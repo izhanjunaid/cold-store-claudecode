@@ -1,0 +1,38 @@
+{
+  "name": "@coldchain/api",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run --reporter=verbose",
+    "test:integration": "vitest run --reporter=verbose --config vitest.integration.config.ts",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@coldchain/db": "workspace:*",
+    "@coldchain/shared": "workspace:*",
+    "@fastify/cors": "^10.0.0",
+    "@fastify/helmet": "^13.0.0",
+    "@fastify/rate-limit": "^10.2.0",
+    "@fastify/sensible": "^6.0.0",
+    "bcryptjs": "^2.4.3",
+    "fastify": "^5.2.0",
+    "fastify-plugin": "^5.1.0",
+    "fastify-type-provider-zod": "^4.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  }
+}

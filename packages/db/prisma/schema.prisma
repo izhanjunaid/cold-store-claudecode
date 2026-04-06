@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  OWNER
+  MANAGER
+  ACCOUNTANT
+  OPERATOR
+  SECURITY
+  VIEWER
+}
+
+enum AuditAction {
+  INSERT
+  UPDATE
+}
+
+// ============================================================
+// FOUNDATION TABLES (Migration 0001)
+// ============================================================
+
+model Facility {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String   @db.VarChar(200)
+  address    String?  @db.Text
+  city       String   @default("Lahore") @db.VarChar(100)
+  phone      String?  @db.VarChar(20)
+  gstNumber  String?  @map("gst_number") @db.VarChar(50)
+  settings   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  users         User[]
+  auditLogs     AuditLog[]
+  refreshTokens RefreshToken[]
+
+  @@map("facilities")
+}
+
+model User {
+  id               String    @id @default(uuid()) @db.Uuid
+  facilityId       String    @map("facility_id") @db.Uuid
+  email            String    @db.VarChar(200)
+  passwordHash     String    @map("password_hash") @db.VarChar(200)
+  name             String    @db.VarChar(200)
+  nameUrdu         String?   @map("name_urdu") @db.VarChar(200)
+  role             UserRole
+  isActive         Boolean   @default(true) @map("is_active")
+  lastLoginAt      DateTime? @map("last_login_at") @db.Timestamptz()
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until") @db.Timestamptz()
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  facility      Facility       @relation(fields: [facilityId], references: [id])
+  refreshTokens RefreshToken[]
+
+  @@unique([facilityId, email])
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  facilityId String    @map("facility_id") @db.Uuid
+  tokenHash  String    @map("token_hash") @db.VarChar(200)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz()
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz()
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  user     User     @relation(fields: [userId], references: [id])
+  facility Facility @relation(fields: [facilityId], references: [id])
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid()) @db.Uuid
+  facilityId String      @map("facility_id") @db.Uuid
+  tableName  String      @map("table_name") @db.VarChar(100)
+  recordId   String      @map("record_id") @db.Uuid
+  action     AuditAction
+  changedBy  String      @map("changed_by") @db.Uuid
+  changedAt  DateTime    @default(now()) @map("changed_at") @db.Timestamptz()
+  oldValues  Json?       @map("old_values")
+  newValues  Json        @map("new_values")
+  reason     String?     @db.Text
+
+  facility Facility @relation(fields: [facilityId], references: [id])
+
+  @@index([facilityId, tableName, recordId])
+  @@index([changedAt])
+  @@map("audit_log")
+}

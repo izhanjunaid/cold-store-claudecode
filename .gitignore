@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.next/
+.turbo/
+.env
+.env.local
+.env.production
+*.log
+coverage/
+.DS_Store
+*.tsbuildinfo
+.claude/settings.local.json
+packages/db/prisma/seed.js
+packages/db/prisma/seed.d.ts
+packages/db/prisma/seed.js.map
+packages/db/prisma/seed.d.ts.map

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(npm install:*)",
+      "Bash(pnpm:*)",
+      "Bash(npx -y json -e 'this')",
+      "Bash(npx turbo:*)",
+      "Bash(npx prisma:*)",
+      "mcp__postgres__execute_sql",
+      "Bash(PGPASSWORD=postgres psql:*)",
+      "Bash(node:*)",
+      "Bash(npx tsx:*)",
+      "Bash(git reset:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)"
+    ]
+  }
+}
