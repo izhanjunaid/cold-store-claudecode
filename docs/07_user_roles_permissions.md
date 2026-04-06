@@ -1,0 +1,159 @@
+# ColdChain — User Roles & Permissions
+
+**Version**: 1.0  
+**Date**: March 2026
+
+---
+
+## 1. Role Definitions
+
+| Role | Description | Typical User |
+|---|---|---|
+| **OWNER** | Full system access; business owner; can manage all settings, users, and data | Cold store proprietor |
+| **MANAGER** | Operational authority; can authorize overrides, approve transfers, finalize bills | Senior facility manager |
+| **OPERATOR** | Day-to-day data entry; inbound/outbound processing; cannot approve overrides | Gate/floor operator |
+| **SECURITY GUARD** | Strictly physical gate control; records vehicle arrival/departure | Main Gate Security |
+| **ACCOUNTANT** | Financial views and payment recording; no operational mutations | In-house accounts person |
+| **AUDITOR** | Read-only access to all records and audit logs | External or internal auditor |
+
+---
+
+## 2. Permissions Matrix
+
+| Feature | OWNER | MANAGER | OPERATOR | SECURITY | ACCOUNTANT | AUDITOR |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Party Management** ||||||
+| Create / edit party | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Deactivate party | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Merge duplicate parties | ✅ | ❌ | ❌ | ❌ | ❌ |
+| View party ledger | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Set credit limit | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Inbound & Lot Management** |||||
+| Create inbound lot | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Backdate lot entry | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Override weight dispute flag | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Reprint storage receipt | ✅ | ✅ | ✅ | ❌ | ❌ |
+| View lot details | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Ownership Transfer** |||||
+| Initiate full ownership transfer | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Initiate partial ownership transfer | ✅ | ✅ | ❌ | ❌ | ❌ |
+| View ownership history | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Outbound & Dispatch** |||||
+| Initiate withdrawal | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Finalize invoice | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Override invoice total | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Generate dispatch note | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Backdate outbound | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Billing Engine** |||||
+| Create / edit rate plans | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Create / edit service charges | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Issue credit note | ✅ | ✅ | ❌ | ✅ | ❌ |
+| View all invoices | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Quality & Spoilage** |||||
+| Log quality inspection | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Create spoilage record | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Confirm spoilage (adjust quantity) | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Dispute spoilage record | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Financial Ledger & Payments** |||||
+| Record payment | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Record advance payment | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Mark cheque as dishonoured | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Allocate payment to invoices | ✅ | ✅ | ❌ | ✅ | ❌ |
+| View party ledger / AR aging | ✅ | ✅ | ❌ | ✅ | ✅ |
+| Export party statement | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **Accounting — Chart of Accounts** |||||
+| View Chart of Accounts | ✅ | ✅ | ❌ | ✅ | ✅ |
+| Add new account | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Rename / deactivate account | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Delete system-protected account | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Accounting — Journal Entries & GL** |||||
+| View journal entries (auto-generated) | ✅ | ✅ | ❌ | ✅ | ✅ |
+| View GL account ledger | ✅ | ✅ | ❌ | ✅ | ✅ |
+| Create manual journal entry (draft) | ✅ | ❌ | ❌ | ✅ | ❌ |
+| Post manual journal entry | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Reverse a posted journal entry | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Write off bad debt | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Accounting — Statements & Periods** |||||
+| View Trial Balance | ✅ | ✅ | ❌ | ✅ | ✅ |
+| View P&L Statement | ✅ | ❌ | ❌ | ✅ | ✅ |
+| View Balance Sheet | ✅ | ❌ | ❌ | ✅ | ✅ |
+| View Revenue by Commodity | ✅ | ✅ | ❌ | ✅ | ✅ |
+| View GST Output Summary | ✅ | ❌ | ❌ | ✅ | ✅ |
+| Lock accounting period | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Unlock locked period (override) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| View AR Reconciliation report | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **Cost Accounting — Fixed Assets & HR** |||||
+| Create/Edit fixed assets | ✅ | ❌ | ❌ | ✅ | ❌ |
+| Run depreciation batch | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Dispose of fixed asset | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Manage employee roster | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ |
+| Draft payroll runs | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Finalize payroll runs | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Record expense voucher (draft) | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| Approve expense voucher | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Pay expense voucher | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| **Mandi Context (Phase 5)** ||||||
+| Log Inward/Outward Gate Pass | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Issue Peshgi (Advance Loan) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Record Peshgi Recovery | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Soft Edit/Delete "KATCHI" Record | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Toggle Katchi/Pacci Filters | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| **Chamber Management** ||||||
+| Create / edit chambers | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| View chamber occupancy | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Log temperature | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Decommission chamber | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Reporting** ||||||
+| View operational dashboard | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| View financial dashboard | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| Run / export any report | ✅ | ✅ | Limited | ❌ | ✅ | ✅ |
+| **System Administration** ||||||
+| Create / edit users | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Assign roles | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Configure system settings | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| View audit log | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
+
+*OPERATOR report access is limited to: Lot Listing, Chamber Occupancy, Today's Inbound/Outbound.*
+*SECURITY GUARD access is strictly limited to the Gate Pass interface.*
+
+---
+
+## 3. Override Capabilities
+
+| Override Action | Required Role | Audit Requirement |
+|---|---|---|
+| Backdate lot entry | MANAGER or above | Mandatory reason field |
+| Override weight dispute | MANAGER or above | Resolution note required |
+| Override invoice total | MANAGER or above | Adjustment reason required |
+| Adjust lot quantity (spoilage) | MANAGER or above | Spoilage report linked |
+| Backdate outbound | MANAGER or above | Mandatory reason field |
+| Soft Edit/Delete Katchi Record | OWNER only | Shadow audit record; silent in frontend |
+| Merge parties | OWNER only | Confirmation dialog + log |
+| Change rate plan mid-storage | MANAGER or above | Old/new rate + effective date logged |
+| Post manual journal entry | OWNER only | Balanced lines required; purpose note |
+| Reverse posted journal entry | OWNER only | Reversal reason mandatory; original entry referenced |
+| Unlock locked accounting period | OWNER only | Reason logged; correction posted in current period |
+| Write off bad debt | OWNER only | Invoice reference + write-off justification |
+
+---
+
+## 4. Role Assignment Rules
+
+- Every user has exactly one role per facility
+- In multi-facility scenarios (Phase 3), a user can have different roles in different facilities
+- Role assignment is performed exclusively by OWNER
+- A facility must always have at least one active OWNER — cannot demote the last OWNER
+- Deactivated users lose all system access immediately; their historical records are preserved
+
+---
+
+## 5. Session Policies
+
+| Policy | Value |
+|---|---|
+| Session duration | 8 hours |
+| Idle timeout | 30 minutes |
+| Concurrent sessions | 3 max per user |
+| Password minimum | 8 characters, at least 1 number |
+| MFA | Optional in MVP; mandatory for OWNER in Phase 2 |
+| Failed login lockout | 5 attempts → 15 min lockout |
