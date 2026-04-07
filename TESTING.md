@@ -32,6 +32,18 @@
 6. **WF-06**: Month-End Financial Reconciliation — aging → interim invoices → cash summary
 7. **WF-07**: Peshgi Loan Issue & Recovery — issue → store → settle → recover
 
+## Test Results by Phase
+
+| Phase | Unit | Integration | E2E | Total | Status |
+|-------|------|-------------|-----|-------|--------|
+| 0 | 14 | 13 | — | 27 | ALL PASS |
+
+### Phase 0 Tests
+- `apps/api/src/common/jwt.test.ts` — 4 tests (sign/verify access & refresh tokens)
+- `apps/api/src/common/errors.test.ts` — 5 tests (AppError, error factories)
+- `apps/web/src/stores/auth.store.test.ts` — 5 tests (Zustand auth store)
+- `apps/api/src/modules/auth/auth.integration.test.ts` — 13 tests (health, login, me, refresh, logout)
+
 ## Commands
 
 ```bash

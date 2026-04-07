@@ -4,36 +4,41 @@
 -- triggers, RLS policies, and functions applied after schema creation.
 
 -- Audit trigger function
+-- Safely handles empty/unset session variables (empty string cannot cast to uuid)
 CREATE OR REPLACE FUNCTION audit_trigger_fn()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  v_user_id uuid;
+  v_facility_id uuid;
+  v_raw text;
 BEGIN
+  -- Safely resolve user_id from session variable
+  v_raw := current_setting('app.user_id', true);
+  IF v_raw IS NOT NULL AND v_raw <> '' THEN
+    v_user_id := v_raw::uuid;
+  ELSE
+    v_user_id := '00000000-0000-0000-0000-000000000000'::uuid;
+  END IF;
+
+  -- Safely resolve facility_id (prefer row value, fall back to session)
+  IF NEW.facility_id IS NOT NULL THEN
+    v_facility_id := NEW.facility_id;
+  ELSE
+    v_raw := current_setting('app.facility_id', true);
+    IF v_raw IS NOT NULL AND v_raw <> '' THEN
+      v_facility_id := v_raw::uuid;
+    ELSE
+      v_facility_id := '00000000-0000-0000-0000-000000000000'::uuid;
+    END IF;
+  END IF;
+
   IF TG_OP = 'INSERT' THEN
     INSERT INTO audit_log (id, facility_id, table_name, record_id, action, changed_by, changed_at, old_values, new_values)
-    VALUES (
-      gen_random_uuid(),
-      COALESCE(NEW.facility_id, current_setting('app.facility_id', true)::uuid),
-      TG_TABLE_NAME,
-      NEW.id,
-      'INSERT',
-      COALESCE(current_setting('app.user_id', true)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-      NOW(),
-      NULL,
-      to_jsonb(NEW)
-    );
+    VALUES (gen_random_uuid(), v_facility_id, TG_TABLE_NAME, NEW.id, 'INSERT', v_user_id, NOW(), NULL, to_jsonb(NEW));
     RETURN NEW;
   ELSIF TG_OP = 'UPDATE' THEN
     INSERT INTO audit_log (id, facility_id, table_name, record_id, action, changed_by, changed_at, old_values, new_values)
-    VALUES (
-      gen_random_uuid(),
-      COALESCE(NEW.facility_id, current_setting('app.facility_id', true)::uuid),
-      TG_TABLE_NAME,
-      NEW.id,
-      'UPDATE',
-      COALESCE(current_setting('app.user_id', true)::uuid, '00000000-0000-0000-0000-000000000000'::uuid),
-      NOW(),
-      to_jsonb(OLD),
-      to_jsonb(NEW)
-    );
+    VALUES (gen_random_uuid(), v_facility_id, TG_TABLE_NAME, NEW.id, 'UPDATE', v_user_id, NOW(), to_jsonb(OLD), to_jsonb(NEW));
     RETURN NEW;
   END IF;
   RETURN NULL;
