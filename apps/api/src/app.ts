@@ -8,6 +8,9 @@ import errorHandler from './plugins/error-handler';
 import facilityScope from './plugins/facility-scope';
 import authPlugin from './plugins/auth';
 import { authRoutes } from './modules/auth/auth.controller';
+import { partyRoutes } from './modules/party/party.controller';
+import { chamberRoutes } from './modules/chamber/chamber.controller';
+import { commodityRoutes } from './modules/commodity/commodity.controller';
 
 export async function buildApp() {
   const app = Fastify({
@@ -41,6 +44,9 @@ export async function buildApp() {
 
   // Routes
   await app.register(authRoutes);
+  await app.register(partyRoutes);
+  await app.register(chamberRoutes);
+  await app.register(commodityRoutes);
 
   return app;
 }

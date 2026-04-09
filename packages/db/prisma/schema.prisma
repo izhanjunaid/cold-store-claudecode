@@ -26,6 +26,23 @@ enum AuditAction {
 }
 
 // ============================================================
+// ENUMS (Phase 1)
+// ============================================================
+
+enum PartyType {
+  FARMER
+  TRADER
+  ARHTI
+  BUYER
+  OTHER
+}
+
+enum TemperatureSource {
+  MANUAL
+  SENSOR
+}
+
+// ============================================================
 // FOUNDATION TABLES (Migration 0001)
 // ============================================================
 
@@ -43,6 +60,8 @@ model Facility {
   users         User[]
   auditLogs     AuditLog[]
   refreshTokens RefreshToken[]
+  parties       Party[]
+  chambers      Chamber[]
 
   @@map("facilities")
 }
@@ -62,8 +81,10 @@ model User {
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
-  facility      Facility       @relation(fields: [facilityId], references: [id])
-  refreshTokens RefreshToken[]
+  facility        Facility       @relation(fields: [facilityId], references: [id])
+  refreshTokens   RefreshToken[]
+  partiesCreated  Party[]        @relation("PartyCreatedBy")
+  temperatureLogs TemperatureLog[]
 
   @@unique([facilityId, email])
   @@map("users")
@@ -103,4 +124,94 @@ model AuditLog {
   @@index([facilityId, tableName, recordId])
   @@index([changedAt])
   @@map("audit_log")
+}
+
+// ============================================================
+// PHASE 1: PARTIES, COMMODITIES, CHAMBERS (Migration 0002)
+// ============================================================
+
+model Party {
+  id              String    @id @default(uuid()) @db.Uuid
+  facilityId      String    @map("facility_id") @db.Uuid
+  name            String    @db.VarChar(200)
+  nameUrdu        String?   @map("name_urdu") @db.VarChar(200)
+  partyType       PartyType @map("party_type")
+  phonePrimary    String    @map("phone_primary") @db.VarChar(20)
+  phoneSecondary  String?   @map("phone_secondary") @db.VarChar(20)
+  address         String?   @db.Text
+  cnic            String?   @db.VarChar(15)
+  parentArhtiId   String?   @map("parent_arhti_id") @db.Uuid
+  creditLimitPkr  Decimal?  @map("credit_limit_pkr") @db.Decimal(12, 2)
+  creditTermsDays Int       @default(30) @map("credit_terms_days")
+  isActive        Boolean   @default(true) @map("is_active")
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy       String    @map("created_by") @db.Uuid
+
+  facility     Facility @relation(fields: [facilityId], references: [id])
+  parentArhti  Party?   @relation("PartyArhtiLink", fields: [parentArhtiId], references: [id])
+  childParties Party[]  @relation("PartyArhtiLink")
+  createdByUser User    @relation("PartyCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([facilityId, phonePrimary])
+  @@index([facilityId, partyType])
+  @@index([parentArhtiId])
+  @@map("parties")
+}
+
+model Commodity {
+  id                      String   @id @default(uuid()) @db.Uuid
+  name                    String   @unique @db.VarChar(100)
+  unitLabel               String   @map("unit_label") @db.VarChar(20)
+  defaultStorageDaysAlert Int?     @map("default_storage_days_alert")
+  isActive                Boolean  @default(true) @map("is_active")
+
+  varieties Variety[]
+  chambers  Chamber[] @relation("ChamberCommodityRestriction")
+
+  @@map("commodities")
+}
+
+model Variety {
+  id          String  @id @default(uuid()) @db.Uuid
+  commodityId String  @map("commodity_id") @db.Uuid
+  name        String  @db.VarChar(100)
+  isActive    Boolean @default(true) @map("is_active")
+
+  commodity Commodity @relation(fields: [commodityId], references: [id])
+
+  @@map("varieties")
+}
+
+model Chamber {
+  id                     String   @id @default(uuid()) @db.Uuid
+  facilityId             String   @map("facility_id") @db.Uuid
+  name                   String   @db.VarChar(100)
+  commodityRestrictionId String?  @map("commodity_restriction") @db.Uuid
+  maxCapacityBags        Int      @map("max_capacity_bags")
+  temperatureMinC        Decimal? @map("temperature_min_c") @db.Decimal(4, 1)
+  temperatureMaxC        Decimal? @map("temperature_max_c") @db.Decimal(4, 1)
+  isActive               Boolean  @default(true) @map("is_active")
+  notes                  String?  @db.Text
+
+  facility             Facility       @relation(fields: [facilityId], references: [id])
+  commodityRestriction Commodity?     @relation("ChamberCommodityRestriction", fields: [commodityRestrictionId], references: [id])
+  temperatureLogs      TemperatureLog[]
+
+  @@map("chambers")
+}
+
+model TemperatureLog {
+  id           String            @id @default(uuid()) @db.Uuid
+  chamberId    String            @map("chamber_id") @db.Uuid
+  recordedAt   DateTime          @map("recorded_at") @db.Timestamptz()
+  temperatureC Decimal           @map("temperature_c") @db.Decimal(4, 1)
+  recordedBy   String            @map("recorded_by") @db.Uuid
+  source       TemperatureSource @default(MANUAL)
+
+  chamber      Chamber @relation(fields: [chamberId], references: [id])
+  recordedByUser User  @relation(fields: [recordedBy], references: [id])
+
+  @@index([chamberId, recordedAt])
+  @@map("temperature_logs")
 }

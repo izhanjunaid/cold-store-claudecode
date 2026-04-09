@@ -7,6 +7,9 @@ import errorHandler from '../plugins/error-handler';
 import facilityScope from '../plugins/facility-scope';
 import authPlugin from '../plugins/auth';
 import { authRoutes } from '../modules/auth/auth.controller';
+import { partyRoutes } from '../modules/party/party.controller';
+import { chamberRoutes } from '../modules/chamber/chamber.controller';
+import { commodityRoutes } from '../modules/commodity/commodity.controller';
 import type { FastifyInstance } from 'fastify';
 
 export const TEST_FACILITY_ID = '00000000-0000-0000-0000-000000000001';
@@ -25,6 +28,9 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(authPlugin);
   testApp.get('/health', async () => ({ success: true, data: { status: 'ok' } }));
   await testApp.register(authRoutes);
+  await testApp.register(partyRoutes);
+  await testApp.register(chamberRoutes);
+  await testApp.register(commodityRoutes);
   return testApp;
 }
 
@@ -43,17 +49,42 @@ export async function closeTestApp(): Promise<void> {
   }
 }
 
-export async function loginAsAdmin(testApp: FastifyInstance) {
+const ROLE_EMAILS: Record<string, string> = {
+  OWNER: 'admin@coldchain.pk',
+  MANAGER: 'manager@coldchain.pk',
+  ACCOUNTANT: 'accountant@coldchain.pk',
+  OPERATOR: 'operator@coldchain.pk',
+  SECURITY: 'security@coldchain.pk',
+};
+
+async function loginAs(testApp: FastifyInstance, email: string) {
   const res = await testApp.inject({
     method: 'POST',
     url: '/v1/auth/login',
     headers: { 'x-facility-id': TEST_FACILITY_ID },
-    payload: { email: 'admin@coldchain.pk', password: 'admin123' },
+    payload: { email, password: 'admin123' },
   });
   const body = JSON.parse(res.body);
   return {
     accessToken: body.data.access_token as string,
     refreshToken: body.data.refresh_token as string,
     user: body.data.user,
+  };
+}
+
+export async function loginAsAdmin(testApp: FastifyInstance) {
+  return loginAs(testApp, 'admin@coldchain.pk');
+}
+
+export async function loginAsRole(testApp: FastifyInstance, role: string) {
+  const email = ROLE_EMAILS[role];
+  if (!email) throw new Error(`Unknown role: ${role}`);
+  return loginAs(testApp, email);
+}
+
+export function authHeaders(accessToken: string) {
+  return {
+    authorization: `Bearer ${accessToken}`,
+    'x-facility-id': TEST_FACILITY_ID,
   };
 }
