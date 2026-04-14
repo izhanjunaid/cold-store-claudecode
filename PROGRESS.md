@@ -1,10 +1,10 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 1 — Party Management + Chambers
+- **Active Phase**: Phase 2 — Inbound & Lot Management
 - **Active Task**: COMPLETED
 - **Blockers**: None
-- **Last Updated**: 2026-04-08
+- **Last Updated**: 2026-04-14
 
 ## Phase Completion
 
@@ -12,7 +12,7 @@
 |-------|------|--------|---------|-----------|
 | 0 | Project Foundation | COMPLETED | 2026-04-06 | 2026-04-07 |
 | 1 | Party Management + Chambers | COMPLETED | 2026-04-08 | 2026-04-08 |
-| 2 | Inbound & Lot Management | PENDING | — | — |
+| 2 | Inbound & Lot Management | COMPLETED | 2026-04-10 | 2026-04-14 |
 | 3 | Ownership Transfer | PENDING | — | — |
 | 4 | Outbound & Dispatch | PENDING | — | — |
 | 5 | Billing Engine | PENDING | — | — |
@@ -29,6 +29,7 @@
 |-------|------|-------------|-----|-------|
 | 0 | 14 | 13 | — | 27 |
 | 1 | — | 25 | — | 25 |
+| 2 | 9 | 24 | — | 33 |
 
 ## Completed Tasks Log
 
@@ -53,3 +54,14 @@
 - [2026-04-08] 1.7 — S-06 Party Create/Edit — shared form component, Arhti dropdown, validation
 - [2026-04-08] 1.8 — S-07 Party Detail — info card, credit profile, tabs (stubs), deactivate modal
 - [2026-04-08] 1.9 — S-27 Chamber List + S-28 Chamber Detail — capacity bars, temp history, inline log form
+- [2026-04-10] 2.1 — Migration 0003_lots_billing_config — rate_plans, service_charges, lots, ownership_history
+- [2026-04-10] 2.2 — Lot number generation — LOT-YYMMDD-NNNN, concurrency-safe (FOR UPDATE + unique index)
+- [2026-04-10] 2.3 — Lot CRUD backend — create (WF-01), list, detail, update (notes/quality only), ownership-history, receipt endpoints
+- [2026-04-10] 2.4 — Rate Plan CRUD — SEASONAL/MONTHLY/DAILY_PER_BAG, season date validation, MANAGER+ create/edit
+- [2026-04-10] 2.5 — Service Charge Catalog — PER_BAG/PER_TON/FLAT, name uniqueness per facility
+- [2026-04-10] 2.6 — PDF Service + Storage Receipt — Puppeteer + Handlebars, bilingual (English/Urdu) parchi
+- [2026-04-14] 2.7 — S-08 Lot List — paginated table, status/search filters, days_in_storage
+- [2026-04-14] 2.8 — S-09 Lot Create — inbound form, weight dispute detection, capacity warning, commodity-filtered dropdowns
+- [2026-04-14] 2.9 — S-10 Lot Detail — header card, tabs (overview/ownership history/stub phases), receipt PDF download
+- [2026-04-14] 2.10 — S-11 Storage Receipt PDF — served via GET /v1/lots/:id/receipt, opened as blob URL in frontend
+- [2026-04-14] 2.11 — S-17/S-18/S-19 Rate Plans & Service Charges screens — CRUD, modal, list + edit pages

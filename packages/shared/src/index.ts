@@ -4,3 +4,6 @@ export * from './schemas/auth';
 export * from './schemas/party';
 export * from './schemas/chamber';
 export * from './schemas/commodity';
+export * from './schemas/rate-plan';
+export * from './schemas/service-charge';
+export * from './schemas/lot';

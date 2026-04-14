@@ -44,6 +44,84 @@ beforeAll(async () => {
     update: {},
     create: { id: '00000000-0000-0000-0000-000000000100', name: 'POTATO', unitLabel: 'Bags', defaultStorageDaysAlert: 180 },
   });
+
+  // Seed a second commodity for restriction tests
+  await prisma.commodity.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000101' },
+    update: {},
+    create: { id: '00000000-0000-0000-0000-000000000101', name: 'APPLE', unitLabel: 'Bags', defaultStorageDaysAlert: 120 },
+  });
+
+  // ── Phase 2 fixtures ──────────────────────────────────────────
+
+  // Test chamber (unrestricted, 1000-bag capacity)
+  await prisma.chamber.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000200' },
+    update: { isActive: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000200',
+      facilityId: TEST_FACILITY_ID,
+      name: 'Test Chamber A',
+      maxCapacityBags: 1000,
+      isActive: true,
+    },
+  });
+
+  // Test chamber restricted to POTATO (for restriction mismatch test)
+  await prisma.chamber.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000201' },
+    update: { isActive: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000201',
+      facilityId: TEST_FACILITY_ID,
+      name: 'Test Chamber B (POTATO only)',
+      maxCapacityBags: 500,
+      commodityRestrictionId: '00000000-0000-0000-0000-000000000100',
+      isActive: true,
+    },
+  });
+
+  // Small chamber for capacity overflow test
+  await prisma.chamber.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000202' },
+    update: { isActive: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000202',
+      facilityId: TEST_FACILITY_ID,
+      name: 'Test Chamber C (tiny)',
+      maxCapacityBags: 10,
+      isActive: true,
+    },
+  });
+
+  // Test rate plan (MONTHLY_PER_BAG, no commodity restriction)
+  await prisma.ratePlan.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000500' },
+    update: { isActive: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000500',
+      facilityId: TEST_FACILITY_ID,
+      name: 'Test Monthly Rate',
+      rateType: 'MONTHLY_PER_BAG',
+      rateAmountPkr: 100,
+      minBillingDays: 1,
+      isActive: true,
+    },
+  });
+
+  // Test service charge
+  await prisma.serviceCharge.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000600' },
+    update: { isActive: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000600',
+      facilityId: TEST_FACILITY_ID,
+      name: 'Test Loading Charge',
+      unitType: 'PER_BAG',
+      unitPricePkr: 10,
+      isActive: true,
+    },
+  });
 });
 
 afterAll(async () => {

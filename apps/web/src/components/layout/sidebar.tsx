@@ -8,6 +8,8 @@ const navItems = [
   { label: 'Parties', href: '/parties', icon: 'P' },
   { label: 'Lots', href: '/lots', icon: 'L' },
   { label: 'Chambers', href: '/chambers', icon: 'C' },
+  { label: 'Rate Plans', href: '/billing/rate-plans', icon: 'R' },
+  { label: 'Service Charges', href: '/billing/service-charges', icon: '$' },
   { label: 'Invoices', href: '/invoices', icon: 'I' },
   { label: 'Payments', href: '/payments', icon: '$' },
   { label: 'Quality', href: '/quality', icon: 'Q' },

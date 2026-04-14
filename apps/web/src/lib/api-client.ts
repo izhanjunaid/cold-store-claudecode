@@ -6,7 +6,7 @@ interface ApiOptions {
   headers?: Record<string, string>;
 }
 
-export async function apiClient<T>(path: string, options: ApiOptions = {}): Promise<T> {
+async function apiFetch(path: string, options: ApiOptions = {}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
   const facilityId =
     typeof window !== 'undefined' ? localStorage.getItem('facility_id') : null;
@@ -28,5 +28,20 @@ export async function apiClient<T>(path: string, options: ApiOptions = {}): Prom
     throw new Error(data.error?.message || 'Request failed');
   }
 
+  return data;
+}
+
+export async function apiClient<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  const data = await apiFetch(path, options);
   return data.data as T;
+}
+
+export interface PaginatedResult<T> {
+  data: T[];
+  meta: { page: number; per_page: number; total: number };
+}
+
+export async function apiClientList<T>(path: string, options: ApiOptions = {}): Promise<PaginatedResult<T>> {
+  const data = await apiFetch(path, options);
+  return { data: data.data as T[], meta: data.meta };
 }

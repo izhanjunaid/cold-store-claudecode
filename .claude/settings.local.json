@@ -13,7 +13,13 @@
       "Bash(npx tsx:*)",
       "Bash(git reset:*)",
       "Bash(git add:*)",
-      "Bash(git commit -m ':*)"
+      "Bash(git commit -m ':*)",
+      "Bash(npx vitest:*)",
+      "Bash(npx tsc:*)",
+      "Bash(sed -n '150,170p' C:/cold-store-claudecode/apps/api/src/modules/lot/lot.service.ts)",
+      "Bash(sed -n '260,275p' C:/cold-store-claudecode/apps/api/src/modules/lot/lot.service.ts)",
+      "Bash(mkdir -p \"C:/cold-store-claudecode/apps/web/src/app/\\(app\\)/billing/rate-plans/[id]/edit\")",
+      "Bash(mkdir -p \"C:/cold-store-claudecode/apps/web/src/app/\\(app\\)/lots/[id]\")"
     ]
   }
 }

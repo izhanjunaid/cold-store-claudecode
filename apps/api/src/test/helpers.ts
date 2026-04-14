@@ -10,6 +10,9 @@ import { authRoutes } from '../modules/auth/auth.controller';
 import { partyRoutes } from '../modules/party/party.controller';
 import { chamberRoutes } from '../modules/chamber/chamber.controller';
 import { commodityRoutes } from '../modules/commodity/commodity.controller';
+import { ratePlanRoutes } from '../modules/rate-plan/rate-plan.controller';
+import { serviceChargeRoutes } from '../modules/service-charge/service-charge.controller';
+import { lotRoutes } from '../modules/lot/lot.controller';
 import type { FastifyInstance } from 'fastify';
 
 export const TEST_FACILITY_ID = '00000000-0000-0000-0000-000000000001';
@@ -31,6 +34,9 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(partyRoutes);
   await testApp.register(chamberRoutes);
   await testApp.register(commodityRoutes);
+  await testApp.register(ratePlanRoutes);
+  await testApp.register(serviceChargeRoutes);
+  await testApp.register(lotRoutes);
   return testApp;
 }
 

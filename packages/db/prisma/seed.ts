@@ -242,6 +242,92 @@ async function main() {
     console.log(`  Party: ${p.name} (${p.partyType})`);
   }
 
+  // ============================================================
+  // PHASE 2: Rate Plans, Service Charges
+  // ============================================================
+
+  console.log('\n  --- Phase 2 Seed Data ---');
+
+  const ratePlans = [
+    {
+      id: '00000000-0000-0000-0000-000000000550',
+      facilityId: facility.id,
+      name: 'Potato Seasonal 2026',
+      commodityId: commodities[0]!.id, // POTATO
+      rateType: 'SEASONAL_PER_BAG' as const,
+      rateAmountPkr: 250,
+      seasonStartDate: new Date('2026-03-01'),
+      seasonEndDate: new Date('2026-09-30'),
+      minBillingDays: 7,
+      isActive: true,
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000551',
+      facilityId: facility.id,
+      name: 'Apple Monthly 2026',
+      commodityId: commodities[1]!.id, // APPLE
+      rateType: 'MONTHLY_PER_BAG' as const,
+      rateAmountPkr: 80,
+      minBillingDays: 1,
+      isActive: true,
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000552',
+      facilityId: facility.id,
+      name: 'General Daily Rate',
+      commodityId: null,
+      rateType: 'DAILY_PER_BAG' as const,
+      rateAmountPkr: 5,
+      minBillingDays: 1,
+      isActive: true,
+    },
+  ];
+
+  for (const rp of ratePlans) {
+    await prisma.ratePlan.upsert({
+      where: { id: rp.id },
+      update: {},
+      create: rp,
+    });
+    console.log(`  Rate Plan: ${rp.name} (${rp.rateType}, Rs. ${rp.rateAmountPkr}/bag)`);
+  }
+
+  const serviceCharges = [
+    {
+      id: '00000000-0000-0000-0000-000000000650',
+      facilityId: facility.id,
+      name: 'Loading',
+      unitType: 'PER_BAG' as const,
+      unitPricePkr: 10,
+      isActive: true,
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000651',
+      facilityId: facility.id,
+      name: 'Unloading',
+      unitType: 'PER_BAG' as const,
+      unitPricePkr: 10,
+      isActive: true,
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000652',
+      facilityId: facility.id,
+      name: 'Sorting',
+      unitType: 'PER_BAG' as const,
+      unitPricePkr: 15,
+      isActive: true,
+    },
+  ];
+
+  for (const sc of serviceCharges) {
+    await prisma.serviceCharge.upsert({
+      where: { id: sc.id },
+      update: {},
+      create: sc,
+    });
+    console.log(`  Service Charge: ${sc.name} (${sc.unitType}, Rs. ${sc.unitPricePkr})`);
+  }
+
   console.log('Seeding complete.');
 }
 

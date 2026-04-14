@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { apiClient } from '@/lib/api-client';
+import { apiClientList } from '@/lib/api-client';
 
 interface Party {
   id: string;
@@ -13,11 +13,6 @@ interface Party {
   phone_primary: string;
   credit_limit_pkr: number | null;
   is_active: boolean;
-}
-
-interface ListResponse {
-  data: Party[];
-  meta: { page: number; per_page: number; total: number };
 }
 
 const PARTY_TYPE_COLORS: Record<string, string> = {
@@ -46,7 +41,7 @@ export default function PartyListPage() {
       if (search) params.set('search', search);
       if (typeFilter) params.set('type', typeFilter);
       if (activeFilter) params.set('is_active', activeFilter);
-      const res = await apiClient<ListResponse>(`/v1/parties?${params}`);
+      const res = await apiClientList<Party>(`/v1/parties?${params}`);
       setParties(res.data);
       setTotal(res.meta.total);
     } catch {

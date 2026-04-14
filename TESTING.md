@@ -38,6 +38,7 @@
 |-------|------|-------------|-----|-------|--------|
 | 0 | 14 | 13 | — | 27 | ALL PASS |
 | 1 | — | 25 | — | 25 | ALL PASS |
+| 2 | 9 | 24 | — | 33 | ALL PASS |
 
 ### Phase 0 Tests
 - `apps/api/src/common/jwt.test.ts` — 4 tests (sign/verify access & refresh tokens)
@@ -49,6 +50,13 @@
 - `apps/api/src/modules/party/party.integration.test.ts` — 12 tests (CRUD, search, filter, role guards, deactivate)
 - `apps/api/src/modules/chamber/chamber.integration.test.ts` — 7 tests (CRUD, temperature logging, detail with logs)
 - `apps/api/src/modules/commodity/commodity.integration.test.ts` — 6 tests (list, create, update, varieties CRUD)
+
+### Phase 2 Tests
+- `apps/api/src/modules/lot/lot-number.test.ts` — 3 tests (format, zero-padding, concurrency sequence)
+- `apps/api/src/modules/pdf/templates/storage-receipt.test.ts` — 6 tests (Handlebars template snapshot, bilingual, dispute flag)
+- `apps/api/src/modules/lot/lot.integration.test.ts` — 14 tests (create WF-01, 5-concurrent unique numbers, weight dispute, capacity overflow, commodity restriction, role guards, list/filter, detail, update, receipt PDF)
+- `apps/api/src/modules/rate-plan/rate-plan.integration.test.ts` — 6 tests (create SEASONAL with dates, missing dates → 400, OPERATOR blocked, list filter, PATCH, soft delete)
+- `apps/api/src/modules/service-charge/service-charge.integration.test.ts` — 4 tests (create, duplicate name → 400, list, OPERATOR blocked)
 
 ## Commands
 

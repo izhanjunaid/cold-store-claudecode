@@ -43,25 +43,61 @@ enum TemperatureSource {
 }
 
 // ============================================================
+// ENUMS (Phase 2)
+// ============================================================
+
+enum RateType {
+  SEASONAL_PER_BAG
+  MONTHLY_PER_BAG
+  DAILY_PER_BAG
+}
+
+enum ServiceUnitType {
+  PER_BAG
+  PER_TON
+  FLAT
+}
+
+enum LotStatus {
+  ACTIVE
+  CLOSED
+  SUSPENDED
+}
+
+enum BookType {
+  PACCI
+  KATCHI
+}
+
+enum OwnershipEventType {
+  INITIAL
+  TRANSFER_IN
+  TRANSFER_OUT
+}
+
+// ============================================================
 // FOUNDATION TABLES (Migration 0001)
 // ============================================================
 
 model Facility {
-  id         String   @id @default(uuid()) @db.Uuid
-  name       String   @db.VarChar(200)
-  address    String?  @db.Text
-  city       String   @default("Lahore") @db.VarChar(100)
-  phone      String?  @db.VarChar(20)
-  gstNumber  String?  @map("gst_number") @db.VarChar(50)
-  settings   Json     @default("{}")
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(200)
+  address   String?  @db.Text
+  city      String   @default("Lahore") @db.VarChar(100)
+  phone     String?  @db.VarChar(20)
+  gstNumber String?  @map("gst_number") @db.VarChar(50)
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz()
 
-  users         User[]
-  auditLogs     AuditLog[]
-  refreshTokens RefreshToken[]
-  parties       Party[]
-  chambers      Chamber[]
+  users          User[]
+  auditLogs      AuditLog[]
+  refreshTokens  RefreshToken[]
+  parties        Party[]
+  chambers       Chamber[]
+  ratePlans      RatePlan[]
+  serviceCharges ServiceCharge[]
+  lots           Lot[]
 
   @@map("facilities")
 }
@@ -81,10 +117,12 @@ model User {
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
-  facility        Facility       @relation(fields: [facilityId], references: [id])
+  facility        Facility           @relation(fields: [facilityId], references: [id])
   refreshTokens   RefreshToken[]
-  partiesCreated  Party[]        @relation("PartyCreatedBy")
+  partiesCreated  Party[]            @relation("PartyCreatedBy")
   temperatureLogs TemperatureLog[]
+  lotsCreated     Lot[]              @relation("LotCreatedBy")
+  ownershipEvents OwnershipHistory[]
 
   @@unique([facilityId, email])
   @@map("users")
@@ -148,10 +186,14 @@ model Party {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   createdBy       String    @map("created_by") @db.Uuid
 
-  facility     Facility @relation(fields: [facilityId], references: [id])
-  parentArhti  Party?   @relation("PartyArhtiLink", fields: [parentArhtiId], references: [id])
-  childParties Party[]  @relation("PartyArhtiLink")
-  createdByUser User    @relation("PartyCreatedBy", fields: [createdBy], references: [id])
+  facility      Facility           @relation(fields: [facilityId], references: [id])
+  parentArhti   Party?             @relation("PartyArhtiLink", fields: [parentArhtiId], references: [id])
+  childParties  Party[]            @relation("PartyArhtiLink")
+  createdByUser User               @relation("PartyCreatedBy", fields: [createdBy], references: [id])
+  lotsOwned     Lot[]              @relation("LotOwner")
+  lotsBilled    Lot[]              @relation("LotBillingParty")
+  ownershipFrom OwnershipHistory[] @relation("OwnershipFromParty")
+  ownershipTo   OwnershipHistory[] @relation("OwnershipToParty")
 
   @@index([facilityId, phonePrimary])
   @@index([facilityId, partyType])
@@ -160,14 +202,16 @@ model Party {
 }
 
 model Commodity {
-  id                      String   @id @default(uuid()) @db.Uuid
-  name                    String   @unique @db.VarChar(100)
-  unitLabel               String   @map("unit_label") @db.VarChar(20)
-  defaultStorageDaysAlert Int?     @map("default_storage_days_alert")
-  isActive                Boolean  @default(true) @map("is_active")
+  id                      String  @id @default(uuid()) @db.Uuid
+  name                    String  @unique @db.VarChar(100)
+  unitLabel               String  @map("unit_label") @db.VarChar(20)
+  defaultStorageDaysAlert Int?    @map("default_storage_days_alert")
+  isActive                Boolean @default(true) @map("is_active")
 
   varieties Variety[]
-  chambers  Chamber[] @relation("ChamberCommodityRestriction")
+  chambers  Chamber[]  @relation("ChamberCommodityRestriction")
+  ratePlans RatePlan[]
+  lots      Lot[]
 
   @@map("commodities")
 }
@@ -179,6 +223,7 @@ model Variety {
   isActive    Boolean @default(true) @map("is_active")
 
   commodity Commodity @relation(fields: [commodityId], references: [id])
+  lots      Lot[]
 
   @@map("varieties")
 }
@@ -194,9 +239,10 @@ model Chamber {
   isActive               Boolean  @default(true) @map("is_active")
   notes                  String?  @db.Text
 
-  facility             Facility       @relation(fields: [facilityId], references: [id])
-  commodityRestriction Commodity?     @relation("ChamberCommodityRestriction", fields: [commodityRestrictionId], references: [id])
+  facility             Facility         @relation(fields: [facilityId], references: [id])
+  commodityRestriction Commodity?       @relation("ChamberCommodityRestriction", fields: [commodityRestrictionId], references: [id])
   temperatureLogs      TemperatureLog[]
+  lots                 Lot[]
 
   @@map("chambers")
 }
@@ -209,9 +255,119 @@ model TemperatureLog {
   recordedBy   String            @map("recorded_by") @db.Uuid
   source       TemperatureSource @default(MANUAL)
 
-  chamber      Chamber @relation(fields: [chamberId], references: [id])
-  recordedByUser User  @relation(fields: [recordedBy], references: [id])
+  chamber        Chamber @relation(fields: [chamberId], references: [id])
+  recordedByUser User    @relation(fields: [recordedBy], references: [id])
 
   @@index([chamberId, recordedAt])
   @@map("temperature_logs")
+}
+
+// ============================================================
+// PHASE 2: LOTS, RATE PLANS, SERVICE CHARGES (Migration 0003)
+// ============================================================
+
+model RatePlan {
+  id              String    @id @default(uuid()) @db.Uuid
+  facilityId      String    @map("facility_id") @db.Uuid
+  name            String    @db.VarChar(200)
+  commodityId     String?   @map("commodity_id") @db.Uuid
+  rateType        RateType  @map("rate_type")
+  rateAmountPkr   Decimal   @map("rate_amount_pkr") @db.Decimal(10, 2)
+  seasonStartDate DateTime? @map("season_start_date") @db.Date
+  seasonEndDate   DateTime? @map("season_end_date") @db.Date
+  minBillingDays  Int       @default(1) @map("min_billing_days")
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  facility  Facility   @relation(fields: [facilityId], references: [id])
+  commodity Commodity? @relation(fields: [commodityId], references: [id])
+  lots      Lot[]
+
+  @@index([facilityId, isActive])
+  @@map("rate_plans")
+}
+
+model ServiceCharge {
+  id           String          @id @default(uuid()) @db.Uuid
+  facilityId   String          @map("facility_id") @db.Uuid
+  name         String          @db.VarChar(100)
+  unitType     ServiceUnitType @map("unit_type")
+  unitPricePkr Decimal         @map("unit_price_pkr") @db.Decimal(10, 2)
+  isActive     Boolean         @default(true) @map("is_active")
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+
+  facility Facility @relation(fields: [facilityId], references: [id])
+
+  @@unique([facilityId, name])
+  @@map("service_charges")
+}
+
+model Lot {
+  id                  String    @id @default(uuid()) @db.Uuid
+  facilityId          String    @map("facility_id") @db.Uuid
+  lotNumber           String    @map("lot_number") @db.VarChar(30)
+  chamberId           String    @map("chamber_id") @db.Uuid
+  ownerPartyId        String    @map("owner_party_id") @db.Uuid
+  billingPartyId      String    @map("billing_party_id") @db.Uuid
+  commodityId         String    @map("commodity_id") @db.Uuid
+  varietyId           String?   @map("variety_id") @db.Uuid
+  ratePlanId          String    @map("rate_plan_id") @db.Uuid
+  quantityBags        Int       @map("quantity_bags")
+  currentBalanceBags  Int       @map("current_balance_bags")
+  acceptedWeightKg    Decimal   @map("accepted_weight_kg") @db.Decimal(10, 2)
+  declaredWeightKg    Decimal?  @map("declared_weight_kg") @db.Decimal(10, 2)
+  weightDisputeFlag   Boolean   @default(false) @map("weight_dispute_flag")
+  weightDisputeNote   String?   @map("weight_dispute_note") @db.Text
+  qualityGradeInbound String?   @map("quality_grade_inbound") @db.VarChar(2)
+  inboundDate         DateTime  @map("inbound_date") @db.Date
+  entryDate           DateTime  @map("entry_date") @db.Date
+  parentLotId         String?   @map("parent_lot_id") @db.Uuid
+  vehicleNumber       String?   @map("vehicle_number") @db.VarChar(20)
+  status              LotStatus @default(ACTIVE)
+  closedAt            DateTime? @map("closed_at") @db.Date
+  bookType            BookType  @default(PACCI) @map("book_type")
+  notes               String?   @db.Text
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy           String    @map("created_by") @db.Uuid
+
+  facility         Facility           @relation(fields: [facilityId], references: [id])
+  chamber          Chamber            @relation(fields: [chamberId], references: [id])
+  ownerParty       Party              @relation("LotOwner", fields: [ownerPartyId], references: [id])
+  billingParty     Party              @relation("LotBillingParty", fields: [billingPartyId], references: [id])
+  commodity        Commodity          @relation(fields: [commodityId], references: [id])
+  variety          Variety?           @relation(fields: [varietyId], references: [id])
+  ratePlan         RatePlan           @relation(fields: [ratePlanId], references: [id])
+  parentLot        Lot?               @relation("LotParent", fields: [parentLotId], references: [id])
+  childLots        Lot[]              @relation("LotParent")
+  createdByUser    User               @relation("LotCreatedBy", fields: [createdBy], references: [id])
+  ownershipHistory OwnershipHistory[]
+
+  @@unique([facilityId, lotNumber])
+  @@index([facilityId, status])
+  @@index([ownerPartyId, status])
+  @@index([chamberId, status])
+  @@index([inboundDate])
+  @@map("lots")
+}
+
+model OwnershipHistory {
+  id               String             @id @default(uuid()) @db.Uuid
+  lotId            String             @map("lot_id") @db.Uuid
+  eventType        OwnershipEventType @map("event_type")
+  fromPartyId      String?            @map("from_party_id") @db.Uuid
+  toPartyId        String             @map("to_party_id") @db.Uuid
+  quantityBags     Int                @map("quantity_bags")
+  transferPricePkr Decimal?           @map("transfer_price_pkr") @db.Decimal(12, 2)
+  effectiveDate    DateTime           @map("effective_date") @db.Date
+  operatorId       String             @map("operator_id") @db.Uuid
+  notes            String?            @db.Text
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+
+  lot       Lot    @relation(fields: [lotId], references: [id])
+  fromParty Party? @relation("OwnershipFromParty", fields: [fromPartyId], references: [id])
+  toParty   Party  @relation("OwnershipToParty", fields: [toPartyId], references: [id])
+  operator  User   @relation(fields: [operatorId], references: [id])
+
+  @@index([lotId, effectiveDate])
+  @@map("ownership_history")
 }

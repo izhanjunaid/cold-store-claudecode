@@ -11,6 +11,9 @@ import { authRoutes } from './modules/auth/auth.controller';
 import { partyRoutes } from './modules/party/party.controller';
 import { chamberRoutes } from './modules/chamber/chamber.controller';
 import { commodityRoutes } from './modules/commodity/commodity.controller';
+import { ratePlanRoutes } from './modules/rate-plan/rate-plan.controller';
+import { serviceChargeRoutes } from './modules/service-charge/service-charge.controller';
+import { lotRoutes } from './modules/lot/lot.controller';
 
 export async function buildApp() {
   const app = Fastify({
@@ -47,6 +50,9 @@ export async function buildApp() {
   await app.register(partyRoutes);
   await app.register(chamberRoutes);
   await app.register(commodityRoutes);
+  await app.register(ratePlanRoutes);
+  await app.register(serviceChargeRoutes);
+  await app.register(lotRoutes);
 
   return app;
 }
