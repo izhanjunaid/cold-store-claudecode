@@ -14,6 +14,7 @@ import { commodityRoutes } from './modules/commodity/commodity.controller';
 import { ratePlanRoutes } from './modules/rate-plan/rate-plan.controller';
 import { serviceChargeRoutes } from './modules/service-charge/service-charge.controller';
 import { lotRoutes } from './modules/lot/lot.controller';
+import { ownershipTransferRoutes } from './modules/ownership-transfer/ownership-transfer.controller';
 
 export async function buildApp() {
   const app = Fastify({
@@ -53,6 +54,7 @@ export async function buildApp() {
   await app.register(ratePlanRoutes);
   await app.register(serviceChargeRoutes);
   await app.register(lotRoutes);
+  await app.register(ownershipTransferRoutes);
 
   return app;
 }

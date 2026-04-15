@@ -1,10 +1,10 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 2 — Inbound & Lot Management
+- **Active Phase**: Phase 3 — Ownership Transfer
 - **Active Task**: COMPLETED
 - **Blockers**: None
-- **Last Updated**: 2026-04-14
+- **Last Updated**: 2026-04-15
 
 ## Phase Completion
 
@@ -13,7 +13,7 @@
 | 0 | Project Foundation | COMPLETED | 2026-04-06 | 2026-04-07 |
 | 1 | Party Management + Chambers | COMPLETED | 2026-04-08 | 2026-04-08 |
 | 2 | Inbound & Lot Management | COMPLETED | 2026-04-10 | 2026-04-14 |
-| 3 | Ownership Transfer | PENDING | — | — |
+| 3 | Ownership Transfer | COMPLETED | 2026-04-15 | 2026-04-15 |
 | 4 | Outbound & Dispatch | PENDING | — | — |
 | 5 | Billing Engine | PENDING | — | — |
 | 6 | Quality & Spoilage | PENDING | — | — |
@@ -30,6 +30,7 @@
 | 0 | 14 | 13 | — | 27 |
 | 1 | — | 25 | — | 25 |
 | 2 | 9 | 24 | — | 33 |
+| 3 | — | 9 | — | 9 |
 
 ## Completed Tasks Log
 
@@ -65,3 +66,9 @@
 - [2026-04-14] 2.9 — S-10 Lot Detail — header card, tabs (overview/ownership history/stub phases), receipt PDF download
 - [2026-04-14] 2.10 — S-11 Storage Receipt PDF — served via GET /v1/lots/:id/receipt, opened as blob URL in frontend
 - [2026-04-14] 2.11 — S-17/S-18/S-19 Rate Plans & Service Charges screens — CRUD, modal, list + edit pages
+- [2026-04-15] 3.1 — Ownership Transfer Backend — POST /v1/lots/:id/transfer (FULL/PARTIAL), OT-01→OT-06, MANAGER+ gated, row-locked, child lot `-Tn` numbering
+- [2026-04-15] 3.2 — Transfer Acknowledgment PDF — renderTransferAcknowledgment + bilingual template, GET /v1/lots/:id/transfer/:transferId/acknowledgment
+- [2026-04-15] 3.3 — S-12 Transfer Form — full/partial toggle, party picker (excludes current owner), balance-aware quantity validation
+- [2026-04-15] 3.4 — S-13 Transfer Acknowledgment Viewer — blob iframe + download
+- [2026-04-15] 3.5 — Lot Detail timeline — transfer price column, per-row PDF link, post-transfer banner with ack CTA, Transfer Ownership header button (MANAGER+)
+- [2026-04-15] 3.6 — Integration tests — 9 cases: FULL, PARTIAL, sequential -T2, quantity>=balance reject, same-party reject, CLOSED reject, role gating, PDF endpoint, history endpoint

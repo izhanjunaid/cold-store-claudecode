@@ -39,6 +39,7 @@
 | 0 | 14 | 13 | — | 27 | ALL PASS |
 | 1 | — | 25 | — | 25 | ALL PASS |
 | 2 | 9 | 24 | — | 33 | ALL PASS |
+| 3 | — | 9 | — | 9 | ALL PASS |
 
 ### Phase 0 Tests
 - `apps/api/src/common/jwt.test.ts` — 4 tests (sign/verify access & refresh tokens)
@@ -57,6 +58,9 @@
 - `apps/api/src/modules/lot/lot.integration.test.ts` — 14 tests (create WF-01, 5-concurrent unique numbers, weight dispute, capacity overflow, commodity restriction, role guards, list/filter, detail, update, receipt PDF)
 - `apps/api/src/modules/rate-plan/rate-plan.integration.test.ts` — 6 tests (create SEASONAL with dates, missing dates → 400, OPERATOR blocked, list filter, PATCH, soft delete)
 - `apps/api/src/modules/service-charge/service-charge.integration.test.ts` — 4 tests (create, duplicate name → 400, list, OPERATOR blocked)
+
+### Phase 3 Tests
+- `apps/api/src/modules/ownership-transfer/ownership-transfer.integration.test.ts` — 9 tests (FULL, PARTIAL with -T1 child, sequential -T2, qty >= balance reject, same-party reject, CLOSED lot reject, OPERATOR 403 / MANAGER 201, acknowledgment PDF, ownership history reflects TRANSFER_OUT)
 
 ## Commands
 

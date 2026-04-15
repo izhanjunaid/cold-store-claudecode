@@ -40,7 +40,27 @@ export interface StorageReceiptData {
   bookType: string;
 }
 
+export interface TransferAcknowledgmentData {
+  facilityName: string;
+  facilityCity: string;
+  parentLotNumber: string;
+  childLotNumber: string | null;
+  fromPartyName: string;
+  fromPartyNameUrdu: string | null;
+  toPartyName: string;
+  toPartyNameUrdu: string | null;
+  commodityName: string;
+  varietyName: string | null;
+  quantityBags: number;
+  transferPricePkr: number | null;
+  effectiveDate: string;
+  operatorName: string;
+  notes: string | null;
+  transferType: 'FULL' | 'PARTIAL';
+}
+
 let _template: HandlebarsTemplateDelegate | null = null;
+let _transferTemplate: HandlebarsTemplateDelegate | null = null;
 
 function getTemplate(): HandlebarsTemplateDelegate {
   if (!_template) {
@@ -51,14 +71,52 @@ function getTemplate(): HandlebarsTemplateDelegate {
   return _template;
 }
 
+function getTransferTemplate(): HandlebarsTemplateDelegate {
+  if (!_transferTemplate) {
+    const templatePath = join(__dirname, 'templates', 'transfer-acknowledgment.html');
+    const source = readFileSync(templatePath, 'utf-8');
+    _transferTemplate = Handlebars.compile(source);
+  }
+  return _transferTemplate;
+}
+
 export function renderStorageReceiptHtml(data: StorageReceiptData): string {
   return getTemplate()(data);
+}
+
+export function renderTransferAcknowledgmentHtml(data: TransferAcknowledgmentData): string {
+  return getTransferTemplate()(data);
 }
 
 export async function renderStorageReceipt(data: StorageReceiptData): Promise<Buffer> {
   const html = renderStorageReceiptHtml(data);
 
   // Lazy import puppeteer so tests that mock this module don't need Chromium
+  const puppeteer = await import('puppeteer');
+  const browser = await puppeteer.default.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdf = await page.pdf({
+      format: 'A5',
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+    });
+    return Buffer.from(pdf);
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function renderTransferAcknowledgment(
+  data: TransferAcknowledgmentData,
+): Promise<Buffer> {
+  const html = renderTransferAcknowledgmentHtml(data);
+
   const puppeteer = await import('puppeteer');
   const browser = await puppeteer.default.launch({
     headless: true,

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
+import { useAuthStore } from '@/stores/auth.store';
 
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
@@ -68,13 +69,17 @@ type Tab = 'overview' | 'ownership' | 'inspections' | 'withdrawals' | 'billing';
 export default function LotDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const id = params['id'] as string;
+  const recentTransferId = searchParams?.get('transfer');
 
   const [lot, setLot] = useState<Lot | null>(null);
   const [ownershipHistory, setOwnershipHistory] = useState<OwnershipEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [receiptLoading, setReceiptLoading] = useState(false);
+  const user = useAuthStore((s) => s.user);
+  const canTransfer = user?.role === 'OWNER' || user?.role === 'MANAGER';
 
   const fetchLot = useCallback(async () => {
     setLoading(true);
@@ -97,6 +102,11 @@ export default function LotDetailPage() {
         .catch(() => {});
     }
   }, [activeTab, id, ownershipHistory.length]);
+
+  // When landing with ?transfer= (post-transfer redirect), switch to the Ownership tab
+  useEffect(() => {
+    if (recentTransferId) setActiveTab('ownership');
+  }, [recentTransferId]);
 
   const handlePrintReceipt = async () => {
     setReceiptLoading(true);
@@ -155,14 +165,36 @@ export default function LotDetailPage() {
             {lot.book_type}
           </span>
         </div>
-        <button
-          onClick={handlePrintReceipt}
-          disabled={receiptLoading}
-          className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-        >
-          {receiptLoading ? 'Loading...' : 'Print Receipt'}
-        </button>
+        <div className="flex gap-2">
+          {canTransfer && lot.status === 'ACTIVE' && lot.current_balance_bags > 0 && (
+            <button
+              onClick={() => router.push(`/lots/${id}/transfer/new`)}
+              className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700"
+            >
+              Transfer Ownership
+            </button>
+          )}
+          <button
+            onClick={handlePrintReceipt}
+            disabled={receiptLoading}
+            className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {receiptLoading ? 'Loading...' : 'Print Receipt'}
+          </button>
+        </div>
       </div>
+
+      {recentTransferId && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
+          <p className="text-sm text-green-800">Transfer completed successfully.</p>
+          <button
+            onClick={() => router.push(`/lots/${id}/transfer/${recentTransferId}/acknowledgment`)}
+            className="text-sm font-medium text-green-800 underline hover:no-underline"
+          >
+            View / Print Acknowledgment
+          </button>
+        </div>
+      )}
 
       {/* Header Card */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
@@ -310,8 +342,10 @@ export default function LotDetailPage() {
                       <th className="pb-2 text-left text-xs font-medium text-gray-500 uppercase">From</th>
                       <th className="pb-2 text-left text-xs font-medium text-gray-500 uppercase">To</th>
                       <th className="pb-2 text-right text-xs font-medium text-gray-500 uppercase">Bags</th>
+                      <th className="pb-2 text-right text-xs font-medium text-gray-500 uppercase">Price (PKR)</th>
                       <th className="pb-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                       <th className="pb-2 text-left text-xs font-medium text-gray-500 uppercase">Operator</th>
+                      <th className="pb-2"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -323,8 +357,21 @@ export default function LotDetailPage() {
                         <td className="py-3 text-gray-600">{ev.from_party_name ?? '—'}</td>
                         <td className="py-3 text-gray-900">{ev.to_party_name ?? '—'}</td>
                         <td className="py-3 text-right text-gray-900">{ev.quantity_bags.toLocaleString()}</td>
+                        <td className="py-3 text-right text-gray-900">
+                          {ev.transfer_price_pkr != null ? ev.transfer_price_pkr.toLocaleString() : '—'}
+                        </td>
                         <td className="py-3 text-gray-600">{ev.effective_date}</td>
                         <td className="py-3 text-gray-600">{ev.operator_name ?? '—'}</td>
+                        <td className="py-3 text-right">
+                          {(ev.event_type === 'TRANSFER_OUT' || ev.event_type === 'TRANSFER_IN') && (
+                            <button
+                              onClick={() => router.push(`/lots/${id}/transfer/${ev.id}/acknowledgment`)}
+                              className="text-xs text-primary-600 hover:underline"
+                            >
+                              PDF
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
