@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { CreateLotRequest, UpdateLotRequest, LotListQuery } from '@coldchain/shared';
 import { LotService } from './lot.service';
 import { LotRepository } from './lot.repository';
+import { OutboundService } from '../outbound/outbound.service';
+import { OutboundRepository } from '../outbound/outbound.repository';
 import { sendSuccess } from '../../common/response';
 import { requireMinRole } from '../../plugins/auth';
 import { z } from 'zod';
@@ -10,6 +12,7 @@ const IdParam = z.object({ id: z.string().uuid() });
 
 export async function lotRoutes(app: FastifyInstance) {
   const service = new LotService(app.prisma, new LotRepository(app.prisma));
+  const outboundService = new OutboundService(app.prisma, new OutboundRepository(app.prisma));
 
   // GET /v1/lots
   app.route({
@@ -94,6 +97,19 @@ export async function lotRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const result = await service.getOwnershipHistory(request.user!.facilityId, id);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // GET /v1/lots/:id/outbound-events
+  app.route({
+    method: 'GET',
+    url: '/v1/lots/:id/outbound-events',
+    preHandler: [app.authenticate],
+    schema: { params: IdParam },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const result = await outboundService.getByLot(request.user!.facilityId, id);
       return sendSuccess(reply, result);
     },
   });

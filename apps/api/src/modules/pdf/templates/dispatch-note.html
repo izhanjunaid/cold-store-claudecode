@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dispatch Note — {{dispatchNoteNumber}}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 11px;
+      color: #111;
+      background: #fff;
+      padding: 6mm;
+    }
+
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #1a5276;
+      padding-bottom: 4mm;
+      margin-bottom: 4mm;
+    }
+    .header h1 {
+      font-size: 16px;
+      color: #1a5276;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .header .subtitle {
+      font-size: 10px;
+      color: #555;
+      margin-top: 1mm;
+    }
+    .header .dn-number {
+      font-size: 14px;
+      font-weight: 700;
+      color: #c0392b;
+      margin-top: 2mm;
+      letter-spacing: 1px;
+    }
+
+    .bilingual {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4mm;
+      margin-bottom: 4mm;
+    }
+    .col-en { border-right: 1px dashed #aaa; padding-right: 4mm; }
+    .col-ur {
+      direction: rtl;
+      font-family: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif;
+      font-size: 12px;
+      line-height: 1.8;
+    }
+
+    .section-title {
+      font-size: 9px;
+      font-weight: 700;
+      color: #1a5276;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2mm;
+      border-bottom: 1px solid #d5d8dc;
+      padding-bottom: 1mm;
+    }
+    .col-ur .section-title {
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    table.fields {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    table.fields td {
+      padding: 1.5mm 0;
+      vertical-align: top;
+    }
+    table.fields td.label {
+      font-weight: 600;
+      color: #444;
+      width: 45%;
+      padding-right: 2mm;
+    }
+    table.fields td.value { color: #111; }
+
+    .qty-highlight {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1a5276;
+      text-align: center;
+      padding: 3mm;
+      border: 2px solid #1a5276;
+      border-radius: 3px;
+      margin: 3mm 0;
+    }
+
+    .footer {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8mm;
+      margin-top: 6mm;
+      padding-top: 4mm;
+      border-top: 1px solid #aaa;
+    }
+    .signature-box {
+      border: 1px solid #999;
+      height: 18mm;
+      padding: 2mm;
+      font-size: 9px;
+      color: #555;
+    }
+
+    .barcode-area {
+      text-align: center;
+      margin-top: 3mm;
+      font-size: 9px;
+      color: #888;
+      font-family: monospace;
+      letter-spacing: 2px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.5mm 2mm;
+      border-radius: 2px;
+      font-size: 9px;
+      font-weight: 700;
+    }
+    .badge-full { background: #1a5276; color: #fff; }
+    .badge-partial { background: #7d6608; color: #fff; }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <h1>{{facilityName}}</h1>
+    <div class="subtitle">Cold Storage — {{facilityCity}} | Dispatch Note (ڈسپیچ نوٹ)</div>
+    <div class="dn-number">{{dispatchNoteNumber}}</div>
+  </div>
+
+  <!-- QUANTITY HIGHLIGHT -->
+  <div class="qty-highlight">
+    {{quantityWithdrawnBags}} Bags Dispatched — {{withdrawalType}}
+  </div>
+
+  <!-- BILINGUAL BODY -->
+  <div class="bilingual">
+
+    <!-- ENGLISH COLUMN -->
+    <div class="col-en">
+      <div class="section-title">Dispatch Details</div>
+      <table class="fields">
+        <tr>
+          <td class="label">Dispatch Date</td>
+          <td class="value">{{outboundDate}}</td>
+        </tr>
+        <tr>
+          <td class="label">Lot Number</td>
+          <td class="value">{{lotNumber}}</td>
+        </tr>
+        <tr>
+          <td class="label">Withdrawal Type</td>
+          <td class="value">
+            <span class="badge {{#if (eq withdrawalType 'FULL')}}badge-full{{else}}badge-partial{{/if}}">
+              {{withdrawalType}}
+            </span>
+          </td>
+        </tr>
+        {{#if commodityName}}
+        <tr>
+          <td class="label">Commodity</td>
+          <td class="value">{{commodityName}}</td>
+        </tr>
+        {{/if}}
+      </table>
+
+      <div class="section-title" style="margin-top:3mm">Quantity &amp; Weight</div>
+      <table class="fields">
+        <tr>
+          <td class="label">Bags Dispatched</td>
+          <td class="value" style="font-weight:700; font-size:13px">{{quantityWithdrawnBags}}</td>
+        </tr>
+        {{#if outboundWeightKg}}
+        <tr>
+          <td class="label">Outbound Weight</td>
+          <td class="value">{{outboundWeightKg}} kg</td>
+        </tr>
+        {{/if}}
+      </table>
+
+      <div class="section-title" style="margin-top:3mm">Receiving Party &amp; Vehicle</div>
+      <table class="fields">
+        {{#if receivingPartyName}}
+        <tr>
+          <td class="label">Receiving Party</td>
+          <td class="value">{{receivingPartyName}}</td>
+        </tr>
+        {{/if}}
+        {{#if vehicleNumber}}
+        <tr>
+          <td class="label">Vehicle No.</td>
+          <td class="value">{{vehicleNumber}}</td>
+        </tr>
+        {{/if}}
+        <tr>
+          <td class="label">Operator</td>
+          <td class="value">{{operatorName}}</td>
+        </tr>
+      </table>
+    </div><!-- /col-en -->
+
+    <!-- URDU COLUMN -->
+    <div class="col-ur">
+      <div class="section-title">ڈسپیچ کی تفصیل</div>
+      <table class="fields">
+        <tr>
+          <td class="value">{{outboundDate}}</td>
+          <td class="label" style="text-align:right">تاریخ</td>
+        </tr>
+        <tr>
+          <td class="value">{{lotNumber}}</td>
+          <td class="label" style="text-align:right">لاٹ نمبر</td>
+        </tr>
+        {{#if commodityName}}
+        <tr>
+          <td class="value">{{commodityName}}</td>
+          <td class="label" style="text-align:right">جنس</td>
+        </tr>
+        {{/if}}
+      </table>
+
+      <div class="section-title" style="margin-top:3mm">مقدار و وزن</div>
+      <table class="fields">
+        <tr>
+          <td class="value" style="font-weight:700; font-size:13px">{{quantityWithdrawnBags}}</td>
+          <td class="label" style="text-align:right">بوری ڈسپیچ</td>
+        </tr>
+        {{#if outboundWeightKg}}
+        <tr>
+          <td class="value">{{outboundWeightKg}} کلو</td>
+          <td class="label" style="text-align:right">اخراجی وزن</td>
+        </tr>
+        {{/if}}
+      </table>
+
+      <div class="section-title" style="margin-top:3mm">وصول کنندہ و گاڑی</div>
+      <table class="fields">
+        {{#if receivingPartyName}}
+        <tr>
+          <td class="value">{{receivingPartyName}}</td>
+          <td class="label" style="text-align:right">وصول کنندہ</td>
+        </tr>
+        {{/if}}
+        {{#if vehicleNumber}}
+        <tr>
+          <td class="value">{{vehicleNumber}}</td>
+          <td class="label" style="text-align:right">گاڑی نمبر</td>
+        </tr>
+        {{/if}}
+        <tr>
+          <td class="value">{{operatorName}}</td>
+          <td class="label" style="text-align:right">آپریٹر</td>
+        </tr>
+      </table>
+    </div><!-- /col-ur -->
+
+  </div><!-- /bilingual -->
+
+  <!-- FOOTER: SIGNATURES -->
+  <div class="footer">
+    <div class="signature-box">
+      Operator Signature<br/>
+      <strong>{{operatorName}}</strong>
+    </div>
+    <div class="signature-box" style="direction:rtl; font-family:'Noto Nastaliq Urdu',serif">
+      وصول کنندہ کے دستخط<br/>
+      <strong>{{#if receivingPartyName}}{{receivingPartyName}}{{else}}——{{/if}}</strong>
+    </div>
+  </div>
+
+  <div class="barcode-area">
+    {{dispatchNoteNumber}} | {{lotNumber}} | {{outboundDate}}
+  </div>
+
+</body>
+</html>

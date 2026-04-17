@@ -1,10 +1,10 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 3 — Ownership Transfer
+- **Active Phase**: Phase 4 — Outbound & Dispatch
 - **Active Task**: COMPLETED
 - **Blockers**: None
-- **Last Updated**: 2026-04-15
+- **Last Updated**: 2026-04-17
 
 ## Phase Completion
 
@@ -14,7 +14,7 @@
 | 1 | Party Management + Chambers | COMPLETED | 2026-04-08 | 2026-04-08 |
 | 2 | Inbound & Lot Management | COMPLETED | 2026-04-10 | 2026-04-14 |
 | 3 | Ownership Transfer | COMPLETED | 2026-04-15 | 2026-04-15 |
-| 4 | Outbound & Dispatch | PENDING | — | — |
+| 4 | Outbound & Dispatch | COMPLETED | 2026-04-17 | 2026-04-17 |
 | 5 | Billing Engine | PENDING | — | — |
 | 6 | Quality & Spoilage | PENDING | — | — |
 | 7 | Financial Ledger & Payments | PENDING | — | — |
@@ -31,6 +31,7 @@
 | 1 | — | 25 | — | 25 |
 | 2 | 9 | 24 | — | 33 |
 | 3 | — | 9 | — | 9 |
+| 4 | — | 13 | — | 13 |
 
 ## Completed Tasks Log
 
@@ -72,3 +73,10 @@
 - [2026-04-15] 3.4 — S-13 Transfer Acknowledgment Viewer — blob iframe + download
 - [2026-04-15] 3.5 — Lot Detail timeline — transfer price column, per-row PDF link, post-transfer banner with ack CTA, Transfer Ownership header button (MANAGER+)
 - [2026-04-15] 3.6 — Integration tests — 9 cases: FULL, PARTIAL, sequential -T2, quantity>=balance reject, same-party reject, CLOSED reject, role gating, PDF endpoint, history endpoint
+- [2026-04-17] 4.1 — Migration outbound_events — Prisma schema + db push (WithdrawalType, OutboundStatus enums; OutboundEvent model)
+- [2026-04-17] 4.2 — Outbound Backend — POST /v1/outbound-events, GET /:id, PATCH /:id/weight, POST /:id/finalize, GET /:id/dispatch-note; DN-YYMMDD-NNNN number generation
+- [2026-04-17] 4.3 — Dispatch Note PDF — bilingual Handlebars template, renderDispatchNote() in pdf.service.ts
+- [2026-04-17] 4.4 — S-14 Withdrawal Form — /lots/:id/withdraw with FULL/PARTIAL toggle, balance-aware validation
+- [2026-04-17] 4.5/4.6 — S-15 Outbound Event Detail — weight recording, variance display, finalize confirm, dispatch note print
+- [2026-04-17] 4.7 — Lot Detail updated — "New Withdrawal" button (OPERATOR+), Withdrawals tab with outbound events table
+- [2026-04-17] 4.8 — Integration tests — 13 cases: PARTIAL/FULL create, balance checks, CLOSED lot reject, GET by ID, weight→WEIGHED, finalize→DISPATCHED (partial/full), no-weight reject, role gating, PDF endpoint, lot events endpoint

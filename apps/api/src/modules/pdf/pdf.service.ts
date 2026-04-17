@@ -59,8 +59,24 @@ export interface TransferAcknowledgmentData {
   transferType: 'FULL' | 'PARTIAL';
 }
 
+export interface DispatchNoteData {
+  facilityName: string;
+  facilityCity: string;
+  dispatchNoteNumber: string;
+  lotNumber: string;
+  outboundDate: string;
+  withdrawalType: string;
+  commodityName: string;
+  quantityWithdrawnBags: number;
+  outboundWeightKg: number | null;
+  receivingPartyName: string | null;
+  vehicleNumber: string | null;
+  operatorName: string;
+}
+
 let _template: HandlebarsTemplateDelegate | null = null;
 let _transferTemplate: HandlebarsTemplateDelegate | null = null;
+let _dispatchNoteTemplate: HandlebarsTemplateDelegate | null = null;
 
 function getTemplate(): HandlebarsTemplateDelegate {
   if (!_template) {
@@ -78,6 +94,15 @@ function getTransferTemplate(): HandlebarsTemplateDelegate {
     _transferTemplate = Handlebars.compile(source);
   }
   return _transferTemplate;
+}
+
+function getDispatchNoteTemplate(): HandlebarsTemplateDelegate {
+  if (!_dispatchNoteTemplate) {
+    const templatePath = join(__dirname, 'templates', 'dispatch-note.html');
+    const source = readFileSync(templatePath, 'utf-8');
+    _dispatchNoteTemplate = Handlebars.compile(source);
+  }
+  return _dispatchNoteTemplate;
 }
 
 export function renderStorageReceiptHtml(data: StorageReceiptData): string {
@@ -116,6 +141,33 @@ export async function renderTransferAcknowledgment(
   data: TransferAcknowledgmentData,
 ): Promise<Buffer> {
   const html = renderTransferAcknowledgmentHtml(data);
+
+  const puppeteer = await import('puppeteer');
+  const browser = await puppeteer.default.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdf = await page.pdf({
+      format: 'A5',
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+    });
+    return Buffer.from(pdf);
+  } finally {
+    await browser.close();
+  }
+}
+
+export function renderDispatchNoteHtml(data: DispatchNoteData): string {
+  return getDispatchNoteTemplate()(data);
+}
+
+export async function renderDispatchNote(data: DispatchNoteData): Promise<Buffer> {
+  const html = renderDispatchNoteHtml(data);
 
   const puppeteer = await import('puppeteer');
   const browser = await puppeteer.default.launch({

@@ -76,6 +76,23 @@ enum OwnershipEventType {
 }
 
 // ============================================================
+// ENUMS (Phase 4)
+// ============================================================
+
+enum WithdrawalType {
+  FULL
+  PARTIAL
+}
+
+enum OutboundStatus {
+  PENDING
+  WEIGHED
+  DISPATCHED
+  CANCELLED
+  DISPUTED
+}
+
+// ============================================================
 // FOUNDATION TABLES (Migration 0001)
 // ============================================================
 
@@ -98,6 +115,7 @@ model Facility {
   ratePlans      RatePlan[]
   serviceCharges ServiceCharge[]
   lots           Lot[]
+  outboundEvents OutboundEvent[]
 
   @@map("facilities")
 }
@@ -119,10 +137,11 @@ model User {
 
   facility        Facility           @relation(fields: [facilityId], references: [id])
   refreshTokens   RefreshToken[]
-  partiesCreated  Party[]            @relation("PartyCreatedBy")
-  temperatureLogs TemperatureLog[]
-  lotsCreated     Lot[]              @relation("LotCreatedBy")
-  ownershipEvents OwnershipHistory[]
+  partiesCreated   Party[]            @relation("PartyCreatedBy")
+  temperatureLogs  TemperatureLog[]
+  lotsCreated      Lot[]              @relation("LotCreatedBy")
+  ownershipEvents  OwnershipHistory[]
+  outboundCreated  OutboundEvent[]    @relation("OutboundCreatedBy")
 
   @@unique([facilityId, email])
   @@map("users")
@@ -190,10 +209,11 @@ model Party {
   parentArhti   Party?             @relation("PartyArhtiLink", fields: [parentArhtiId], references: [id])
   childParties  Party[]            @relation("PartyArhtiLink")
   createdByUser User               @relation("PartyCreatedBy", fields: [createdBy], references: [id])
-  lotsOwned     Lot[]              @relation("LotOwner")
-  lotsBilled    Lot[]              @relation("LotBillingParty")
-  ownershipFrom OwnershipHistory[] @relation("OwnershipFromParty")
-  ownershipTo   OwnershipHistory[] @relation("OwnershipToParty")
+  lotsOwned          Lot[]              @relation("LotOwner")
+  lotsBilled         Lot[]              @relation("LotBillingParty")
+  ownershipFrom      OwnershipHistory[] @relation("OwnershipFromParty")
+  ownershipTo        OwnershipHistory[] @relation("OwnershipToParty")
+  outboundReceived   OutboundEvent[]    @relation("OutboundReceiver")
 
   @@index([facilityId, phonePrimary])
   @@index([facilityId, partyType])
@@ -341,6 +361,7 @@ model Lot {
   childLots        Lot[]              @relation("LotParent")
   createdByUser    User               @relation("LotCreatedBy", fields: [createdBy], references: [id])
   ownershipHistory OwnershipHistory[]
+  outboundEvents   OutboundEvent[]
 
   @@unique([facilityId, lotNumber])
   @@index([facilityId, status])
@@ -370,4 +391,35 @@ model OwnershipHistory {
 
   @@index([lotId, effectiveDate])
   @@map("ownership_history")
+}
+
+// ============================================================
+// PHASE 4: OUTBOUND EVENTS (Migration 0004)
+// ============================================================
+
+model OutboundEvent {
+  id                    String         @id @default(uuid()) @db.Uuid
+  lotId                 String         @map("lot_id") @db.Uuid
+  facilityId            String         @map("facility_id") @db.Uuid
+  withdrawalType        WithdrawalType @map("withdrawal_type")
+  quantityWithdrawnBags Int            @map("quantity_withdrawn_bags")
+  outboundWeightKg      Decimal?       @map("outbound_weight_kg") @db.Decimal(10, 2)
+  outboundDate          DateTime       @map("outbound_date") @db.Date
+  receivingPartyId      String?        @map("receiving_party_id") @db.Uuid
+  vehicleNumber         String?        @map("vehicle_number") @db.VarChar(20)
+  dispatchNoteNumber    String?        @map("dispatch_note_number") @db.VarChar(30)
+  status                OutboundStatus @default(PENDING)
+  notes                 String?        @db.Text
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy             String         @map("created_by") @db.Uuid
+
+  lot            Lot      @relation(fields: [lotId], references: [id])
+  facility       Facility @relation(fields: [facilityId], references: [id])
+  receivingParty Party?   @relation("OutboundReceiver", fields: [receivingPartyId], references: [id])
+  createdByUser  User     @relation("OutboundCreatedBy", fields: [createdBy], references: [id])
+
+  @@unique([facilityId, dispatchNoteNumber])
+  @@index([lotId])
+  @@index([facilityId, status])
+  @@map("outbound_events")
 }

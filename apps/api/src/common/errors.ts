@@ -48,4 +48,12 @@ export const Errors = {
     new AppError('INTERNAL_ERROR', msg, 500),
   ACCOUNT_LOCKED: () =>
     new AppError('ACCOUNT_LOCKED', 'Account is temporarily locked due to failed login attempts', 423),
+  OUTBOUND_NOT_FOUND: () =>
+    new AppError('OUTBOUND_NOT_FOUND', 'Outbound event does not exist', 404),
+  OUTBOUND_ALREADY_FINALIZED: () =>
+    new AppError('OUTBOUND_ALREADY_FINALIZED', 'Outbound event is already dispatched', 409),
+  OUTBOUND_WEIGHT_REQUIRED: () =>
+    new AppError('OUTBOUND_WEIGHT_REQUIRED', 'Outbound weight must be recorded before finalizing', 422),
+  LOT_NOT_ACTIVE: () =>
+    new AppError('LOT_NOT_ACTIVE', 'Lot must be ACTIVE to create a withdrawal', 409),
 } as const;

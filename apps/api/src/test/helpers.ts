@@ -14,6 +14,7 @@ import { ratePlanRoutes } from '../modules/rate-plan/rate-plan.controller';
 import { serviceChargeRoutes } from '../modules/service-charge/service-charge.controller';
 import { lotRoutes } from '../modules/lot/lot.controller';
 import { ownershipTransferRoutes } from '../modules/ownership-transfer/ownership-transfer.controller';
+import { outboundRoutes } from '../modules/outbound/outbound.controller';
 import type { FastifyInstance } from 'fastify';
 
 export const TEST_FACILITY_ID = '00000000-0000-0000-0000-000000000001';
@@ -39,6 +40,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(serviceChargeRoutes);
   await testApp.register(lotRoutes);
   await testApp.register(ownershipTransferRoutes);
+  await testApp.register(outboundRoutes);
   return testApp;
 }
 

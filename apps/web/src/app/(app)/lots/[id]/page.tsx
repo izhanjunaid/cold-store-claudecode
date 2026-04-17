@@ -52,6 +52,15 @@ interface OwnershipEvent {
   notes: string | null;
 }
 
+interface OutboundSummary {
+  id: string;
+  dispatch_note_number: string | null;
+  withdrawal_type: string;
+  quantity_withdrawn_bags: number;
+  status: string;
+  outbound_date: string;
+}
+
 const STATUS_COLORS: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-800',
   CLOSED: 'bg-gray-100 text-gray-800',
@@ -75,11 +84,15 @@ export default function LotDetailPage() {
 
   const [lot, setLot] = useState<Lot | null>(null);
   const [ownershipHistory, setOwnershipHistory] = useState<OwnershipEvent[]>([]);
+  const [outboundEvents, setOutboundEvents] = useState<OutboundSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [receiptLoading, setReceiptLoading] = useState(false);
   const user = useAuthStore((s) => s.user);
   const canTransfer = user?.role === 'OWNER' || user?.role === 'MANAGER';
+  const canWithdraw =
+    user?.role != null &&
+    ['OWNER', 'MANAGER', 'ACCOUNTANT', 'OPERATOR'].includes(user.role);
 
   const fetchLot = useCallback(async () => {
     setLoading(true);
@@ -101,7 +114,12 @@ export default function LotDetailPage() {
         .then(setOwnershipHistory)
         .catch(() => {});
     }
-  }, [activeTab, id, ownershipHistory.length]);
+    if (activeTab === 'withdrawals' && outboundEvents.length === 0) {
+      apiClient<OutboundSummary[]>(`/v1/lots/${id}/outbound-events`)
+        .then(setOutboundEvents)
+        .catch(() => {});
+    }
+  }, [activeTab, id, ownershipHistory.length, outboundEvents.length]);
 
   // When landing with ?transfer= (post-transfer redirect), switch to the Ownership tab
   useEffect(() => {
@@ -172,6 +190,14 @@ export default function LotDetailPage() {
               className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700"
             >
               Transfer Ownership
+            </button>
+          )}
+          {canWithdraw && lot.status === 'ACTIVE' && lot.current_balance_bags > 0 && (
+            <button
+              onClick={() => router.push(`/lots/${id}/withdraw`)}
+              className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700"
+            >
+              New Withdrawal
             </button>
           )}
           <button
@@ -380,10 +406,58 @@ export default function LotDetailPage() {
             </div>
           )}
 
-          {(activeTab === 'inspections' || activeTab === 'withdrawals' || activeTab === 'billing') && (
+          {activeTab === 'withdrawals' && (
+            <div>
+              {outboundEvents.length === 0 ? (
+                <p className="text-gray-500 text-sm">No withdrawals yet.</p>
+              ) : (
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="pb-2 text-left text-xs font-medium text-gray-500 uppercase">Dispatch #</th>
+                      <th className="pb-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                      <th className="pb-2 text-right text-xs font-medium text-gray-500 uppercase">Bags</th>
+                      <th className="pb-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="pb-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="pb-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {outboundEvents.map(ev => (
+                      <tr key={ev.id}>
+                        <td className="py-3 font-mono text-gray-900">{ev.dispatch_note_number ?? '—'}</td>
+                        <td className="py-3 text-gray-700">{ev.withdrawal_type}</td>
+                        <td className="py-3 text-right text-gray-900">{ev.quantity_withdrawn_bags.toLocaleString()}</td>
+                        <td className="py-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                            ev.status === 'DISPATCHED' ? 'bg-green-100 text-green-800' :
+                            ev.status === 'WEIGHED' ? 'bg-blue-100 text-blue-800' :
+                            ev.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-gray-100 text-gray-500'
+                          }`}>
+                            {ev.status}
+                          </span>
+                        </td>
+                        <td className="py-3 text-gray-600">{ev.outbound_date}</td>
+                        <td className="py-3 text-right">
+                          <button
+                            onClick={() => router.push(`/outbound-events/${ev.id}`)}
+                            className="text-xs text-primary-600 hover:underline"
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {(activeTab === 'inspections' || activeTab === 'billing') && (
             <p className="text-gray-400 text-sm italic">
               {activeTab === 'inspections' && 'Quality inspections and spoilage records — available in Phase 6.'}
-              {activeTab === 'withdrawals' && 'Outbound withdrawals and dispatch — available in Phase 4.'}
               {activeTab === 'billing' && 'Storage invoices and billing history — available in Phase 5.'}
             </p>
           )}
