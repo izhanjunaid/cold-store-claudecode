@@ -93,6 +93,23 @@ enum OutboundStatus {
 }
 
 // ============================================================
+// ENUMS (Phase 5)
+// ============================================================
+
+enum InvoiceStatus {
+  DRAFT
+  FINALIZED
+  VOID
+}
+
+enum InvoiceLineType {
+  STORAGE
+  SERVICE
+  ADJUSTMENT
+  ADVANCE_APPLIED
+}
+
+// ============================================================
 // FOUNDATION TABLES (Migration 0001)
 // ============================================================
 
@@ -116,6 +133,7 @@ model Facility {
   serviceCharges ServiceCharge[]
   lots           Lot[]
   outboundEvents OutboundEvent[]
+  invoices       Invoice[]
 
   @@map("facilities")
 }
@@ -135,13 +153,15 @@ model User {
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
-  facility        Facility           @relation(fields: [facilityId], references: [id])
-  refreshTokens   RefreshToken[]
-  partiesCreated   Party[]            @relation("PartyCreatedBy")
-  temperatureLogs  TemperatureLog[]
-  lotsCreated      Lot[]              @relation("LotCreatedBy")
-  ownershipEvents  OwnershipHistory[]
-  outboundCreated  OutboundEvent[]    @relation("OutboundCreatedBy")
+  facility           Facility           @relation(fields: [facilityId], references: [id])
+  refreshTokens      RefreshToken[]
+  partiesCreated     Party[]            @relation("PartyCreatedBy")
+  temperatureLogs    TemperatureLog[]
+  lotsCreated        Lot[]              @relation("LotCreatedBy")
+  ownershipEvents    OwnershipHistory[]
+  outboundCreated    OutboundEvent[]    @relation("OutboundCreatedBy")
+  invoicesCreated    Invoice[]          @relation("InvoiceCreatedBy")
+  invoicesFinalized  Invoice[]          @relation("InvoiceFinalizedBy")
 
   @@unique([facilityId, email])
   @@map("users")
@@ -214,6 +234,7 @@ model Party {
   ownershipFrom      OwnershipHistory[] @relation("OwnershipFromParty")
   ownershipTo        OwnershipHistory[] @relation("OwnershipToParty")
   outboundReceived   OutboundEvent[]    @relation("OutboundReceiver")
+  invoicesBilled     Invoice[]          @relation("InvoiceBillingParty")
 
   @@index([facilityId, phonePrimary])
   @@index([facilityId, partyType])
@@ -299,9 +320,10 @@ model RatePlan {
   isActive        Boolean   @default(true) @map("is_active")
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
 
-  facility  Facility   @relation(fields: [facilityId], references: [id])
-  commodity Commodity? @relation(fields: [commodityId], references: [id])
-  lots      Lot[]
+  facility     Facility          @relation(fields: [facilityId], references: [id])
+  commodity    Commodity?        @relation(fields: [commodityId], references: [id])
+  lots         Lot[]
+  invoiceLines InvoiceLineItem[]
 
   @@index([facilityId, isActive])
   @@map("rate_plans")
@@ -316,7 +338,8 @@ model ServiceCharge {
   isActive     Boolean         @default(true) @map("is_active")
   createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz()
 
-  facility Facility @relation(fields: [facilityId], references: [id])
+  facility     Facility          @relation(fields: [facilityId], references: [id])
+  invoiceLines InvoiceLineItem[]
 
   @@unique([facilityId, name])
   @@map("service_charges")
@@ -362,6 +385,7 @@ model Lot {
   createdByUser    User               @relation("LotCreatedBy", fields: [createdBy], references: [id])
   ownershipHistory OwnershipHistory[]
   outboundEvents   OutboundEvent[]
+  invoices         Invoice[]
 
   @@unique([facilityId, lotNumber])
   @@index([facilityId, status])
@@ -417,9 +441,74 @@ model OutboundEvent {
   facility       Facility @relation(fields: [facilityId], references: [id])
   receivingParty Party?   @relation("OutboundReceiver", fields: [receivingPartyId], references: [id])
   createdByUser  User     @relation("OutboundCreatedBy", fields: [createdBy], references: [id])
+  invoice        Invoice?
 
   @@unique([facilityId, dispatchNoteNumber])
   @@index([lotId])
   @@index([facilityId, status])
   @@map("outbound_events")
+}
+
+// ============================================================
+// PHASE 5: BILLING ENGINE — INVOICES (Migration 0005)
+// ============================================================
+
+model Invoice {
+  id               String        @id @default(uuid()) @db.Uuid
+  facilityId       String        @map("facility_id") @db.Uuid
+  invoiceNumber    String?       @map("invoice_number") @db.VarChar(30)
+  lotId            String        @map("lot_id") @db.Uuid
+  outboundEventId  String?       @unique @map("outbound_event_id") @db.Uuid
+  billingPartyId   String        @map("billing_party_id") @db.Uuid
+  invoiceDate      DateTime      @map("invoice_date") @db.Date
+  periodStart      DateTime      @map("period_start") @db.Date
+  periodEnd        DateTime      @map("period_end") @db.Date
+  subTotalPkr      Decimal       @map("sub_total_pkr") @db.Decimal(12, 2)
+  gstRate          Decimal       @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  gstAmountPkr     Decimal       @default(0) @map("gst_amount_pkr") @db.Decimal(12, 2)
+  totalPkr         Decimal       @map("total_pkr") @db.Decimal(12, 2)
+  amountPaidPkr    Decimal       @default(0) @map("amount_paid_pkr") @db.Decimal(12, 2)
+  status           InvoiceStatus @default(DRAFT)
+  finalizedAt      DateTime?     @map("finalized_at") @db.Timestamptz()
+  finalizedBy      String?       @map("finalized_by") @db.Uuid
+  bookType         BookType      @default(PACCI) @map("book_type")
+  notes            String?       @db.Text
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy        String        @map("created_by") @db.Uuid
+
+  facility        Facility          @relation(fields: [facilityId], references: [id])
+  lot             Lot               @relation(fields: [lotId], references: [id])
+  outboundEvent   OutboundEvent?    @relation(fields: [outboundEventId], references: [id])
+  billingParty    Party             @relation("InvoiceBillingParty", fields: [billingPartyId], references: [id])
+  finalizedByUser User?             @relation("InvoiceFinalizedBy", fields: [finalizedBy], references: [id])
+  createdByUser   User              @relation("InvoiceCreatedBy", fields: [createdBy], references: [id])
+  lineItems       InvoiceLineItem[]
+
+  @@index([facilityId, invoiceNumber])
+  @@index([facilityId, status])
+  @@index([billingPartyId, status])
+  @@index([lotId])
+  @@index([invoiceDate])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id              String          @id @default(uuid()) @db.Uuid
+  invoiceId       String          @map("invoice_id") @db.Uuid
+  lineType        InvoiceLineType @map("line_type")
+  description     String          @db.VarChar(300)
+  quantity        Decimal         @db.Decimal(10, 2)
+  unitPricePkr    Decimal         @map("unit_price_pkr") @db.Decimal(10, 2)
+  amountPkr       Decimal         @map("amount_pkr") @db.Decimal(12, 2)
+  serviceChargeId String?         @map("service_charge_id") @db.Uuid
+  ratePlanId      String?         @map("rate_plan_id") @db.Uuid
+  sortOrder       Int             @default(0) @map("sort_order")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+
+  invoice       Invoice        @relation(fields: [invoiceId], references: [id])
+  serviceCharge ServiceCharge? @relation(fields: [serviceChargeId], references: [id])
+  ratePlan      RatePlan?      @relation(fields: [ratePlanId], references: [id])
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
 }
