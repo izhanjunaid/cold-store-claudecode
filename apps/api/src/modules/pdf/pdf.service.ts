@@ -188,3 +188,67 @@ export async function renderDispatchNote(data: DispatchNoteData): Promise<Buffer
     await browser.close();
   }
 }
+
+export interface InvoicePdfData {
+  facilityName: string;
+  facilityCity: string;
+  invoiceNumber: string;
+  lotNumber: string;
+  billingPartyName: string;
+  invoiceDate: string;
+  periodStart: string;
+  periodEnd: string;
+  subTotalPkr: number;
+  gstRate: number;
+  gstAmountPkr: number;
+  totalPkr: number;
+  amountPaidPkr: number;
+  balanceDuePkr: number;
+  status: string;
+  isDraft: boolean;
+  lineItems: {
+    lineType: string;
+    description: string;
+    quantity: number;
+    unitPricePkr: number;
+    amountPkr: number;
+  }[];
+}
+
+let _invoiceTemplate: HandlebarsTemplateDelegate | null = null;
+
+function getInvoiceTemplate(): HandlebarsTemplateDelegate {
+  if (!_invoiceTemplate) {
+    const templatePath = join(__dirname, 'templates', 'invoice.html');
+    const source = readFileSync(templatePath, 'utf-8');
+    _invoiceTemplate = Handlebars.compile(source);
+  }
+  return _invoiceTemplate;
+}
+
+export function renderInvoiceHtml(data: InvoicePdfData): string {
+  return getInvoiceTemplate()(data);
+}
+
+export async function renderInvoice(data: InvoicePdfData): Promise<Buffer> {
+  const html = renderInvoiceHtml(data);
+
+  const puppeteer = await import('puppeteer');
+  const browser = await puppeteer.default.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdf = await page.pdf({
+      format: 'A5',
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+    });
+    return Buffer.from(pdf);
+  } finally {
+    await browser.close();
+  }
+}

@@ -56,4 +56,13 @@ export const Errors = {
     new AppError('OUTBOUND_WEIGHT_REQUIRED', 'Outbound weight must be recorded before finalizing', 422),
   LOT_NOT_ACTIVE: () =>
     new AppError('LOT_NOT_ACTIVE', 'Lot must be ACTIVE to create a withdrawal', 409),
+  INVOICE_NOT_FOUND: () => new AppError('INVOICE_NOT_FOUND', 'Invoice does not exist', 404),
+  INVOICE_LINE_NOT_FOUND: () =>
+    new AppError('INVOICE_LINE_NOT_FOUND', 'Invoice line does not exist', 404),
+  INVOICE_LINE_IMMUTABLE: () =>
+    new AppError(
+      'INVOICE_LINE_IMMUTABLE',
+      'STORAGE and ADVANCE_APPLIED lines cannot be edited',
+      422,
+    ),
 } as const;
