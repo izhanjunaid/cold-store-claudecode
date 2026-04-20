@@ -7,6 +7,12 @@ import type { FastifyInstance } from 'fastify';
 vi.mock('../pdf/pdf.service', () => ({
   renderStorageReceipt: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 mock\n')),
   renderStorageReceiptHtml: vi.fn().mockReturnValue('<html>mock</html>'),
+  renderTransferAcknowledgment: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 ack\n')),
+  renderTransferAcknowledgmentHtml: vi.fn().mockReturnValue('<html>ack</html>'),
+  renderDispatchNote: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 dn\n')),
+  renderDispatchNoteHtml: vi.fn().mockReturnValue('<html>dn</html>'),
+  renderInvoice: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 inv\n')),
+  renderInvoiceHtml: vi.fn().mockReturnValue('<html>inv</html>'),
 }));
 
 const prisma = new PrismaClient();
@@ -42,6 +48,9 @@ beforeAll(async () => {
   app = await getTestApp();
 
   // Clean up lots from prior test runs so chamber capacity isn't exhausted
+  await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
+  await prisma.invoice.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+  await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.ownershipHistory.deleteMany({ where: { lot: { facilityId: TEST_FACILITY_ID } } });
   await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
 
@@ -91,6 +100,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
+  await prisma.invoice.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+  await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.ownershipHistory.deleteMany({ where: { lot: { facilityId: TEST_FACILITY_ID } } });
   await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.$disconnect();

@@ -11,6 +11,8 @@ vi.mock('../pdf/pdf.service', () => ({
   renderTransferAcknowledgmentHtml: vi.fn().mockReturnValue('<html>ack</html>'),
   renderDispatchNote: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 dn\n')),
   renderDispatchNoteHtml: vi.fn().mockReturnValue('<html>dn</html>'),
+  renderInvoice: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 inv\n')),
+  renderInvoiceHtml: vi.fn().mockReturnValue('<html>inv</html>'),
 }));
 
 const prisma = new PrismaClient();
@@ -66,6 +68,8 @@ async function createParty(name: string, phone: string): Promise<string> {
 beforeAll(async () => {
   app = await getTestApp();
 
+  await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
+  await prisma.invoice.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.ownershipHistory.deleteMany({ where: { lot: { facilityId: TEST_FACILITY_ID } } });
   await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
@@ -80,6 +84,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
+  await prisma.invoice.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.ownershipHistory.deleteMany({ where: { lot: { facilityId: TEST_FACILITY_ID } } });
   await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
@@ -282,6 +288,7 @@ describe('Outbound Events', () => {
     expect(finalizeRes.statusCode).toBe(200);
     const body = JSON.parse(finalizeRes.body).data;
     expect(body.status).toBe('DISPATCHED');
+    expect(body.invoice_id).toBeTruthy();
 
     const dbLot = await prisma.lot.findUnique({ where: { id: lot.id } });
     expect(dbLot?.currentBalanceBags).toBe(70); // 100 - 30
@@ -317,6 +324,8 @@ describe('Outbound Events', () => {
       payload: {},
     });
     expect(finalizeRes.statusCode).toBe(200);
+    const finalizeBody = JSON.parse(finalizeRes.body).data;
+    expect(finalizeBody.invoice_id).toBeTruthy();
 
     const dbLot = await prisma.lot.findUnique({ where: { id: lot.id } });
     expect(dbLot?.currentBalanceBags).toBe(0);

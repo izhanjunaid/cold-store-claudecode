@@ -3,6 +3,7 @@ import { Errors } from '../../common/errors';
 import { OutboundRepository, type OutboundWithRelations } from './outbound.repository';
 import { generateDispatchNoteNumber } from './dispatch-note-number';
 import { renderDispatchNote } from '../pdf/pdf.service';
+import { buildInvoiceFromOutbound } from '../invoice/invoice.builder';
 
 function toNumber(d: { toString(): string } | null | undefined): number | null {
   if (d == null) return null;
@@ -27,7 +28,7 @@ function computeVariance(
   };
 }
 
-function formatOutbound(ob: OutboundWithRelations) {
+function formatOutbound(ob: OutboundWithRelations, invoiceId: string | null = null) {
   const { proratedInboundWeightKg, weightVariancePct } = computeVariance(
     ob.lot.acceptedWeightKg,
     ob.lot.quantityBags,
@@ -51,6 +52,7 @@ function formatOutbound(ob: OutboundWithRelations) {
     notes: ob.notes,
     prorated_inbound_weight_kg: proratedInboundWeightKg,
     weight_variance_pct: weightVariancePct,
+    invoice_id: invoiceId,
     created_at: ob.createdAt.toISOString(),
     created_by_name: ob.createdByUser.name,
   };
@@ -140,7 +142,11 @@ export class OutboundService {
   async getById(facilityId: string, id: string) {
     const ob = await this.repo.findById(facilityId, id);
     if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
-    return formatOutbound(ob);
+    const invoice = await this.prisma.invoice.findFirst({
+      where: { outboundEventId: id },
+      select: { id: true },
+    });
+    return formatOutbound(ob, invoice?.id ?? null);
   }
 
   async recordWeight(facilityId: string, id: string, outboundWeightKg: number) {
@@ -194,7 +200,9 @@ export class OutboundService {
         ...(notes ? { notes } : {}),
       });
 
-      return formatOutbound(updated);
+      const invoice = await buildInvoiceFromOutbound(tx, id);
+
+      return formatOutbound(updated, invoice.id);
     });
   }
 
@@ -229,6 +237,11 @@ export class OutboundService {
     const lot = await this.prisma.lot.findFirst({ where: { id: lotId, facilityId } });
     if (!lot) throw Errors.LOT_NOT_FOUND();
     const events = await this.repo.findByLot(facilityId, lotId);
-    return events.map(formatOutbound);
+    const invoices = await this.prisma.invoice.findMany({
+      where: { outboundEventId: { in: events.map((e) => e.id) } },
+      select: { id: true, outboundEventId: true },
+    });
+    const byEvent = new Map(invoices.map((i) => [i.outboundEventId!, i.id]));
+    return events.map((e) => formatOutbound(e, byEvent.get(e.id) ?? null));
   }
 }
