@@ -35,6 +35,7 @@ export const OutboundEventResponse = z.object({
   receiving_party_name: z.string().nullable(),
   vehicle_number: z.string().nullable(),
   dispatch_note_number: z.string().nullable(),
+  invoice_id: z.string().uuid().nullable(),
   status: OutboundStatus,
   notes: z.string().nullable(),
   prorated_inbound_weight_kg: z.number().nullable(),

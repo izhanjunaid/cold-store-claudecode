@@ -6,6 +6,7 @@ export * from './schemas/chamber';
 export * from './schemas/commodity';
 export * from './schemas/rate-plan';
 export * from './schemas/service-charge';
+export * from './schemas/invoice';
 export * from './schemas/lot';
 export * from './schemas/ownership-transfer';
 export * from './schemas/outbound';
