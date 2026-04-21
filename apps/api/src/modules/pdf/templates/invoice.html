@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Invoice — {{invoiceNumber}}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 11px;
+      color: #111;
+      background: #fff;
+      padding: 6mm;
+      position: relative;
+    }
+
+    .watermark {
+      position: fixed;
+      top: 40%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-30deg);
+      font-size: 72px;
+      font-weight: 900;
+      color: rgba(192, 57, 43, 0.12);
+      letter-spacing: 8px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .content { position: relative; z-index: 1; }
+
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #1a5276;
+      padding-bottom: 4mm;
+      margin-bottom: 4mm;
+    }
+    .header h1 {
+      font-size: 16px;
+      color: #1a5276;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .header .subtitle {
+      font-size: 10px;
+      color: #555;
+      margin-top: 1mm;
+    }
+    .header .inv-number {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1a5276;
+      margin-top: 2mm;
+      letter-spacing: 1px;
+    }
+    .header .inv-date {
+      font-size: 10px;
+      color: #555;
+      margin-top: 1mm;
+    }
+
+    .bilingual {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4mm;
+      margin-bottom: 4mm;
+    }
+    .col-en { border-right: 1px dashed #aaa; padding-right: 4mm; }
+    .col-ur {
+      direction: rtl;
+      font-family: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', serif;
+      font-size: 12px;
+      line-height: 1.8;
+    }
+
+    .section-title {
+      font-size: 9px;
+      font-weight: 700;
+      color: #1a5276;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2mm;
+      border-bottom: 1px solid #d5d8dc;
+      padding-bottom: 1mm;
+    }
+    .col-ur .section-title {
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    table.fields {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    table.fields td {
+      padding: 1.5mm 0;
+      vertical-align: top;
+    }
+    table.fields td.label {
+      font-weight: 600;
+      color: #444;
+      width: 45%;
+      padding-right: 2mm;
+    }
+    table.fields td.value { color: #111; }
+
+    table.lines {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 3mm 0;
+      font-size: 10px;
+    }
+    table.lines thead th {
+      background: #1a5276;
+      color: #fff;
+      padding: 1.5mm 2mm;
+      text-align: left;
+      font-weight: 700;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    table.lines thead th.num { text-align: right; }
+    table.lines tbody td {
+      padding: 1.5mm 2mm;
+      border-bottom: 1px solid #eaeded;
+      vertical-align: top;
+    }
+    table.lines tbody td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    table.lines tbody tr.line-type-adjustment td { color: #c0392b; }
+
+    .line-type-badge {
+      display: inline-block;
+      padding: 0.3mm 1.5mm;
+      border-radius: 2px;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .lt-STORAGE { background: #1a5276; color: #fff; }
+    .lt-SERVICE { background: #117a65; color: #fff; }
+    .lt-ADJUSTMENT { background: #c0392b; color: #fff; }
+    .lt-ADVANCE_APPLIED { background: #7d6608; color: #fff; }
+
+    .totals {
+      margin-top: 3mm;
+      margin-left: auto;
+      width: 60%;
+      border-collapse: collapse;
+      font-size: 10px;
+    }
+    .totals td {
+      padding: 1mm 2mm;
+      border-bottom: 1px solid #eaeded;
+    }
+    .totals td.label { text-align: right; color: #444; font-weight: 600; }
+    .totals td.value {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      width: 30mm;
+    }
+    .totals tr.total-row td {
+      background: #1a5276;
+      color: #fff;
+      font-weight: 700;
+      font-size: 12px;
+      border: none;
+    }
+    .totals tr.balance-row td {
+      font-weight: 700;
+      color: #c0392b;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 0.5mm 2mm;
+      border-radius: 2px;
+      font-size: 9px;
+      font-weight: 700;
+    }
+    .status-DRAFT { background: #7d6608; color: #fff; }
+    .status-FINALIZED { background: #117a65; color: #fff; }
+    .status-VOID { background: #555; color: #fff; }
+
+    .footer {
+      margin-top: 6mm;
+      padding-top: 3mm;
+      border-top: 1px solid #aaa;
+      font-size: 9px;
+      color: #666;
+      text-align: center;
+    }
+
+    .barcode-area {
+      text-align: center;
+      margin-top: 3mm;
+      font-size: 9px;
+      color: #888;
+      font-family: monospace;
+      letter-spacing: 2px;
+    }
+  </style>
+</head>
+<body>
+
+  {{#if isDraft}}<div class="watermark">DRAFT</div>{{/if}}
+
+  <div class="content">
+
+    <!-- HEADER -->
+    <div class="header">
+      <h1>{{facilityName}}</h1>
+      <div class="subtitle">Cold Storage — {{facilityCity}} | Invoice (انوائس)</div>
+      <div class="inv-number">{{invoiceNumber}}</div>
+      <div class="inv-date">
+        Invoice Date: {{invoiceDate}}
+        &nbsp;|&nbsp;
+        <span class="status-badge status-{{status}}">{{status}}</span>
+      </div>
+    </div>
+
+    <!-- BILINGUAL BILLING SECTION -->
+    <div class="bilingual">
+
+      <div class="col-en">
+        <div class="section-title">Billing Details</div>
+        <table class="fields">
+          <tr>
+            <td class="label">Billed To</td>
+            <td class="value"><strong>{{billingPartyName}}</strong></td>
+          </tr>
+          <tr>
+            <td class="label">Lot Number</td>
+            <td class="value">{{lotNumber}}</td>
+          </tr>
+          <tr>
+            <td class="label">Period Start</td>
+            <td class="value">{{periodStart}}</td>
+          </tr>
+          <tr>
+            <td class="label">Period End</td>
+            <td class="value">{{periodEnd}}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="col-ur">
+        <div class="section-title">انوائس کی تفصیل</div>
+        <table class="fields">
+          <tr>
+            <td class="value"><strong>{{billingPartyName}}</strong></td>
+            <td class="label" style="text-align:right">مد مقابل</td>
+          </tr>
+          <tr>
+            <td class="value">{{lotNumber}}</td>
+            <td class="label" style="text-align:right">لاٹ نمبر</td>
+          </tr>
+          <tr>
+            <td class="value">{{periodStart}}</td>
+            <td class="label" style="text-align:right">مدت شروع</td>
+          </tr>
+          <tr>
+            <td class="value">{{periodEnd}}</td>
+            <td class="label" style="text-align:right">مدت ختم</td>
+          </tr>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- LINE ITEMS -->
+    <div class="section-title">Line Items / اشیاء</div>
+    <table class="lines">
+      <thead>
+        <tr>
+          <th style="width:18%">Type</th>
+          <th>Description</th>
+          <th class="num" style="width:10%">Qty</th>
+          <th class="num" style="width:16%">Unit Price (PKR)</th>
+          <th class="num" style="width:18%">Amount (PKR)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each lineItems}}
+        <tr class="line-type-{{lineType}}">
+          <td><span class="line-type-badge lt-{{lineType}}">{{lineType}}</span></td>
+          <td>{{description}}</td>
+          <td class="num">{{quantity}}</td>
+          <td class="num">{{unitPricePkr}}</td>
+          <td class="num"><strong>{{amountPkr}}</strong></td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+
+    <!-- TOTALS -->
+    <table class="totals">
+      <tr>
+        <td class="label">Subtotal</td>
+        <td class="value">{{subTotalPkr}}</td>
+      </tr>
+      <tr>
+        <td class="label">GST ({{gstRate}}%)</td>
+        <td class="value">{{gstAmountPkr}}</td>
+      </tr>
+      <tr class="total-row">
+        <td class="label">Total</td>
+        <td class="value">{{totalPkr}}</td>
+      </tr>
+      <tr>
+        <td class="label">Amount Paid</td>
+        <td class="value">{{amountPaidPkr}}</td>
+      </tr>
+      <tr class="balance-row">
+        <td class="label">Balance Due</td>
+        <td class="value">{{balanceDuePkr}}</td>
+      </tr>
+    </table>
+
+    <div class="footer">
+      Thank you for your business &nbsp;•&nbsp; آپ کے کاروبار کا شکریہ
+    </div>
+
+    <div class="barcode-area">
+      {{invoiceNumber}} | {{lotNumber}} | {{invoiceDate}}
+    </div>
+
+  </div>
+
+</body>
+</html>
