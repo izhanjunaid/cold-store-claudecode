@@ -1,10 +1,10 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 4 — Outbound & Dispatch
+- **Active Phase**: Phase 5 — Billing Engine
 - **Active Task**: COMPLETED
 - **Blockers**: None
-- **Last Updated**: 2026-04-17
+- **Last Updated**: 2026-04-21
 
 ## Phase Completion
 
@@ -15,7 +15,7 @@
 | 2 | Inbound & Lot Management | COMPLETED | 2026-04-10 | 2026-04-14 |
 | 3 | Ownership Transfer | COMPLETED | 2026-04-15 | 2026-04-15 |
 | 4 | Outbound & Dispatch | COMPLETED | 2026-04-17 | 2026-04-17 |
-| 5 | Billing Engine | PENDING | — | — |
+| 5 | Billing Engine | COMPLETED | 2026-04-20 | 2026-04-21 |
 | 6 | Quality & Spoilage | PENDING | — | — |
 | 7 | Financial Ledger & Payments | PENDING | — | — |
 | 8 | Accounting System | PENDING | — | — |
@@ -32,6 +32,7 @@
 | 2 | 9 | 24 | — | 33 |
 | 3 | — | 9 | — | 9 |
 | 4 | — | 13 | — | 13 |
+| 5 | 8 | 12 | — | 20 |
 
 ## Completed Tasks Log
 
@@ -80,3 +81,11 @@
 - [2026-04-17] 4.5/4.6 — S-15 Outbound Event Detail — weight recording, variance display, finalize confirm, dispatch note print
 - [2026-04-17] 4.7 — Lot Detail updated — "New Withdrawal" button (OPERATOR+), Withdrawals tab with outbound events table
 - [2026-04-17] 4.8 — Integration tests — 13 cases: PARTIAL/FULL create, balance checks, CLOSED lot reject, GET by ID, weight→WEIGHED, finalize→DISPATCHED (partial/full), no-weight reject, role gating, PDF endpoint, lot events endpoint
+- [2026-04-20] 5.1 — Migration 0005_invoices — Invoice + InvoiceLineItem Prisma models, InvoiceStatus/InvoiceLineType enums
+- [2026-04-20] 5.2 — Invoice Zod schemas — CreateInvoiceRequest, AddInvoiceLineRequest, FinalizeInvoiceRequest, InvoiceListQuery, InvoiceResponse (in @coldchain/shared)
+- [2026-04-20] 5.3 — Invoice backend module — storage-charge.ts (SEASONAL/MONTHLY/DAILY math), invoice-number.ts (INV-YYYYMM-NNNN advisory lock), invoice.repository.ts, invoice.builder.ts (idempotent, periodStart from ownership or lot.inboundDate), invoice.service.ts, invoice.controller.ts (7 routes)
+- [2026-04-20] 5.4 — Wire outbound finalize → auto-create DRAFT invoice in same transaction; invoice_id in outbound response; getById/getByLot backfill; sequential fileParallelism fix for integration tests
+- [2026-04-20] 5.5 — Invoice PDF — bilingual A5 Handlebars template (header, billing details, line items table, totals, DRAFT watermark); renderInvoice/renderInvoiceHtml in pdf.service.ts
+- [2026-04-20] 5.6 — Invoice integration tests — 12 tests (SEASONAL/MONTHLY/DAILY math, min-days floor, add SERVICE/ADJUSTMENT lines, remove immutability, finalize numbering, post-finalize rejection, list filters, role gating, PDF endpoint, idempotency)
+- [2026-04-21] 5.7 — S-20 Invoice List (/invoices) — status/party/date filters, role guard; S-21 Invoice Detail (/invoices/:id) — line items, add/delete modals, finalize modal, PDF print, disabled Record Payment; Lot billing tab live
+- [2026-04-21] 5.8 — Docs updated: PROGRESS.md, TESTING.md, phases/phase-05-billing-engine.md

@@ -62,6 +62,13 @@
 ### Phase 3 Tests
 - `apps/api/src/modules/ownership-transfer/ownership-transfer.integration.test.ts` — 9 tests (FULL, PARTIAL with -T1 child, sequential -T2, qty >= balance reject, same-party reject, CLOSED lot reject, OPERATOR 403 / MANAGER 201, acknowledgment PDF, ownership history reflects TRANSFER_OUT)
 
+### Phase 4 Tests
+- `apps/api/src/modules/outbound/outbound.integration.test.ts` — 13 tests (PARTIAL/FULL create, balance checks, CLOSED lot reject, GET by ID, weight→WEIGHED, variance, finalize→DISPATCHED with invoice_id, FULL finalize closes lot, no-weight reject, OPERATOR 403, dispatch note PDF, lot events endpoint)
+
+### Phase 5 Tests
+- `apps/api/src/modules/invoice/storage-charge.test.ts` — 8 unit tests (SEASONAL day-independent, MONTHLY ceil-to-month boundaries, DAILY days×rate×qty, min-billing-days floor, same-day inbound/outbound, rounding, zero-bag throw, SEASONAL description)
+- `apps/api/src/modules/invoice/invoice.integration.test.ts` — 12 tests (SEASONAL charge math, MONTHLY 45-day=2months, DAILY 15-day, min-days same-day floor, add SERVICE line totals recomputed, add ADJUSTMENT negative, delete SERVICE ok/STORAGE immutable 422, finalize assigns INV-YYYYMM-NNNN, post-finalize add/delete/finalize 409, list filters by status+party_id+lot, role gating OPERATOR/SECURITY 403, PDF endpoint + idempotent builder)
+
 ## Commands
 
 ```bash
