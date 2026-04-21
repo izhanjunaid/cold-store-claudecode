@@ -61,6 +61,14 @@ interface OutboundSummary {
   outbound_date: string;
 }
 
+interface InvoiceSummary {
+  id: string;
+  invoice_number: string | null;
+  invoice_date: string;
+  total_pkr: number;
+  status: 'DRAFT' | 'FINALIZED' | 'VOID';
+}
+
 const STATUS_COLORS: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-800',
   CLOSED: 'bg-gray-100 text-gray-800',
@@ -85,6 +93,7 @@ export default function LotDetailPage() {
   const [lot, setLot] = useState<Lot | null>(null);
   const [ownershipHistory, setOwnershipHistory] = useState<OwnershipEvent[]>([]);
   const [outboundEvents, setOutboundEvents] = useState<OutboundSummary[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [receiptLoading, setReceiptLoading] = useState(false);
@@ -119,7 +128,12 @@ export default function LotDetailPage() {
         .then(setOutboundEvents)
         .catch(() => {});
     }
-  }, [activeTab, id, ownershipHistory.length, outboundEvents.length]);
+    if (activeTab === 'billing' && invoices.length === 0) {
+      apiClient<InvoiceSummary[]>(`/v1/lots/${id}/invoices`)
+        .then(setInvoices)
+        .catch(() => {});
+    }
+  }, [activeTab, id, ownershipHistory.length, outboundEvents.length, invoices.length]);
 
   // When landing with ?transfer= (post-transfer redirect), switch to the Ownership tab
   useEffect(() => {
@@ -455,11 +469,57 @@ export default function LotDetailPage() {
             </div>
           )}
 
-          {(activeTab === 'inspections' || activeTab === 'billing') && (
-            <p className="text-gray-400 text-sm italic">
-              {activeTab === 'inspections' && 'Quality inspections and spoilage records — available in Phase 6.'}
-              {activeTab === 'billing' && 'Storage invoices and billing history — available in Phase 5.'}
-            </p>
+          {activeTab === 'inspections' && (
+            <p className="text-gray-400 text-sm italic">Quality inspections and spoilage records — available in Phase 6.</p>
+          )}
+
+          {activeTab === 'billing' && (
+            <div>
+              <h3 className="font-semibold text-gray-900 mb-3">Invoices</h3>
+              {invoices.length === 0 ? (
+                <p className="text-gray-400 text-sm italic">No invoices yet. Invoices are created automatically when a withdrawal is dispatched.</p>
+              ) : (
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Invoice #</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total (PKR)</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-4 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-100">
+                    {invoices.map((inv) => (
+                      <tr key={inv.id}>
+                        <td className="px-4 py-2 font-mono">
+                          {inv.invoice_number ?? <span className="text-gray-400 italic">Draft</span>}
+                        </td>
+                        <td className="px-4 py-2 text-gray-600">{inv.invoice_date}</td>
+                        <td className="px-4 py-2 text-right font-medium">{inv.total_pkr.toLocaleString()}</td>
+                        <td className="px-4 py-2">
+                          <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                            inv.status === 'FINALIZED' ? 'bg-green-100 text-green-800' :
+                            inv.status === 'VOID' ? 'bg-gray-100 text-gray-800' :
+                            'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {inv.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <button
+                            onClick={() => router.push(`/invoices/${inv.id}`)}
+                            className="text-xs text-primary-600 hover:underline"
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           )}
         </div>
       </div>
