@@ -4,7 +4,7 @@
 - **Active Phase**: Phase 8 — Accounting System (Phase 6 deferred to end)
 - **Active Task**: PENDING
 - **Blockers**: None
-- **Last Updated**: 2026-04-24
+- **Last Updated**: 2026-04-25
 
 ## Phase Completion
 
@@ -90,3 +90,11 @@
 - [2026-04-20] 5.6 — Invoice integration tests — 12 tests (SEASONAL/MONTHLY/DAILY math, min-days floor, add SERVICE/ADJUSTMENT lines, remove immutability, finalize numbering, post-finalize rejection, list filters, role gating, PDF endpoint, idempotency)
 - [2026-04-21] 5.7 — S-20 Invoice List (/invoices) — status/party/date filters, role guard; S-21 Invoice Detail (/invoices/:id) — line items, add/delete modals, finalize modal, PDF print, disabled Record Payment; Lot billing tab live
 - [2026-04-21] 5.8 — Docs updated: PROGRESS.md, TESTING.md, phases/phase-05-billing-engine.md
+- [2026-04-24] 7.1 — Migration 0006_payments — Payment + PaymentAllocation Prisma models; PaymentMethod/PaymentStatus/ClearanceStatus enums
+- [2026-04-24] 7.2 — Payment Zod schemas — CreatePaymentRequest, AllocatePaymentRequest, DishonourPaymentRequest, PaymentListQuery, PaymentResponse, PartyLedgerEntry, PartyLedgerResponse (in @coldchain/shared)
+- [2026-04-24] 7.3 — Payment backend module — payment.repository.ts, payment.service.ts (record, list, getById, allocate, dishonour, getPartyLedger), payment.controller.ts (6 routes: POST /payments, GET /payments, GET /payments/:id, POST /payments/:id/allocate, POST /payments/:id/dishonour, GET /parties/:id/ledger)
+- [2026-04-24] 7.4 — Payment integration tests — 12 cases: full CASH allocation, partial allocation, advance payment, cheque clearance, over-allocation reject, DRAFT invoice reject, party mismatch reject, balance exceeded reject, cheque dishonour reversal, non-cheque dishonour reject, role gating, WF-04 e2e ledger
+- [2026-04-24] 7.5 — S-24 Payments List (/payments) — status/method/date filters, pagination; S-25 Record Payment (/payments/new) — party preselect, allocation grid with Fill-balance; S-26 Payment Detail (/payments/:id) — amount summary, allocations, cheque dishonour flow
+- [2026-04-24] 7.6 — Party Detail tabs live — Active Lots, Invoices, Payments (with Record Payment CTA), Ledger (chronological DR/CR with running balance)
+- [2026-04-24] 7.7 — Invoice Record Payment button enabled — routes to /payments/new?party_id= when status=FINALIZED and balance_due>0
+- [2026-04-25] 7.8 — E2E UI verification (playwright-cli): login → lot create → outbound → invoice finalize → Record Payment → verify balance_due=0 → party ledger DR/CR — all flows pass, 0 console errors

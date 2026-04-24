@@ -40,6 +40,9 @@
 | 1 | — | 25 | — | 25 | ALL PASS |
 | 2 | 9 | 24 | — | 33 | ALL PASS |
 | 3 | — | 9 | — | 9 | ALL PASS |
+| 4 | — | 13 | — | 13 | ALL PASS |
+| 5 | 8 | 12 | — | 20 | ALL PASS |
+| 7 | — | 12 | 1 | 13 | ALL PASS |
 
 ### Phase 0 Tests
 - `apps/api/src/common/jwt.test.ts` — 4 tests (sign/verify access & refresh tokens)
@@ -68,6 +71,10 @@
 ### Phase 5 Tests
 - `apps/api/src/modules/invoice/storage-charge.test.ts` — 8 unit tests (SEASONAL day-independent, MONTHLY ceil-to-month boundaries, DAILY days×rate×qty, min-billing-days floor, same-day inbound/outbound, rounding, zero-bag throw, SEASONAL description)
 - `apps/api/src/modules/invoice/invoice.integration.test.ts` — 12 tests (SEASONAL charge math, MONTHLY 45-day=2months, DAILY 15-day, min-days same-day floor, add SERVICE line totals recomputed, add ADJUSTMENT negative, delete SERVICE ok/STORAGE immutable 422, finalize assigns INV-YYYYMM-NNNN, post-finalize add/delete/finalize 409, list filters by status+party_id+lot, role gating OPERATOR/SECURITY 403, PDF endpoint + idempotent builder)
+
+### Phase 7 Tests
+- `apps/api/src/modules/payment/payment.integration.test.ts` — 12 tests (full CASH allocation → balance_due=0 + status=ALLOCATED, partial allocation, advance payment → ADVANCE, cheque → clearance CLEARED, over-allocation 422, DRAFT invoice allocation 422, party mismatch 422, balance exceeded 422, dishonour cheque → allocations reversed, dishonour non-cheque 409, role gating OPERATOR 403, WF-04 ledger e2e)
+- E2E (playwright-cli): login, lot create, outbound finalize, invoice finalize, record payment via UI, balance_due=0, party ledger DR/CR
 
 ## Commands
 
