@@ -17,6 +17,7 @@ import { lotRoutes } from './modules/lot/lot.controller';
 import { ownershipTransferRoutes } from './modules/ownership-transfer/ownership-transfer.controller';
 import { outboundRoutes } from './modules/outbound/outbound.controller';
 import { invoiceRoutes } from './modules/invoice/invoice.controller';
+import { paymentRoutes } from './modules/payment/payment.controller';
 
 export async function buildApp() {
   const app = Fastify({
@@ -59,6 +60,7 @@ export async function buildApp() {
   await app.register(ownershipTransferRoutes);
   await app.register(outboundRoutes);
   await app.register(invoiceRoutes);
+  await app.register(paymentRoutes);
 
   return app;
 }

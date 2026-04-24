@@ -10,3 +10,4 @@ export * from './schemas/invoice';
 export * from './schemas/lot';
 export * from './schemas/ownership-transfer';
 export * from './schemas/outbound';
+export * from './schemas/payment';

@@ -86,7 +86,7 @@ export class InvoiceService {
     );
     return {
       data: data.map(formatInvoice),
-      meta: { total, page: query.page, page_size: query.page_size },
+      meta: { total, page: query.page, per_page: query.page_size },
     };
   }
 

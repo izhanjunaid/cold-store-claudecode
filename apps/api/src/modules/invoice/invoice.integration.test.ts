@@ -518,7 +518,7 @@ describe('Invoice — Billing Engine', () => {
       headers: authHeaders(accountantToken),
     });
     expect(draftRes.statusCode).toBe(200);
-    const draftList = JSON.parse(draftRes.body).data.data;
+    const draftList = JSON.parse(draftRes.body).data;
     expect(Array.isArray(draftList)).toBe(true);
     expect(draftList.every((i: any) => i.status === 'DRAFT')).toBe(true);
 
@@ -529,7 +529,7 @@ describe('Invoice — Billing Engine', () => {
       headers: authHeaders(accountantToken),
     });
     expect(partyRes.statusCode).toBe(200);
-    const partyList = JSON.parse(partyRes.body).data.data;
+    const partyList = JSON.parse(partyRes.body).data;
     expect(Array.isArray(partyList)).toBe(true);
     expect(partyList.every((i: any) => i.billing_party_id === otherPartyId)).toBe(true);
     expect(partyList.some((i: any) => i.id === invB)).toBe(true);

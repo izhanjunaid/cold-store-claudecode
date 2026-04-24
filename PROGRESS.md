@@ -1,10 +1,10 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 5 — Billing Engine
-- **Active Task**: COMPLETED
+- **Active Phase**: Phase 8 — Accounting System (Phase 6 deferred to end)
+- **Active Task**: PENDING
 - **Blockers**: None
-- **Last Updated**: 2026-04-21
+- **Last Updated**: 2026-04-24
 
 ## Phase Completion
 
@@ -16,8 +16,8 @@
 | 3 | Ownership Transfer | COMPLETED | 2026-04-15 | 2026-04-15 |
 | 4 | Outbound & Dispatch | COMPLETED | 2026-04-17 | 2026-04-17 |
 | 5 | Billing Engine | COMPLETED | 2026-04-20 | 2026-04-21 |
-| 6 | Quality & Spoilage | PENDING | — | — |
-| 7 | Financial Ledger & Payments | PENDING | — | — |
+| 6 | Quality & Spoilage | SKIPPED (deferred to end) | — | — |
+| 7 | Financial Ledger & Payments | COMPLETED | 2026-04-24 | 2026-04-24 |
 | 8 | Accounting System | PENDING | — | — |
 | 9 | Gate Pass + Peshgi | PENDING | — | — |
 | 10 | Reporting & Dashboards | PENDING | — | — |
@@ -33,6 +33,7 @@
 | 3 | — | 9 | — | 9 |
 | 4 | — | 13 | — | 13 |
 | 5 | 8 | 12 | — | 20 |
+| 7 | — | 12 | — | 12 |
 
 ## Completed Tasks Log
 

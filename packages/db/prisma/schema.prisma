@@ -110,6 +110,31 @@ enum InvoiceLineType {
 }
 
 // ============================================================
+// ENUMS (Phase 7)
+// ============================================================
+
+enum PaymentMethod {
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+  MOBILE_WALLET
+}
+
+enum PaymentStatus {
+  RECORDED
+  ALLOCATED
+  ADVANCE
+  DISHONOURED
+}
+
+enum ClearanceStatus {
+  NA
+  PENDING
+  CLEARED
+  BOUNCED
+}
+
+// ============================================================
 // FOUNDATION TABLES (Migration 0001)
 // ============================================================
 
@@ -134,6 +159,7 @@ model Facility {
   lots           Lot[]
   outboundEvents OutboundEvent[]
   invoices       Invoice[]
+  payments       Payment[]
 
   @@map("facilities")
 }
@@ -162,6 +188,7 @@ model User {
   outboundCreated    OutboundEvent[]    @relation("OutboundCreatedBy")
   invoicesCreated    Invoice[]          @relation("InvoiceCreatedBy")
   invoicesFinalized  Invoice[]          @relation("InvoiceFinalizedBy")
+  paymentsCreated    Payment[]          @relation("PaymentCreatedBy")
 
   @@unique([facilityId, email])
   @@map("users")
@@ -235,6 +262,7 @@ model Party {
   ownershipTo        OwnershipHistory[] @relation("OwnershipToParty")
   outboundReceived   OutboundEvent[]    @relation("OutboundReceiver")
   invoicesBilled     Invoice[]          @relation("InvoiceBillingParty")
+  payments           Payment[]
 
   @@index([facilityId, phonePrimary])
   @@index([facilityId, partyType])
@@ -483,6 +511,7 @@ model Invoice {
   finalizedByUser User?             @relation("InvoiceFinalizedBy", fields: [finalizedBy], references: [id])
   createdByUser   User              @relation("InvoiceCreatedBy", fields: [createdBy], references: [id])
   lineItems       InvoiceLineItem[]
+  allocations     PaymentAllocation[]
 
   @@index([facilityId, invoiceNumber])
   @@index([facilityId, status])
@@ -511,4 +540,50 @@ model InvoiceLineItem {
 
   @@index([invoiceId])
   @@map("invoice_line_items")
+}
+
+// ============================================================
+// PHASE 7: PAYMENTS & ALLOCATIONS (Migration 0007)
+// ============================================================
+
+model Payment {
+  id              String          @id @default(uuid()) @db.Uuid
+  facilityId      String          @map("facility_id") @db.Uuid
+  partyId         String          @map("party_id") @db.Uuid
+  paymentDate     DateTime        @map("payment_date") @db.Date
+  amountPkr       Decimal         @map("amount_pkr") @db.Decimal(12, 2)
+  paymentMethod   PaymentMethod   @map("payment_method")
+  referenceNumber String?         @map("reference_number") @db.VarChar(100)
+  isAdvance       Boolean         @default(false) @map("is_advance")
+  status          PaymentStatus   @default(RECORDED)
+  clearanceStatus ClearanceStatus @default(NA) @map("clearance_status")
+  chequeDate      DateTime?       @map("cheque_date") @db.Date
+  bookType        BookType        @default(PACCI) @map("book_type")
+  notes           String?         @db.Text
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy       String          @map("created_by") @db.Uuid
+
+  facility      Facility            @relation(fields: [facilityId], references: [id])
+  party         Party               @relation(fields: [partyId], references: [id])
+  createdByUser User                @relation("PaymentCreatedBy", fields: [createdBy], references: [id])
+  allocations   PaymentAllocation[]
+
+  @@index([facilityId, partyId])
+  @@index([facilityId, status])
+  @@index([facilityId, paymentDate])
+  @@map("payments")
+}
+
+model PaymentAllocation {
+  id                 String  @id @default(uuid()) @db.Uuid
+  paymentId          String  @map("payment_id") @db.Uuid
+  invoiceId          String  @map("invoice_id") @db.Uuid
+  allocatedAmountPkr Decimal @map("allocated_amount_pkr") @db.Decimal(12, 2)
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([paymentId])
+  @@index([invoiceId])
+  @@map("payment_allocations")
 }

@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, apiClientList } from '@/lib/api-client';
 
 interface Party {
   id: string;
@@ -23,6 +23,55 @@ interface Party {
   created_at: string;
 }
 
+interface LotSummary {
+  id: string;
+  lot_number: string;
+  commodity_name: string | null;
+  current_balance_bags: number;
+  status: string;
+  inbound_date: string;
+}
+
+interface InvoiceSummary {
+  id: string;
+  invoice_number: string | null;
+  lot_number: string;
+  invoice_date: string;
+  total_pkr: number;
+  balance_due_pkr: number;
+  status: string;
+}
+
+interface PaymentSummary {
+  id: string;
+  payment_date: string;
+  amount_pkr: number;
+  payment_method: string;
+  reference_number: string | null;
+  status: string;
+  allocations: { id: string }[];
+}
+
+interface LedgerEntry {
+  date: string;
+  type: 'INVOICE' | 'PAYMENT';
+  reference: string | null;
+  description: string;
+  debit_pkr: number;
+  credit_pkr: number;
+  balance_pkr: number;
+  id: string;
+}
+
+interface LedgerData {
+  party_id: string;
+  party_name: string;
+  entries: LedgerEntry[];
+  total_debit_pkr: number;
+  total_credit_pkr: number;
+  closing_balance_pkr: number;
+}
+
 const PARTY_TYPE_COLORS: Record<string, string> = {
   FARMER: 'bg-green-100 text-green-800',
   TRADER: 'bg-blue-100 text-blue-800',
@@ -40,13 +89,44 @@ export default function PartyDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('Active Lots');
   const [showDeactivateModal, setShowDeactivateModal] = useState(false);
+  const [lots, setLots] = useState<LotSummary[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
+  const [payments, setPayments] = useState<PaymentSummary[]>([]);
+  const [ledger, setLedger] = useState<LedgerData | null>(null);
+  const [tabLoaded, setTabLoaded] = useState<Record<string, boolean>>({});
+
+  const partyId = params['id'] as string;
 
   useEffect(() => {
-    apiClient<Party>(`/v1/parties/${params['id']}`)
+    apiClient<Party>(`/v1/parties/${partyId}`)
       .then(setParty)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [params['id']]);
+  }, [partyId]);
+
+  const loadTab = useCallback(async (tab: string) => {
+    if (tabLoaded[tab]) return;
+    setTabLoaded((prev) => ({ ...prev, [tab]: true }));
+    try {
+      if (tab === 'Active Lots') {
+        const res = await apiClientList<LotSummary>(`/v1/lots?owner_party_id=${partyId}&status=ACTIVE&page_size=100`);
+        setLots(res.data);
+      } else if (tab === 'Invoices') {
+        const res = await apiClientList<InvoiceSummary>(`/v1/invoices?party_id=${partyId}&page_size=100`);
+        setInvoices(res.data);
+      } else if (tab === 'Payments') {
+        const res = await apiClientList<PaymentSummary>(`/v1/payments?party_id=${partyId}&page_size=100`);
+        setPayments(res.data);
+      } else if (tab === 'Ledger') {
+        const data = await apiClient<LedgerData>(`/v1/parties/${partyId}/ledger`);
+        setLedger(data);
+      }
+    } catch {
+      // silently handled
+    }
+  }, [partyId, tabLoaded]);
+
+  useEffect(() => { loadTab('Active Lots'); }, [partyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDeactivate = async () => {
     try {
@@ -173,7 +253,7 @@ export default function PartyDetailPage() {
             {TABS.map(tab => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => { setActiveTab(tab); loadTab(tab); }}
                 className={`px-6 py-3 text-sm font-medium border-b-2 ${
                   activeTab === tab
                     ? 'border-primary-500 text-primary-600'
@@ -185,8 +265,149 @@ export default function PartyDetailPage() {
             ))}
           </nav>
         </div>
-        <div className="p-6 text-sm text-gray-400">
-          {activeTab} will be populated in later phases.
+
+        {/* Tab Content */}
+        <div className="p-6">
+          {activeTab === 'Active Lots' && (
+            lots.length === 0 ? (
+              <p className="text-sm text-gray-400">No active lots for this party.</p>
+            ) : (
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead><tr>
+                  <th className="pb-2 text-left text-xs text-gray-500 uppercase">Lot #</th>
+                  <th className="pb-2 text-left text-xs text-gray-500 uppercase">Commodity</th>
+                  <th className="pb-2 text-right text-xs text-gray-500 uppercase">Balance (Bags)</th>
+                  <th className="pb-2 text-left text-xs text-gray-500 uppercase">Inbound Date</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {lots.map((lot) => (
+                    <tr key={lot.id} onClick={() => router.push(`/lots/${lot.id}`)} className="cursor-pointer hover:bg-gray-50">
+                      <td className="py-2 text-sm font-mono text-blue-600">{lot.lot_number}</td>
+                      <td className="py-2 text-sm text-gray-700">{lot.commodity_name ?? '—'}</td>
+                      <td className="py-2 text-sm text-right font-medium">{lot.current_balance_bags}</td>
+                      <td className="py-2 text-sm text-gray-600">{lot.inbound_date}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          )}
+
+          {activeTab === 'Invoices' && (
+            invoices.length === 0 ? (
+              <p className="text-sm text-gray-400">No invoices for this party.</p>
+            ) : (
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead><tr>
+                  <th className="pb-2 text-left text-xs text-gray-500 uppercase">Invoice #</th>
+                  <th className="pb-2 text-left text-xs text-gray-500 uppercase">Lot</th>
+                  <th className="pb-2 text-left text-xs text-gray-500 uppercase">Date</th>
+                  <th className="pb-2 text-right text-xs text-gray-500 uppercase">Total (PKR)</th>
+                  <th className="pb-2 text-right text-xs text-gray-500 uppercase">Balance (PKR)</th>
+                  <th className="pb-2 text-left text-xs text-gray-500 uppercase">Status</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {invoices.map((inv) => (
+                    <tr key={inv.id} onClick={() => router.push(`/invoices/${inv.id}`)} className="cursor-pointer hover:bg-gray-50">
+                      <td className="py-2 text-sm font-mono text-blue-600">{inv.invoice_number ?? <span className="italic text-gray-400">Draft</span>}</td>
+                      <td className="py-2 text-sm font-mono text-gray-600">{inv.lot_number}</td>
+                      <td className="py-2 text-sm text-gray-600">{inv.invoice_date}</td>
+                      <td className="py-2 text-sm text-right">{inv.total_pkr.toLocaleString()}</td>
+                      <td className="py-2 text-sm text-right font-medium text-red-700">{inv.balance_due_pkr.toLocaleString()}</td>
+                      <td className="py-2 text-xs">
+                        <span className={`px-2 py-0.5 rounded-full ${inv.status === 'FINALIZED' ? 'bg-green-100 text-green-800' : inv.status === 'DRAFT' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>{inv.status}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          )}
+
+          {activeTab === 'Payments' && (
+            <div>
+              <div className="flex justify-end mb-4">
+                <button
+                  onClick={() => router.push(`/payments/new?party_id=${partyId}`)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700"
+                >
+                  Record Payment
+                </button>
+              </div>
+              {payments.length === 0 ? (
+                <p className="text-sm text-gray-400">No payments recorded for this party.</p>
+              ) : (
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead><tr>
+                    <th className="pb-2 text-left text-xs text-gray-500 uppercase">Date</th>
+                    <th className="pb-2 text-left text-xs text-gray-500 uppercase">Method</th>
+                    <th className="pb-2 text-left text-xs text-gray-500 uppercase">Reference</th>
+                    <th className="pb-2 text-right text-xs text-gray-500 uppercase">Amount (PKR)</th>
+                    <th className="pb-2 text-left text-xs text-gray-500 uppercase">Status</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {payments.map((pay) => (
+                      <tr key={pay.id} onClick={() => router.push(`/payments/${pay.id}`)} className="cursor-pointer hover:bg-gray-50">
+                        <td className="py-2 text-sm text-gray-600">{pay.payment_date}</td>
+                        <td className="py-2 text-sm text-gray-700">{pay.payment_method}</td>
+                        <td className="py-2 text-sm font-mono text-gray-600">{pay.reference_number ?? '—'}</td>
+                        <td className="py-2 text-sm text-right font-medium">{pay.amount_pkr.toLocaleString()}</td>
+                        <td className="py-2 text-xs">
+                          <span className={`px-2 py-0.5 rounded-full ${pay.status === 'ALLOCATED' ? 'bg-green-100 text-green-800' : pay.status === 'DISHONOURED' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>{pay.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'Ledger' && (
+            !ledger ? (
+              <p className="text-sm text-gray-400">Loading ledger...</p>
+            ) : ledger.entries.length === 0 ? (
+              <p className="text-sm text-gray-400">No ledger entries for this party.</p>
+            ) : (
+              <div>
+                <table className="min-w-full divide-y divide-gray-200 mb-4">
+                  <thead><tr>
+                    <th className="pb-2 text-left text-xs text-gray-500 uppercase">Date</th>
+                    <th className="pb-2 text-left text-xs text-gray-500 uppercase">Type</th>
+                    <th className="pb-2 text-left text-xs text-gray-500 uppercase">Description</th>
+                    <th className="pb-2 text-right text-xs text-gray-500 uppercase">Debit (PKR)</th>
+                    <th className="pb-2 text-right text-xs text-gray-500 uppercase">Credit (PKR)</th>
+                    <th className="pb-2 text-right text-xs text-gray-500 uppercase">Balance (PKR)</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {ledger.entries.map((entry) => (
+                      <tr key={entry.id} className="hover:bg-gray-50">
+                        <td className="py-2 text-sm text-gray-600">{entry.date}</td>
+                        <td className="py-2 text-xs">
+                          <span className={`px-2 py-0.5 rounded-full ${entry.type === 'INVOICE' ? 'bg-orange-100 text-orange-800' : 'bg-green-100 text-green-800'}`}>{entry.type}</span>
+                        </td>
+                        <td className="py-2 text-sm text-gray-700">{entry.description}</td>
+                        <td className="py-2 text-sm text-right text-red-700">{entry.debit_pkr > 0 ? entry.debit_pkr.toLocaleString() : '—'}</td>
+                        <td className="py-2 text-sm text-right text-green-700">{entry.credit_pkr > 0 ? entry.credit_pkr.toLocaleString() : '—'}</td>
+                        <td className="py-2 text-sm text-right font-medium">{entry.balance_pkr.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="border-t pt-4 flex justify-between text-sm">
+                  <span className="text-gray-600">Total Invoiced: <strong>PKR {ledger.total_debit_pkr.toLocaleString()}</strong></span>
+                  <span className="text-gray-600">Total Paid: <strong>PKR {ledger.total_credit_pkr.toLocaleString()}</strong></span>
+                  <span className={`font-semibold ${ledger.closing_balance_pkr > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                    Outstanding: PKR {ledger.closing_balance_pkr.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            )
+          )}
+
+          {activeTab === 'Peshgi' && (
+            <p className="text-sm text-gray-400">Peshgi (loans) will be available in a later phase.</p>
+          )}
         </div>
       </div>
 

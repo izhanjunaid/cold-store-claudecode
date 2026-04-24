@@ -20,6 +20,7 @@ interface InvoiceLine {
 interface Invoice {
   id: string;
   invoice_number: string | null;
+  billing_party_id: string;
   billing_party_name: string;
   lot_id: string;
   lot_number: string;
@@ -198,13 +199,14 @@ export default function InvoiceDetailPage() {
               Finalize Invoice
             </button>
           )}
-          <button
-            disabled
-            title="Available in Phase 7"
-            className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-400 cursor-not-allowed"
-          >
-            Record Payment
-          </button>
+          {invoice?.status === 'FINALIZED' && invoice.balance_due_pkr > 0 && (
+            <button
+              onClick={() => router.push(`/payments/new?party_id=${invoice.billing_party_id}`)}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700"
+            >
+              Record Payment
+            </button>
+          )}
         </div>
       </div>
 

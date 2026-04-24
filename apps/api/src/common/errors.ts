@@ -65,4 +65,15 @@ export const Errors = {
       'STORAGE and ADVANCE_APPLIED lines cannot be edited',
       422,
     ),
+  PAYMENT_NOT_FOUND: () => new AppError('PAYMENT_NOT_FOUND', 'Payment does not exist', 404),
+  PAYMENT_OVER_ALLOCATED: () =>
+    new AppError('PAYMENT_OVER_ALLOCATED', 'Total allocations exceed payment amount', 422),
+  PAYMENT_EXCEEDS_INVOICE_BALANCE: () =>
+    new AppError('PAYMENT_EXCEEDS_INVOICE_BALANCE', 'Allocation exceeds invoice balance due', 422),
+  PAYMENT_PARTY_MISMATCH: () =>
+    new AppError('PAYMENT_PARTY_MISMATCH', 'Invoice billing party does not match payment party', 422),
+  PAYMENT_ALREADY_DISHONOURED: () =>
+    new AppError('PAYMENT_ALREADY_DISHONOURED', 'Payment has already been dishonoured', 409),
+  PAYMENT_NOT_CHEQUE: () =>
+    new AppError('PAYMENT_NOT_CHEQUE', 'Only cheque payments can be dishonoured', 409),
 } as const;
