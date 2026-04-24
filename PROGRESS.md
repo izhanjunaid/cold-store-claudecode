@@ -17,7 +17,7 @@
 | 4 | Outbound & Dispatch | COMPLETED | 2026-04-17 | 2026-04-17 |
 | 5 | Billing Engine | COMPLETED | 2026-04-20 | 2026-04-21 |
 | 6 | Quality & Spoilage | SKIPPED (deferred to end) | — | — |
-| 7 | Financial Ledger & Payments | COMPLETED | 2026-04-24 | 2026-04-24 |
+| 7 | Financial Ledger & Payments | COMPLETED | 2026-04-24 | 2026-04-25 |
 | 8 | Accounting System | PENDING | — | — |
 | 9 | Gate Pass + Peshgi | PENDING | — | — |
 | 10 | Reporting & Dashboards | PENDING | — | — |
@@ -33,7 +33,7 @@
 | 3 | — | 9 | — | 9 |
 | 4 | — | 13 | — | 13 |
 | 5 | 8 | 12 | — | 20 |
-| 7 | — | 12 | — | 12 |
+| 7 | — | 12 | 1 | 13 |
 
 ## Completed Tasks Log
 
