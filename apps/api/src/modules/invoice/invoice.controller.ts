@@ -9,12 +9,20 @@ import { InvoiceService } from './invoice.service';
 import { InvoiceRepository } from './invoice.repository';
 import { sendSuccess } from '../../common/response';
 import { requireMinRole } from '../../plugins/auth';
+import { JournalEntryService } from '../accounting/journal-entry.service';
+import { PeriodLockService } from '../accounting/period-lock.service';
 
 const IdParam = z.object({ id: z.string().uuid() });
 const LineIdParam = z.object({ id: z.string().uuid(), lineId: z.string().uuid() });
 
 export async function invoiceRoutes(app: FastifyInstance) {
-  const service = new InvoiceService(app.prisma, new InvoiceRepository(app.prisma));
+  const periodLock = new PeriodLockService(app.prisma);
+  const journalEntry = new JournalEntryService(app.prisma, periodLock);
+  const service = new InvoiceService(
+    app.prisma,
+    new InvoiceRepository(app.prisma),
+    journalEntry,
+  );
 
   // GET /v1/invoices — ACCOUNTANT+
   app.route({
@@ -25,7 +33,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof InvoiceListQuery>;
       const result = await service.list(request.user!.facilityId, query);
-      return sendSuccess(reply, result);
+      return sendSuccess(reply, result.data, result.meta);
     },
   });
 

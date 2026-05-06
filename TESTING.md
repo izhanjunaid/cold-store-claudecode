@@ -43,6 +43,7 @@
 | 4 | — | 13 | — | 13 | ALL PASS |
 | 5 | 8 | 12 | — | 20 | ALL PASS |
 | 7 | — | 12 | 1 | 13 | ALL PASS |
+| 8A | 16 | 24 | — | 40 | ALL PASS |
 
 ### Phase 0 Tests
 - `apps/api/src/common/jwt.test.ts` — 4 tests (sign/verify access & refresh tokens)
@@ -75,6 +76,10 @@
 ### Phase 7 Tests
 - `apps/api/src/modules/payment/payment.integration.test.ts` — 12 tests (full CASH allocation → balance_due=0 + status=ALLOCATED, partial allocation, advance payment → ADVANCE, cheque → clearance CLEARED, over-allocation 422, DRAFT invoice allocation 422, party mismatch 422, balance exceeded 422, dishonour cheque → allocations reversed, dishonour non-cheque 409, role gating OPERATOR 403, WF-04 ledger e2e)
 - E2E (playwright-cli): login, lot create, outbound finalize, invoice finalize, record payment via UI, balance_due=0, party ledger DR/CR
+
+### Phase 8A Tests
+- `apps/api/src/modules/accounting/__tests__/journal-entry-templates.unit.test.ts` — 16 tests covering all 11 JE template builders (JE-01 storage+service+GST balance, JE-01 commodity routing 4010/4020/4030/4040, JE-01 advance-applied, JE-02 cash receipt, JE-03 advance to liability, JE-04 advance applied to invoice, JE-05 multi-line credit note, JE-06 cheque bounce REVERSAL, JE-07 overpayment split, JE-08 bad debt, JE-10 ownership reassignment, JE-11 monthly accrual, JE-11R reversal swap) plus account-mapping helper tests
+- `apps/api/src/modules/accounting/__tests__/accounting.integration.test.ts` — 24 tests across 8 groups: CoA list/filter/RBAC create (4); JE forward path JE-01/02/03 + cheque dishonour reversal (4); manual JE validation — unbalanced 422, header account 422, unknown account 404, OPERATOR 403, KATCHI OWNER-only (5); period locks — OPERATOR 403, locked period rejects backdated JE 409 PERIOD_LOCKED, OWNER unlock vs ACCOUNTANT 403 (3); financial statements — trial balance balanced, balance sheet balanced, P&L shape (3); bad debt — OWNER write-off success + ACCOUNTANT 403 (2); credit notes — JE-05 posts and reduces invoice balance, OPERATOR 403 (2); GL running-balance arithmetic (1)
 
 ## Commands
 

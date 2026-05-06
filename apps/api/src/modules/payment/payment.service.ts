@@ -1,6 +1,12 @@
 import type { PrismaClient } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { PaymentRepository, type PaymentWithRelations } from './payment.repository';
+import type { JournalEntryService } from '../accounting/journal-entry.service';
+import { buildJE02PaymentReceived } from '../accounting/templates/je-02-payment-received';
+import { buildJE03AdvanceReceived } from '../accounting/templates/je-03-advance-received';
+import { buildJE04AdvanceApplied } from '../accounting/templates/je-04-advance-applied';
+import { buildJE06ChequeDishonoured } from '../accounting/templates/je-06-cheque-dishonoured';
+import { assetAccountForPaymentMethod } from '../accounting/templates/types';
 
 function toNumber(d: { toString(): string } | null | undefined): number | null {
   if (d == null) return null;
@@ -39,6 +45,7 @@ export class PaymentService {
   constructor(
     private prisma: PrismaClient,
     private repo: PaymentRepository,
+    private journalEntry?: JournalEntryService,
   ) {}
 
   async record(params: {
@@ -100,6 +107,9 @@ export class PaymentService {
       // Determine clearance status
       const clearanceStatus = params.paymentMethod === 'CHEQUE' ? 'CLEARED' : 'NA';
 
+      const assetAccountCode = assetAccountForPaymentMethod(params.paymentMethod);
+      const bookType = ((params.bookType as 'PACCI' | 'KATCHI' | undefined) ?? 'PACCI');
+
       const payment = await this.repo.create(tx, {
         facilityId: params.facilityId,
         partyId: params.partyId,
@@ -111,7 +121,8 @@ export class PaymentService {
         status,
         clearanceStatus: clearanceStatus as any,
         chequeDate: params.chequeDate ? new Date(params.chequeDate) : null,
-        bookType: (params.bookType as any) ?? 'PACCI',
+        bookType,
+        assetAccountCode,
         notes: params.notes ?? null,
         createdBy: params.createdBy,
         allocations: {
@@ -127,6 +138,43 @@ export class PaymentService {
         await tx.invoice.update({
           where: { id: alloc.invoice_id },
           data: { amountPaidPkr: { increment: alloc.allocated_amount_pkr } },
+        });
+      }
+
+      // Phase 8: post JE-02 (regular) or JE-03 (advance) inside the same transaction.
+      if (this.journalEntry) {
+        const draft = isAdvance
+          ? buildJE03AdvanceReceived({
+              paymentId: payment.id,
+              paymentDate: payment.paymentDate,
+              amountPkr: Number(payment.amountPkr),
+              paymentMethod: payment.paymentMethod,
+              referenceNumber: payment.referenceNumber,
+              bookType,
+              party: { id: party.id, partyType: party.partyType, name: party.name },
+              assetAccountCode,
+            })
+          : buildJE02PaymentReceived({
+              paymentId: payment.id,
+              paymentDate: payment.paymentDate,
+              amountPkr: Number(payment.amountPkr),
+              paymentMethod: payment.paymentMethod,
+              referenceNumber: payment.referenceNumber,
+              bookType,
+              party: { id: party.id, partyType: party.partyType, name: party.name },
+              assetAccountCode,
+            });
+
+        const posted = await this.journalEntry.postInTransaction(
+          tx,
+          params.facilityId,
+          params.createdBy,
+          draft,
+          { postingStatus: 'POSTED' },
+        );
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { journalEntryId: posted.id },
         });
       }
 
@@ -177,6 +225,7 @@ export class PaymentService {
     facilityId: string,
     id: string,
     allocations: { invoice_id: string; allocated_amount_pkr: number }[],
+    userId?: string,
   ) {
     return this.prisma.$transaction(async (tx) => {
       // Row-lock the payment
@@ -225,6 +274,7 @@ export class PaymentService {
       }
 
       // Create allocations
+      const previousStatus = paymentRow.status;
       for (const alloc of allocations) {
         await tx.paymentAllocation.create({
           data: {
@@ -239,24 +289,68 @@ export class PaymentService {
         });
       }
 
+      // Phase 8: if this was an ADVANCE payment, posting allocations triggers JE-04 per invoice.
+      // Regular payments don't post additional JE on allocate — JE-02 already covered the cash receipt;
+      // allocations are sub-ledger detail (which invoice the cash is applied to).
+      if (this.journalEntry && previousStatus === 'ADVANCE') {
+        const partyRow = await tx.party.findFirstOrThrow({
+          where: { id: paymentRow.party_id },
+          select: { id: true, name: true, partyType: true },
+        });
+        const paymentDateRows = await tx.$queryRawUnsafe<{ payment_date: Date; book_type: string }[]>(
+          `SELECT payment_date, book_type FROM payments WHERE id = $1::uuid`,
+          id,
+        );
+        const paymentDate = new Date(paymentDateRows[0]?.payment_date ?? new Date());
+        const bookType = (paymentDateRows[0]?.book_type ?? 'PACCI') as 'PACCI' | 'KATCHI';
+
+        for (const alloc of allocations) {
+          const invRow = await tx.invoice.findFirstOrThrow({
+            where: { id: alloc.invoice_id },
+            select: { id: true, invoiceNumber: true },
+          });
+          const draft = buildJE04AdvanceApplied({
+            paymentId: id,
+            invoiceId: invRow.id,
+            invoiceNumber: invRow.invoiceNumber,
+            appliedDate: paymentDate,
+            amountPkr: alloc.allocated_amount_pkr,
+            bookType,
+            party: partyRow,
+          });
+          await this.journalEntry.postInTransaction(
+            tx,
+            facilityId,
+            userId ?? partyRow.id,
+            draft,
+            { postingStatus: 'POSTED' },
+          );
+        }
+      }
+
       const updated = await this.repo.update(tx, id, { status: 'ALLOCATED' });
       return formatPayment(updated);
     });
   }
 
-  async dishonour(facilityId: string, id: string, notes?: string) {
+  async dishonour(facilityId: string, id: string, notes?: string, userId?: string) {
     return this.prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRawUnsafe<
-        { id: string; status: string; payment_method: string }[]
-      >(
-        `SELECT id, status, payment_method FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+      const fullPayment = await tx.payment.findFirst({
+        where: { id, facilityId },
+        include: {
+          party: { select: { id: true, name: true, partyType: true } },
+        },
+      });
+      if (!fullPayment) throw Errors.PAYMENT_NOT_FOUND();
+      if (fullPayment.status === 'DISHONOURED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
+      if (fullPayment.paymentMethod !== 'CHEQUE') throw Errors.PAYMENT_NOT_CHEQUE();
+
+      // Row-lock to prevent concurrent dishonour
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
         id,
         facilityId,
       );
-      const paymentRow = rows[0];
-      if (!paymentRow) throw Errors.PAYMENT_NOT_FOUND();
-      if (paymentRow.status === 'DISHONOURED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
-      if (paymentRow.payment_method !== 'CHEQUE') throw Errors.PAYMENT_NOT_CHEQUE();
 
       // Reverse all allocations
       const allocations = await tx.paymentAllocation.findMany({
@@ -277,6 +371,28 @@ export class PaymentService {
         clearanceStatus: 'BOUNCED',
         ...(notes ? { notes } : {}),
       });
+
+      // Phase 8: post JE-06 (reversal) and mark the original JE-02 as REVERSED.
+      if (this.journalEntry) {
+        const draft = buildJE06ChequeDishonoured({
+          paymentId: id,
+          dishonourDate: new Date(),
+          amountPkr: Number(fullPayment.amountPkr),
+          bookType: fullPayment.bookType as 'PACCI' | 'KATCHI',
+          party: fullPayment.party,
+          originalAssetAccountCode: fullPayment.assetAccountCode,
+        });
+        const posted = await this.journalEntry.postInTransaction(
+          tx,
+          facilityId,
+          userId ?? fullPayment.createdBy,
+          draft,
+          { postingStatus: 'POSTED', reversedById: fullPayment.journalEntryId ?? null },
+        );
+        if (fullPayment.journalEntryId) {
+          await this.journalEntry.markReversed(tx, fullPayment.journalEntryId, posted.id);
+        }
+      }
 
       return formatPayment(updated);
     });

@@ -108,21 +108,28 @@ export const JournalEntryType = z.enum([
   'INVOICE',
   'PAYMENT',
   'ADVANCE',
+  'ADVANCE_APPLIED',
   'CREDIT_NOTE',
   'ADJUSTMENT',
   'ACCRUAL',
   'BAD_DEBT',
   'REVERSAL',
+  'SPOILAGE',
+  'SPOILAGE_SETTLEMENT',
   'DEPRECIATION',
-  'PAYROLL',
-  'EXPENSE',
   'ASSET_PURCHASE',
   'ASSET_DISPOSAL',
+  'PAYROLL',
+  'PAYROLL_PAYMENT',
+  'GOVT_REMITTANCE',
+  'EXPENSE',
   'PESHGI_ISSUE',
   'PESHGI_RECOVERY',
-  'DAMAGE_LIABILITY',
 ]);
 export type JournalEntryType = z.infer<typeof JournalEntryType>;
+
+export const CreditNoteStatus = z.enum(['ISSUED', 'APPLIED', 'CANCELLED']);
+export type CreditNoteStatus = z.infer<typeof CreditNoteStatus>;
 
 export const PostingStatus = z.enum(['AUTO_DRAFT', 'POSTED', 'REVERSED']);
 export type PostingStatus = z.infer<typeof PostingStatus>;

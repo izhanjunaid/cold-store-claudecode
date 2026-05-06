@@ -328,6 +328,170 @@ async function main() {
     console.log(`  Service Charge: ${sc.name} (${sc.unitType}, Rs. ${sc.unitPricePkr})`);
   }
 
+  // ============================================================
+  // PHASE 8: ACCOUNTING — CHART OF ACCOUNTS (§2 of 09_accounting_spec.md)
+  // ============================================================
+
+  console.log('\n  --- Phase 8 Seed Data (Chart of Accounts) ---');
+
+  type CoaSeed = {
+    code: string;
+    name: string;
+    cls: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'COST_OF_SERVICE' | 'EXPENSE';
+    type: 'HEADER' | 'DETAIL';
+    parent: string | null;
+    normal: 'DEBIT' | 'CREDIT';
+    system?: boolean;
+  };
+
+  const coa: CoaSeed[] = [
+    // CLASS 1: ASSETS
+    { code: '1000', name: 'Cash & Bank', cls: 'ASSET', type: 'HEADER', parent: null, normal: 'DEBIT' },
+    { code: '1010', name: 'Cash on Hand', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT' },
+    { code: '1020', name: 'Bank Account — Main', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT' },
+    { code: '1030', name: 'Mobile Wallet Receipts', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT' },
+    { code: '1100', name: 'Trade Receivables', cls: 'ASSET', type: 'HEADER', parent: null, normal: 'DEBIT' },
+    { code: '1110', name: 'Receivable — Farmers', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true },
+    { code: '1120', name: 'Receivable — Traders', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true },
+    { code: '1130', name: 'Receivable — Arhtis', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true },
+    { code: '1140', name: 'Receivable — Peshgi (Loans)', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT' },
+    { code: '1150', name: 'Receivable — Other', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT' },
+    { code: '1200', name: 'Other Current Assets', cls: 'ASSET', type: 'HEADER', parent: null, normal: 'DEBIT' },
+    { code: '1210', name: 'Advance Payments to Suppliers', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
+    { code: '1220', name: 'Prepaid Electricity (Security Deposit)', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
+    { code: '1300', name: 'Fixed Assets', cls: 'ASSET', type: 'HEADER', parent: null, normal: 'DEBIT' },
+    { code: '1310', name: 'Cold Storage Plant & Equipment', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT' },
+    { code: '1311', name: 'Accum. Depreciation — Plant & Equipment', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT' },
+    { code: '1320', name: 'Building / Civil Works', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT' },
+    { code: '1321', name: 'Accum. Depreciation — Building', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT' },
+    { code: '1330', name: 'Vehicles', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT' },
+    { code: '1331', name: 'Accum. Depreciation — Vehicles', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT' },
+    { code: '1340', name: 'Computer & Software', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT' },
+    { code: '1341', name: 'Accum. Depreciation — Computer', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT' },
+
+    // CLASS 2: LIABILITIES
+    { code: '2000', name: 'Current Liabilities', cls: 'LIABILITY', type: 'HEADER', parent: null, normal: 'CREDIT' },
+    { code: '2010', name: 'Advance Receipts from Clients', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
+    { code: '2020', name: 'GST Payable — Output Tax', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
+    { code: '2030', name: 'Salaries Payable', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT' },
+    { code: '2040', name: 'Utility Bills Payable', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT' },
+    { code: '2060', name: 'EOBI Payable — Employee Portion', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT' },
+    { code: '2061', name: 'EOBI Payable — Employer Portion', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT' },
+    { code: '2070', name: 'Income Tax Withheld Payable', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT' },
+    { code: '2080', name: 'Damage / Spoilage Liability Payable', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT' },
+    { code: '2100', name: 'Long-Term Liabilities', cls: 'LIABILITY', type: 'HEADER', parent: null, normal: 'CREDIT' },
+    { code: '2110', name: 'Bank Loan — Equipment Finance', cls: 'LIABILITY', type: 'DETAIL', parent: '2100', normal: 'CREDIT' },
+    { code: '2120', name: 'Loan from Director / Owner', cls: 'LIABILITY', type: 'DETAIL', parent: '2100', normal: 'CREDIT' },
+
+    // CLASS 3: EQUITY
+    { code: '3010', name: "Owner's Capital", cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT' },
+    { code: '3020', name: 'Retained Earnings', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT' },
+    { code: '3030', name: 'Current Year Profit / (Loss)', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT' },
+
+    // CLASS 4: REVENUE
+    { code: '4000', name: 'Storage Revenue', cls: 'REVENUE', type: 'HEADER', parent: null, normal: 'CREDIT' },
+    { code: '4010', name: 'Storage Revenue — Potato', cls: 'REVENUE', type: 'DETAIL', parent: '4000', normal: 'CREDIT' },
+    { code: '4020', name: 'Storage Revenue — Apple', cls: 'REVENUE', type: 'DETAIL', parent: '4000', normal: 'CREDIT' },
+    { code: '4030', name: 'Storage Revenue — Onion', cls: 'REVENUE', type: 'DETAIL', parent: '4000', normal: 'CREDIT' },
+    { code: '4040', name: 'Storage Revenue — Kinnow', cls: 'REVENUE', type: 'DETAIL', parent: '4000', normal: 'CREDIT' },
+    { code: '4050', name: 'Storage Revenue — Other', cls: 'REVENUE', type: 'DETAIL', parent: '4000', normal: 'CREDIT' },
+    { code: '4100', name: 'Handling & Service Revenue', cls: 'REVENUE', type: 'HEADER', parent: null, normal: 'CREDIT' },
+    { code: '4110', name: 'Loading Revenue', cls: 'REVENUE', type: 'DETAIL', parent: '4100', normal: 'CREDIT' },
+    { code: '4120', name: 'Unloading Revenue', cls: 'REVENUE', type: 'DETAIL', parent: '4100', normal: 'CREDIT' },
+    { code: '4130', name: 'Sorting & Grading Revenue', cls: 'REVENUE', type: 'DETAIL', parent: '4100', normal: 'CREDIT' },
+    { code: '4140', name: 'Packing Revenue', cls: 'REVENUE', type: 'DETAIL', parent: '4100', normal: 'CREDIT' },
+    { code: '4150', name: 'Other Service Revenue', cls: 'REVENUE', type: 'DETAIL', parent: '4100', normal: 'CREDIT' },
+    { code: '4200', name: 'Other Income', cls: 'REVENUE', type: 'HEADER', parent: null, normal: 'CREDIT' },
+    { code: '4210', name: 'Late Payment Surcharge', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT' },
+    { code: '4220', name: 'Damage Settlement Received', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT' },
+
+    // CLASS 5: COST OF SERVICES (Direct)
+    { code: '5000', name: 'Direct Operating Costs', cls: 'COST_OF_SERVICE', type: 'HEADER', parent: null, normal: 'DEBIT' },
+    { code: '5010', name: 'Electricity — Refrigeration', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
+    { code: '5020', name: 'Electricity — Facility (Non-Refrig.)', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
+    { code: '5030', name: 'Direct Labor — Loaders & Handlers', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
+    { code: '5035', name: 'Employer EOBI — Direct Labor', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
+    { code: '5040', name: 'Depreciation — Cold Plant', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
+    { code: '5050', name: 'Refrigerant & Consumables', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
+    { code: '5060', name: 'Packaging & Materials', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
+
+    // CLASS 6: OPERATING EXPENSES (Indirect)
+    { code: '6000', name: 'Indirect / Overhead Expenses', cls: 'EXPENSE', type: 'HEADER', parent: null, normal: 'DEBIT' },
+    { code: '6010', name: 'Salaries — Management & Office', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6015', name: 'Employer EOBI — Management & Office', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6020', name: 'Rent', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6030', name: 'Maintenance & Repairs', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6040', name: 'Fuel & Vehicle', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6050', name: 'Insurance', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6060', name: 'Communication', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6070', name: 'Computer & Software', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6080', name: 'Bad Debt Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6090', name: 'Bank Charges', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6100', name: 'Miscellaneous', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6150', name: 'Spoilage / Damage Compensation Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+  ];
+
+  for (const a of coa) {
+    await prisma.chartOfAccounts.upsert({
+      where: { facilityId_accountCode: { facilityId: facility.id, accountCode: a.code } },
+      update: {
+        accountName: a.name,
+        accountClass: a.cls,
+        accountType: a.type,
+        parentAccountCode: a.parent,
+        normalBalance: a.normal,
+        isSystemAccount: a.system ?? false,
+      },
+      create: {
+        facilityId: facility.id,
+        accountCode: a.code,
+        accountName: a.name,
+        accountClass: a.cls,
+        accountType: a.type,
+        parentAccountCode: a.parent,
+        normalBalance: a.normal,
+        isSystemAccount: a.system ?? false,
+      },
+    });
+  }
+  console.log(`  Chart of Accounts: ${coa.length} accounts seeded`);
+
+  // Wire revenue account codes to existing rate plans and service charges so JE-01 can route by commodity/service.
+  // Commodity → revenue account (per JE-01 spec):
+  const commodityRevenueMap: Record<string, string> = {
+    POTATO: '4010',
+    APPLE: '4020',
+    ONION: '4030',
+    KINNOW: '4040',
+  };
+
+  for (const rp of ratePlans) {
+    const cmd = commodities.find((c) => c.id === rp.commodityId);
+    const code = cmd ? (commodityRevenueMap[cmd.name] ?? '4050') : '4050';
+    await prisma.ratePlan.update({
+      where: { id: rp.id },
+      data: { revenueAccountCode: code },
+    });
+  }
+  console.log(`  Rate Plans: revenue_account_code wired by commodity`);
+
+  // Service → revenue account (per JE-01 spec):
+  const serviceRevenueMap: Record<string, string> = {
+    Loading: '4110',
+    Unloading: '4120',
+    Sorting: '4130',
+    Packing: '4140',
+  };
+
+  for (const sc of serviceCharges) {
+    const code = serviceRevenueMap[sc.name] ?? '4150';
+    await prisma.serviceCharge.update({
+      where: { id: sc.id },
+      data: { revenueAccountCode: code },
+    });
+  }
+  console.log(`  Service Charges: revenue_account_code wired by service name`);
+
   console.log('Seeding complete.');
 }
 

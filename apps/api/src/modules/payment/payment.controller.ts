@@ -10,12 +10,16 @@ import { PaymentService } from './payment.service';
 import { PaymentRepository } from './payment.repository';
 import { sendSuccess } from '../../common/response';
 import { requireMinRole } from '../../plugins/auth';
+import { JournalEntryService } from '../accounting/journal-entry.service';
+import { PeriodLockService } from '../accounting/period-lock.service';
 
 const IdParam = z.object({ id: z.string().uuid() });
 const PartyIdParam = z.object({ partyId: z.string().uuid() });
 
 export async function paymentRoutes(app: FastifyInstance) {
-  const service = new PaymentService(app.prisma, new PaymentRepository(app.prisma));
+  const periodLock = new PeriodLockService(app.prisma);
+  const journalEntry = new JournalEntryService(app.prisma, periodLock);
+  const service = new PaymentService(app.prisma, new PaymentRepository(app.prisma), journalEntry);
 
   // POST /v1/payments — ACCOUNTANT+
   app.route({
@@ -86,7 +90,12 @@ export async function paymentRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof AllocatePaymentRequest>;
-      const result = await service.allocate(request.user!.facilityId, id, body.allocations);
+      const result = await service.allocate(
+        request.user!.facilityId,
+        id,
+        body.allocations,
+        request.user!.userId,
+      );
       return sendSuccess(reply, result);
     },
   });
@@ -100,7 +109,12 @@ export async function paymentRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof DishonourPaymentRequest>;
-      const result = await service.dishonour(request.user!.facilityId, id, body.notes);
+      const result = await service.dishonour(
+        request.user!.facilityId,
+        id,
+        body.notes,
+        request.user!.userId,
+      );
       return sendSuccess(reply, result);
     },
   });

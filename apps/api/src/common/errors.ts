@@ -76,4 +76,24 @@ export const Errors = {
     new AppError('PAYMENT_ALREADY_DISHONOURED', 'Payment has already been dishonoured', 409),
   PAYMENT_NOT_CHEQUE: () =>
     new AppError('PAYMENT_NOT_CHEQUE', 'Only cheque payments can be dishonoured', 409),
+  CREDIT_NOTE_NOT_FOUND: () =>
+    new AppError('CREDIT_NOTE_NOT_FOUND', 'Credit note does not exist', 404),
+  INVOICE_NOT_FINALIZED: () =>
+    new AppError(
+      'INVOICE_NOT_FINALIZED',
+      'Operation requires a FINALIZED invoice',
+      409,
+    ),
+  ACCOUNT_INACTIVE: () =>
+    new AppError('ACCOUNT_INACTIVE', 'Account is inactive and cannot accept postings', 409),
+  HEADER_ACCOUNT_NOT_POSTABLE: () =>
+    new AppError(
+      'HEADER_ACCOUNT_NOT_POSTABLE',
+      'Cannot post journal entry lines to a HEADER account',
+      422,
+    ),
+  PERIOD_ALREADY_LOCKED: () =>
+    new AppError('PERIOD_ALREADY_LOCKED', 'Period is already locked', 409),
+  PERIOD_NOT_LOCKED: () =>
+    new AppError('PERIOD_NOT_LOCKED', 'Period is not currently locked', 409),
 } as const;

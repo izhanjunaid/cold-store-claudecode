@@ -9,6 +9,8 @@ import type {
   AddInvoiceLineRequestType,
   FinalizeInvoiceRequestType,
 } from '@coldchain/shared';
+import type { JournalEntryService } from '../accounting/journal-entry.service';
+import { buildJE01InvoiceFinalized } from '../accounting/templates/je-01-invoice-finalized';
 
 function formatInvoice(inv: InvoiceWithRelations) {
   return {
@@ -66,6 +68,7 @@ export class InvoiceService {
   constructor(
     private prisma: PrismaClient,
     private repo: InvoiceRepository,
+    private journalEntry?: JournalEntryService,
   ) {}
 
   async buildFromOutbound(tx: Prisma.TransactionClient, outboundEventId: string) {
@@ -153,6 +156,69 @@ export class InvoiceService {
       }
       const invoiceNumber = await generateInvoiceNumber(tx, facilityId, new Date());
       const updated = await this.repo.finalize(tx, invoiceId, invoiceNumber, userId);
+
+      // Phase 8: post JE-01 atomically with finalize so the GL is always reconciled.
+      if (this.journalEntry) {
+        const context = await tx.invoice.findFirstOrThrow({
+          where: { id: invoiceId },
+          include: {
+            billingParty: { select: { id: true, name: true, partyType: true } },
+            lot: {
+              select: {
+                id: true,
+                lotNumber: true,
+                commodity: { select: { name: true } },
+              },
+            },
+            lineItems: {
+              orderBy: { sortOrder: 'asc' },
+              include: {
+                serviceCharge: { select: { revenueAccountCode: true } },
+                ratePlan: { select: { revenueAccountCode: true } },
+              },
+            },
+          },
+        });
+
+        const draft = buildJE01InvoiceFinalized({
+          invoiceId: context.id,
+          invoiceNumber: context.invoiceNumber ?? invoiceNumber,
+          invoiceDate: context.invoiceDate,
+          totalPkr: Number(context.totalPkr),
+          gstAmountPkr: Number(context.gstAmountPkr),
+          bookType: context.bookType as 'PACCI' | 'KATCHI',
+          billingParty: {
+            id: context.billingParty.id,
+            partyType: context.billingParty.partyType,
+            name: context.billingParty.name,
+          },
+          lot: {
+            id: context.lot.id,
+            lotNumber: context.lot.lotNumber,
+            commodityName: context.lot.commodity.name,
+          },
+          lines: context.lineItems.map((l) => ({
+            lineType: l.lineType,
+            description: l.description,
+            amountPkr: Number(l.amountPkr),
+            serviceChargeRevenueCode: l.serviceCharge?.revenueAccountCode ?? null,
+            ratePlanRevenueCode: l.ratePlan?.revenueAccountCode ?? null,
+          })),
+        });
+
+        const posted = await this.journalEntry.postInTransaction(
+          tx,
+          facilityId,
+          userId,
+          draft,
+          { postingStatus: 'POSTED' },
+        );
+        await tx.invoice.update({
+          where: { id: invoiceId },
+          data: { journalEntryId: posted.id },
+        });
+      }
+
       return formatInvoice(updated);
     });
   }
