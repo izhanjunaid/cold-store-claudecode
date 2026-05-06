@@ -55,7 +55,7 @@ export default function WithdrawPage() {
       setLot(lotRes);
 
       const partyRes = await apiClient<{ data: Party[] } | Party[]>(
-        '/v1/parties?is_active=true&per_page=200',
+        '/v1/parties?is_active=true&per_page=100',
       );
       const list = Array.isArray(partyRes) ? partyRes : partyRes.data;
       setParties(list.filter((p) => p.is_active));

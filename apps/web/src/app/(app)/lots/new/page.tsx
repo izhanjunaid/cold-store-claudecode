@@ -62,7 +62,7 @@ export default function LotCreatePage() {
 
   // Load reference data
   useEffect(() => {
-    apiClient<Party[]>('/v1/parties?is_active=true&per_page=500').then(setParties).catch(() => {});
+    apiClient<Party[]>('/v1/parties?is_active=true&per_page=100').then(setParties).catch(() => {});
     apiClient<Commodity[]>('/v1/commodities').then(setCommodities).catch(() => {});
     apiClient<Variety[]>('/v1/varieties').then(setVarieties).catch(() => {});
     apiClient<Chamber[]>('/v1/chambers?is_active=true').then(setChambers).catch(() => {});
