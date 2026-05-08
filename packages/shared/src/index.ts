@@ -12,3 +12,7 @@ export * from './schemas/ownership-transfer';
 export * from './schemas/outbound';
 export * from './schemas/payment';
 export * from './schemas/accounting';
+export * from './schemas/fixed-assets';
+export * from './schemas/payroll';
+export * from './schemas/expenses';
+export * from './schemas/peshgi';

@@ -1,10 +1,11 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 8A complete; Phase 8B (cost-side) deferred
-- **Active Task**: Ready for Phase 9 (or 8B/6 if prioritized)
+- **Active Phase**: Phase 8 (8A + 8B) complete — backend, tests, frontend all shipped
+- **Active Task**: Ready for Phase 9 (Gate Pass + Peshgi UI) or Phase 6 (Quality & Spoilage)
 - **Blockers**: None
-- **Last Updated**: 2026-05-05
+- **Last Updated**: 2026-05-08
+- **Deferred to Phase 11 polish**: salary-slip PDF (currently JSON), manual UI smoke against dev servers
 
 ## Phase Completion
 
@@ -19,7 +20,7 @@
 | 6 | Quality & Spoilage | SKIPPED (deferred to end) | — | — |
 | 7 | Financial Ledger & Payments | COMPLETED | 2026-04-24 | 2026-04-25 |
 | 8A | Core Ledger (CoA, JE, GL, Statements) | COMPLETED | 2026-04-28 | 2026-05-05 |
-| 8B | Cost-side (FA, Payroll, Expenses, Peshgi) | DEFERRED | — | — |
+| 8B | Cost-side (FA, Payroll, Expenses, Peshgi-API) | COMPLETED | 2026-05-06 | 2026-05-08 |
 | 9 | Gate Pass + Peshgi | PENDING | — | — |
 | 10 | Reporting & Dashboards | PENDING | — | — |
 | 11 | Admin, Polish & Pre-Launch | PENDING | — | — |
@@ -36,6 +37,7 @@
 | 5 | 8 | 12 | — | 20 |
 | 7 | — | 12 | 1 | 13 |
 | 8A | 16 | 24 | — | 40 |
+| 8B | 34 | 46 | — | 80 |
 
 ## Completed Tasks Log
 
@@ -100,3 +102,12 @@
 - [2026-04-24] 7.6 — Party Detail tabs live — Active Lots, Invoices, Payments (with Record Payment CTA), Ledger (chronological DR/CR with running balance)
 - [2026-04-24] 7.7 — Invoice Record Payment button enabled — routes to /payments/new?party_id= when status=FINALIZED and balance_due>0
 - [2026-04-25] 7.8 — E2E UI verification (playwright-cli): login → lot create → outbound → invoice finalize → Record Payment → verify balance_due=0 → party ledger DR/CR — all flows pass, 0 console errors
+- [2026-05-06] 8B.0 — Pre-flight chore commit (`c12d4e3`): @playwright/test devDep + party fetch per_page=100 cleanup
+- [2026-05-06] 8B.0 — Schema additions to `packages/db/prisma/schema.prisma`: 9 new enums + 8 new models (FixedAsset, DepreciationSchedule, Employee, PayrollRun, PayrollLineItem, ExpenseVoucher, PartyLoan, PartyLoanRepayment) + JE inverse relations. Pushed via `prisma db push`, client regenerated.
+- [2026-05-06] 8B.0 — CoA seed extended with 8 new accounts (1350, 1360, 1361, 4230, 6110, 6120, 6130, 6140). Total CoA: **81 accounts** (was 73).
+- [2026-05-06] 8.7 — Fixed Assets: 3 JE templates (12/13/14), `ASSET_CATEGORY_ACCOUNT_DEFAULTS` routing constant, `depreciation-calc.ts` (SLM + WDV with pro-rata + residual floor), `fixed-asset-number.ts` (FA-YYYY-NNNN advisory-lock), repository, service (purchase/commission/dispose/runMonthlyDepreciation), controller (8 routes); shared `fixed-assets.ts` schemas. Tests: 18 unit + 13 integration.
+- [2026-05-07] 8.8 — Payroll: 4 JE templates (15/15B/16/16B with EOBI 375/1875 rates and zero-tax-line omission), `payroll-number.ts` (PAY-YYYYMM-NNN), `EmployeeService` CRUD, `PayrollRunService` (snapshot-based DRAFT → finalize/JE-15 or 15B → pay/JE-16 → remit/JE-16B), 13 routes; salary-slip endpoint returns JSON (PDF deferred to Phase 11 polish); shared `payroll.ts`. Tests: 8 unit + 14 integration.
+- [2026-05-07] 8.9 — Expense Vouchers: 4 JE templates (17A/17B/17B-PAY/17C), `expense-number.ts` (EXP-YYYYMM-NNNN), `ExpenseService` (DRAFT → APPROVED → ACCRUED/PAID lifecycle), 9 routes including `/petty-cash-replenish`; shared `expenses.ts`. JE-17C scoped to single replenishment JE per plan. Tests: 5 unit + 11 integration.
+- [2026-05-07] 8.10 — Peshgi (loans, API only): 2 JE templates (18/19), `peshgi-number.ts` (PSH-YYYYMM-NNNN), `PeshgiService` (issue with row-locked recordRepayment + auto-status FULLY_RECOVERED), 4 routes; shared `peshgi.ts`. Frontend deferred to Phase 9 per plan. Tests: 3 unit + 8 integration.
+- [2026-05-08] 8.11 — Frontend pages: `accounting/fixed-assets/` (list/new/detail/runs), `accounting/payroll/employees/` (list/new/detail), `accounting/payroll/runs/` (list/new/detail with finalize/pay/remit modals + JSON salary slip viewer), `accounting/expenses/` (list/new/detail with approve/accrue/pay/cancel). Accounting landing page extended with 5 new nav cards. Web typecheck clean; Next.js production build green.
+- [2026-05-08] 8.11 — Tracking docs (PROGRESS.md, TESTING.md, phases/phase-08-accounting.md) and project memory updated. Audit-trigger gap (only `facilities` and `users` have triggers in dev DB) flagged in phase doc — pre-existing 8A state, not 8B regression, but should be backfilled or doc updated to match reality.

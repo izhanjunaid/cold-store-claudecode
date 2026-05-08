@@ -194,6 +194,72 @@ enum CreditNoteStatus {
 }
 
 // ============================================================
+// ENUMS (Phase 8B — Cost-side)
+// ============================================================
+
+enum AssetCategory {
+  COLD_PLANT
+  BUILDING
+  VEHICLE
+  COMPUTER
+  OTHER
+}
+
+enum DepreciationMethod {
+  SLM
+  WDV
+}
+
+enum FixedAssetStatus {
+  PLANNED
+  PURCHASED
+  IN_SERVICE
+  DISPOSED
+  WRITTEN_OFF
+}
+
+enum DepreciationScheduleStatus {
+  PENDING
+  POSTED
+}
+
+enum EmployeeType {
+  SALARIED
+  DAILY_WAGE
+}
+
+enum PayrollType {
+  MONTHLY_SALARY
+  DAILY_WAGES
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  FINALIZED
+  PAID
+}
+
+enum ExpenseVoucherStatus {
+  DRAFT
+  APPROVED
+  ACCRUED
+  PAID
+  CANCELLED
+}
+
+enum ExpensePaymentMethod {
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+}
+
+enum PartyLoanStatus {
+  ACTIVE
+  FULLY_RECOVERED
+  WRITTEN_OFF
+}
+
+// ============================================================
 // FOUNDATION TABLES (Migration 0001)
 // ============================================================
 
@@ -225,6 +291,12 @@ model Facility {
   creditNotes     CreditNote[]
   periodLocks     PeriodLock[]
 
+  fixedAssets     FixedAsset[]
+  employees       Employee[]
+  payrollRuns     PayrollRun[]
+  expenseVouchers ExpenseVoucher[]
+  partyLoans      PartyLoan[]
+
   @@map("facilities")
 }
 
@@ -243,20 +315,28 @@ model User {
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
-  facility           Facility           @relation(fields: [facilityId], references: [id])
-  refreshTokens      RefreshToken[]
-  partiesCreated     Party[]            @relation("PartyCreatedBy")
-  temperatureLogs    TemperatureLog[]
-  lotsCreated        Lot[]              @relation("LotCreatedBy")
-  ownershipEvents    OwnershipHistory[]
-  outboundCreated    OutboundEvent[]    @relation("OutboundCreatedBy")
-  invoicesCreated    Invoice[]          @relation("InvoiceCreatedBy")
-  invoicesFinalized  Invoice[]          @relation("InvoiceFinalizedBy")
-  paymentsCreated    Payment[]          @relation("PaymentCreatedBy")
-  journalEntriesCreated JournalEntry[]  @relation("JournalEntryCreatedBy")
-  creditNotesCreated CreditNote[]       @relation("CreditNoteCreatedBy")
-  periodLocksCreated PeriodLock[]       @relation("PeriodLockLockedBy")
-  periodLocksUnlocked PeriodLock[]      @relation("PeriodLockUnlockedBy")
+  facility              Facility           @relation(fields: [facilityId], references: [id])
+  refreshTokens         RefreshToken[]
+  partiesCreated        Party[]            @relation("PartyCreatedBy")
+  temperatureLogs       TemperatureLog[]
+  lotsCreated           Lot[]              @relation("LotCreatedBy")
+  ownershipEvents       OwnershipHistory[]
+  outboundCreated       OutboundEvent[]    @relation("OutboundCreatedBy")
+  invoicesCreated       Invoice[]          @relation("InvoiceCreatedBy")
+  invoicesFinalized     Invoice[]          @relation("InvoiceFinalizedBy")
+  paymentsCreated       Payment[]          @relation("PaymentCreatedBy")
+  journalEntriesCreated JournalEntry[]     @relation("JournalEntryCreatedBy")
+  creditNotesCreated    CreditNote[]       @relation("CreditNoteCreatedBy")
+  periodLocksCreated    PeriodLock[]       @relation("PeriodLockLockedBy")
+  periodLocksUnlocked   PeriodLock[]       @relation("PeriodLockUnlockedBy")
+
+  fixedAssetsCreated      FixedAsset[]         @relation("FixedAssetCreatedBy")
+  employeesCreated        Employee[]           @relation("EmployeeCreatedBy")
+  payrollRunsFinalized    PayrollRun[]         @relation("PayrollRunFinalizedBy")
+  expenseVouchersCreated  ExpenseVoucher[]     @relation("ExpenseVoucherCreatedBy")
+  expenseVouchersApproved ExpenseVoucher[]     @relation("ExpenseVoucherApprovedBy")
+  partyLoansCreated       PartyLoan[]          @relation("PartyLoanCreatedBy")
+  loanRepaymentsCreated   PartyLoanRepayment[] @relation("PartyLoanRepaymentCreatedBy")
 
   @@unique([facilityId, email])
   @@map("users")
@@ -320,19 +400,20 @@ model Party {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   createdBy       String    @map("created_by") @db.Uuid
 
-  facility      Facility           @relation(fields: [facilityId], references: [id])
-  parentArhti   Party?             @relation("PartyArhtiLink", fields: [parentArhtiId], references: [id])
-  childParties  Party[]            @relation("PartyArhtiLink")
-  createdByUser User               @relation("PartyCreatedBy", fields: [createdBy], references: [id])
-  lotsOwned          Lot[]              @relation("LotOwner")
-  lotsBilled         Lot[]              @relation("LotBillingParty")
-  ownershipFrom      OwnershipHistory[] @relation("OwnershipFromParty")
-  ownershipTo        OwnershipHistory[] @relation("OwnershipToParty")
-  outboundReceived   OutboundEvent[]    @relation("OutboundReceiver")
-  invoicesBilled     Invoice[]          @relation("InvoiceBillingParty")
-  payments           Payment[]
-  journalEntryLines  JournalEntryLine[]
-  creditNotes        CreditNote[]       @relation("CreditNoteBillingParty")
+  facility          Facility           @relation(fields: [facilityId], references: [id])
+  parentArhti       Party?             @relation("PartyArhtiLink", fields: [parentArhtiId], references: [id])
+  childParties      Party[]            @relation("PartyArhtiLink")
+  createdByUser     User               @relation("PartyCreatedBy", fields: [createdBy], references: [id])
+  lotsOwned         Lot[]              @relation("LotOwner")
+  lotsBilled        Lot[]              @relation("LotBillingParty")
+  ownershipFrom     OwnershipHistory[] @relation("OwnershipFromParty")
+  ownershipTo       OwnershipHistory[] @relation("OwnershipToParty")
+  outboundReceived  OutboundEvent[]    @relation("OutboundReceiver")
+  invoicesBilled    Invoice[]          @relation("InvoiceBillingParty")
+  payments          Payment[]
+  journalEntryLines JournalEntryLine[]
+  creditNotes       CreditNote[]       @relation("CreditNoteBillingParty")
+  partyLoans        PartyLoan[]
 
   @@index([facilityId, phonePrimary])
   @@index([facilityId, partyType])
@@ -473,19 +554,19 @@ model Lot {
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   createdBy           String    @map("created_by") @db.Uuid
 
-  facility         Facility           @relation(fields: [facilityId], references: [id])
-  chamber          Chamber            @relation(fields: [chamberId], references: [id])
-  ownerParty       Party              @relation("LotOwner", fields: [ownerPartyId], references: [id])
-  billingParty     Party              @relation("LotBillingParty", fields: [billingPartyId], references: [id])
-  commodity        Commodity          @relation(fields: [commodityId], references: [id])
-  variety          Variety?           @relation(fields: [varietyId], references: [id])
-  ratePlan         RatePlan           @relation(fields: [ratePlanId], references: [id])
-  parentLot        Lot?               @relation("LotParent", fields: [parentLotId], references: [id])
-  childLots        Lot[]              @relation("LotParent")
-  createdByUser    User               @relation("LotCreatedBy", fields: [createdBy], references: [id])
-  ownershipHistory OwnershipHistory[]
-  outboundEvents   OutboundEvent[]
-  invoices         Invoice[]
+  facility          Facility           @relation(fields: [facilityId], references: [id])
+  chamber           Chamber            @relation(fields: [chamberId], references: [id])
+  ownerParty        Party              @relation("LotOwner", fields: [ownerPartyId], references: [id])
+  billingParty      Party              @relation("LotBillingParty", fields: [billingPartyId], references: [id])
+  commodity         Commodity          @relation(fields: [commodityId], references: [id])
+  variety           Variety?           @relation(fields: [varietyId], references: [id])
+  ratePlan          RatePlan           @relation(fields: [ratePlanId], references: [id])
+  parentLot         Lot?               @relation("LotParent", fields: [parentLotId], references: [id])
+  childLots         Lot[]              @relation("LotParent")
+  createdByUser     User               @relation("LotCreatedBy", fields: [createdBy], references: [id])
+  ownershipHistory  OwnershipHistory[]
+  outboundEvents    OutboundEvent[]
+  invoices          Invoice[]
   journalEntryLines JournalEntryLine[]
 
   @@unique([facilityId, lotNumber])
@@ -555,39 +636,39 @@ model OutboundEvent {
 // ============================================================
 
 model Invoice {
-  id               String        @id @default(uuid()) @db.Uuid
-  facilityId       String        @map("facility_id") @db.Uuid
-  invoiceNumber    String?       @map("invoice_number") @db.VarChar(30)
-  lotId            String        @map("lot_id") @db.Uuid
-  outboundEventId  String?       @unique @map("outbound_event_id") @db.Uuid
-  billingPartyId   String        @map("billing_party_id") @db.Uuid
-  invoiceDate      DateTime      @map("invoice_date") @db.Date
-  periodStart      DateTime      @map("period_start") @db.Date
-  periodEnd        DateTime      @map("period_end") @db.Date
-  subTotalPkr      Decimal       @map("sub_total_pkr") @db.Decimal(12, 2)
-  gstRate          Decimal       @default(0) @map("gst_rate") @db.Decimal(5, 2)
-  gstAmountPkr     Decimal       @default(0) @map("gst_amount_pkr") @db.Decimal(12, 2)
-  totalPkr         Decimal       @map("total_pkr") @db.Decimal(12, 2)
-  amountPaidPkr    Decimal       @default(0) @map("amount_paid_pkr") @db.Decimal(12, 2)
-  status           InvoiceStatus @default(DRAFT)
-  finalizedAt      DateTime?     @map("finalized_at") @db.Timestamptz()
-  finalizedBy      String?       @map("finalized_by") @db.Uuid
-  bookType         BookType      @default(PACCI) @map("book_type")
-  journalEntryId   String?       @unique @map("journal_entry_id") @db.Uuid
-  notes            String?       @db.Text
-  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
-  createdBy        String        @map("created_by") @db.Uuid
+  id              String        @id @default(uuid()) @db.Uuid
+  facilityId      String        @map("facility_id") @db.Uuid
+  invoiceNumber   String?       @map("invoice_number") @db.VarChar(30)
+  lotId           String        @map("lot_id") @db.Uuid
+  outboundEventId String?       @unique @map("outbound_event_id") @db.Uuid
+  billingPartyId  String        @map("billing_party_id") @db.Uuid
+  invoiceDate     DateTime      @map("invoice_date") @db.Date
+  periodStart     DateTime      @map("period_start") @db.Date
+  periodEnd       DateTime      @map("period_end") @db.Date
+  subTotalPkr     Decimal       @map("sub_total_pkr") @db.Decimal(12, 2)
+  gstRate         Decimal       @default(0) @map("gst_rate") @db.Decimal(5, 2)
+  gstAmountPkr    Decimal       @default(0) @map("gst_amount_pkr") @db.Decimal(12, 2)
+  totalPkr        Decimal       @map("total_pkr") @db.Decimal(12, 2)
+  amountPaidPkr   Decimal       @default(0) @map("amount_paid_pkr") @db.Decimal(12, 2)
+  status          InvoiceStatus @default(DRAFT)
+  finalizedAt     DateTime?     @map("finalized_at") @db.Timestamptz()
+  finalizedBy     String?       @map("finalized_by") @db.Uuid
+  bookType        BookType      @default(PACCI) @map("book_type")
+  journalEntryId  String?       @unique @map("journal_entry_id") @db.Uuid
+  notes           String?       @db.Text
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy       String        @map("created_by") @db.Uuid
 
-  facility        Facility          @relation(fields: [facilityId], references: [id])
-  lot             Lot               @relation(fields: [lotId], references: [id])
-  outboundEvent   OutboundEvent?    @relation(fields: [outboundEventId], references: [id])
-  billingParty    Party             @relation("InvoiceBillingParty", fields: [billingPartyId], references: [id])
-  finalizedByUser User?             @relation("InvoiceFinalizedBy", fields: [finalizedBy], references: [id])
-  createdByUser   User              @relation("InvoiceCreatedBy", fields: [createdBy], references: [id])
-  journalEntry    JournalEntry?     @relation("InvoiceJournalEntry", fields: [journalEntryId], references: [id])
+  facility        Facility            @relation(fields: [facilityId], references: [id])
+  lot             Lot                 @relation(fields: [lotId], references: [id])
+  outboundEvent   OutboundEvent?      @relation(fields: [outboundEventId], references: [id])
+  billingParty    Party               @relation("InvoiceBillingParty", fields: [billingPartyId], references: [id])
+  finalizedByUser User?               @relation("InvoiceFinalizedBy", fields: [finalizedBy], references: [id])
+  createdByUser   User                @relation("InvoiceCreatedBy", fields: [createdBy], references: [id])
+  journalEntry    JournalEntry?       @relation("InvoiceJournalEntry", fields: [journalEntryId], references: [id])
   lineItems       InvoiceLineItem[]
   allocations     PaymentAllocation[]
-  creditNotes     CreditNote[]      @relation("CreditNoteOriginalInvoice")
+  creditNotes     CreditNote[]        @relation("CreditNoteOriginalInvoice")
 
   @@index([facilityId, invoiceNumber])
   @@index([facilityId, status])
@@ -623,17 +704,17 @@ model InvoiceLineItem {
 // ============================================================
 
 model Payment {
-  id              String          @id @default(uuid()) @db.Uuid
-  facilityId      String          @map("facility_id") @db.Uuid
-  partyId         String          @map("party_id") @db.Uuid
-  paymentDate     DateTime        @map("payment_date") @db.Date
-  amountPkr       Decimal         @map("amount_pkr") @db.Decimal(12, 2)
-  paymentMethod   PaymentMethod   @map("payment_method")
-  referenceNumber String?         @map("reference_number") @db.VarChar(100)
-  isAdvance       Boolean         @default(false) @map("is_advance")
-  status          PaymentStatus   @default(RECORDED)
-  clearanceStatus ClearanceStatus @default(NA) @map("clearance_status")
-  chequeDate      DateTime?       @map("cheque_date") @db.Date
+  id               String          @id @default(uuid()) @db.Uuid
+  facilityId       String          @map("facility_id") @db.Uuid
+  partyId          String          @map("party_id") @db.Uuid
+  paymentDate      DateTime        @map("payment_date") @db.Date
+  amountPkr        Decimal         @map("amount_pkr") @db.Decimal(12, 2)
+  paymentMethod    PaymentMethod   @map("payment_method")
+  referenceNumber  String?         @map("reference_number") @db.VarChar(100)
+  isAdvance        Boolean         @default(false) @map("is_advance")
+  status           PaymentStatus   @default(RECORDED)
+  clearanceStatus  ClearanceStatus @default(NA) @map("clearance_status")
+  chequeDate       DateTime?       @map("cheque_date") @db.Date
   bookType         BookType        @default(PACCI) @map("book_type")
   assetAccountCode String?         @map("asset_account_code") @db.VarChar(10)
   journalEntryId   String?         @unique @map("journal_entry_id") @db.Uuid
@@ -673,20 +754,20 @@ model PaymentAllocation {
 // ============================================================
 
 model ChartOfAccounts {
-  id                  String        @id @default(uuid()) @db.Uuid
-  facilityId          String        @map("facility_id") @db.Uuid
-  accountCode         String        @map("account_code") @db.VarChar(10)
-  accountName         String        @map("account_name") @db.VarChar(200)
-  accountClass        AccountClass  @map("account_class")
-  accountType         AccountType   @map("account_type")
-  parentAccountCode   String?       @map("parent_account_code") @db.VarChar(10)
-  normalBalance       NormalBalance @map("normal_balance")
-  isSystemAccount     Boolean       @default(false) @map("is_system_account")
-  isActive            Boolean       @default(true) @map("is_active")
-  createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  id                String        @id @default(uuid()) @db.Uuid
+  facilityId        String        @map("facility_id") @db.Uuid
+  accountCode       String        @map("account_code") @db.VarChar(10)
+  accountName       String        @map("account_name") @db.VarChar(200)
+  accountClass      AccountClass  @map("account_class")
+  accountType       AccountType   @map("account_type")
+  parentAccountCode String?       @map("parent_account_code") @db.VarChar(10)
+  normalBalance     NormalBalance @map("normal_balance")
+  isSystemAccount   Boolean       @default(false) @map("is_system_account")
+  isActive          Boolean       @default(true) @map("is_active")
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz()
 
-  facility           Facility           @relation(fields: [facilityId], references: [id])
-  journalEntryLines  JournalEntryLine[]
+  facility          Facility           @relation(fields: [facilityId], references: [id])
+  journalEntryLines JournalEntryLine[]
 
   @@unique([facilityId, accountCode])
   @@index([facilityId, accountClass])
@@ -694,30 +775,40 @@ model ChartOfAccounts {
 }
 
 model JournalEntry {
-  id              String        @id @default(uuid()) @db.Uuid
-  facilityId      String        @map("facility_id") @db.Uuid
-  entryNumber     String        @map("entry_number") @db.VarChar(20)
-  entryDate       DateTime      @map("entry_date") @db.Date
-  entryType       EntryType     @map("entry_type")
-  bookType        BookType      @default(PACCI) @map("book_type")
-  sourceTable     String        @map("source_table") @db.VarChar(50)
-  sourceId        String        @map("source_id") @db.Uuid
-  description     String        @db.VarChar(500)
-  postingStatus   PostingStatus @default(POSTED) @map("posting_status")
-  periodMonth     Int           @map("period_month")
-  periodYear      Int           @map("period_year")
-  reversedById    String?       @map("reversed_by") @db.Uuid
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz()
-  createdBy       String        @map("created_by") @db.Uuid
+  id            String        @id @default(uuid()) @db.Uuid
+  facilityId    String        @map("facility_id") @db.Uuid
+  entryNumber   String        @map("entry_number") @db.VarChar(20)
+  entryDate     DateTime      @map("entry_date") @db.Date
+  entryType     EntryType     @map("entry_type")
+  bookType      BookType      @default(PACCI) @map("book_type")
+  sourceTable   String        @map("source_table") @db.VarChar(50)
+  sourceId      String        @map("source_id") @db.Uuid
+  description   String        @db.VarChar(500)
+  postingStatus PostingStatus @default(POSTED) @map("posting_status")
+  periodMonth   Int           @map("period_month")
+  periodYear    Int           @map("period_year")
+  reversedById  String?       @map("reversed_by") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy     String        @map("created_by") @db.Uuid
 
-  facility        Facility           @relation(fields: [facilityId], references: [id])
-  createdByUser   User               @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
-  reversedBy      JournalEntry?      @relation("JournalEntryReversal", fields: [reversedById], references: [id])
-  reverses        JournalEntry[]     @relation("JournalEntryReversal")
-  lines           JournalEntryLine[]
-  invoice         Invoice?           @relation("InvoiceJournalEntry")
-  payment         Payment?           @relation("PaymentJournalEntry")
-  creditNote      CreditNote?        @relation("CreditNoteJournalEntry")
+  facility              Facility               @relation(fields: [facilityId], references: [id])
+  createdByUser         User                   @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
+  reversedBy            JournalEntry?          @relation("JournalEntryReversal", fields: [reversedById], references: [id])
+  reverses              JournalEntry[]         @relation("JournalEntryReversal")
+  lines                 JournalEntryLine[]
+  invoice               Invoice?               @relation("InvoiceJournalEntry")
+  payment               Payment?               @relation("PaymentJournalEntry")
+  creditNote            CreditNote?            @relation("CreditNoteJournalEntry")
+  fixedAssetPurchase    FixedAsset?            @relation("FixedAssetPurchaseJE")
+  fixedAssetDisposal    FixedAsset?            @relation("FixedAssetDisposalJE")
+  depreciationSchedules DepreciationSchedule[] @relation("DepreciationScheduleJE")
+  payrollRunPayroll     PayrollRun?            @relation("PayrollRunPayrollJE")
+  payrollRunPayment     PayrollRun?            @relation("PayrollRunPaymentJE")
+  payrollRunRemittance  PayrollRun?            @relation("PayrollRunRemittanceJE")
+  expenseAccrual        ExpenseVoucher?        @relation("ExpenseVoucherAccrualJE")
+  expensePayment        ExpenseVoucher?        @relation("ExpenseVoucherPaymentJE")
+  partyLoanIssue        PartyLoan?             @relation("PartyLoanIssueJE")
+  partyLoanRepayment    PartyLoanRepayment?    @relation("PartyLoanRepaymentJE")
 
   @@unique([facilityId, entryNumber])
   @@index([facilityId, entryDate])
@@ -728,21 +819,21 @@ model JournalEntry {
 }
 
 model JournalEntryLine {
-  id              String   @id @default(uuid()) @db.Uuid
-  journalEntryId  String   @map("journal_entry_id") @db.Uuid
-  lineNumber      Int      @map("line_number")
-  accountCode     String   @map("account_code") @db.VarChar(10)
-  facilityId      String   @map("facility_id") @db.Uuid
-  debitAmount     Decimal  @default(0) @map("debit_amount") @db.Decimal(14, 2)
-  creditAmount    Decimal  @default(0) @map("credit_amount") @db.Decimal(14, 2)
-  partyId         String?  @map("party_id") @db.Uuid
-  lotId           String?  @map("lot_id") @db.Uuid
-  description     String?  @db.VarChar(300)
+  id             String  @id @default(uuid()) @db.Uuid
+  journalEntryId String  @map("journal_entry_id") @db.Uuid
+  lineNumber     Int     @map("line_number")
+  accountCode    String  @map("account_code") @db.VarChar(10)
+  facilityId     String  @map("facility_id") @db.Uuid
+  debitAmount    Decimal @default(0) @map("debit_amount") @db.Decimal(14, 2)
+  creditAmount   Decimal @default(0) @map("credit_amount") @db.Decimal(14, 2)
+  partyId        String? @map("party_id") @db.Uuid
+  lotId          String? @map("lot_id") @db.Uuid
+  description    String? @db.VarChar(300)
 
-  journalEntry    JournalEntry    @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
-  account         ChartOfAccounts @relation(fields: [facilityId, accountCode], references: [facilityId, accountCode])
-  party           Party?          @relation(fields: [partyId], references: [id])
-  lot             Lot?            @relation(fields: [lotId], references: [id])
+  journalEntry JournalEntry    @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account      ChartOfAccounts @relation(fields: [facilityId, accountCode], references: [facilityId, accountCode])
+  party        Party?          @relation(fields: [partyId], references: [id])
+  lot          Lot?            @relation(fields: [lotId], references: [id])
 
   @@index([journalEntryId])
   @@index([facilityId, accountCode])
@@ -781,12 +872,12 @@ model CreditNote {
 }
 
 model CreditNoteLineItem {
-  id                  String  @id @default(uuid()) @db.Uuid
-  creditNoteId        String  @map("credit_note_id") @db.Uuid
-  revenueAccountCode  String  @map("revenue_account_code") @db.VarChar(10)
-  description         String  @db.VarChar(300)
-  amountPkr           Decimal @map("amount_pkr") @db.Decimal(12, 2)
-  sortOrder           Int     @default(0) @map("sort_order")
+  id                 String  @id @default(uuid()) @db.Uuid
+  creditNoteId       String  @map("credit_note_id") @db.Uuid
+  revenueAccountCode String  @map("revenue_account_code") @db.VarChar(10)
+  description        String  @db.VarChar(300)
+  amountPkr          Decimal @map("amount_pkr") @db.Decimal(12, 2)
+  sortOrder          Int     @default(0) @map("sort_order")
 
   creditNote CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
 
@@ -795,15 +886,15 @@ model CreditNoteLineItem {
 }
 
 model PeriodLock {
-  id           String    @id @default(uuid()) @db.Uuid
-  facilityId   String    @map("facility_id") @db.Uuid
-  periodYear   Int       @map("period_year")
-  periodMonth  Int       @map("period_month")
-  lockedAt     DateTime  @default(now()) @map("locked_at") @db.Timestamptz()
-  lockedBy     String    @map("locked_by") @db.Uuid
-  unlockedAt   DateTime? @map("unlocked_at") @db.Timestamptz()
-  unlockedBy   String?   @map("unlocked_by") @db.Uuid
-  reason       String?   @db.Text
+  id          String    @id @default(uuid()) @db.Uuid
+  facilityId  String    @map("facility_id") @db.Uuid
+  periodYear  Int       @map("period_year")
+  periodMonth Int       @map("period_month")
+  lockedAt    DateTime  @default(now()) @map("locked_at") @db.Timestamptz()
+  lockedBy    String    @map("locked_by") @db.Uuid
+  unlockedAt  DateTime? @map("unlocked_at") @db.Timestamptz()
+  unlockedBy  String?   @map("unlocked_by") @db.Uuid
+  reason      String?   @db.Text
 
   facility       Facility @relation(fields: [facilityId], references: [id])
   lockedByUser   User     @relation("PeriodLockLockedBy", fields: [lockedBy], references: [id])
@@ -811,4 +902,238 @@ model PeriodLock {
 
   @@unique([facilityId, periodYear, periodMonth])
   @@map("period_locks")
+}
+
+// ============================================================
+// PHASE 8B: FIXED ASSETS, PAYROLL, EXPENSES, PESHGI (Migration 0009)
+// ============================================================
+
+model FixedAsset {
+  id                         String             @id @default(uuid()) @db.Uuid
+  facilityId                 String             @map("facility_id") @db.Uuid
+  assetNumber                String             @map("asset_number") @db.VarChar(20)
+  assetName                  String             @map("asset_name") @db.VarChar(200)
+  assetCategory              AssetCategory      @map("asset_category")
+  assetAccountCode           String             @map("asset_account_code") @db.VarChar(10)
+  accumDeprAccountCode       String             @map("accum_depr_account_code") @db.VarChar(10)
+  deprExpenseAccountCode     String             @map("depr_expense_account_code") @db.VarChar(10)
+  purchaseDate               DateTime           @map("purchase_date") @db.Date
+  purchaseCostPkr            Decimal            @map("purchase_cost_pkr") @db.Decimal(14, 2)
+  residualValuePkr           Decimal            @default(0) @map("residual_value_pkr") @db.Decimal(14, 2)
+  usefulLifeYears            Decimal?           @map("useful_life_years") @db.Decimal(5, 2)
+  depreciationMethod         DepreciationMethod @map("depreciation_method")
+  wdvRatePercent             Decimal?           @map("wdv_rate_percent") @db.Decimal(5, 2)
+  depreciationStartDate      DateTime?          @map("depreciation_start_date") @db.Date
+  status                     FixedAssetStatus   @default(PURCHASED)
+  accumulatedDepreciationPkr Decimal            @default(0) @map("accumulated_depreciation_pkr") @db.Decimal(14, 2)
+  disposalDate               DateTime?          @map("disposal_date") @db.Date
+  disposalProceedsPkr        Decimal?           @map("disposal_proceeds_pkr") @db.Decimal(14, 2)
+  purchaseJournalEntryId     String?            @unique @map("purchase_journal_entry_id") @db.Uuid
+  disposalJournalEntryId     String?            @unique @map("disposal_journal_entry_id") @db.Uuid
+  bookType                   BookType           @default(PACCI) @map("book_type")
+  notes                      String?            @db.Text
+  createdAt                  DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy                  String             @map("created_by") @db.Uuid
+
+  facility             Facility               @relation(fields: [facilityId], references: [id])
+  createdByUser        User                   @relation("FixedAssetCreatedBy", fields: [createdBy], references: [id])
+  purchaseJournalEntry JournalEntry?          @relation("FixedAssetPurchaseJE", fields: [purchaseJournalEntryId], references: [id])
+  disposalJournalEntry JournalEntry?          @relation("FixedAssetDisposalJE", fields: [disposalJournalEntryId], references: [id])
+  schedules            DepreciationSchedule[]
+
+  @@unique([facilityId, assetNumber])
+  @@index([facilityId, status])
+  @@index([facilityId, assetCategory])
+  @@map("fixed_assets")
+}
+
+model DepreciationSchedule {
+  id                    String                     @id @default(uuid()) @db.Uuid
+  fixedAssetId          String                     @map("fixed_asset_id") @db.Uuid
+  periodYear            Int                        @map("period_year")
+  periodMonth           Int                        @map("period_month")
+  openingNbvPkr         Decimal                    @map("opening_nbv_pkr") @db.Decimal(14, 2)
+  depreciationAmountPkr Decimal                    @map("depreciation_amount_pkr") @db.Decimal(14, 2)
+  closingNbvPkr         Decimal                    @map("closing_nbv_pkr") @db.Decimal(14, 2)
+  status                DepreciationScheduleStatus @default(PENDING)
+  journalEntryId        String?                    @map("journal_entry_id") @db.Uuid
+  postedAt              DateTime?                  @map("posted_at") @db.Timestamptz()
+
+  fixedAsset   FixedAsset    @relation(fields: [fixedAssetId], references: [id], onDelete: Cascade)
+  journalEntry JournalEntry? @relation("DepreciationScheduleJE", fields: [journalEntryId], references: [id])
+
+  @@unique([fixedAssetId, periodYear, periodMonth])
+  @@index([periodYear, periodMonth, status])
+  @@map("depreciation_schedules")
+}
+
+model Employee {
+  id                String       @id @default(uuid()) @db.Uuid
+  facilityId        String       @map("facility_id") @db.Uuid
+  name              String       @db.VarChar(200)
+  nameUrdu          String?      @map("name_urdu") @db.VarChar(200)
+  cnic              String?      @db.VarChar(15)
+  employeeType      EmployeeType @map("employee_type")
+  designation       String?      @db.VarChar(100)
+  joinDate          DateTime     @map("join_date") @db.Date
+  basicSalaryPkr    Decimal?     @map("basic_salary_pkr") @db.Decimal(10, 2)
+  dailyWagePkr      Decimal?     @map("daily_wage_pkr") @db.Decimal(8, 2)
+  eobiRegistered    Boolean      @default(false) @map("eobi_registered")
+  bankAccountNumber String?      @map("bank_account_number") @db.VarChar(30)
+  bankName          String?      @map("bank_name") @db.VarChar(100)
+  isActive          Boolean      @default(true) @map("is_active")
+  terminationDate   DateTime?    @map("termination_date") @db.Date
+  notes             String?      @db.Text
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy         String       @map("created_by") @db.Uuid
+
+  facility      Facility          @relation(fields: [facilityId], references: [id])
+  createdByUser User              @relation("EmployeeCreatedBy", fields: [createdBy], references: [id])
+  payrollLines  PayrollLineItem[]
+
+  @@index([facilityId, isActive])
+  @@index([facilityId, employeeType])
+  @@map("employees")
+}
+
+model PayrollRun {
+  id                       String           @id @default(uuid()) @db.Uuid
+  facilityId               String           @map("facility_id") @db.Uuid
+  runNumber                String           @map("run_number") @db.VarChar(20)
+  payrollType              PayrollType      @map("payroll_type")
+  periodYear               Int              @map("period_year")
+  periodMonth              Int              @map("period_month")
+  periodFrom               DateTime         @map("period_from") @db.Date
+  periodTo                 DateTime         @map("period_to") @db.Date
+  totalGrossPkr            Decimal          @default(0) @map("total_gross_pkr") @db.Decimal(14, 2)
+  totalDeductionsPkr       Decimal          @default(0) @map("total_deductions_pkr") @db.Decimal(14, 2)
+  totalEmployerEobiPkr     Decimal          @default(0) @map("total_employer_eobi_pkr") @db.Decimal(14, 2)
+  totalNetPayablePkr       Decimal          @default(0) @map("total_net_payable_pkr") @db.Decimal(14, 2)
+  status                   PayrollRunStatus @default(DRAFT)
+  bookType                 BookType         @default(PACCI) @map("book_type")
+  payrollJournalEntryId    String?          @unique @map("payroll_journal_entry_id") @db.Uuid
+  paymentJournalEntryId    String?          @unique @map("payment_journal_entry_id") @db.Uuid
+  remittanceJournalEntryId String?          @unique @map("remittance_journal_entry_id") @db.Uuid
+  finalizedBy              String?          @map("finalized_by") @db.Uuid
+  finalizedAt              DateTime?        @map("finalized_at") @db.Timestamptz()
+  paidAt                   DateTime?        @map("paid_at") @db.Timestamptz()
+  notes                    String?          @db.Text
+  createdAt                DateTime         @default(now()) @map("created_at") @db.Timestamptz()
+
+  facility               Facility          @relation(fields: [facilityId], references: [id])
+  finalizedByUser        User?             @relation("PayrollRunFinalizedBy", fields: [finalizedBy], references: [id])
+  payrollJournalEntry    JournalEntry?     @relation("PayrollRunPayrollJE", fields: [payrollJournalEntryId], references: [id])
+  paymentJournalEntry    JournalEntry?     @relation("PayrollRunPaymentJE", fields: [paymentJournalEntryId], references: [id])
+  remittanceJournalEntry JournalEntry?     @relation("PayrollRunRemittanceJE", fields: [remittanceJournalEntryId], references: [id])
+  lineItems              PayrollLineItem[]
+
+  @@unique([facilityId, runNumber])
+  @@index([facilityId, status])
+  @@index([facilityId, periodYear, periodMonth])
+  @@map("payroll_runs")
+}
+
+model PayrollLineItem {
+  id                 String   @id @default(uuid()) @db.Uuid
+  payrollRunId       String   @map("payroll_run_id") @db.Uuid
+  employeeId         String   @map("employee_id") @db.Uuid
+  daysWorked         Decimal? @map("days_worked") @db.Decimal(5, 2)
+  grossPayPkr        Decimal  @map("gross_pay_pkr") @db.Decimal(10, 2)
+  eobiEmployeePkr    Decimal  @default(0) @map("eobi_employee_pkr") @db.Decimal(8, 2)
+  eobiEmployerPkr    Decimal  @default(0) @map("eobi_employer_pkr") @db.Decimal(8, 2)
+  incomeTaxPkr       Decimal  @default(0) @map("income_tax_pkr") @db.Decimal(8, 2)
+  otherDeductionsPkr Decimal  @default(0) @map("other_deductions_pkr") @db.Decimal(8, 2)
+  netPayPkr          Decimal  @map("net_pay_pkr") @db.Decimal(10, 2)
+  sortOrder          Int      @default(0) @map("sort_order")
+
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee   Employee   @relation(fields: [employeeId], references: [id])
+
+  @@index([payrollRunId])
+  @@map("payroll_line_items")
+}
+
+model ExpenseVoucher {
+  id                    String                @id @default(uuid()) @db.Uuid
+  facilityId            String                @map("facility_id") @db.Uuid
+  voucherNumber         String                @map("voucher_number") @db.VarChar(20)
+  voucherDate           DateTime              @map("voucher_date") @db.Date
+  paymentDate           DateTime?             @map("payment_date") @db.Date
+  expenseAccountCode    String                @map("expense_account_code") @db.VarChar(10)
+  description           String                @db.VarChar(500)
+  vendorName            String?               @map("vendor_name") @db.VarChar(200)
+  referenceNumber       String?               @map("reference_number") @db.VarChar(100)
+  amountPkr             Decimal               @map("amount_pkr") @db.Decimal(12, 2)
+  paymentMethod         ExpensePaymentMethod? @map("payment_method")
+  assetAccountCode      String?               @map("asset_account_code") @db.VarChar(10)
+  isAccrual             Boolean               @default(false) @map("is_accrual")
+  status                ExpenseVoucherStatus  @default(DRAFT)
+  bookType              BookType              @default(PACCI) @map("book_type")
+  accrualJournalEntryId String?               @unique @map("accrual_journal_entry_id") @db.Uuid
+  paymentJournalEntryId String?               @unique @map("payment_journal_entry_id") @db.Uuid
+  receiptUrl            String?               @map("receipt_url") @db.VarChar(500)
+  approvedBy            String?               @map("approved_by") @db.Uuid
+  approvedAt            DateTime?             @map("approved_at") @db.Timestamptz()
+  notes                 String?               @db.Text
+  createdBy             String                @map("created_by") @db.Uuid
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz()
+
+  facility            Facility      @relation(fields: [facilityId], references: [id])
+  createdByUser       User          @relation("ExpenseVoucherCreatedBy", fields: [createdBy], references: [id])
+  approvedByUser      User?         @relation("ExpenseVoucherApprovedBy", fields: [approvedBy], references: [id])
+  accrualJournalEntry JournalEntry? @relation("ExpenseVoucherAccrualJE", fields: [accrualJournalEntryId], references: [id])
+  paymentJournalEntry JournalEntry? @relation("ExpenseVoucherPaymentJE", fields: [paymentJournalEntryId], references: [id])
+
+  @@unique([facilityId, voucherNumber])
+  @@index([facilityId, status])
+  @@index([facilityId, voucherDate])
+  @@map("expense_vouchers")
+}
+
+model PartyLoan {
+  id                     String          @id @default(uuid()) @db.Uuid
+  facilityId             String          @map("facility_id") @db.Uuid
+  loanNumber             String          @map("loan_number") @db.VarChar(20)
+  partyId                String          @map("party_id") @db.Uuid
+  issueDate              DateTime        @map("issue_date") @db.Date
+  principalPkr           Decimal         @map("principal_pkr") @db.Decimal(12, 2)
+  balanceOutstandingPkr  Decimal         @map("balance_outstanding_pkr") @db.Decimal(12, 2)
+  status                 PartyLoanStatus @default(ACTIVE)
+  bookType               BookType        @default(PACCI) @map("book_type")
+  sourceAssetAccountCode String          @map("source_asset_account_code") @db.VarChar(10)
+  issueJournalEntryId    String?         @unique @map("issue_journal_entry_id") @db.Uuid
+  notes                  String?         @db.Text
+  createdAt              DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy              String          @map("created_by") @db.Uuid
+
+  facility          Facility             @relation(fields: [facilityId], references: [id])
+  party             Party                @relation(fields: [partyId], references: [id])
+  createdByUser     User                 @relation("PartyLoanCreatedBy", fields: [createdBy], references: [id])
+  issueJournalEntry JournalEntry?        @relation("PartyLoanIssueJE", fields: [issueJournalEntryId], references: [id])
+  repayments        PartyLoanRepayment[]
+
+  @@unique([facilityId, loanNumber])
+  @@index([facilityId, partyId])
+  @@index([facilityId, status])
+  @@map("party_loans")
+}
+
+model PartyLoanRepayment {
+  id               String               @id @default(uuid()) @db.Uuid
+  loanId           String               @map("loan_id") @db.Uuid
+  repaymentDate    DateTime             @map("repayment_date") @db.Date
+  amountPkr        Decimal              @map("amount_pkr") @db.Decimal(12, 2)
+  paymentMethod    ExpensePaymentMethod @map("payment_method")
+  assetAccountCode String               @map("asset_account_code") @db.VarChar(10)
+  journalEntryId   String?              @unique @map("journal_entry_id") @db.Uuid
+  notes            String?              @db.Text
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy        String               @map("created_by") @db.Uuid
+
+  loan          PartyLoan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  createdByUser User          @relation("PartyLoanRepaymentCreatedBy", fields: [createdBy], references: [id])
+  journalEntry  JournalEntry? @relation("PartyLoanRepaymentJE", fields: [journalEntryId], references: [id])
+
+  @@index([loanId])
+  @@map("party_loan_repayments")
 }

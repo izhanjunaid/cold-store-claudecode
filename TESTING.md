@@ -44,6 +44,7 @@
 | 5 | 8 | 12 | — | 20 | ALL PASS |
 | 7 | — | 12 | 1 | 13 | ALL PASS |
 | 8A | 16 | 24 | — | 40 | ALL PASS |
+| 8B | 34 | 46 | — | 80 | ALL PASS |
 
 ### Phase 0 Tests
 - `apps/api/src/common/jwt.test.ts` — 4 tests (sign/verify access & refresh tokens)
@@ -79,7 +80,19 @@
 
 ### Phase 8A Tests
 - `apps/api/src/modules/accounting/__tests__/journal-entry-templates.unit.test.ts` — 16 tests covering all 11 JE template builders (JE-01 storage+service+GST balance, JE-01 commodity routing 4010/4020/4030/4040, JE-01 advance-applied, JE-02 cash receipt, JE-03 advance to liability, JE-04 advance applied to invoice, JE-05 multi-line credit note, JE-06 cheque bounce REVERSAL, JE-07 overpayment split, JE-08 bad debt, JE-10 ownership reassignment, JE-11 monthly accrual, JE-11R reversal swap) plus account-mapping helper tests
-- `apps/api/src/modules/accounting/__tests__/accounting.integration.test.ts` — 24 tests across 8 groups: CoA list/filter/RBAC create (4); JE forward path JE-01/02/03 + cheque dishonour reversal (4); manual JE validation — unbalanced 422, header account 422, unknown account 404, OPERATOR 403, KATCHI OWNER-only (5); period locks — OPERATOR 403, locked period rejects backdated JE 409 PERIOD_LOCKED, OWNER unlock vs ACCOUNTANT 403 (3); financial statements — trial balance balanced, balance sheet balanced, P&L shape (3); bad debt — OWNER write-off success + ACCOUNTANT 403 (2); credit notes — JE-05 posts and reduces invoice balance, OPERATOR 403 (2); GL running-balance arithmetic (1)
+- `apps/api/src/modules/accounting/__tests__/accounting.integration.test.ts` — 24 tests across 8 groups: CoA list/filter/RBAC create (4); JE forward path JE-01/02/03 + cheque dishonour reversal (4); manual JE validation — unbalanced 422, header account 422, unknown account 404, OPERATOR 403, KATCHI OWNER-only (5); period locks — OPERATOR 403, locked period rejects backdated JE 409 PERIOD_LOCKED, OWNER unlock vs ACCOUNTANT 403 (3); financial statements — trial balance balanced, balance sheet balanced, P&L shape (3); bad debt — OWNER write-off success + ACCOUNTANT 403 (2); credit notes — JE-05 posts and reduces invoice balance, OPERATOR 403 (2); GL running-balance arithmetic (1) — count updated to **81 CoA accounts** post-8B
+
+### Phase 8B Tests
+- `apps/api/src/modules/fixed-assets/__tests__/depreciation-calc.unit.test.ts` — 11 tests (isPeriodActive boundary cases, SLM monthly calc, SLM throws without life, WDV monthly calc, WDV year-2 reduces, WDV throws without rate, residual floor cap, period-before-start zero)
+- `apps/api/src/modules/fixed-assets/__tests__/fixed-asset-templates.unit.test.ts` — 7 tests (JE-12 balance, JE-13 routing COLD_PLANT→5040, BUILDING→6120, JE-14 case A break-even, case B gain→4230, case C loss→6110, scrap zero-proceeds full loss)
+- `apps/api/src/modules/fixed-assets/__tests__/fixed-asset.integration.test.ts` — 13 tests (purchase + JE-12 posted, SLM rejects without life, OPERATOR 403, ACCOUNTANT lists, commission PURCHASED→IN_SERVICE, double-commission 409, monthly run posts JE-13 batch, re-run same period DEPRECIATION_ALREADY_POSTED 409, dispose-gain posts 4230, dispose-loss posts 6110, period-lock rejects run 409, runs aggregation list, FA-YYYY-NNNN sequence increments)
+- `apps/api/src/modules/payroll/__tests__/payroll-templates.unit.test.ts` — 6 tests (JE-15 zero-tax line omission, JE-15 with tax includes 2070, JE-15B 5030/5035 not 6010, JE-16 balance, JE-16B remit, JE-16B partial remit no tax)
+- `apps/api/src/modules/payroll/__tests__/payroll-number.unit.test.ts` — 2 tests (PAY-YYYYMM-NNN format, prefix)
+- `apps/api/src/modules/payroll/__tests__/payroll.integration.test.ts` — 14 tests (employee CRUD, OPERATOR 403, SALARIED requires basic_salary, snapshot DRAFT for active employees with EOBI 375/1875 totals, duplicate period 409, finalize SALARIED→JE-15 routes 6010, double-finalize 409, pay→JE-16 DR 2030/CR 1020, remit→JE-16B, finalize DAILY_WAGES→JE-15B routes 5030/5035, period lock rejects finalize, KATCHI MANAGER 403, line-item update recomputes totals, slip data endpoint)
+- `apps/api/src/modules/expenses/__tests__/expense-templates.unit.test.ts` — 5 tests (JE-17A balance, JE-17B accrual to 2040, JE-17B-PAY no expense recognition, JE-17C single replenishment JE, petty-cash voucher routing 1010)
+- `apps/api/src/modules/expenses/__tests__/expense.integration.test.ts` — 11 tests (DRAFT create EXP-YYYYMM-NNNN, OPERATOR 403, full DRAFT→APPROVED→PAID JE-17A, accrual path JE-17B then JE-17B-PAY, pay-without-approve 409, edit-after-approve 409, cancel DRAFT, petty-cash-replenish single JE, period lock rejects pay, KATCHI ACCOUNTANT 403, list filter + sequence increment)
+- `apps/api/src/modules/peshgi/__tests__/peshgi-templates.unit.test.ts` — 3 tests (JE-18 balance with party tagging, JE-19 balance, JE-19 partial)
+- `apps/api/src/modules/peshgi/__tests__/peshgi.integration.test.ts` — 8 tests (issue + JE-18, OPERATOR 403, partial repayment reduces balance, full repayment marks FULLY_RECOVERED, over-repayment 422, repayment on inactive 409, period lock rejects issue, list filtered by party + status)
 
 ## Commands
 

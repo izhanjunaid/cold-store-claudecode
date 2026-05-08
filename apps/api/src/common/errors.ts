@@ -96,4 +96,30 @@ export const Errors = {
     new AppError('PERIOD_ALREADY_LOCKED', 'Period is already locked', 409),
   PERIOD_NOT_LOCKED: () =>
     new AppError('PERIOD_NOT_LOCKED', 'Period is not currently locked', 409),
+  // Phase 8B
+  FIXED_ASSET_NOT_FOUND: () =>
+    new AppError('FIXED_ASSET_NOT_FOUND', 'Fixed asset does not exist', 404),
+  FIXED_ASSET_INVALID_STATUS: (msg: string) =>
+    new AppError('FIXED_ASSET_INVALID_STATUS', msg, 409),
+  DEPRECIATION_ALREADY_POSTED: () =>
+    new AppError('DEPRECIATION_ALREADY_POSTED', 'Depreciation already posted for this period', 409),
+  DEPRECIATION_NOTHING_TO_RUN: () =>
+    new AppError('DEPRECIATION_NOTHING_TO_RUN', 'No assets eligible for depreciation in this period', 422),
+  EMPLOYEE_NOT_FOUND: () => new AppError('EMPLOYEE_NOT_FOUND', 'Employee does not exist', 404),
+  PAYROLL_RUN_NOT_FOUND: () => new AppError('PAYROLL_RUN_NOT_FOUND', 'Payroll run does not exist', 404),
+  PAYROLL_RUN_INVALID_STATUS: (msg: string) =>
+    new AppError('PAYROLL_RUN_INVALID_STATUS', msg, 409),
+  PAYROLL_LINE_NOT_FOUND: () =>
+    new AppError('PAYROLL_LINE_NOT_FOUND', 'Payroll line item does not exist', 404),
+  PAYROLL_RUN_DUPLICATE_PERIOD: () =>
+    new AppError('PAYROLL_RUN_DUPLICATE_PERIOD', 'A payroll run already exists for this period and type', 409),
+  EXPENSE_VOUCHER_NOT_FOUND: () =>
+    new AppError('EXPENSE_VOUCHER_NOT_FOUND', 'Expense voucher does not exist', 404),
+  EXPENSE_VOUCHER_INVALID_STATUS: (msg: string) =>
+    new AppError('EXPENSE_VOUCHER_INVALID_STATUS', msg, 409),
+  PESHGI_NOT_FOUND: () => new AppError('PESHGI_NOT_FOUND', 'Peshgi loan does not exist', 404),
+  PESHGI_OVER_REPAYMENT: () =>
+    new AppError('PESHGI_OVER_REPAYMENT', 'Repayment amount exceeds outstanding loan balance', 422),
+  PESHGI_INACTIVE: () =>
+    new AppError('PESHGI_INACTIVE', 'Loan is fully recovered or written off; cannot record repayment', 409),
 } as const;

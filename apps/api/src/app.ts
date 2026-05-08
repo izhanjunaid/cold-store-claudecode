@@ -19,6 +19,10 @@ import { outboundRoutes } from './modules/outbound/outbound.controller';
 import { invoiceRoutes } from './modules/invoice/invoice.controller';
 import { paymentRoutes } from './modules/payment/payment.controller';
 import { accountingRoutes } from './modules/accounting/accounting.controller';
+import { fixedAssetRoutes } from './modules/fixed-assets/fixed-asset.controller';
+import { payrollRoutes } from './modules/payroll/payroll.controller';
+import { expenseRoutes } from './modules/expenses/expense.controller';
+import { peshgiRoutes } from './modules/peshgi/peshgi.controller';
 
 export async function buildApp() {
   const app = Fastify({
@@ -63,6 +67,10 @@ export async function buildApp() {
   await app.register(invoiceRoutes);
   await app.register(paymentRoutes);
   await app.register(accountingRoutes);
+  await app.register(fixedAssetRoutes);
+  await app.register(payrollRoutes);
+  await app.register(expenseRoutes);
+  await app.register(peshgiRoutes);
 
   return app;
 }

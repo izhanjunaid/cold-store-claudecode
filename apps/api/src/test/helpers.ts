@@ -18,6 +18,10 @@ import { outboundRoutes } from '../modules/outbound/outbound.controller';
 import { invoiceRoutes } from '../modules/invoice/invoice.controller';
 import { paymentRoutes } from '../modules/payment/payment.controller';
 import { accountingRoutes } from '../modules/accounting/accounting.controller';
+import { fixedAssetRoutes } from '../modules/fixed-assets/fixed-asset.controller';
+import { payrollRoutes } from '../modules/payroll/payroll.controller';
+import { expenseRoutes } from '../modules/expenses/expense.controller';
+import { peshgiRoutes } from '../modules/peshgi/peshgi.controller';
 import type { FastifyInstance } from 'fastify';
 
 export const TEST_FACILITY_ID = '00000000-0000-0000-0000-000000000001';
@@ -47,6 +51,10 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(invoiceRoutes);
   await testApp.register(paymentRoutes);
   await testApp.register(accountingRoutes);
+  await testApp.register(fixedAssetRoutes);
+  await testApp.register(payrollRoutes);
+  await testApp.register(expenseRoutes);
+  await testApp.register(peshgiRoutes);
   return testApp;
 }
 

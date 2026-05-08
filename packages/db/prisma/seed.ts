@@ -368,6 +368,9 @@ async function main() {
     { code: '1331', name: 'Accum. Depreciation — Vehicles', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT' },
     { code: '1340', name: 'Computer & Software', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT' },
     { code: '1341', name: 'Accum. Depreciation — Computer', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT' },
+    { code: '1350', name: 'Capital Work in Progress', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT' },
+    { code: '1360', name: 'Intangible Assets — Software', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT' },
+    { code: '1361', name: 'Accum. Amortisation — Software', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT' },
 
     // CLASS 2: LIABILITIES
     { code: '2000', name: 'Current Liabilities', cls: 'LIABILITY', type: 'HEADER', parent: null, normal: 'CREDIT' },
@@ -404,6 +407,7 @@ async function main() {
     { code: '4200', name: 'Other Income', cls: 'REVENUE', type: 'HEADER', parent: null, normal: 'CREDIT' },
     { code: '4210', name: 'Late Payment Surcharge', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT' },
     { code: '4220', name: 'Damage Settlement Received', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT' },
+    { code: '4230', name: 'Gain on Disposal of Asset', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT' },
 
     // CLASS 5: COST OF SERVICES (Direct)
     { code: '5000', name: 'Direct Operating Costs', cls: 'COST_OF_SERVICE', type: 'HEADER', parent: null, normal: 'DEBIT' },
@@ -428,6 +432,10 @@ async function main() {
     { code: '6080', name: 'Bad Debt Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
     { code: '6090', name: 'Bank Charges', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
     { code: '6100', name: 'Miscellaneous', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6110', name: 'Loss on Disposal of Asset', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6120', name: 'Depreciation — Building', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6130', name: 'Depreciation — Vehicles', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+    { code: '6140', name: 'Amortisation — Software', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
     { code: '6150', name: 'Spoilage / Damage Compensation Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
   ];
 

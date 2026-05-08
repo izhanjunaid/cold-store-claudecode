@@ -6,7 +6,7 @@ const cards = [
   {
     title: 'Chart of Accounts',
     href: '/accounting/chart-of-accounts',
-    description: 'View and manage the 73-account chart of accounts.',
+    description: 'View and manage the 81-account chart of accounts.',
   },
   {
     title: 'Journal Entries',
@@ -32,6 +32,31 @@ const cards = [
     title: 'Balance Sheet',
     href: '/accounting/reports/balance-sheet',
     description: 'Assets = Liabilities + Equity, as of any date.',
+  },
+  {
+    title: 'Fixed Assets',
+    href: '/accounting/fixed-assets',
+    description: 'Register, commission, and dispose of cold-plant, building, vehicle and computer assets.',
+  },
+  {
+    title: 'Depreciation Runs',
+    href: '/accounting/fixed-assets/runs',
+    description: 'Run monthly depreciation (JE-13) and review past runs.',
+  },
+  {
+    title: 'Employees',
+    href: '/accounting/payroll/employees',
+    description: 'Manage salaried staff and daily-wage workers, with EOBI registration.',
+  },
+  {
+    title: 'Payroll Runs',
+    href: '/accounting/payroll/runs',
+    description: 'Create monthly payroll runs, finalize JE-15/15B, pay JE-16, remit JE-16B.',
+  },
+  {
+    title: 'Expense Vouchers',
+    href: '/accounting/expenses',
+    description: 'Record, approve, accrue, and pay operating expenses (JE-17A/B/C).',
   },
 ];
 
