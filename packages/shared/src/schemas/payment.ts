@@ -1,6 +1,24 @@
 import { z } from 'zod';
 import { PaymentMethod, PaymentStatus, ClearanceStatus } from './enums';
 
+// Discriminated allocation union — accepts either an invoice or a loan target.
+// Legacy payloads `{invoice_id, allocated_amount_pkr}` are still accepted; the
+// loan variant must explicitly set target='LOAN'.
+const InvoiceAllocationLine = z.object({
+  target: z.literal('INVOICE').optional().default('INVOICE'),
+  invoice_id: z.string().uuid(),
+  allocated_amount_pkr: z.number().positive(),
+});
+
+const LoanAllocationLine = z.object({
+  target: z.literal('LOAN'),
+  loan_id: z.string().uuid(),
+  allocated_amount_pkr: z.number().positive(),
+});
+
+export const AllocationLine = z.union([LoanAllocationLine, InvoiceAllocationLine]);
+export type AllocationLineType = z.infer<typeof AllocationLine>;
+
 // CreatePaymentRequest
 export const CreatePaymentRequest = z.object({
   party_id: z.string().uuid(),
@@ -12,28 +30,13 @@ export const CreatePaymentRequest = z.object({
   cheque_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   book_type: z.enum(['PACCI', 'KATCHI']).optional().default('PACCI'),
   notes: z.string().optional(),
-  allocations: z
-    .array(
-      z.object({
-        invoice_id: z.string().uuid(),
-        allocated_amount_pkr: z.number().positive(),
-      }),
-    )
-    .optional()
-    .default([]),
+  allocations: z.array(AllocationLine).optional().default([]),
 });
 export type CreatePaymentRequestType = z.infer<typeof CreatePaymentRequest>;
 
 // AllocatePaymentRequest — add allocations to an existing payment
 export const AllocatePaymentRequest = z.object({
-  allocations: z
-    .array(
-      z.object({
-        invoice_id: z.string().uuid(),
-        allocated_amount_pkr: z.number().positive(),
-      }),
-    )
-    .min(1),
+  allocations: z.array(AllocationLine).min(1),
 });
 export type AllocatePaymentRequestType = z.infer<typeof AllocatePaymentRequest>;
 
@@ -59,8 +62,11 @@ export type PaymentListQueryType = z.infer<typeof PaymentListQuery>;
 export const PaymentAllocationResponse = z.object({
   id: z.string().uuid(),
   payment_id: z.string().uuid(),
-  invoice_id: z.string().uuid(),
+  target: z.enum(['INVOICE', 'LOAN']),
+  invoice_id: z.string().uuid().nullable(),
   invoice_number: z.string().nullable(),
+  loan_id: z.string().uuid().nullable(),
+  loan_number: z.string().nullable(),
   allocated_amount_pkr: z.number(),
 });
 export type PaymentAllocationResponseType = z.infer<typeof PaymentAllocationResponse>;

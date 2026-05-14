@@ -179,6 +179,7 @@ enum EntryType {
   EXPENSE
   PESHGI_ISSUE
   PESHGI_RECOVERY
+  PESHGI_WRITE_OFF
 }
 
 enum PostingStatus {
@@ -255,8 +256,30 @@ enum ExpensePaymentMethod {
 
 enum PartyLoanStatus {
   ACTIVE
-  FULLY_RECOVERED
+  RECOVERED
   WRITTEN_OFF
+}
+
+enum RepaymentMethod {
+  CASH
+  BANK_TRANSFER
+  DEDUCTED_FROM_PRODUCE
+}
+
+// ============================================================
+// ENUMS (Phase 9 — Gate Pass + Peshgi UI)
+// ============================================================
+
+enum GatePassDirection {
+  INWARD
+  OUTWARD
+}
+
+enum GatePassStatus {
+  ARRIVED
+  WEIGHING
+  CLEARED
+  CANCELLED
 }
 
 // ============================================================
@@ -296,6 +319,7 @@ model Facility {
   payrollRuns     PayrollRun[]
   expenseVouchers ExpenseVoucher[]
   partyLoans      PartyLoan[]
+  gatePasses      GatePass[]
 
   @@map("facilities")
 }
@@ -337,6 +361,7 @@ model User {
   expenseVouchersApproved ExpenseVoucher[]     @relation("ExpenseVoucherApprovedBy")
   partyLoansCreated       PartyLoan[]          @relation("PartyLoanCreatedBy")
   loanRepaymentsCreated   PartyLoanRepayment[] @relation("PartyLoanRepaymentCreatedBy")
+  gatePassesCreated       GatePass[]           @relation("GatePassCreatedBy")
 
   @@unique([facilityId, email])
   @@map("users")
@@ -568,6 +593,7 @@ model Lot {
   outboundEvents    OutboundEvent[]
   invoices          Invoice[]
   journalEntryLines JournalEntryLine[]
+  gatePasses        GatePass[]
 
   @@unique([facilityId, lotNumber])
   @@index([facilityId, status])
@@ -619,11 +645,12 @@ model OutboundEvent {
   createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz()
   createdBy             String         @map("created_by") @db.Uuid
 
-  lot            Lot      @relation(fields: [lotId], references: [id])
-  facility       Facility @relation(fields: [facilityId], references: [id])
-  receivingParty Party?   @relation("OutboundReceiver", fields: [receivingPartyId], references: [id])
-  createdByUser  User     @relation("OutboundCreatedBy", fields: [createdBy], references: [id])
+  lot            Lot        @relation(fields: [lotId], references: [id])
+  facility       Facility   @relation(fields: [facilityId], references: [id])
+  receivingParty Party?     @relation("OutboundReceiver", fields: [receivingPartyId], references: [id])
+  createdByUser  User       @relation("OutboundCreatedBy", fields: [createdBy], references: [id])
   invoice        Invoice?
+  gatePasses     GatePass[]
 
   @@unique([facilityId, dispatchNoteNumber])
   @@index([lotId])
@@ -722,11 +749,12 @@ model Payment {
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz()
   createdBy        String          @map("created_by") @db.Uuid
 
-  facility      Facility            @relation(fields: [facilityId], references: [id])
-  party         Party               @relation(fields: [partyId], references: [id])
-  createdByUser User                @relation("PaymentCreatedBy", fields: [createdBy], references: [id])
-  journalEntry  JournalEntry?       @relation("PaymentJournalEntry", fields: [journalEntryId], references: [id])
-  allocations   PaymentAllocation[]
+  facility       Facility             @relation(fields: [facilityId], references: [id])
+  party          Party                @relation(fields: [partyId], references: [id])
+  createdByUser  User                 @relation("PaymentCreatedBy", fields: [createdBy], references: [id])
+  journalEntry   JournalEntry?        @relation("PaymentJournalEntry", fields: [journalEntryId], references: [id])
+  allocations    PaymentAllocation[]
+  loanRepayments PartyLoanRepayment[] @relation("PartyLoanRepaymentPayment")
 
   @@index([facilityId, partyId])
   @@index([facilityId, status])
@@ -737,14 +765,17 @@ model Payment {
 model PaymentAllocation {
   id                 String  @id @default(uuid()) @db.Uuid
   paymentId          String  @map("payment_id") @db.Uuid
-  invoiceId          String  @map("invoice_id") @db.Uuid
+  invoiceId          String? @map("invoice_id") @db.Uuid
+  loanId             String? @map("loan_id") @db.Uuid
   allocatedAmountPkr Decimal @map("allocated_amount_pkr") @db.Decimal(12, 2)
 
-  payment Payment @relation(fields: [paymentId], references: [id])
-  invoice Invoice @relation(fields: [invoiceId], references: [id])
+  payment Payment    @relation(fields: [paymentId], references: [id])
+  invoice Invoice?   @relation(fields: [invoiceId], references: [id])
+  loan    PartyLoan? @relation(fields: [loanId], references: [id])
 
   @@index([paymentId])
   @@index([invoiceId])
+  @@index([loanId])
   @@map("payment_allocations")
 }
 
@@ -808,6 +839,7 @@ model JournalEntry {
   expenseAccrual        ExpenseVoucher?        @relation("ExpenseVoucherAccrualJE")
   expensePayment        ExpenseVoucher?        @relation("ExpenseVoucherPaymentJE")
   partyLoanIssue        PartyLoan?             @relation("PartyLoanIssueJE")
+  partyLoanWriteOff     PartyLoan?             @relation("PartyLoanWriteOffJE")
   partyLoanRepayment    PartyLoanRepayment?    @relation("PartyLoanRepaymentJE")
 
   @@unique([facilityId, entryNumber])
@@ -1102,15 +1134,20 @@ model PartyLoan {
   bookType               BookType        @default(PACCI) @map("book_type")
   sourceAssetAccountCode String          @map("source_asset_account_code") @db.VarChar(10)
   issueJournalEntryId    String?         @unique @map("issue_journal_entry_id") @db.Uuid
+  writeOffJournalEntryId String?         @unique @map("write_off_journal_entry_id") @db.Uuid
+  writeOffReason         String?         @map("write_off_reason") @db.Text
+  writeOffAt             DateTime?       @map("write_off_at") @db.Timestamptz()
   notes                  String?         @db.Text
   createdAt              DateTime        @default(now()) @map("created_at") @db.Timestamptz()
   createdBy              String          @map("created_by") @db.Uuid
 
-  facility          Facility             @relation(fields: [facilityId], references: [id])
-  party             Party                @relation(fields: [partyId], references: [id])
-  createdByUser     User                 @relation("PartyLoanCreatedBy", fields: [createdBy], references: [id])
-  issueJournalEntry JournalEntry?        @relation("PartyLoanIssueJE", fields: [issueJournalEntryId], references: [id])
-  repayments        PartyLoanRepayment[]
+  facility             Facility             @relation(fields: [facilityId], references: [id])
+  party                Party                @relation(fields: [partyId], references: [id])
+  createdByUser        User                 @relation("PartyLoanCreatedBy", fields: [createdBy], references: [id])
+  issueJournalEntry    JournalEntry?        @relation("PartyLoanIssueJE", fields: [issueJournalEntryId], references: [id])
+  writeOffJournalEntry JournalEntry?        @relation("PartyLoanWriteOffJE", fields: [writeOffJournalEntryId], references: [id])
+  repayments           PartyLoanRepayment[]
+  paymentAllocations   PaymentAllocation[]
 
   @@unique([facilityId, loanNumber])
   @@index([facilityId, partyId])
@@ -1119,21 +1156,58 @@ model PartyLoan {
 }
 
 model PartyLoanRepayment {
-  id               String               @id @default(uuid()) @db.Uuid
-  loanId           String               @map("loan_id") @db.Uuid
-  repaymentDate    DateTime             @map("repayment_date") @db.Date
-  amountPkr        Decimal              @map("amount_pkr") @db.Decimal(12, 2)
-  paymentMethod    ExpensePaymentMethod @map("payment_method")
-  assetAccountCode String               @map("asset_account_code") @db.VarChar(10)
-  journalEntryId   String?              @unique @map("journal_entry_id") @db.Uuid
-  notes            String?              @db.Text
-  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz()
-  createdBy        String               @map("created_by") @db.Uuid
+  id               String          @id @default(uuid()) @db.Uuid
+  loanId           String          @map("loan_id") @db.Uuid
+  repaymentDate    DateTime        @map("repayment_date") @db.Date
+  amountPkr        Decimal         @map("amount_pkr") @db.Decimal(12, 2)
+  paymentMethod    RepaymentMethod @map("payment_method")
+  assetAccountCode String?         @map("asset_account_code") @db.VarChar(10)
+  paymentId        String?         @map("payment_id") @db.Uuid
+  journalEntryId   String?         @unique @map("journal_entry_id") @db.Uuid
+  notes            String?         @db.Text
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy        String          @map("created_by") @db.Uuid
 
   loan          PartyLoan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  payment       Payment?      @relation("PartyLoanRepaymentPayment", fields: [paymentId], references: [id])
   createdByUser User          @relation("PartyLoanRepaymentCreatedBy", fields: [createdBy], references: [id])
   journalEntry  JournalEntry? @relation("PartyLoanRepaymentJE", fields: [journalEntryId], references: [id])
 
   @@index([loanId])
+  @@index([paymentId])
   @@map("party_loan_repayments")
+}
+
+// ============================================================
+// PHASE 9: GATE PASSES (Migration 0010)
+// ============================================================
+
+model GatePass {
+  id                String            @id @default(uuid()) @db.Uuid
+  facilityId        String            @map("facility_id") @db.Uuid
+  passNumber        String            @map("pass_number") @db.VarChar(30)
+  direction         GatePassDirection
+  vehicleNumber     String            @map("vehicle_number") @db.VarChar(30)
+  driverName        String?           @map("driver_name") @db.VarChar(100)
+  driverPhone       String?           @map("driver_phone") @db.VarChar(20)
+  biltyNumber       String?           @map("bilty_number") @db.VarChar(50)
+  status            GatePassStatus    @default(ARRIVED)
+  relatedLotId      String?           @map("related_lot_id") @db.Uuid
+  relatedOutboundId String?           @map("related_outbound_id") @db.Uuid
+  notes             String?           @db.Text
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  clearedAt         DateTime?         @map("cleared_at") @db.Timestamptz()
+  createdBy         String            @map("created_by") @db.Uuid
+
+  facility        Facility       @relation(fields: [facilityId], references: [id])
+  relatedLot      Lot?           @relation(fields: [relatedLotId], references: [id])
+  relatedOutbound OutboundEvent? @relation(fields: [relatedOutboundId], references: [id])
+  createdByUser   User           @relation("GatePassCreatedBy", fields: [createdBy], references: [id])
+
+  @@unique([facilityId, passNumber])
+  @@index([facilityId, status])
+  @@index([facilityId, vehicleNumber])
+  @@index([relatedLotId])
+  @@index([relatedOutboundId])
+  @@map("gate_passes")
 }

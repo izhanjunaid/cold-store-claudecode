@@ -45,6 +45,7 @@
 | 7 | — | 12 | 1 | 13 | ALL PASS |
 | 8A | 16 | 24 | — | 40 | ALL PASS |
 | 8B | 34 | 46 | — | 80 | ALL PASS |
+| 9 | 6 | 21 | — | 27 | ALL PASS |
 
 ### Phase 0 Tests
 - `apps/api/src/common/jwt.test.ts` — 4 tests (sign/verify access & refresh tokens)
@@ -91,8 +92,14 @@
 - `apps/api/src/modules/payroll/__tests__/payroll.integration.test.ts` — 14 tests (employee CRUD, OPERATOR 403, SALARIED requires basic_salary, snapshot DRAFT for active employees with EOBI 375/1875 totals, duplicate period 409, finalize SALARIED→JE-15 routes 6010, double-finalize 409, pay→JE-16 DR 2030/CR 1020, remit→JE-16B, finalize DAILY_WAGES→JE-15B routes 5030/5035, period lock rejects finalize, KATCHI MANAGER 403, line-item update recomputes totals, slip data endpoint)
 - `apps/api/src/modules/expenses/__tests__/expense-templates.unit.test.ts` — 5 tests (JE-17A balance, JE-17B accrual to 2040, JE-17B-PAY no expense recognition, JE-17C single replenishment JE, petty-cash voucher routing 1010)
 - `apps/api/src/modules/expenses/__tests__/expense.integration.test.ts` — 11 tests (DRAFT create EXP-YYYYMM-NNNN, OPERATOR 403, full DRAFT→APPROVED→PAID JE-17A, accrual path JE-17B then JE-17B-PAY, pay-without-approve 409, edit-after-approve 409, cancel DRAFT, petty-cash-replenish single JE, period lock rejects pay, KATCHI ACCOUNTANT 403, list filter + sequence increment)
-- `apps/api/src/modules/peshgi/__tests__/peshgi-templates.unit.test.ts` — 3 tests (JE-18 balance with party tagging, JE-19 balance, JE-19 partial)
-- `apps/api/src/modules/peshgi/__tests__/peshgi.integration.test.ts` — 8 tests (issue + JE-18, OPERATOR 403, partial repayment reduces balance, full repayment marks FULLY_RECOVERED, over-repayment 422, repayment on inactive 409, period lock rejects issue, list filtered by party + status)
+- `apps/api/src/modules/peshgi/__tests__/peshgi-templates.unit.test.ts` — 3 tests (JE-18 balance with party tagging, JE-19 balance, JE-19 partial). **Phase 9 update: loan numbers now `L-YYMMDD-NNN`.**
+- `apps/api/src/modules/peshgi/__tests__/peshgi.integration.test.ts` — **Rewritten in Phase 9** — 12 tests (issue with `L-YYMMDD-NNN` + JE-18, BANK_TRANSFER routes to 1020, OPERATOR 403, MANAGER repayment, ACCOUNTANT 403 on repayment, full repayment→`RECOVERED`, over-repayment 422, repayment on inactive 409, write-off JE-20 happy path, write-off non-OWNER 403, write-off already-closed 409, period lock 409, list filtering, JSON acknowledgment).
+
+### Phase 9 Tests
+- `apps/api/src/modules/peshgi/__tests__/peshgi-write-off-template.unit.test.ts` — 3 tests (JE-20 DR 6080 / CR 1140 balance with party tagging, fractional rounding, `L-YYMMDD-NNN` format / prefix sanity).
+- `apps/api/src/modules/gate-pass/__tests__/gate-pass-number.unit.test.ts` — 3 tests (`GP-YYMMDD-NNNN` format with 4-digit pad, prefix excludes sequence, day rollover changes prefix).
+- `apps/api/src/modules/gate-pass/__tests__/gate-pass.integration.test.ts` — 7 tests (SECURITY logs inward with GP-YYMMDD-NNNN + uppercase vehicle + ARRIVED, OPERATOR link-lot transitions to WEIGHING, SECURITY cannot link-lot 403, paid invoice → CLEARED with `turnaround_seconds > 0`, finalized-unpaid → 422 GATE_OUTWARD_BLOCKED, MANAGER credit_authorization clears, SECURITY credit_authorization 403 GATE_CREDIT_AUTH_REQUIRES_MANAGER, list active passes).
+- `apps/api/src/modules/payment/payment.integration.test.ts` (combined-settlement section) — 4 tests (one payment splits 50k invoice + 100k loan, posts JE-19 once, loan→RECOVERED, balance_due=0; loan over-allocation 422 PESHGI_OVER_REPAYMENT; loan party mismatch 422 PAYMENT_PARTY_MISMATCH; allocating to WRITTEN_OFF loan 409 PESHGI_INACTIVE).
 
 ## Commands
 

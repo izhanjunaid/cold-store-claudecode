@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { apiClient } from '@/lib/api-client';
+import { defaultRouteForRole } from '@/lib/auth-redirect';
 
 interface LoginResponse {
   access_token: string;
@@ -40,7 +41,7 @@ export default function LoginPage() {
       });
 
       setUser(result.user, result.access_token, result.refresh_token);
-      router.push('/dashboard');
+      router.push(defaultRouteForRole(result.user.role));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {

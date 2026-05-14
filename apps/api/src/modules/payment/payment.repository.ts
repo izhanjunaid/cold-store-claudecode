@@ -6,6 +6,7 @@ const paymentInclude = {
   allocations: {
     include: {
       invoice: { select: { invoiceNumber: true } },
+      loan: { select: { loanNumber: true } },
     },
   },
 } satisfies Prisma.PaymentInclude;

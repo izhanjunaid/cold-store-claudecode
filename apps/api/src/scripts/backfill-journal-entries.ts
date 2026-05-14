@@ -160,6 +160,7 @@ async function main() {
       // For ADVANCE payments that have already been allocated, post JE-04 per allocation
       if (pay.isAdvance && pay.allocations.length > 0) {
         for (const alloc of pay.allocations) {
+          if (!alloc.invoice) continue; // Phase 9: loan-targeted allocations don't apply here
           const draft = buildJE04AdvanceApplied({
             paymentId: pay.id,
             invoiceId: alloc.invoice.id,

@@ -496,3 +496,171 @@ describe('Payment — Financial Ledger', () => {
     expect(ledger.closing_balance_pkr).toBe(totalPkr - 600);
   });
 });
+
+describe('Phase 9 — Combined settlement (invoice + loan)', () => {
+  async function issueLoan(partyId: string, amount: number, date: string) {
+    const ownerLogin = await loginAsRole(app, 'OWNER');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/loans/issue',
+      headers: authHeaders(ownerLogin.accessToken),
+      payload: {
+        party_id: partyId,
+        issue_date: date,
+        principal_pkr: amount,
+        payment_method: 'CASH',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    return JSON.parse(res.body).data;
+  }
+
+  async function cleanLoans() {
+    await prisma.paymentAllocation.deleteMany({ where: { loanId: { not: null } } });
+    await prisma.partyLoanRepayment.deleteMany({ where: { loan: { facilityId: TEST_FACILITY_ID } } });
+    await prisma.partyLoan.updateMany({
+      where: { facilityId: TEST_FACILITY_ID },
+      data: { issueJournalEntryId: null, writeOffJournalEntryId: null },
+    });
+    await prisma.partyLoan.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+  }
+
+  it('one payment allocates across invoice + loan in one transaction', async () => {
+    await cleanLoans();
+    const partyId = await createParty('Combined Settle Party', '03001099001');
+    const lot = await createLot({ ownerPartyId: partyId, quantity: 10, inboundDate: '2026-03-01' });
+    const invoiceId = await finalizeOutbound({ lotId: lot.id, quantity: 10, outboundDate: '2026-09-01' });
+    const total = await finalizeInvoice(invoiceId);
+
+    const loan = await issueLoan(partyId, 100000, '2026-04-10');
+
+    const totalPayment = total + 100000;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: partyId,
+        payment_date: '2026-09-01',
+        amount_pkr: totalPayment,
+        payment_method: 'CASH',
+        allocations: [
+          { invoice_id: invoiceId, allocated_amount_pkr: total },
+          { target: 'LOAN', loan_id: loan.id, allocated_amount_pkr: 100000 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const payment = JSON.parse(res.body).data;
+    expect(payment.allocations).toHaveLength(2);
+
+    const invoiceAlloc = payment.allocations.find((a: any) => a.target === 'INVOICE');
+    const loanAlloc = payment.allocations.find((a: any) => a.target === 'LOAN');
+    expect(invoiceAlloc.invoice_id).toBe(invoiceId);
+    expect(loanAlloc.loan_id).toBe(loan.id);
+    expect(loanAlloc.loan_number).toBe(loan.loan_number);
+
+    const loanRes = await app.inject({
+      method: 'GET',
+      url: `/v1/loans/${loan.id}`,
+      headers: authHeaders(accountantToken),
+    });
+    const loanData = JSON.parse(loanRes.body).data;
+    expect(loanData.status).toBe('RECOVERED');
+    expect(loanData.balance_outstanding_pkr).toBe(0);
+    expect(loanData.repayments).toHaveLength(1);
+    expect(loanData.repayments[0].payment_method).toBe('DEDUCTED_FROM_PRODUCE');
+    expect(loanData.repayments[0].journal_entry_id).toBeTruthy();
+
+    const je19 = await prisma.journalEntry.findUnique({
+      where: { id: loanData.repayments[0].journal_entry_id },
+      include: { lines: true },
+    });
+    expect(je19?.entryType).toBe('PESHGI_RECOVERY');
+    expect(je19?.lines.find((l) => l.accountCode === '1140')?.creditAmount.toString()).toBe('100000');
+
+    const invRes = await app.inject({
+      method: 'GET',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(accountantToken),
+    });
+    expect(JSON.parse(invRes.body).data.balance_due_pkr).toBe(0);
+  });
+
+  it('rejects loan allocation exceeding outstanding balance', async () => {
+    await cleanLoans();
+    const partyId = await createParty('Over Allocate', '03001099002');
+    const loan = await issueLoan(partyId, 50000, '2026-04-10');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: partyId,
+        payment_date: '2026-09-01',
+        amount_pkr: 60000,
+        payment_method: 'CASH',
+        allocations: [
+          { target: 'LOAN', loan_id: loan.id, allocated_amount_pkr: 60000 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error.code).toBe('PESHGI_OVER_REPAYMENT');
+  });
+
+  it('rejects loan allocation when loan party does not match payment party', async () => {
+    await cleanLoans();
+    const partyA = await createParty('Loan Belongs To A', '03001099003');
+    const partyB = await createParty('Payer B', '03001099004');
+    const loan = await issueLoan(partyA, 25000, '2026-04-10');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: partyB,
+        payment_date: '2026-09-01',
+        amount_pkr: 25000,
+        payment_method: 'CASH',
+        allocations: [
+          { target: 'LOAN', loan_id: loan.id, allocated_amount_pkr: 25000 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error.code).toBe('PAYMENT_PARTY_MISMATCH');
+  });
+
+  it('rejects loan allocation when loan is WRITTEN_OFF', async () => {
+    await cleanLoans();
+    const partyId = await createParty('Inactive Loan', '03001099005');
+    const loan = await issueLoan(partyId, 30000, '2026-04-10');
+    const ownerLogin = await loginAsRole(app, 'OWNER');
+    await app.inject({
+      method: 'POST',
+      url: `/v1/loans/${loan.id}/write-off`,
+      headers: authHeaders(ownerLogin.accessToken),
+      payload: { reason: 'unrecoverable' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: partyId,
+        payment_date: '2026-09-01',
+        amount_pkr: 30000,
+        payment_method: 'CASH',
+        allocations: [
+          { target: 'LOAN', loan_id: loan.id, allocated_amount_pkr: 30000 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('PESHGI_INACTIVE');
+  });
+});

@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@coldchain/db';
+import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { PaymentRepository, type PaymentWithRelations } from './payment.repository';
 import type { JournalEntryService } from '../accounting/journal-entry.service';
@@ -7,11 +7,13 @@ import { buildJE03AdvanceReceived } from '../accounting/templates/je-03-advance-
 import { buildJE04AdvanceApplied } from '../accounting/templates/je-04-advance-applied';
 import { buildJE06ChequeDishonoured } from '../accounting/templates/je-06-cheque-dishonoured';
 import { assetAccountForPaymentMethod } from '../accounting/templates/types';
+import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recovered';
 
-function toNumber(d: { toString(): string } | null | undefined): number | null {
-  if (d == null) return null;
-  return Number(d);
-}
+// Internal allocation shape used by service. Controller normalises legacy
+// `{invoice_id, allocated_amount_pkr}` payloads into INVOICE-targeted lines.
+type AllocationInput =
+  | { target: 'INVOICE'; invoice_id: string; allocated_amount_pkr: number }
+  | { target: 'LOAN'; loan_id: string; allocated_amount_pkr: number };
 
 function formatPayment(p: PaymentWithRelations) {
   return {
@@ -34,8 +36,11 @@ function formatPayment(p: PaymentWithRelations) {
     allocations: p.allocations.map((a) => ({
       id: a.id,
       payment_id: a.paymentId,
-      invoice_id: a.invoiceId,
-      invoice_number: a.invoice.invoiceNumber ?? null,
+      target: (a.invoiceId ? 'INVOICE' : 'LOAN') as 'INVOICE' | 'LOAN',
+      invoice_id: a.invoiceId ?? null,
+      invoice_number: a.invoice?.invoiceNumber ?? null,
+      loan_id: a.loanId ?? null,
+      loan_number: a.loan?.loanNumber ?? null,
       allocated_amount_pkr: Number(a.allocatedAmountPkr),
     })),
   };
@@ -60,10 +65,9 @@ export class PaymentService {
     chequeDate?: string;
     bookType?: string;
     notes?: string;
-    allocations?: { invoice_id: string; allocated_amount_pkr: number }[];
+    allocations?: AllocationInput[];
   }) {
     return this.prisma.$transaction(async (tx) => {
-      // Validate party exists in facility
       const party = await tx.party.findFirst({
         where: { id: params.partyId, facilityId: params.facilityId },
       });
@@ -72,41 +76,25 @@ export class PaymentService {
       const isAdvance = params.isAdvance ?? false;
       const allocations = isAdvance ? [] : (params.allocations ?? []);
 
-      // Validate allocation total <= amount
       const allocTotal = allocations.reduce((s, a) => s + a.allocated_amount_pkr, 0);
       if (allocTotal > params.amountPkr + 0.001) {
         throw Errors.PAYMENT_OVER_ALLOCATED();
       }
 
-      // Validate and row-lock each invoice
+      // Pre-validate each allocation (row-locking targets).
       for (const alloc of allocations) {
-        const rows = await tx.$queryRawUnsafe<
-          { id: string; status: string; billing_party_id: string; total_pkr: string; amount_paid_pkr: string }[]
-        >(
-          `SELECT id, status, billing_party_id, total_pkr, amount_paid_pkr FROM invoices WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-          alloc.invoice_id,
-          params.facilityId,
-        );
-        const inv = rows[0];
-        if (!inv) throw Errors.INVOICE_NOT_FOUND();
-        if (inv.status !== 'FINALIZED') {
-          throw Errors.VALIDATION_ERROR('Only FINALIZED invoices can be allocated', 'invoice_id');
-        }
-        if (inv.billing_party_id !== params.partyId) throw Errors.PAYMENT_PARTY_MISMATCH();
-        const balanceDue = Number(inv.total_pkr) - Number(inv.amount_paid_pkr);
-        if (alloc.allocated_amount_pkr > balanceDue + 0.001) {
-          throw Errors.PAYMENT_EXCEEDS_INVOICE_BALANCE();
+        if (alloc.target === 'INVOICE') {
+          await validateInvoiceAllocation(tx, params.facilityId, params.partyId, alloc);
+        } else {
+          await validateLoanAllocation(tx, params.facilityId, params.partyId, alloc);
         }
       }
 
-      // Determine status
       let status: 'RECORDED' | 'ALLOCATED' | 'ADVANCE' = 'RECORDED';
       if (isAdvance) status = 'ADVANCE';
       else if (allocations.length > 0) status = 'ALLOCATED';
 
-      // Determine clearance status
       const clearanceStatus = params.paymentMethod === 'CHEQUE' ? 'CLEARED' : 'NA';
-
       const assetAccountCode = assetAccountForPaymentMethod(params.paymentMethod);
       const bookType = ((params.bookType as 'PACCI' | 'KATCHI' | undefined) ?? 'PACCI');
 
@@ -126,22 +114,35 @@ export class PaymentService {
         notes: params.notes ?? null,
         createdBy: params.createdBy,
         allocations: {
-          create: allocations.map((a) => ({
-            invoiceId: a.invoice_id,
-            allocatedAmountPkr: a.allocated_amount_pkr,
-          })),
+          create: allocations.map((a) =>
+            a.target === 'INVOICE'
+              ? { invoiceId: a.invoice_id, allocatedAmountPkr: a.allocated_amount_pkr }
+              : { loanId: a.loan_id, allocatedAmountPkr: a.allocated_amount_pkr },
+          ),
         },
       });
 
-      // Update invoice amountPaidPkr for each allocation
+      // Apply each allocation: invoice increments amount_paid; loan decrements balance + posts JE-19.
       for (const alloc of allocations) {
-        await tx.invoice.update({
-          where: { id: alloc.invoice_id },
-          data: { amountPaidPkr: { increment: alloc.allocated_amount_pkr } },
-        });
+        if (alloc.target === 'INVOICE') {
+          await tx.invoice.update({
+            where: { id: alloc.invoice_id },
+            data: { amountPaidPkr: { increment: alloc.allocated_amount_pkr } },
+          });
+        } else {
+          await this.applyLoanAllocation(
+            tx,
+            params.facilityId,
+            params.createdBy,
+            payment.id,
+            assetAccountCode,
+            new Date(params.paymentDate),
+            alloc,
+          );
+        }
       }
 
-      // Phase 8: post JE-02 (regular) or JE-03 (advance) inside the same transaction.
+      // Post JE-02 (regular) or JE-03 (advance) for the cash receipt itself.
       if (this.journalEntry) {
         const draft = isAdvance
           ? buildJE03AdvanceReceived({
@@ -224,15 +225,14 @@ export class PaymentService {
   async allocate(
     facilityId: string,
     id: string,
-    allocations: { invoice_id: string; allocated_amount_pkr: number }[],
+    allocations: AllocationInput[],
     userId?: string,
   ) {
     return this.prisma.$transaction(async (tx) => {
-      // Row-lock the payment
       const rows = await tx.$queryRawUnsafe<
-        { id: string; status: string; amount_pkr: string; party_id: string }[]
+        { id: string; status: string; amount_pkr: string; party_id: string; asset_account_code: string | null; payment_date: Date; book_type: string }[]
       >(
-        `SELECT id, status, amount_pkr, party_id FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+        `SELECT id, status, amount_pkr, party_id, asset_account_code, payment_date, book_type FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
         id,
         facilityId,
       );
@@ -240,7 +240,6 @@ export class PaymentService {
       if (!paymentRow) throw Errors.PAYMENT_NOT_FOUND();
       if (paymentRow.status === 'DISHONOURED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
 
-      // Get existing allocations total
       const existing = await tx.paymentAllocation.findMany({
         where: { paymentId: id },
         select: { allocatedAmountPkr: true },
@@ -252,59 +251,53 @@ export class PaymentService {
         throw Errors.PAYMENT_OVER_ALLOCATED();
       }
 
-      // Validate and lock each invoice
       for (const alloc of allocations) {
-        const invRows = await tx.$queryRawUnsafe<
-          { id: string; status: string; billing_party_id: string; total_pkr: string; amount_paid_pkr: string }[]
-        >(
-          `SELECT id, status, billing_party_id, total_pkr, amount_paid_pkr FROM invoices WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-          alloc.invoice_id,
-          facilityId,
-        );
-        const inv = invRows[0];
-        if (!inv) throw Errors.INVOICE_NOT_FOUND();
-        if (inv.status !== 'FINALIZED') {
-          throw Errors.VALIDATION_ERROR('Only FINALIZED invoices can be allocated', 'invoice_id');
-        }
-        if (inv.billing_party_id !== paymentRow.party_id) throw Errors.PAYMENT_PARTY_MISMATCH();
-        const balanceDue = Number(inv.total_pkr) - Number(inv.amount_paid_pkr);
-        if (alloc.allocated_amount_pkr > balanceDue + 0.001) {
-          throw Errors.PAYMENT_EXCEEDS_INVOICE_BALANCE();
+        if (alloc.target === 'INVOICE') {
+          await validateInvoiceAllocation(tx, facilityId, paymentRow.party_id, alloc);
+        } else {
+          await validateLoanAllocation(tx, facilityId, paymentRow.party_id, alloc);
         }
       }
 
-      // Create allocations
       const previousStatus = paymentRow.status;
+      const paymentDate = new Date(paymentRow.payment_date);
+      const bookType = (paymentRow.book_type ?? 'PACCI') as 'PACCI' | 'KATCHI';
+      const assetAccountCode = paymentRow.asset_account_code ?? '1010';
+
       for (const alloc of allocations) {
-        await tx.paymentAllocation.create({
-          data: {
-            paymentId: id,
-            invoiceId: alloc.invoice_id,
-            allocatedAmountPkr: alloc.allocated_amount_pkr,
-          },
-        });
-        await tx.invoice.update({
-          where: { id: alloc.invoice_id },
-          data: { amountPaidPkr: { increment: alloc.allocated_amount_pkr } },
-        });
+        if (alloc.target === 'INVOICE') {
+          await tx.paymentAllocation.create({
+            data: {
+              paymentId: id,
+              invoiceId: alloc.invoice_id,
+              allocatedAmountPkr: alloc.allocated_amount_pkr,
+            },
+          });
+          await tx.invoice.update({
+            where: { id: alloc.invoice_id },
+            data: { amountPaidPkr: { increment: alloc.allocated_amount_pkr } },
+          });
+        } else {
+          await this.applyLoanAllocation(
+            tx,
+            facilityId,
+            userId ?? paymentRow.party_id,
+            id,
+            assetAccountCode,
+            paymentDate,
+            alloc,
+          );
+        }
       }
 
-      // Phase 8: if this was an ADVANCE payment, posting allocations triggers JE-04 per invoice.
-      // Regular payments don't post additional JE on allocate — JE-02 already covered the cash receipt;
-      // allocations are sub-ledger detail (which invoice the cash is applied to).
+      // ADVANCE → applying to invoices triggers JE-04 per invoice line.
       if (this.journalEntry && previousStatus === 'ADVANCE') {
         const partyRow = await tx.party.findFirstOrThrow({
           where: { id: paymentRow.party_id },
           select: { id: true, name: true, partyType: true },
         });
-        const paymentDateRows = await tx.$queryRawUnsafe<{ payment_date: Date; book_type: string }[]>(
-          `SELECT payment_date, book_type FROM payments WHERE id = $1::uuid`,
-          id,
-        );
-        const paymentDate = new Date(paymentDateRows[0]?.payment_date ?? new Date());
-        const bookType = (paymentDateRows[0]?.book_type ?? 'PACCI') as 'PACCI' | 'KATCHI';
-
         for (const alloc of allocations) {
+          if (alloc.target !== 'INVOICE') continue;
           const invRow = await tx.invoice.findFirstOrThrow({
             where: { id: alloc.invoice_id },
             select: { id: true, invoiceNumber: true },
@@ -345,23 +338,48 @@ export class PaymentService {
       if (fullPayment.status === 'DISHONOURED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
       if (fullPayment.paymentMethod !== 'CHEQUE') throw Errors.PAYMENT_NOT_CHEQUE();
 
-      // Row-lock to prevent concurrent dishonour
       await tx.$queryRawUnsafe(
         `SELECT id FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
         id,
         facilityId,
       );
 
-      // Reverse all allocations
       const allocations = await tx.paymentAllocation.findMany({
         where: { paymentId: id },
       });
 
       for (const alloc of allocations) {
-        await tx.invoice.update({
-          where: { id: alloc.invoiceId },
-          data: { amountPaidPkr: { decrement: Number(alloc.allocatedAmountPkr) } },
-        });
+        if (alloc.invoiceId) {
+          await tx.invoice.update({
+            where: { id: alloc.invoiceId },
+            data: { amountPaidPkr: { decrement: Number(alloc.allocatedAmountPkr) } },
+          });
+        } else if (alloc.loanId) {
+          // Reverse loan allocation: increment balance, revert status to ACTIVE if needed,
+          // remove the linked PartyLoanRepayment + its JE.
+          await tx.$queryRawUnsafe(
+            `SELECT id FROM party_loans WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+            alloc.loanId,
+            facilityId,
+          );
+          const loan = await tx.partyLoan.findFirstOrThrow({
+            where: { id: alloc.loanId, facilityId },
+          });
+          const newBalance = round2(
+            Number(loan.balanceOutstandingPkr) + Number(alloc.allocatedAmountPkr),
+          );
+          await tx.partyLoan.update({
+            where: { id: alloc.loanId },
+            data: {
+              balanceOutstandingPkr: newBalance,
+              status: 'ACTIVE',
+            },
+          });
+          // Wipe the matching repayment row(s)
+          await tx.partyLoanRepayment.deleteMany({
+            where: { loanId: alloc.loanId, paymentId: id },
+          });
+        }
       }
 
       await tx.paymentAllocation.deleteMany({ where: { paymentId: id } });
@@ -372,7 +390,6 @@ export class PaymentService {
         ...(notes ? { notes } : {}),
       });
 
-      // Phase 8: post JE-06 (reversal) and mark the original JE-02 as REVERSED.
       if (this.journalEntry) {
         const draft = buildJE06ChequeDishonoured({
           paymentId: id,
@@ -404,7 +421,6 @@ export class PaymentService {
     });
     if (!party) throw Errors.PARTY_NOT_FOUND();
 
-    // Fetch all finalized invoices for this party (debits)
     const invoices = await this.prisma.invoice.findMany({
       where: { facilityId, billingPartyId: partyId, status: 'FINALIZED' },
       select: {
@@ -417,7 +433,6 @@ export class PaymentService {
       orderBy: [{ invoiceDate: 'asc' }, { createdAt: 'asc' }],
     });
 
-    // Fetch all non-dishonoured payments for this party (credits)
     const payments = await this.prisma.payment.findMany({
       where: { facilityId, partyId, status: { not: 'DISHONOURED' } },
       select: {
@@ -494,4 +509,122 @@ export class PaymentService {
       closing_balance_pkr: Math.round((totalDebit - totalCredit) * 100) / 100,
     };
   }
+
+  // ---------- internals ----------
+
+  private async applyLoanAllocation(
+    tx: Prisma.TransactionClient,
+    facilityId: string,
+    userId: string,
+    paymentId: string,
+    assetAccountCode: string,
+    paymentDate: Date,
+    alloc: { target: 'LOAN'; loan_id: string; allocated_amount_pkr: number },
+  ): Promise<void> {
+    const loan = await tx.partyLoan.findFirstOrThrow({
+      where: { id: alloc.loan_id, facilityId },
+      include: { party: { select: { name: true } } },
+    });
+
+    const newBalance = round2(
+      Number(loan.balanceOutstandingPkr) - alloc.allocated_amount_pkr,
+    );
+    await tx.partyLoan.update({
+      where: { id: alloc.loan_id },
+      data: {
+        balanceOutstandingPkr: newBalance,
+        status: newBalance <= 0.005 ? 'RECOVERED' : 'ACTIVE',
+      },
+    });
+
+    const repayment = await tx.partyLoanRepayment.create({
+      data: {
+        loanId: alloc.loan_id,
+        repaymentDate: paymentDate,
+        amountPkr: alloc.allocated_amount_pkr,
+        paymentMethod: 'DEDUCTED_FROM_PRODUCE',
+        assetAccountCode,
+        paymentId,
+        notes: `Allocated from payment ${paymentId.slice(0, 8)}`,
+        createdBy: userId,
+      },
+    });
+
+    if (this.journalEntry) {
+      const draft = buildJE19PeshgiRecovered({
+        loanId: loan.id,
+        loanNumber: loan.loanNumber,
+        repaymentId: repayment.id,
+        partyId: loan.partyId,
+        partyName: loan.party.name,
+        entryDate: paymentDate,
+        amountPkr: alloc.allocated_amount_pkr,
+        toAssetAccountCode: assetAccountCode,
+        bookType: loan.bookType,
+      });
+      const posted = await this.journalEntry.postInTransaction(
+        tx,
+        facilityId,
+        userId,
+        draft,
+        { postingStatus: 'POSTED' },
+      );
+      await tx.partyLoanRepayment.update({
+        where: { id: repayment.id },
+        data: { journalEntryId: posted.id },
+      });
+    }
+  }
+}
+
+async function validateInvoiceAllocation(
+  tx: Prisma.TransactionClient,
+  facilityId: string,
+  partyId: string,
+  alloc: { invoice_id: string; allocated_amount_pkr: number },
+) {
+  const rows = await tx.$queryRawUnsafe<
+    { id: string; status: string; billing_party_id: string; total_pkr: string; amount_paid_pkr: string }[]
+  >(
+    `SELECT id, status, billing_party_id, total_pkr, amount_paid_pkr FROM invoices WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+    alloc.invoice_id,
+    facilityId,
+  );
+  const inv = rows[0];
+  if (!inv) throw Errors.INVOICE_NOT_FOUND();
+  if (inv.status !== 'FINALIZED') {
+    throw Errors.VALIDATION_ERROR('Only FINALIZED invoices can be allocated', 'invoice_id');
+  }
+  if (inv.billing_party_id !== partyId) throw Errors.PAYMENT_PARTY_MISMATCH();
+  const balanceDue = Number(inv.total_pkr) - Number(inv.amount_paid_pkr);
+  if (alloc.allocated_amount_pkr > balanceDue + 0.001) {
+    throw Errors.PAYMENT_EXCEEDS_INVOICE_BALANCE();
+  }
+}
+
+async function validateLoanAllocation(
+  tx: Prisma.TransactionClient,
+  facilityId: string,
+  partyId: string,
+  alloc: { loan_id: string; allocated_amount_pkr: number },
+) {
+  const rows = await tx.$queryRawUnsafe<
+    { id: string; status: string; party_id: string; balance_outstanding_pkr: string }[]
+  >(
+    `SELECT id, status, party_id, balance_outstanding_pkr FROM party_loans WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+    alloc.loan_id,
+    facilityId,
+  );
+  const loan = rows[0];
+  if (!loan) throw Errors.PESHGI_NOT_FOUND();
+  if (loan.status !== 'ACTIVE') throw Errors.PESHGI_INACTIVE();
+  if (loan.party_id !== partyId) throw Errors.PAYMENT_PARTY_MISMATCH();
+  const balance = Number(loan.balance_outstanding_pkr);
+  if (alloc.allocated_amount_pkr > balance + 0.005) {
+    throw Errors.PESHGI_OVER_REPAYMENT();
+  }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }

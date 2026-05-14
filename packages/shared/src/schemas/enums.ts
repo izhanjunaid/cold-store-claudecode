@@ -125,6 +125,7 @@ export const JournalEntryType = z.enum([
   'EXPENSE',
   'PESHGI_ISSUE',
   'PESHGI_RECOVERY',
+  'PESHGI_WRITE_OFF',
 ]);
 export type JournalEntryType = z.infer<typeof JournalEntryType>;
 

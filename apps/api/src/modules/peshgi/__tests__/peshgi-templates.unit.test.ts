@@ -13,7 +13,7 @@ describe('Peshgi JE templates', () => {
   it('JE-18 balances: DR 1140 / CR 1010', () => {
     const draft = buildJE18PeshgiIssued({
       loanId: 'l1',
-      loanNumber: 'PSH-202604-0001',
+      loanNumber: 'L-260415-001',
       partyId: 'p1',
       partyName: 'Ghulam Hussain',
       entryDate: new Date('2026-04-15'),
@@ -33,7 +33,7 @@ describe('Peshgi JE templates', () => {
   it('JE-19 balances: DR cash/bank / CR 1140', () => {
     const draft = buildJE19PeshgiRecovered({
       loanId: 'l1',
-      loanNumber: 'PSH-202604-0001',
+      loanNumber: 'L-260415-001',
       repaymentId: 'r1',
       partyId: 'p1',
       partyName: 'Ghulam Hussain',
@@ -53,7 +53,7 @@ describe('Peshgi JE templates', () => {
   it('JE-19 partial recovery (smaller than principal) still balances', () => {
     const draft = buildJE19PeshgiRecovered({
       loanId: 'l1',
-      loanNumber: 'PSH-202604-0001',
+      loanNumber: 'L-260415-001',
       repaymentId: 'r2',
       partyId: 'p1',
       partyName: 'Ghulam Hussain',

@@ -16,3 +16,4 @@ export * from './schemas/fixed-assets';
 export * from './schemas/payroll';
 export * from './schemas/expenses';
 export * from './schemas/peshgi';
+export * from './schemas/gate-pass';

@@ -23,6 +23,7 @@ import { fixedAssetRoutes } from './modules/fixed-assets/fixed-asset.controller'
 import { payrollRoutes } from './modules/payroll/payroll.controller';
 import { expenseRoutes } from './modules/expenses/expense.controller';
 import { peshgiRoutes } from './modules/peshgi/peshgi.controller';
+import { gatePassRoutes } from './modules/gate-pass/gate-pass.controller';
 
 export async function buildApp() {
   const app = Fastify({
@@ -71,6 +72,7 @@ export async function buildApp() {
   await app.register(payrollRoutes);
   await app.register(expenseRoutes);
   await app.register(peshgiRoutes);
+  await app.register(gatePassRoutes);
 
   return app;
 }

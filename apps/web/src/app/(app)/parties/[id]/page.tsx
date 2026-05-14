@@ -72,6 +72,21 @@ interface LedgerData {
   closing_balance_pkr: number;
 }
 
+interface LoanSummary {
+  id: string;
+  loan_number: string;
+  issue_date: string;
+  principal_pkr: number;
+  balance_outstanding_pkr: number;
+  status: 'ACTIVE' | 'RECOVERED' | 'WRITTEN_OFF';
+}
+
+const LOAN_STATUS_COLORS: Record<string, string> = {
+  ACTIVE: 'bg-emerald-100 text-emerald-800',
+  RECOVERED: 'bg-gray-100 text-gray-700',
+  WRITTEN_OFF: 'bg-red-100 text-red-700',
+};
+
 const PARTY_TYPE_COLORS: Record<string, string> = {
   FARMER: 'bg-green-100 text-green-800',
   TRADER: 'bg-blue-100 text-blue-800',
@@ -93,6 +108,7 @@ export default function PartyDetailPage() {
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
   const [payments, setPayments] = useState<PaymentSummary[]>([]);
   const [ledger, setLedger] = useState<LedgerData | null>(null);
+  const [loans, setLoans] = useState<LoanSummary[]>([]);
   const [tabLoaded, setTabLoaded] = useState<Record<string, boolean>>({});
 
   const partyId = params['id'] as string;
@@ -120,6 +136,9 @@ export default function PartyDetailPage() {
       } else if (tab === 'Ledger') {
         const data = await apiClient<LedgerData>(`/v1/parties/${partyId}/ledger`);
         setLedger(data);
+      } else if (tab === 'Peshgi') {
+        const res = await apiClientList<LoanSummary>(`/v1/loans?party_id=${partyId}&page_size=100`);
+        setLoans(res.data);
       }
     } catch {
       // silently handled
@@ -406,7 +425,53 @@ export default function PartyDetailPage() {
           )}
 
           {activeTab === 'Peshgi' && (
-            <p className="text-sm text-gray-400">Peshgi (loans) will be available in a later phase.</p>
+            <div>
+              <div className="flex justify-between items-center mb-3">
+                <p className="text-sm text-gray-600">
+                  {loans.length === 0
+                    ? 'No peshgi loans yet.'
+                    : `${loans.filter((l) => l.status === 'ACTIVE').length} active · ${loans.length} total`}
+                </p>
+                <Link
+                  href={`/loans/issue?party_id=${partyId}`}
+                  className="bg-emerald-600 text-white text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-emerald-700"
+                >
+                  Issue Peshgi
+                </Link>
+              </div>
+              {loans.length > 0 && (
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Loan No.</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Issued</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Principal</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {loans.map((l) => (
+                      <tr
+                        key={l.id}
+                        onClick={() => router.push(`/loans/${l.id}`)}
+                        className="hover:bg-gray-50 cursor-pointer"
+                      >
+                        <td className="px-4 py-2 text-sm font-mono text-gray-900">{l.loan_number}</td>
+                        <td className="px-4 py-2 text-sm text-gray-600">{l.issue_date}</td>
+                        <td className="px-4 py-2 text-sm text-right">{Number(l.principal_pkr).toLocaleString()}</td>
+                        <td className="px-4 py-2 text-sm text-right font-medium">{Number(l.balance_outstanding_pkr).toLocaleString()}</td>
+                        <td className="px-4 py-2">
+                          <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${LOAN_STATUS_COLORS[l.status]}`}>
+                            {l.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           )}
         </div>
       </div>

@@ -122,4 +122,27 @@ export const Errors = {
     new AppError('PESHGI_OVER_REPAYMENT', 'Repayment amount exceeds outstanding loan balance', 422),
   PESHGI_INACTIVE: () =>
     new AppError('PESHGI_INACTIVE', 'Loan is fully recovered or written off; cannot record repayment', 409),
+  PESHGI_ALREADY_CLOSED: () =>
+    new AppError('PESHGI_ALREADY_CLOSED', 'Loan is not ACTIVE; cannot write off', 409),
+  // Phase 9 — Gate Pass
+  GATE_PASS_NOT_FOUND: () =>
+    new AppError('GATE_PASS_NOT_FOUND', 'Gate pass does not exist', 404),
+  GATE_PASS_INVALID_STATE: (msg: string) =>
+    new AppError('GATE_PASS_INVALID_STATE', msg, 409),
+  GATE_PASS_LOT_MISMATCH: () =>
+    new AppError('GATE_PASS_LOT_MISMATCH', 'Lot does not belong to this facility', 422),
+  GATE_OUTWARD_BLOCKED: (msg = 'Payment Pending — invoice not yet settled') =>
+    new AppError('GATE_OUTWARD_BLOCKED', msg, 422),
+  GATE_OUTWARD_NO_OUTBOUND: () =>
+    new AppError(
+      'GATE_OUTWARD_NO_OUTBOUND',
+      'Cannot clear outward pass — no matching outbound dispatch found',
+      422,
+    ),
+  GATE_CREDIT_AUTH_REQUIRES_MANAGER: () =>
+    new AppError(
+      'GATE_CREDIT_AUTH_REQUIRES_MANAGER',
+      'Credit authorization can only be granted by MANAGER or higher',
+      403,
+    ),
 } as const;

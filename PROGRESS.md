@@ -1,11 +1,11 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 8 (8A + 8B) complete — backend, tests, frontend all shipped
-- **Active Task**: Ready for Phase 9 (Gate Pass + Peshgi UI) or Phase 6 (Quality & Spoilage)
+- **Active Phase**: Phase 9 (Gate Pass + Peshgi UI) complete — backend, tests, frontend all shipped
+- **Active Task**: Ready for Phase 10 (Reporting & Dashboards) or Phase 6 (Quality & Spoilage)
 - **Blockers**: None
-- **Last Updated**: 2026-05-08
-- **Deferred to Phase 11 polish**: salary-slip PDF (currently JSON), manual UI smoke against dev servers
+- **Last Updated**: 2026-05-10
+- **Deferred to Phase 11 polish**: salary-slip PDF, loan acknowledgment PDF, gate pass receipt PDF (all JSON for now); manual UI smoke against dev servers
 
 ## Phase Completion
 
@@ -21,7 +21,7 @@
 | 7 | Financial Ledger & Payments | COMPLETED | 2026-04-24 | 2026-04-25 |
 | 8A | Core Ledger (CoA, JE, GL, Statements) | COMPLETED | 2026-04-28 | 2026-05-05 |
 | 8B | Cost-side (FA, Payroll, Expenses, Peshgi-API) | COMPLETED | 2026-05-06 | 2026-05-08 |
-| 9 | Gate Pass + Peshgi | PENDING | — | — |
+| 9 | Gate Pass + Peshgi (UI + spec realignment + combined settlement) | COMPLETED | 2026-05-09 | 2026-05-10 |
 | 10 | Reporting & Dashboards | PENDING | — | — |
 | 11 | Admin, Polish & Pre-Launch | PENDING | — | — |
 
@@ -38,6 +38,7 @@
 | 7 | — | 12 | 1 | 13 |
 | 8A | 16 | 24 | — | 40 |
 | 8B | 34 | 46 | — | 80 |
+| 9 | 6 | 21 | — | 27 |
 
 ## Completed Tasks Log
 
@@ -111,3 +112,12 @@
 - [2026-05-07] 8.10 — Peshgi (loans, API only): 2 JE templates (18/19), `peshgi-number.ts` (PSH-YYYYMM-NNNN), `PeshgiService` (issue with row-locked recordRepayment + auto-status FULLY_RECOVERED), 4 routes; shared `peshgi.ts`. Frontend deferred to Phase 9 per plan. Tests: 3 unit + 8 integration.
 - [2026-05-08] 8.11 — Frontend pages: `accounting/fixed-assets/` (list/new/detail/runs), `accounting/payroll/employees/` (list/new/detail), `accounting/payroll/runs/` (list/new/detail with finalize/pay/remit modals + JSON salary slip viewer), `accounting/expenses/` (list/new/detail with approve/accrue/pay/cancel). Accounting landing page extended with 5 new nav cards. Web typecheck clean; Next.js production build green.
 - [2026-05-08] 8.11 — Tracking docs (PROGRESS.md, TESTING.md, phases/phase-08-accounting.md) and project memory updated. Audit-trigger gap (only `facilities` and `users` have triggers in dev DB) flagged in phase doc — pre-existing 8A state, not 8B regression, but should be backfilled or doc updated to match reality.
+- [2026-05-09] 9.1 — Migration `0010_gate_peshgi`: GatePass model + GatePassDirection/GatePassStatus enums; `RepaymentMethod` enum (decoupled from ExpensePaymentMethod); `PartyLoanStatus` rename `FULLY_RECOVERED → RECOVERED` (loss-free `ALTER TYPE RENAME VALUE`); `EntryType += PESHGI_WRITE_OFF`; `payment_allocations.invoice_id` nullable + `loan_id` FK + CHECK XOR; `party_loans.write_off_*` columns; loan_number realign `PSH-YYYYMM-NNNN → L-YYMMDD-NNN` for shipped 8B rows.
+- [2026-05-09] 9.2 — Gate Pass backend: `gate-pass-number.ts` (GP-YYMMDD-NNNN), `gate-pass.repository.ts`, `gate-pass.service.ts` (logInward/logOutward/linkLot/clearOutward with row-locking + invoice-paid validation + credit_authorization MANAGER+ override), `gate-pass.controller.ts` (6 routes under `/v1/gate-passes`); shared `gate-pass.ts` Zod schemas; gate-pass error codes added to `errors.ts`. **No JE for gate pass — custodial only.**
+- [2026-05-09] 9.3 — Peshgi realignment: `/v1/peshgi → /v1/loans` URL prefix; `peshgi-number.ts` rewritten to `L-YYMMDD-NNN`; service uses `RECOVERED` enum value; `IssuePeshgiRequest` requires `payment_method` (CASH→1010 / BANK_TRANSFER→1020 routing); `RecordRepaymentRequest` allows `DEDUCTED_FROM_PRODUCE` with optional `asset_account_code`. Added `POST /v1/loans/:id/write-off` (OWNER) + JE-20 template (DR 6080 / CR 1140). `GET /v1/loans/:id/acknowledgment` returns JSON (PDF deferred Phase 11).
+- [2026-05-10] 9.4 — Combined settlement: `AllocatePaymentRequest` accepts discriminated union `{target:'INVOICE',invoice_id} | {target:'LOAN',loan_id}` with legacy `{invoice_id}` shape auto-normalized at the schema layer. `payment.service` forks per-line: invoice path increments `amount_paid_pkr`; loan path row-locks `party_loans`, validates ACTIVE+party-match+balance, decrements balance, transitions to RECOVERED, creates `PartyLoanRepayment(method=DEDUCTED_FROM_PRODUCE, payment_id)`, and posts JE-19 in the same tx. Cheque dishonour reverses both invoice and loan allocations (deletes linked repayment rows, restores balance, reverts ACTIVE status).
+- [2026-05-10] 9.5 — S-32 Gate Pass Console at `/gate`: touch-optimized split layout with 15s polling, Log Arrival form, Vehicles Currently Inside list, Clear Outward modal with credit_authorization toggle (visible to MANAGER+). SECURITY-only; redirect-on-mount for lower roles.
+- [2026-05-10] 9.6 — S-33 `/loans/issue` (OWNER) with debounced party search and PKR formatter; S-34 `/loans` dashboard with summary card and status filter; `/loans/[id]` detail with repayment timeline, Record Repayment (MANAGER+), Write Off (OWNER) reason modal. Party Detail Peshgi tab replaced placeholder with live loan table + Issue CTA.
+- [2026-05-10] 9.7 — Login post-auth helper `apps/web/src/lib/auth-redirect.ts:defaultRouteForRole`. SECURITY → `/gate`; everyone else → `/dashboard`.
+- [2026-05-10] 9.8 — Tests: 6 new unit (gate-pass-number x3, JE-20 template x2, L-YYMMDD-NNN format) + 21 net-new integration (gate-pass: 7 cases including outward-blocked-on-unpaid, credit-auth, role gating, turnaround_seconds; peshgi-realigned: 12 cases including L- format, RECOVERED status, write-off happy + role + already-closed, MANAGER-only repayment, JSON acknowledgment; combined-settlement: 4 cases). Total: 82 unit + 196 integration tests pass.
+- [2026-05-10] 9.9 — Tracking docs (PROGRESS.md, TESTING.md, phases/phase-09-gate-peshgi.md) updated.
