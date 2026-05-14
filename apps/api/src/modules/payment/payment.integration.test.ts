@@ -585,6 +585,103 @@ describe('Phase 9 — Combined settlement (invoice + loan)', () => {
       headers: authHeaders(accountantToken),
     });
     expect(JSON.parse(invRes.body).data.balance_due_pkr).toBe(0);
+
+    // GL invariant: total cash debit posted by this payment must equal payment.amount_pkr exactly.
+    // Pre-fix bug: JE-02 was posting full 150k while JE-19 also debited 100k cash → 250k cash debit.
+    const cashLines = await prisma.journalEntryLine.findMany({
+      where: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: '1010',
+        journalEntry: {
+          OR: [{ sourceId: payment.id }, { sourceId: loanData.repayments[0].id }],
+        },
+      },
+    });
+    const cashDebit = cashLines.reduce((s, l) => s + Number(l.debitAmount), 0);
+    expect(cashDebit).toBe(totalPayment);
+    // And the JE-02 itself should have booked only the invoice portion.
+    const je02 = await prisma.journalEntry.findFirst({
+      where: { sourceId: payment.id, entryType: 'PAYMENT' },
+      include: { lines: true },
+    });
+    expect(je02).toBeTruthy();
+    expect(Number(je02!.lines.find((l) => l.accountCode === '1010')!.debitAmount)).toBe(total);
+  });
+
+  it('loan-only payment skips JE-02 entirely (no double cash debit)', async () => {
+    await cleanLoans();
+    const partyId = await createParty('Loan Only Party', '03001099006');
+    const loan = await issueLoan(partyId, 40000, '2026-04-10');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: partyId,
+        payment_date: '2026-09-01',
+        amount_pkr: 40000,
+        payment_method: 'CASH',
+        allocations: [{ target: 'LOAN', loan_id: loan.id, allocated_amount_pkr: 40000 }],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const payment = JSON.parse(res.body).data;
+
+    // No JE-02 should exist; only JE-19 for the loan cash receipt.
+    const je02 = await prisma.journalEntry.findFirst({
+      where: { sourceId: payment.id, entryType: 'PAYMENT' },
+    });
+    expect(je02).toBeNull();
+
+    // Inspect JE-19 for THIS payment's repayment only (scoped via loan id).
+    const loanDetail = await app.inject({
+      method: 'GET',
+      url: `/v1/loans/${loan.id}`,
+      headers: authHeaders(accountantToken),
+    });
+    const loanData = JSON.parse(loanDetail.body).data;
+    expect(loanData.status).toBe('RECOVERED');
+    expect(loanData.repayments).toHaveLength(1);
+    const je19 = await prisma.journalEntry.findUnique({
+      where: { id: loanData.repayments[0].journal_entry_id },
+      include: { lines: true },
+    });
+    expect(je19?.entryType).toBe('PESHGI_RECOVERY');
+    const cashLine = je19!.lines.find((l) => l.accountCode === '1010');
+    expect(cashLine).toBeTruthy();
+    expect(Number(cashLine!.debitAmount)).toBe(40000);
+  });
+
+  it('POST /v1/payments/:id/allocate rejects LOAN-target allocations', async () => {
+    await cleanLoans();
+    const partyId = await createParty('Post Hoc Loan', '03001099007');
+    const loan = await issueLoan(partyId, 20000, '2026-04-10');
+
+    const payRes = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: partyId,
+        payment_date: '2026-09-01',
+        amount_pkr: 20000,
+        payment_method: 'CASH',
+      },
+    });
+    expect(payRes.statusCode).toBe(201);
+    const paymentId = JSON.parse(payRes.body).data.id;
+
+    const alloc = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${paymentId}/allocate`,
+      headers: authHeaders(accountantToken),
+      payload: {
+        allocations: [{ target: 'LOAN', loan_id: loan.id, allocated_amount_pkr: 20000 }],
+      },
+    });
+    expect(alloc.statusCode).toBe(400);
+    expect(JSON.parse(alloc.body).error.code).toBe('VALIDATION_ERROR');
   });
 
   it('rejects loan allocation exceeding outstanding balance', async () => {
