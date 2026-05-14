@@ -653,6 +653,152 @@ describe('Phase 9 — Combined settlement (invoice + loan)', () => {
     expect(Number(cashLine!.debitAmount)).toBe(40000);
   });
 
+  it('dishonour of cheque combined settlement reverses both invoice and loan sides', async () => {
+    await cleanLoans();
+    const partyId = await createParty('Cheque Combined', '03001099008');
+    const lot = await createLot({ ownerPartyId: partyId, quantity: 10, inboundDate: '2026-03-01' });
+    const invoiceId = await finalizeOutbound({
+      lotId: lot.id,
+      quantity: 10,
+      outboundDate: '2026-09-01',
+    });
+    const invoiceTotal = await finalizeInvoice(invoiceId);
+
+    const loanPrincipal = 100000;
+    const loan = await issueLoan(partyId, loanPrincipal, '2026-04-10');
+
+    const totalPayment = invoiceTotal + loanPrincipal;
+    const payRes = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: partyId,
+        payment_date: '2026-09-01',
+        amount_pkr: totalPayment,
+        payment_method: 'CHEQUE',
+        cheque_date: '2026-09-01',
+        reference_number: 'CHQ-COMBINED-BOUNCE',
+        allocations: [
+          { invoice_id: invoiceId, allocated_amount_pkr: invoiceTotal },
+          { target: 'LOAN', loan_id: loan.id, allocated_amount_pkr: loanPrincipal },
+        ],
+      },
+    });
+    expect(payRes.statusCode).toBe(201);
+    const payment = JSON.parse(payRes.body).data;
+    const paymentId = payment.id;
+
+    // Capture original JE-02 and JE-19 ids before dishonour so we can verify
+    // they get marked REVERSED.
+    const originalJe02 = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceId: paymentId, entryType: 'PAYMENT' },
+    });
+    expect(originalJe02).toBeTruthy();
+    const loanDetail = await app.inject({
+      method: 'GET',
+      url: `/v1/loans/${loan.id}`,
+      headers: authHeaders(accountantToken),
+    });
+    const loanData = JSON.parse(loanDetail.body).data;
+    const originalJe19Id = loanData.repayments[0].journal_entry_id as string;
+    expect(originalJe19Id).toBeTruthy();
+
+    // Dishonour the cheque
+    const dishonourRes = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${paymentId}/dishonour`,
+      headers: authHeaders(accountantToken),
+      payload: { notes: 'Bank returned cheque' },
+    });
+    expect(dishonourRes.statusCode).toBe(200);
+    const dishonoured = JSON.parse(dishonourRes.body).data;
+    expect(dishonoured.status).toBe('DISHONOURED');
+    expect(dishonoured.clearance_status).toBe('BOUNCED');
+    expect(dishonoured.allocations).toHaveLength(0);
+
+    // Data side: invoice balance restored, loan balance restored, repayment row gone.
+    const invRes = await app.inject({
+      method: 'GET',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(accountantToken),
+    });
+    const inv = JSON.parse(invRes.body).data;
+    expect(inv.amount_paid_pkr).toBe(0);
+    expect(inv.balance_due_pkr).toBe(invoiceTotal);
+
+    const loanAfterRes = await app.inject({
+      method: 'GET',
+      url: `/v1/loans/${loan.id}`,
+      headers: authHeaders(accountantToken),
+    });
+    const loanAfter = JSON.parse(loanAfterRes.body).data;
+    expect(loanAfter.status).toBe('ACTIVE');
+    expect(loanAfter.balance_outstanding_pkr).toBe(loanPrincipal);
+    expect(loanAfter.repayments ?? []).toHaveLength(0);
+
+    // JE-06 (cheque dishonour) should be posted for the INVOICE portion only — not the full 150k.
+    const je06 = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceId: paymentId, entryType: 'REVERSAL' },
+      include: { lines: true },
+    });
+    expect(je06).toBeTruthy();
+    const je06CashCredit = je06!.lines.find((l) => l.accountCode === '1020');
+    // CHEQUE asset account is 1020 per PAYMENT_METHOD_ASSET_ACCOUNT
+    expect(je06CashCredit).toBeTruthy();
+    expect(Number(je06CashCredit!.creditAmount)).toBe(invoiceTotal);
+
+    // Original JE-02 should be flagged reversed by JE-06.
+    const originalJe02Refreshed = await prisma.journalEntry.findUnique({
+      where: { id: originalJe02!.id },
+    });
+    expect(originalJe02Refreshed?.postingStatus).toBe('REVERSED');
+
+    // Per-loan REVERSAL JE: sourceTable='party_loans', sourceId=loan.id, DR 1140 / CR 1020
+    const loanReversal = await prisma.journalEntry.findFirst({
+      where: {
+        facilityId: TEST_FACILITY_ID,
+        sourceTable: 'party_loans',
+        sourceId: loan.id,
+        entryType: 'REVERSAL',
+      },
+      include: { lines: true },
+    });
+    expect(loanReversal).toBeTruthy();
+    const loanReversalCashCredit = loanReversal!.lines.find((l) => l.accountCode === '1020');
+    const loanReversalPeshgiDebit = loanReversal!.lines.find((l) => l.accountCode === '1140');
+    expect(Number(loanReversalCashCredit!.creditAmount)).toBe(loanPrincipal);
+    expect(Number(loanReversalPeshgiDebit!.debitAmount)).toBe(loanPrincipal);
+
+    // Original JE-19 should now be marked REVERSED.
+    const originalJe19Refreshed = await prisma.journalEntry.findUnique({
+      where: { id: originalJe19Id },
+    });
+    expect(originalJe19Refreshed?.postingStatus).toBe('REVERSED');
+
+    // Net cash on 1020 across all four JEs must be zero:
+    // +invoiceTotal (JE-02) + loanPrincipal (JE-19) − invoiceTotal (JE-06) − loanPrincipal (loan reversal).
+    const cashLines = await prisma.journalEntryLine.findMany({
+      where: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: '1020',
+        journalEntry: {
+          OR: [
+            { id: originalJe02!.id },
+            { id: originalJe19Id },
+            { id: je06!.id },
+            { id: loanReversal!.id },
+          ],
+        },
+      },
+    });
+    const netCash = cashLines.reduce(
+      (s, l) => s + Number(l.debitAmount) - Number(l.creditAmount),
+      0,
+    );
+    expect(netCash).toBe(0);
+  });
+
   it('POST /v1/payments/:id/allocate rejects LOAN-target allocations', async () => {
     await cleanLoans();
     const partyId = await createParty('Post Hoc Loan', '03001099007');
