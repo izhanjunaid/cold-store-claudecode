@@ -38,7 +38,7 @@
 | 7 | — | 12 | 1 | 13 |
 | 8A | 16 | 24 | — | 40 |
 | 8B | 34 | 46 | — | 80 |
-| 9 | 6 | 21 | — | 27 |
+| 9 | 6 | 27 | — | 33 |
 
 ## Completed Tasks Log
 
@@ -119,5 +119,7 @@
 - [2026-05-10] 9.5 — S-32 Gate Pass Console at `/gate`: touch-optimized split layout with 15s polling, Log Arrival form, Vehicles Currently Inside list, Clear Outward modal with credit_authorization toggle (visible to MANAGER+). SECURITY-only; redirect-on-mount for lower roles.
 - [2026-05-10] 9.6 — S-33 `/loans/issue` (OWNER) with debounced party search and PKR formatter; S-34 `/loans` dashboard with summary card and status filter; `/loans/[id]` detail with repayment timeline, Record Repayment (MANAGER+), Write Off (OWNER) reason modal. Party Detail Peshgi tab replaced placeholder with live loan table + Issue CTA.
 - [2026-05-10] 9.7 — Login post-auth helper `apps/web/src/lib/auth-redirect.ts:defaultRouteForRole`. SECURITY → `/gate`; everyone else → `/dashboard`.
-- [2026-05-10] 9.8 — Tests: 6 new unit (gate-pass-number x3, JE-20 template x2, L-YYMMDD-NNN format) + 21 net-new integration (gate-pass: 7 cases including outward-blocked-on-unpaid, credit-auth, role gating, turnaround_seconds; peshgi-realigned: 12 cases including L- format, RECOVERED status, write-off happy + role + already-closed, MANAGER-only repayment, JSON acknowledgment; combined-settlement: 4 cases). Total: 82 unit + 196 integration tests pass.
+- [2026-05-10] 9.8 — Tests: 6 new unit (gate-pass-number x3, JE-20 template x2, L-YYMMDD-NNN format) + 27 net-new integration (gate-pass: 7 cases including outward-blocked-on-unpaid, credit-auth, role gating, turnaround_seconds; peshgi-realigned: 12 cases including L- format, RECOVERED status, write-off happy + role + already-closed, MANAGER-only repayment, JSON acknowledgment; combined-settlement: 7 cases including JE-02 books invoice-only, total cash debit = payment amount, loan-only skips JE-02, /allocate rejects LOAN, cheque dishonour reverses both sides). Total: 82 unit + 199 integration tests pass.
 - [2026-05-10] 9.9 — Tracking docs (PROGRESS.md, TESTING.md, phases/phase-09-gate-peshgi.md) updated.
+- [2026-05-14] 9.10 — Bugfix `3ff6ed2`: JE-02 was double-debiting cash on combined invoice+loan payments (150k payment posting 250k cash debit because both JE-02 and JE-19 booked cash). JE-02/JE-03 now book only `payment.amountPkr - sum(LOAN allocations)`; skipped entirely for loan-only payments. POST /v1/payments/:id/allocate rejects LOAN target (post-creation AR-transfer JE not built). dishonour() scales JE-06 to invoice portion and posts per-loan REVERSAL JE (DR 1140 / CR cash) marking original JE-19s as REVERSED.
+- [2026-05-14] 9.11 — Regression test `c4aa3c9`: cheque+combined+dishonour end-to-end verifies the new reversal path (scaled JE-06, per-loan REVERSAL JE, REVERSED postingStatus on original JE-02/JE-19, net cash on 1020 sums to zero).

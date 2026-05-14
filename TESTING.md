@@ -45,7 +45,7 @@
 | 7 | — | 12 | 1 | 13 | ALL PASS |
 | 8A | 16 | 24 | — | 40 | ALL PASS |
 | 8B | 34 | 46 | — | 80 | ALL PASS |
-| 9 | 6 | 21 | — | 27 | ALL PASS |
+| 9 | 6 | 27 | — | 33 | ALL PASS |
 
 ### Phase 0 Tests
 - `apps/api/src/common/jwt.test.ts` — 4 tests (sign/verify access & refresh tokens)
@@ -99,7 +99,7 @@
 - `apps/api/src/modules/peshgi/__tests__/peshgi-write-off-template.unit.test.ts` — 3 tests (JE-20 DR 6080 / CR 1140 balance with party tagging, fractional rounding, `L-YYMMDD-NNN` format / prefix sanity).
 - `apps/api/src/modules/gate-pass/__tests__/gate-pass-number.unit.test.ts` — 3 tests (`GP-YYMMDD-NNNN` format with 4-digit pad, prefix excludes sequence, day rollover changes prefix).
 - `apps/api/src/modules/gate-pass/__tests__/gate-pass.integration.test.ts` — 7 tests (SECURITY logs inward with GP-YYMMDD-NNNN + uppercase vehicle + ARRIVED, OPERATOR link-lot transitions to WEIGHING, SECURITY cannot link-lot 403, paid invoice → CLEARED with `turnaround_seconds > 0`, finalized-unpaid → 422 GATE_OUTWARD_BLOCKED, MANAGER credit_authorization clears, SECURITY credit_authorization 403 GATE_CREDIT_AUTH_REQUIRES_MANAGER, list active passes).
-- `apps/api/src/modules/payment/payment.integration.test.ts` (combined-settlement section) — 4 tests (one payment splits 50k invoice + 100k loan, posts JE-19 once, loan→RECOVERED, balance_due=0; loan over-allocation 422 PESHGI_OVER_REPAYMENT; loan party mismatch 422 PAYMENT_PARTY_MISMATCH; allocating to WRITTEN_OFF loan 409 PESHGI_INACTIVE).
+- `apps/api/src/modules/payment/payment.integration.test.ts` (combined-settlement section) — 7 tests (one payment splits 50k invoice + 100k loan, posts JE-19 once, loan→RECOVERED, JE-02 books only invoice portion, total cash debit = payment.amount_pkr exactly; loan over-allocation 422 PESHGI_OVER_REPAYMENT; loan party mismatch 422 PAYMENT_PARTY_MISMATCH; allocating to WRITTEN_OFF loan 409 PESHGI_INACTIVE; loan-only payment skips JE-02; POST /payments/:id/allocate rejects LOAN target; cheque dishonour of combined settlement reverses both sides — scaled JE-06, per-loan REVERSAL JE, original JE-02/JE-19 marked REVERSED, net cash zero).
 
 ## Commands
 
