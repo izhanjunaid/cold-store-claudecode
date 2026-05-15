@@ -6,6 +6,22 @@ interface ApiOptions {
   headers?: Record<string, string>;
 }
 
+export class ApiError extends Error {
+  code: string | null;
+  status: number;
+  details: unknown;
+  constructor(
+    message: string,
+    opts: { code?: string | null; status: number; details?: unknown },
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = opts.code ?? null;
+    this.status = opts.status;
+    this.details = opts.details;
+  }
+}
+
 async function apiFetch(path: string, options: ApiOptions = {}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
   const facilityId =
@@ -25,7 +41,11 @@ async function apiFetch(path: string, options: ApiOptions = {}) {
   const data = await res.json();
 
   if (!res.ok || !data.success) {
-    throw new Error(data.error?.message || 'Request failed');
+    throw new ApiError(data.error?.message || 'Request failed', {
+      code: data.error?.code ?? null,
+      status: res.status,
+      details: data.error,
+    });
   }
 
   return data;

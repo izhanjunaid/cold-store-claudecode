@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiClient, apiClientList } from '@/lib/api-client';
+import { apiClient, apiClientList, ApiError } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 
 interface GatePass {
@@ -51,14 +51,26 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hr / 24)}d ago`;
 }
 
+function formatTurnaround(seconds: number | null): string {
+  if (seconds == null || seconds < 0) return '—';
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+const GATE_ALLOWED_ROLES = ['OWNER', 'MANAGER', 'OPERATOR', 'SECURITY'];
+
 export default function GatePassConsolePage() {
   const router = useRouter();
   const { user } = useAuthStore();
 
   const canManager = (ROLE_RANK[user?.role ?? ''] ?? -1) >= ROLE_RANK['MANAGER']!;
-  const canSecurity = (ROLE_RANK[user?.role ?? ''] ?? -1) >= ROLE_RANK['SECURITY']!;
+  const canSecurity = GATE_ALLOWED_ROLES.includes(user?.role ?? '');
 
   const [passes, setPasses] = useState<GatePass[]>([]);
+  const [recentCleared, setRecentCleared] = useState<GatePass[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,13 +87,21 @@ export default function GatePassConsolePage() {
   const [outwardOutboundId, setOutwardOutboundId] = useState('');
   const [creditAuth, setCreditAuth] = useState(false);
   const [outwardErr, setOutwardErr] = useState<string | null>(null);
+  const [outwardBlocked, setOutwardBlocked] = useState(false);
   const [outwardLoading, setOutwardLoading] = useState(false);
 
   const fetchActive = useCallback(async () => {
     if (!canSecurity) return;
     try {
-      const res = await apiClientList<GatePass>('/v1/gate-passes?active=true&page_size=50');
-      setPasses(res.data);
+      const today = new Date().toISOString().slice(0, 10);
+      const [active, cleared] = await Promise.all([
+        apiClientList<GatePass>('/v1/gate-passes?active=true&page_size=50'),
+        apiClientList<GatePass>(
+          `/v1/gate-passes?status=CLEARED&date_from=${today}&page_size=20`,
+        ),
+      ]);
+      setPasses(active.data);
+      setRecentCleared(cleared.data);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
@@ -103,7 +123,7 @@ export default function GatePassConsolePage() {
   if (!canSecurity) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-gray-500">SECURITY role required.</p>
+        <p className="text-gray-500">Gate Pass access required.</p>
       </div>
     );
   }
@@ -141,19 +161,32 @@ export default function GatePassConsolePage() {
     if (!outwardModal) return;
     setOutwardLoading(true);
     setOutwardErr(null);
+    setOutwardBlocked(false);
     try {
-      await apiClient<GatePass>(`/v1/gate-passes/${outwardModal.id}/outward`, {
-        method: 'POST',
-        body: {
-          ...(outwardOutboundId ? { outbound_event_id: outwardOutboundId } : {}),
-          ...(creditAuth ? { credit_authorization: true } : {}),
+      const cleared = await apiClient<GatePass>(
+        `/v1/gate-passes/${outwardModal.id}/outward`,
+        {
+          method: 'POST',
+          body: {
+            ...(outwardOutboundId ? { outbound_event_id: outwardOutboundId } : {}),
+            ...(creditAuth ? { credit_authorization: true } : {}),
+          },
         },
-      });
+      );
       setOutwardModal(null);
       setOutwardOutboundId('');
       setCreditAuth(false);
+      setFlash(
+        `Cleared ${cleared.vehicle_number} — TAT ${formatTurnaround(
+          cleared.turnaround_seconds,
+        )}`,
+      );
+      setTimeout(() => setFlash(null), 3000);
       fetchActive();
     } catch (err) {
+      const isBlocked =
+        err instanceof ApiError && err.code === 'GATE_OUTWARD_BLOCKED';
+      setOutwardBlocked(isBlocked);
       setOutwardErr(err instanceof Error ? err.message : 'Failed to clear outward');
     } finally {
       setOutwardLoading(false);
@@ -285,6 +318,7 @@ export default function GatePassConsolePage() {
                       setOutwardOutboundId(p.related_outbound_id ?? '');
                       setCreditAuth(false);
                       setOutwardErr(null);
+                      setOutwardBlocked(false);
                     }}
                     className="bg-gray-900 text-white text-sm font-medium px-3 py-2 rounded-lg hover:bg-gray-800"
                   >
@@ -295,6 +329,34 @@ export default function GatePassConsolePage() {
             </ul>
           )}
         </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow p-6">
+        <h2 className="text-lg font-bold text-gray-900 mb-4">Recently Cleared Today</h2>
+        {recentCleared.length === 0 ? (
+          <div className="text-gray-500 text-sm py-6 text-center">
+            No clearances yet today.
+          </div>
+        ) : (
+          <ul className="divide-y">
+            {recentCleared.map((p) => (
+              <li
+                key={p.id}
+                className="py-2 flex items-center justify-between gap-3 text-sm"
+              >
+                <span className="font-mono font-bold text-gray-900">
+                  {p.vehicle_number}
+                </span>
+                <span className="text-gray-500 flex-1 truncate">
+                  {p.pass_number} • {p.driver_name ?? '—'}
+                </span>
+                <span className="font-medium text-emerald-700 whitespace-nowrap">
+                  TAT {formatTurnaround(p.turnaround_seconds)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {outwardModal && (
@@ -308,6 +370,7 @@ export default function GatePassConsolePage() {
           submit={submitOutward}
           loading={outwardLoading}
           error={outwardErr}
+          blocked={outwardBlocked}
           onCancel={() => setOutwardModal(null)}
         />
       )}
@@ -325,6 +388,7 @@ function OutwardModal({
   submit,
   loading,
   error,
+  blocked,
   onCancel,
 }: {
   pass: GatePass;
@@ -336,12 +400,9 @@ function OutwardModal({
   submit: () => void;
   loading: boolean;
   error: string | null;
+  blocked: boolean;
   onCancel: () => void;
 }) {
-  const blocked = useMemo(
-    () => error?.toLowerCase().includes('payment pending') || error?.includes('Payment Pending'),
-    [error],
-  );
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
