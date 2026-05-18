@@ -600,6 +600,7 @@ model Lot {
   @@index([ownerPartyId, status])
   @@index([chamberId, status])
   @@index([inboundDate])
+  @@index([facilityId, status, inboundDate])
   @@map("lots")
 }
 
@@ -655,6 +656,7 @@ model OutboundEvent {
   @@unique([facilityId, dispatchNoteNumber])
   @@index([lotId])
   @@index([facilityId, status])
+  @@index([facilityId, outboundDate, status])
   @@map("outbound_events")
 }
 
@@ -702,6 +704,8 @@ model Invoice {
   @@index([billingPartyId, status])
   @@index([lotId])
   @@index([invoiceDate])
+  @@index([facilityId, status, invoiceDate])
+  @@index([facilityId, billingPartyId, status])
   @@map("invoices")
 }
 
@@ -759,6 +763,7 @@ model Payment {
   @@index([facilityId, partyId])
   @@index([facilityId, status])
   @@index([facilityId, paymentDate])
+  @@index([facilityId, paymentDate, status])
   @@map("payments")
 }
 

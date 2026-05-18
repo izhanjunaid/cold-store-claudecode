@@ -252,3 +252,67 @@ export async function renderInvoice(data: InvoicePdfData): Promise<Buffer> {
     await browser.close();
   }
 }
+
+export interface PartyStatementData {
+  facilityName: string;
+  facilityCity: string;
+  partyName: string;
+  partyNameUrdu: string | null;
+  partyType: string;
+  cnic: string | null;
+  bookType: string;
+  fromDate: string | null;
+  toDate: string | null;
+  generatedAt: string;
+  openingBalancePkr: number;
+  totalDebitPkr: number;
+  totalCreditPkr: number;
+  closingBalancePkr: number;
+  entries: Array<{
+    date: string;
+    type: string;
+    reference: string | null;
+    description: string;
+    debitPkr: number;
+    creditPkr: number;
+    balancePkr: number;
+  }>;
+}
+
+let _partyStatementTemplate: HandlebarsTemplateDelegate | null = null;
+
+function getPartyStatementTemplate(): HandlebarsTemplateDelegate {
+  if (!_partyStatementTemplate) {
+    const templatePath = join(__dirname, 'templates', 'party-statement.html');
+    const source = readFileSync(templatePath, 'utf-8');
+    _partyStatementTemplate = Handlebars.compile(source);
+  }
+  return _partyStatementTemplate;
+}
+
+export function renderPartyStatementHtml(data: PartyStatementData): string {
+  return getPartyStatementTemplate()(data);
+}
+
+export async function renderPartyStatement(data: PartyStatementData): Promise<Buffer> {
+  const html = renderPartyStatementHtml(data);
+
+  const puppeteer = await import('puppeteer');
+  const browser = await puppeteer.default.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdf = await page.pdf({
+      format: 'A5',
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+    });
+    return Buffer.from(pdf);
+  } finally {
+    await browser.close();
+  }
+}

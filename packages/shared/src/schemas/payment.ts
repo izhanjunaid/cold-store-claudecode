@@ -96,7 +96,7 @@ export type PaymentResponseType = z.infer<typeof PaymentResponse>;
 // PartyLedgerEntry
 export const PartyLedgerEntry = z.object({
   date: z.string(),
-  type: z.enum(['INVOICE', 'PAYMENT']),
+  type: z.enum(['INVOICE', 'PAYMENT', 'CREDIT_NOTE']),
   reference: z.string().nullable(),
   description: z.string(),
   debit_pkr: z.number(),
@@ -110,6 +110,7 @@ export type PartyLedgerEntryType = z.infer<typeof PartyLedgerEntry>;
 export const PartyLedgerResponse = z.object({
   party_id: z.string().uuid(),
   party_name: z.string(),
+  opening_balance_pkr: z.number().default(0),
   entries: z.array(PartyLedgerEntry),
   total_debit_pkr: z.number(),
   total_credit_pkr: z.number(),

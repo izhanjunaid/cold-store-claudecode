@@ -46,6 +46,22 @@
 | 8A | 16 | 24 | — | 40 | ALL PASS |
 | 8B | 34 | 46 | — | 80 | ALL PASS |
 | 9 | 6 | 27 | — | 33 | ALL PASS |
+| 10 | 10 | 20 | — | 30 | ALL PASS |
+
+### Phase 10 Tests
+
+**Unit (10)** — `apps/api/src/modules/reporting/__tests__/`
+- `aging-buckets.unit.test.ts` — 6 tests (same-day, 30/31 boundary, 60/61 boundary, 90/91 boundary, future date, emptyBuckets)
+- `days-in-storage.unit.test.ts` — 4 tests (same-day, 1 day, 365 days, future inbound clamped to 0)
+
+**Integration (20)** — `apps/api/src/modules/reporting/__tests__/reporting.integration.test.ts`
+- Dashboard (3): MANAGER full payload incl. financial / OPERATOR financial=null / occupancy_pct sanity
+- Lot Aging (3): MANAGER happy with days_in_storage / commodity_id filter / OPERATOR 403
+- Receivables Aging (3): aged invoice in b_90_plus / OPERATOR 403 / **AR reconciliation vs GL 1110+1120+1130+1150**
+- Commodity Inventory (1): groups active lots by commodity × chamber
+- Weight Variance (2): proration row / excludes lots without DISPATCHED outbound
+- Seasonal Summary (3): OWNER happy / missing date_from → 400 / MANAGER 403 (OWNER-only)
+- Party Statement (5): JSON / opening balance with date_from / PACCI vs KATCHI / format=pdf returns application/pdf / OPERATOR 403
 
 ### Phase 0 Tests
 - `apps/api/src/common/jwt.test.ts` — 4 tests (sign/verify access & refresh tokens)

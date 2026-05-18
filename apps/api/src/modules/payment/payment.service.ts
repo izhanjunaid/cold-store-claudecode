@@ -509,14 +509,26 @@ export class PaymentService {
     });
   }
 
-  async getPartyLedger(facilityId: string, partyId: string) {
+  async getPartyLedger(
+    facilityId: string,
+    partyId: string,
+    opts: { fromDate?: string; toDate?: string; bookType?: 'PACCI' | 'KATCHI' } = {},
+  ) {
     const party = await this.prisma.party.findFirst({
       where: { id: partyId, facilityId },
     });
     if (!party) throw Errors.PARTY_NOT_FOUND();
 
+    const { fromDate, toDate, bookType } = opts;
+    const bookFilter = bookType ? { bookType } : {};
+
     const invoices = await this.prisma.invoice.findMany({
-      where: { facilityId, billingPartyId: partyId, status: 'FINALIZED' },
+      where: {
+        facilityId,
+        billingPartyId: partyId,
+        status: 'FINALIZED',
+        ...bookFilter,
+      },
       select: {
         id: true,
         invoiceNumber: true,
@@ -528,7 +540,12 @@ export class PaymentService {
     });
 
     const payments = await this.prisma.payment.findMany({
-      where: { facilityId, partyId, status: { not: 'DISHONOURED' } },
+      where: {
+        facilityId,
+        partyId,
+        status: { not: 'DISHONOURED' },
+        ...bookFilter,
+      },
       select: {
         id: true,
         paymentDate: true,
@@ -540,9 +557,26 @@ export class PaymentService {
       orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
     });
 
+    const creditNotes = await this.prisma.creditNote.findMany({
+      where: {
+        facilityId,
+        billingPartyId: partyId,
+        status: { in: ['ISSUED', 'APPLIED'] },
+        ...bookFilter,
+      },
+      select: {
+        id: true,
+        creditNoteNumber: true,
+        creditDate: true,
+        totalPkr: true,
+        createdAt: true,
+      },
+      orderBy: [{ creditDate: 'asc' }, { createdAt: 'asc' }],
+    });
+
     type RawEntry = {
       date: string;
-      type: 'INVOICE' | 'PAYMENT';
+      type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
       reference: string | null;
       description: string;
       debit_pkr: number;
@@ -551,7 +585,7 @@ export class PaymentService {
       sortKey: string;
     };
 
-    const entries: RawEntry[] = [
+    const allEntries: RawEntry[] = [
       ...invoices.map((inv) => ({
         date: inv.invoiceDate.toISOString().slice(0, 10),
         type: 'INVOICE' as const,
@@ -572,12 +606,34 @@ export class PaymentService {
         id: pay.id,
         sortKey: `${pay.paymentDate.toISOString().slice(0, 10)}_B_${pay.createdAt.toISOString()}`,
       })),
+      ...creditNotes.map((cn) => ({
+        date: cn.creditDate.toISOString().slice(0, 10),
+        type: 'CREDIT_NOTE' as const,
+        reference: cn.creditNoteNumber ?? null,
+        description: `Credit Note ${cn.creditNoteNumber ?? cn.id.slice(0, 8)}`,
+        debit_pkr: 0,
+        credit_pkr: Number(cn.totalPkr),
+        id: cn.id,
+        sortKey: `${cn.creditDate.toISOString().slice(0, 10)}_C_${cn.createdAt.toISOString()}`,
+      })),
     ];
 
-    entries.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    allEntries.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
 
-    let balance = 0;
-    const ledgerEntries = entries.map((e) => {
+    const openingBalance = fromDate
+      ? allEntries
+          .filter((e) => e.date < fromDate)
+          .reduce((bal, e) => bal + e.debit_pkr - e.credit_pkr, 0)
+      : 0;
+
+    const windowEntries = allEntries.filter((e) => {
+      if (fromDate && e.date < fromDate) return false;
+      if (toDate && e.date > toDate) return false;
+      return true;
+    });
+
+    let balance = openingBalance;
+    const ledgerEntries = windowEntries.map((e) => {
       balance = balance + e.debit_pkr - e.credit_pkr;
       return {
         date: e.date,
@@ -591,16 +647,21 @@ export class PaymentService {
       };
     });
 
-    const totalDebit = entries.reduce((s, e) => s + e.debit_pkr, 0);
-    const totalCredit = entries.reduce((s, e) => s + e.credit_pkr, 0);
+    const totalDebit = windowEntries.reduce((s, e) => s + e.debit_pkr, 0);
+    const totalCredit = windowEntries.reduce((s, e) => s + e.credit_pkr, 0);
 
     return {
       party_id: partyId,
       party_name: party.name,
+      party_type: party.partyType,
+      book_type: bookType ?? null,
+      date_from: fromDate ?? null,
+      date_to: toDate ?? null,
+      opening_balance_pkr: Math.round(openingBalance * 100) / 100,
       entries: ledgerEntries,
       total_debit_pkr: Math.round(totalDebit * 100) / 100,
       total_credit_pkr: Math.round(totalCredit * 100) / 100,
-      closing_balance_pkr: Math.round((totalDebit - totalCredit) * 100) / 100,
+      closing_balance_pkr: Math.round(balance * 100) / 100,
     };
   }
 

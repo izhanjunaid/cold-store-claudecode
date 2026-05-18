@@ -57,13 +57,8 @@ interface OwnershipEvent {
   createdAt: Date;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-function daysInStorage(inboundDate: Date): number {
-  const now = new Date();
-  const diff = Math.floor((now.getTime() - inboundDate.getTime()) / DAY_MS);
-  return Math.max(0, diff);
-}
+import { daysInStorage } from './days-in-storage';
+export { daysInStorage };
 
 function toResponse(lot: LotRecord) {
   return {

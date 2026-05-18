@@ -1,11 +1,11 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 9 (Gate Pass + Peshgi UI) complete — backend, tests, frontend all shipped
-- **Active Task**: Ready for Phase 10 (Reporting & Dashboards) or Phase 6 (Quality & Spoilage)
+- **Active Phase**: Phase 10 (Reporting & Dashboards) complete — 7 endpoints, 4 screens, party-statement PDF, 30 new tests
+- **Active Task**: Ready for Phase 11 (Admin & Polish) or Phase 6 (Quality & Spoilage)
 - **Blockers**: None
-- **Last Updated**: 2026-05-10
-- **Deferred to Phase 11 polish**: salary-slip PDF, loan acknowledgment PDF, gate pass receipt PDF (all JSON for now); manual UI smoke against dev servers
+- **Last Updated**: 2026-05-18
+- **Deferred to Phase 11 polish**: salary-slip PDF, loan acknowledgment PDF, gate pass receipt PDF (all JSON for now); detail pages for commodity-inventory / weight-variance / seasonal-summary / ownership-transfers (stubs in Phase 10); manual UI smoke against dev servers
 
 ## Phase Completion
 
@@ -22,7 +22,7 @@
 | 8A | Core Ledger (CoA, JE, GL, Statements) | COMPLETED | 2026-04-28 | 2026-05-05 |
 | 8B | Cost-side (FA, Payroll, Expenses, Peshgi-API) | COMPLETED | 2026-05-06 | 2026-05-08 |
 | 9 | Gate Pass + Peshgi (UI + spec realignment + combined settlement) | COMPLETED | 2026-05-09 | 2026-05-10 |
-| 10 | Reporting & Dashboards | PENDING | — | — |
+| 10 | Reporting & Dashboards | COMPLETED | 2026-05-17 | 2026-05-18 |
 | 11 | Admin, Polish & Pre-Launch | PENDING | — | — |
 
 ## Test Counts
@@ -39,6 +39,7 @@
 | 8A | 16 | 24 | — | 40 |
 | 8B | 34 | 46 | — | 80 |
 | 9 | 6 | 27 | — | 33 |
+| 10 | 10 | 20 | — | 30 |
 
 ## Completed Tasks Log
 
@@ -123,3 +124,15 @@
 - [2026-05-10] 9.9 — Tracking docs (PROGRESS.md, TESTING.md, phases/phase-09-gate-peshgi.md) updated.
 - [2026-05-14] 9.10 — Bugfix `3ff6ed2`: JE-02 was double-debiting cash on combined invoice+loan payments (150k payment posting 250k cash debit because both JE-02 and JE-19 booked cash). JE-02/JE-03 now book only `payment.amountPkr - sum(LOAN allocations)`; skipped entirely for loan-only payments. POST /v1/payments/:id/allocate rejects LOAN target (post-creation AR-transfer JE not built). dishonour() scales JE-06 to invoice portion and posts per-loan REVERSAL JE (DR 1140 / CR cash) marking original JE-19s as REVERSED.
 - [2026-05-14] 9.11 — Regression test `c4aa3c9`: cheque+combined+dishonour end-to-end verifies the new reversal path (scaled JE-06, per-loan REVERSAL JE, REVERSED postingStatus on original JE-02/JE-19, net cash on 1020 sums to zero).
+- [2026-05-17] 10.0 — Branch `phase/10-reporting` off `phase/09-gate-peshgi`. Recharts installed. React Query provider wired at `(app)/providers.tsx` (scoped to new Phase 10 pages).
+- [2026-05-17] 10.1.9 — Migration `0011_reporting_indexes`: 5 composite indexes (invoices×2, outbound_events, lots, payments) applied via `prisma db execute`; mirrored as `@@index` blocks in `schema.prisma`.
+- [2026-05-17] 10.1.1 — `packages/shared/src/schemas/reports.ts`: 7 query schemas + response shapes. `PartyLedgerEntry.type` extended with `CREDIT_NOTE`; `PartyLedgerResponse` gained `opening_balance_pkr`.
+- [2026-05-17] 10.1.10 — `paymentService.getPartyLedger` extended with optional `{ fromDate, toDate, bookType }` opts. Includes CreditNote rows on credit side. Computes pre-period opening balance. Backwards-compatible. `daysInStorage` extracted to `lot/days-in-storage.ts`.
+- [2026-05-17] 10.1.2–10.1.8 — `apps/api/src/modules/reporting/`: 7 endpoints (`/v1/reports/dashboard`, `lot-aging`, `receivables-aging`, `commodity-inventory`, `weight-variance`, `seasonal-summary`, `party-statement/:partyId`). Role gating per endpoint, server-side strip of financial fields for non-ACCOUNTANT on `/dashboard`. AR aging reconciles to GL 1110+1120+1130+1150.
+- [2026-05-17] 10.2 — Bilingual A5 party-statement Handlebars template + `renderPartyStatement` / `renderPartyStatementHtml` in `pdf.service.ts`. Wired via `?format=pdf` on the party-statement endpoint.
+- [2026-05-17] 10.3 — `/dashboard` rewritten: KPI cards (5 ops + 3 financial), Recharts BarChart with 90% threshold ref-line, AttentionPanel (lots over storage threshold), SpoilagePlaceholder. 30s `refetchInterval`.
+- [2026-05-17] 10.4 — `/dashboards/financial`: 3 KPI cards, Recharts donut for receivables aging, top-5 overdue table. Manual Refresh button (no polling). OWNER + ACCOUNTANT only.
+- [2026-05-17] 10.5 — `/reports` hub (role-based tile hiding); detail pages for `/reports/lot-aging` and `/reports/receivables-aging`; 4 stub pages for commodity-inventory, weight-variance, seasonal-summary, ownership-transfers.
+- [2026-05-17] 10.6 — `/reports/party-statement` picker (debounced party search + date range + book-type radio) → `/reports/party-statement/[partyId]` detail page with opening/totals/closing cards, ledger table, Download PDF button (blob → new tab).
+- [2026-05-17] 10.7 — Sidebar: added "Financial" nav item. Web `tsc --noEmit` + `next build` green.
+- [2026-05-17] 10.8 — Tests: 10 unit (`aging-buckets.unit.test.ts` x6, `days-in-storage.unit.test.ts` x4) + 20 integration (`reporting.integration.test.ts`) including **AR reconciliation against GL 1110+1120+1130+1150**, format=pdf returns `application/pdf`, opening-balance math, PACCI/KATCHI filter, all 7 endpoints' happy + role gates.

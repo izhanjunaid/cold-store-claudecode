@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Party Statement — {{partyName}}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 10px;
+      color: #111;
+      background: #fff;
+      padding: 6mm;
+    }
+
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #1a5276;
+      padding-bottom: 4mm;
+      margin-bottom: 4mm;
+    }
+    .header h1 {
+      font-size: 16px;
+      color: #1a5276;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .header .subtitle {
+      font-size: 10px;
+      color: #555;
+      margin-top: 1mm;
+    }
+    .header .ur {
+      font-family: 'Noto Nastaliq Urdu', serif;
+      font-size: 12px;
+      color: #1a5276;
+      margin-top: 1mm;
+    }
+    .header .range {
+      font-size: 10px;
+      color: #555;
+      margin-top: 2mm;
+    }
+
+    .party-card {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4mm;
+      margin-bottom: 4mm;
+      padding: 3mm;
+      background: #f8f9fa;
+      border-left: 3px solid #1a5276;
+    }
+    .party-card .field { padding: 0.5mm 0; }
+    .party-card .label { font-weight: 600; color: #444; }
+    .party-card .ur {
+      direction: rtl;
+      font-family: 'Noto Nastaliq Urdu', serif;
+      font-size: 12px;
+    }
+
+    .book-badge {
+      display: inline-block;
+      padding: 0.5mm 2mm;
+      border-radius: 2px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .bk-PACCI { background: #117a65; color: #fff; }
+    .bk-KATCHI { background: #7d6608; color: #fff; }
+
+    .section-title {
+      font-size: 9px;
+      font-weight: 700;
+      color: #1a5276;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2mm;
+      border-bottom: 1px solid #d5d8dc;
+      padding-bottom: 1mm;
+    }
+
+    table.ledger {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9px;
+      margin-top: 2mm;
+    }
+    table.ledger thead th {
+      background: #1a5276;
+      color: #fff;
+      padding: 1.5mm 2mm;
+      text-align: left;
+      font-weight: 700;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    table.ledger thead th.num { text-align: right; }
+    table.ledger tbody td {
+      padding: 1.2mm 2mm;
+      border-bottom: 1px solid #eaeded;
+      vertical-align: top;
+    }
+    table.ledger tbody td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    table.ledger tbody tr.opening td,
+    table.ledger tbody tr.total td {
+      background: #eaeded;
+      font-weight: 700;
+    }
+    table.ledger tbody tr.closing td {
+      background: #1a5276;
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .type-badge {
+      display: inline-block;
+      padding: 0.3mm 1.5mm;
+      border-radius: 2px;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .t-INVOICE { background: #1a5276; color: #fff; }
+    .t-PAYMENT { background: #117a65; color: #fff; }
+    .t-CREDIT_NOTE { background: #7d6608; color: #fff; }
+
+    .footer {
+      margin-top: 6mm;
+      padding-top: 3mm;
+      border-top: 1px solid #aaa;
+      font-size: 9px;
+      color: #666;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>{{facilityName}}</h1>
+    <div class="subtitle">Cold Storage — {{facilityCity}} | Party Statement</div>
+    <div class="ur">پارٹی اسٹیٹمنٹ</div>
+    <div class="range">
+      Period: {{#if fromDate}}{{fromDate}}{{else}}—{{/if}} to {{#if toDate}}{{toDate}}{{else}}—{{/if}}
+      &nbsp;|&nbsp;
+      <span class="book-badge bk-{{bookType}}">{{bookType}}</span>
+    </div>
+  </div>
+
+  <div class="party-card">
+    <div>
+      <div class="field"><span class="label">Party:</span> <strong>{{partyName}}</strong></div>
+      <div class="field"><span class="label">Type:</span> {{partyType}}</div>
+      {{#if cnic}}<div class="field"><span class="label">CNIC:</span> {{cnic}}</div>{{/if}}
+    </div>
+    <div class="ur">
+      {{#if partyNameUrdu}}<div class="field"><strong>{{partyNameUrdu}}</strong></div>{{/if}}
+    </div>
+  </div>
+
+  <div class="section-title">Ledger / لیجر</div>
+  <table class="ledger">
+    <thead>
+      <tr>
+        <th style="width:14%">Date</th>
+        <th style="width:12%">Type</th>
+        <th style="width:14%">Reference</th>
+        <th>Description</th>
+        <th class="num" style="width:14%">Debit (PKR)</th>
+        <th class="num" style="width:14%">Credit (PKR)</th>
+        <th class="num" style="width:16%">Balance (PKR)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="opening">
+        <td colspan="6">Opening Balance / ابتدائی بیلنس</td>
+        <td class="num">{{openingBalancePkr}}</td>
+      </tr>
+      {{#each entries}}
+      <tr>
+        <td>{{date}}</td>
+        <td><span class="type-badge t-{{type}}">{{type}}</span></td>
+        <td>{{#if reference}}{{reference}}{{else}}—{{/if}}</td>
+        <td>{{description}}</td>
+        <td class="num">{{#if debitPkr}}{{debitPkr}}{{else}}—{{/if}}</td>
+        <td class="num">{{#if creditPkr}}{{creditPkr}}{{else}}—{{/if}}</td>
+        <td class="num">{{balancePkr}}</td>
+      </tr>
+      {{/each}}
+      <tr class="total">
+        <td colspan="4">Totals / کل</td>
+        <td class="num">{{totalDebitPkr}}</td>
+        <td class="num">{{totalCreditPkr}}</td>
+        <td class="num"></td>
+      </tr>
+      <tr class="closing">
+        <td colspan="6">Closing Balance / حتمی بیلنس</td>
+        <td class="num">{{closingBalancePkr}}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="footer">
+    Generated {{generatedAt}} &nbsp;•&nbsp; Subject to verification / تصدیق ضروری ہے
+  </div>
+
+</body>
+</html>
