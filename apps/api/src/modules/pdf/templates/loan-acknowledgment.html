@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Loan Acknowledgment — {{loanNumber}}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 11px;
+      color: #111;
+      background: #fff;
+      padding: 8mm;
+    }
+
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #7d6608;
+      padding-bottom: 4mm;
+      margin-bottom: 5mm;
+    }
+    .header h1 {
+      font-size: 17px;
+      color: #7d6608;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .header .subtitle {
+      font-size: 11px;
+      color: #555;
+      margin-top: 1mm;
+    }
+    .header .ur {
+      font-family: 'Noto Nastaliq Urdu', serif;
+      font-size: 13px;
+      color: #7d6608;
+      margin-top: 1mm;
+    }
+    .header .loan-no {
+      font-size: 11px;
+      color: #333;
+      margin-top: 2mm;
+      font-weight: 600;
+    }
+
+    .party-card {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4mm;
+      margin-bottom: 5mm;
+      padding: 3mm;
+      background: #fef9e7;
+      border-left: 3px solid #7d6608;
+    }
+    .party-card .field { padding: 0.5mm 0; }
+    .party-card .label { font-weight: 600; color: #444; }
+    .party-card .ur {
+      direction: rtl;
+      font-family: 'Noto Nastaliq Urdu', serif;
+      font-size: 13px;
+    }
+
+    .principal-banner {
+      background: #7d6608;
+      color: #fff;
+      padding: 5mm;
+      text-align: center;
+      margin-bottom: 5mm;
+      border-radius: 2px;
+    }
+    .principal-banner .lbl {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      opacity: 0.9;
+    }
+    .principal-banner .amt {
+      font-size: 22px;
+      font-weight: 700;
+      margin-top: 1mm;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .section-title {
+      font-size: 10px;
+      font-weight: 700;
+      color: #7d6608;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2mm;
+      border-bottom: 1px solid #d5d8dc;
+      padding-bottom: 1mm;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3mm;
+      margin-bottom: 5mm;
+      font-size: 11px;
+    }
+    .meta-grid .row {
+      display: flex;
+      justify-content: space-between;
+      padding: 1mm 0;
+      border-bottom: 1px dotted #ccc;
+    }
+    .meta-grid .row .label { color: #555; }
+    .meta-grid .row .val { font-weight: 600; }
+
+    .acknowledgment {
+      padding: 4mm;
+      background: #f8f9fa;
+      border: 1px dashed #7d6608;
+      font-size: 11px;
+      line-height: 1.5;
+      margin-bottom: 5mm;
+    }
+    .acknowledgment .ur {
+      font-family: 'Noto Nastaliq Urdu', serif;
+      direction: rtl;
+      font-size: 13px;
+      margin-top: 2mm;
+      line-height: 1.6;
+    }
+
+    .sig-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8mm;
+      margin-top: 10mm;
+    }
+    .sig-row .box {
+      border-top: 1px solid #555;
+      padding-top: 1mm;
+      text-align: center;
+      font-size: 10px;
+      color: #555;
+    }
+
+    .footer {
+      margin-top: 6mm;
+      padding-top: 3mm;
+      border-top: 1px solid #aaa;
+      font-size: 9px;
+      color: #666;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>{{facilityName}}</h1>
+    <div class="subtitle">{{facilityCity}} — Peshgi (Loan) Acknowledgment</div>
+    <div class="ur">پیشگی قرض کا اقرار نامہ</div>
+    <div class="loan-no">Loan No: {{loanNumber}}</div>
+  </div>
+
+  <div class="party-card">
+    <div>
+      <div class="field"><span class="label">Borrower:</span> <strong>{{partyName}}</strong></div>
+      <div class="field"><span class="label">Issue Date:</span> {{issueDate}}</div>
+      <div class="field"><span class="label">Source Account:</span> {{sourceAssetAccountCode}}</div>
+    </div>
+    <div class="ur">
+      {{#if partyNameUrdu}}<div class="field"><strong>{{partyNameUrdu}}</strong></div>{{/if}}
+    </div>
+  </div>
+
+  <div class="principal-banner">
+    <div class="lbl">Principal Amount / اصل رقم</div>
+    <div class="amt">PKR {{principalPkr}}</div>
+  </div>
+
+  <div class="section-title">Acknowledgment / اقرار نامہ</div>
+  <div class="acknowledgment">
+    I, <strong>{{partyName}}</strong>, hereby acknowledge receipt of the principal amount of
+    <strong>PKR {{principalPkr}}</strong> as a peshgi (advance) from {{facilityName}} on {{issueDate}}.
+    I agree that this advance will be recovered from future settlements as per facility policy.
+    <div class="ur">
+      میں {{partyName}}، اقرار کرتا ہوں کہ مذکورہ بالا رقم بطور پیشگی وصول کر لی ہے اور آئندہ آمدنی سے کٹوتی کی جائے گی۔
+    </div>
+    {{#if notes}}<div style="margin-top: 3mm; font-style: italic; color: #555;">Notes: {{notes}}</div>{{/if}}
+  </div>
+
+  <div class="sig-row">
+    <div class="box">Borrower Signature / قرض دار</div>
+    <div class="box">Authorized Signatory / مجاز افسر</div>
+  </div>
+
+  <div class="footer">
+    {{#if journalEntryId}}JE Ref: {{journalEntryId}} &nbsp;•&nbsp; {{/if}}System-generated document / سسٹم سے جاری شدہ
+  </div>
+
+</body>
+</html>

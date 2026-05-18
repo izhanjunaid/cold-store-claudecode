@@ -1,11 +1,11 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 10 (Reporting & Dashboards) complete — 7 endpoints, 4 screens, party-statement PDF, 30 new tests
-- **Active Task**: Ready for Phase 11 (Admin & Polish) or Phase 6 (Quality & Spoilage)
+- **Active Phase**: Phase 11 (Admin & Polish) — branch `phase/11-admin-polish` off Phase 10. Bucket 11.1 (deferred PDFs) shipped.
+- **Active Task**: 11.2 — four deferred report detail pages
 - **Blockers**: None
 - **Last Updated**: 2026-05-18
-- **Deferred to Phase 11 polish**: salary-slip PDF, loan acknowledgment PDF, gate pass receipt PDF (all JSON for now); detail pages for commodity-inventory / weight-variance / seasonal-summary / ownership-transfers (stubs in Phase 10); manual UI smoke against dev servers
+- **Deferred (still remaining)**: detail pages for commodity-inventory / weight-variance / seasonal-summary / ownership-transfers (stubs from Phase 10) → in flight in 11.2. Phase 6 (Quality & Spoilage) remains skipped.
 
 ## Phase Completion
 
@@ -23,7 +23,7 @@
 | 8B | Cost-side (FA, Payroll, Expenses, Peshgi-API) | COMPLETED | 2026-05-06 | 2026-05-08 |
 | 9 | Gate Pass + Peshgi (UI + spec realignment + combined settlement) | COMPLETED | 2026-05-09 | 2026-05-10 |
 | 10 | Reporting & Dashboards | COMPLETED | 2026-05-17 | 2026-05-18 |
-| 11 | Admin, Polish & Pre-Launch | PENDING | — | — |
+| 11 | Admin, Polish & Pre-Launch | IN PROGRESS | 2026-05-18 | — |
 
 ## Test Counts
 
@@ -40,6 +40,7 @@
 | 8B | 34 | 46 | — | 80 |
 | 9 | 6 | 27 | — | 33 |
 | 10 | 10 | 20 | — | 30 |
+| 11 (so far) | 21 | — | — | 21 |
 
 ## Completed Tasks Log
 
@@ -136,3 +137,5 @@
 - [2026-05-17] 10.6 — `/reports/party-statement` picker (debounced party search + date range + book-type radio) → `/reports/party-statement/[partyId]` detail page with opening/totals/closing cards, ledger table, Download PDF button (blob → new tab).
 - [2026-05-17] 10.7 — Sidebar: added "Financial" nav item. Web `tsc --noEmit` + `next build` green.
 - [2026-05-17] 10.8 — Tests: 10 unit (`aging-buckets.unit.test.ts` x6, `days-in-storage.unit.test.ts` x4) + 20 integration (`reporting.integration.test.ts`) including **AR reconciliation against GL 1110+1120+1130+1150**, format=pdf returns `application/pdf`, opening-balance math, PACCI/KATCHI filter, all 7 endpoints' happy + role gates.
+- [2026-05-18] 11.0 — Branch `phase/11-admin-polish` off `phase/10-reporting`.
+- [2026-05-18] 11.1 — Deferred PDFs shipped. New bilingual A5 Handlebars templates: `salary-slip.html`, `loan-acknowledgment.html`, `gate-pass-receipt.html`. New `renderXxxHtml/renderXxx` functions in `pdf.service.ts` + shared `htmlToA5Pdf` helper. Endpoints accept `?format=pdf` (default JSON, backwards-compatible): `GET /v1/payroll-runs/:id/lines/:lineId/slip`, `GET /v1/loans/:id/acknowledgment`, new `GET /v1/gate-passes/:id/receipt`. Web wired: payroll runs detail Slip button → blob, loan detail Download Acknowledgment button, gate console Print on each row. 21 new template unit tests pass.

@@ -118,18 +118,22 @@ export default function PayrollRunDetailPage() {
 
   async function viewSlip(lineId: string) {
     try {
-      const slip = await apiClient<any>(`/v1/payroll-runs/${id}/lines/${lineId}/slip`);
-      alert(
-        `Salary Slip — ${slip.runNumber}\n` +
-        `${slip.employeeName} (${slip.employeeDesignation ?? 'N/A'})\n` +
-        `Period: ${slip.payrollPeriod}\n\n` +
-        `Gross: Rs. ${slip.grossPay.toLocaleString()}\n` +
-        `EOBI (employee): Rs. ${slip.eobiEmployee.toLocaleString()}\n` +
-        `Income tax: Rs. ${slip.incomeTax.toLocaleString()}\n` +
-        `Other deductions: Rs. ${slip.otherDeductions.toLocaleString()}\n` +
-        `─────────────────\n` +
-        `Net Pay: Rs. ${slip.netPay.toLocaleString()}`,
+      const token = localStorage.getItem('access_token');
+      const facilityId = localStorage.getItem('facility_id');
+      const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
+      const res = await fetch(
+        `${apiUrl}/v1/payroll-runs/${id}/lines/${lineId}/slip?format=pdf`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'X-Facility-ID': facilityId ?? '',
+          },
+        },
       );
+      if (!res.ok) throw new Error(`PDF download failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
     } catch (e: any) { alert(e.message); }
   }
 

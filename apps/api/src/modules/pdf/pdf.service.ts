@@ -316,3 +316,129 @@ export async function renderPartyStatement(data: PartyStatementData): Promise<Bu
     await browser.close();
   }
 }
+
+// ============================================================================
+// Phase 11 — Deferred PDFs (salary slip, loan acknowledgment, gate pass receipt)
+// ============================================================================
+
+async function htmlToA5Pdf(html: string): Promise<Buffer> {
+  const puppeteer = await import('puppeteer');
+  const browser = await puppeteer.default.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdf = await page.pdf({
+      format: 'A5',
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+    });
+    return Buffer.from(pdf);
+  } finally {
+    await browser.close();
+  }
+}
+
+export interface SalarySlipData {
+  facilityName: string;
+  runNumber: string;
+  payrollPeriod: string;
+  employeeName: string;
+  employeeNameUrdu: string | null;
+  employeeCnic: string | null;
+  employeeDesignation: string | null;
+  daysWorked: number | null;
+  grossPay: number;
+  eobiEmployee: number;
+  incomeTax: number;
+  otherDeductions: number;
+  netPay: number;
+}
+
+let _salarySlipTemplate: HandlebarsTemplateDelegate | null = null;
+function getSalarySlipTemplate(): HandlebarsTemplateDelegate {
+  if (!_salarySlipTemplate) {
+    const templatePath = join(__dirname, 'templates', 'salary-slip.html');
+    const source = readFileSync(templatePath, 'utf-8');
+    _salarySlipTemplate = Handlebars.compile(source);
+  }
+  return _salarySlipTemplate;
+}
+
+export function renderSalarySlipHtml(data: SalarySlipData): string {
+  return getSalarySlipTemplate()(data);
+}
+
+export async function renderSalarySlip(data: SalarySlipData): Promise<Buffer> {
+  return htmlToA5Pdf(renderSalarySlipHtml(data));
+}
+
+export interface LoanAcknowledgmentData {
+  facilityName: string;
+  facilityCity: string;
+  loanNumber: string;
+  partyName: string;
+  partyNameUrdu: string | null;
+  issueDate: string;
+  principalPkr: number;
+  sourceAssetAccountCode: string;
+  journalEntryId: string | null;
+  notes: string | null;
+}
+
+let _loanAckTemplate: HandlebarsTemplateDelegate | null = null;
+function getLoanAcknowledgmentTemplate(): HandlebarsTemplateDelegate {
+  if (!_loanAckTemplate) {
+    const templatePath = join(__dirname, 'templates', 'loan-acknowledgment.html');
+    const source = readFileSync(templatePath, 'utf-8');
+    _loanAckTemplate = Handlebars.compile(source);
+  }
+  return _loanAckTemplate;
+}
+
+export function renderLoanAcknowledgmentHtml(data: LoanAcknowledgmentData): string {
+  return getLoanAcknowledgmentTemplate()(data);
+}
+
+export async function renderLoanAcknowledgment(data: LoanAcknowledgmentData): Promise<Buffer> {
+  return htmlToA5Pdf(renderLoanAcknowledgmentHtml(data));
+}
+
+export interface GatePassReceiptData {
+  facilityName: string;
+  facilityCity: string;
+  passNumber: string;
+  direction: 'INWARD' | 'OUTWARD';
+  vehicleNumber: string;
+  driverName: string | null;
+  driverPhone: string | null;
+  biltyNumber: string | null;
+  status: string;
+  relatedLotNumber: string | null;
+  relatedDispatchNoteNumber: string | null;
+  createdAt: string;
+  clearedAt: string | null;
+  turnaroundLabel: string | null;
+  notes: string | null;
+}
+
+let _gatePassReceiptTemplate: HandlebarsTemplateDelegate | null = null;
+function getGatePassReceiptTemplate(): HandlebarsTemplateDelegate {
+  if (!_gatePassReceiptTemplate) {
+    const templatePath = join(__dirname, 'templates', 'gate-pass-receipt.html');
+    const source = readFileSync(templatePath, 'utf-8');
+    _gatePassReceiptTemplate = Handlebars.compile(source);
+  }
+  return _gatePassReceiptTemplate;
+}
+
+export function renderGatePassReceiptHtml(data: GatePassReceiptData): string {
+  return getGatePassReceiptTemplate()(data);
+}
+
+export async function renderGatePassReceipt(data: GatePassReceiptData): Promise<Buffer> {
+  return htmlToA5Pdf(renderGatePassReceiptHtml(data));
+}

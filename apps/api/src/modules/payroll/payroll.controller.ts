@@ -18,9 +18,11 @@ import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 import { EmployeeService } from './employee.service';
 import { PayrollRunService } from './payroll-run.service';
+import { renderSalarySlip } from '../pdf/pdf.service';
 
 const IdParam = z.object({ id: z.string().uuid() });
 const RunLineParam = z.object({ id: z.string().uuid(), lineId: z.string().uuid() });
+const FormatQuery = z.object({ format: z.enum(['json', 'pdf']).default('json') });
 
 export async function payrollRoutes(app: FastifyInstance) {
   const periodLock = new PeriodLockService(app.prisma);
@@ -196,12 +198,21 @@ export async function payrollRoutes(app: FastifyInstance) {
     method: 'GET',
     url: '/v1/payroll-runs/:id/lines/:lineId/slip',
     preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
-    schema: { params: RunLineParam },
+    schema: { params: RunLineParam, querystring: FormatQuery },
     handler: async (request, reply) => {
       const { id, lineId } = request.params as z.infer<typeof RunLineParam>;
+      const { format } = request.query as z.infer<typeof FormatQuery>;
       const data = await runs.getSlipData(request.user!.facilityId, id, lineId);
-      // Return JSON for now; PDF rendering deferred (frontend can render). Spec §11.4 PDF
-      // template work is in Phase 11 polish.
+      if (format === 'pdf') {
+        const buf = await renderSalarySlip(data);
+        reply
+          .header('content-type', 'application/pdf')
+          .header(
+            'content-disposition',
+            `inline; filename="${data.runNumber}-${data.employeeName.replace(/\s+/g, '_')}.pdf"`,
+          );
+        return reply.send(buf);
+      }
       return sendSuccess(reply, data);
     },
   });

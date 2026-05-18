@@ -62,6 +62,25 @@ function formatTurnaround(seconds: number | null): string {
 
 const GATE_ALLOWED_ROLES = ['OWNER', 'MANAGER', 'OPERATOR', 'SECURITY'];
 
+async function printGatePassReceipt(passId: string) {
+  const token = localStorage.getItem('access_token');
+  const facilityId = localStorage.getItem('facility_id');
+  const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
+  const res = await fetch(`${apiUrl}/v1/gate-passes/${passId}/receipt?format=pdf`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Facility-ID': facilityId ?? '',
+    },
+  });
+  if (!res.ok) {
+    alert(`Receipt download failed (${res.status})`);
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+}
+
 export default function GatePassConsolePage() {
   const router = useRouter();
   const { user } = useAuthStore();
@@ -313,6 +332,12 @@ export default function GatePassConsolePage() {
                     </div>
                   </div>
                   <button
+                    onClick={() => printGatePassReceipt(p.id)}
+                    className="border border-gray-300 text-gray-700 text-sm font-medium px-3 py-2 rounded-lg hover:bg-gray-50"
+                  >
+                    Print
+                  </button>
+                  <button
                     onClick={() => {
                       setOutwardModal(p);
                       setOutwardOutboundId(p.related_outbound_id ?? '');
@@ -353,6 +378,12 @@ export default function GatePassConsolePage() {
                 <span className="font-medium text-emerald-700 whitespace-nowrap">
                   TAT {formatTurnaround(p.turnaround_seconds)}
                 </span>
+                <button
+                  onClick={() => printGatePassReceipt(p.id)}
+                  className="text-blue-600 hover:underline text-xs"
+                >
+                  Print
+                </button>
               </li>
             ))}
           </ul>

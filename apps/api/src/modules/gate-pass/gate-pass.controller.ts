@@ -9,14 +9,26 @@ import {
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { requireMinRole } from '../../plugins/auth';
+import { Errors } from '../../common/errors';
 import { GatePassRepository } from './gate-pass.repository';
 import { GatePassService } from './gate-pass.service';
+import { renderGatePassReceipt } from '../pdf/pdf.service';
 
 const IdParam = z.object({ id: z.string().uuid() });
+const FormatQuery = z.object({ format: z.enum(['json', 'pdf']).default('json') });
 
 const LogOutwardWithCreditAuth = LogOutwardRequest.extend({
   credit_authorization: z.boolean().optional(),
 });
+
+function formatTurnaround(seconds: number | null): string | null {
+  if (seconds === null) return null;
+  const mins = Math.floor(seconds / 60);
+  const hrs = Math.floor(mins / 60);
+  const remMin = mins % 60;
+  if (hrs > 0) return `${hrs}h ${remMin}m`;
+  return `${mins}m`;
+}
 
 export async function gatePassRoutes(app: FastifyInstance) {
   const service = new GatePassService(app.prisma, new GatePassRepository(app.prisma));
@@ -106,6 +118,54 @@ export async function gatePassRoutes(app: FastifyInstance) {
         body,
       );
       return sendSuccess(reply, data);
+    },
+  });
+
+  // GET /v1/gate-passes/:id/receipt?format=json|pdf — SECURITY+
+  app.route({
+    method: 'GET',
+    url: '/v1/gate-passes/:id/receipt',
+    preHandler: [app.authenticate, requireMinRole('SECURITY')],
+    schema: { params: IdParam, querystring: FormatQuery },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const { format } = request.query as z.infer<typeof FormatQuery>;
+      const facilityId = request.user!.facilityId;
+      const pass = await service.getById(facilityId, id);
+
+      if (format === 'pdf') {
+        const facility = await app.prisma.facility.findUnique({
+          where: { id: facilityId },
+          select: { name: true, city: true },
+        });
+        if (!facility) throw Errors.GATE_PASS_NOT_FOUND();
+        const buf = await renderGatePassReceipt({
+          facilityName: facility.name,
+          facilityCity: facility.city,
+          passNumber: pass.pass_number,
+          direction: pass.direction,
+          vehicleNumber: pass.vehicle_number,
+          driverName: pass.driver_name,
+          driverPhone: pass.driver_phone,
+          biltyNumber: pass.bilty_number,
+          status: pass.status,
+          relatedLotNumber: pass.related_lot_number ?? null,
+          relatedDispatchNoteNumber: pass.related_dispatch_note_number ?? null,
+          createdAt: pass.created_at,
+          clearedAt: pass.cleared_at,
+          turnaroundLabel: formatTurnaround(pass.turnaround_seconds),
+          notes: pass.notes,
+        });
+        reply
+          .header('content-type', 'application/pdf')
+          .header(
+            'content-disposition',
+            `inline; filename="${pass.pass_number}-receipt.pdf"`,
+          );
+        return reply.send(buf);
+      }
+
+      return sendSuccess(reply, pass);
     },
   });
 }

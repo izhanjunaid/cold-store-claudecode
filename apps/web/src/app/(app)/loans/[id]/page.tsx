@@ -160,6 +160,32 @@ export default function LoanDetailPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={async () => {
+              const token = localStorage.getItem('access_token');
+              const facilityId = localStorage.getItem('facility_id');
+              const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
+              const res = await fetch(
+                `${apiUrl}/v1/loans/${loanId}/acknowledgment?format=pdf`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    'X-Facility-ID': facilityId ?? '',
+                  },
+                },
+              );
+              if (!res.ok) {
+                alert(`Download failed (${res.status})`);
+                return;
+              }
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              window.open(url, '_blank');
+            }}
+            className="border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-50"
+          >
+            Download Acknowledgment
+          </button>
           {loan.status === 'ACTIVE' && canRepay && (
             <button
               onClick={() => setRepayModal(true)}

@@ -12,8 +12,10 @@ import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 import { PeshgiService } from './peshgi.service';
+import { renderLoanAcknowledgment } from '../pdf/pdf.service';
 
 const IdParam = z.object({ id: z.string().uuid() });
+const FormatQuery = z.object({ format: z.enum(['json', 'pdf']).default('json') });
 
 export async function peshgiRoutes(app: FastifyInstance) {
   const periodLock = new PeriodLockService(app.prisma);
@@ -100,15 +102,51 @@ export async function peshgiRoutes(app: FastifyInstance) {
     },
   });
 
-  // GET /v1/loans/:id/acknowledgment — JSON acknowledgment (PDF deferred to Phase 11)
+  // GET /v1/loans/:id/acknowledgment?format=json|pdf
   app.route({
     method: 'GET',
     url: '/v1/loans/:id/acknowledgment',
     preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
-    schema: { params: IdParam },
+    schema: { params: IdParam, querystring: FormatQuery },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
-      const loan = await service.getById(request.user!.facilityId, id);
+      const { format } = request.query as z.infer<typeof FormatQuery>;
+      const facilityId = request.user!.facilityId;
+      const loan = await service.getById(facilityId, id);
+
+      if (format === 'pdf') {
+        const [facility, party] = await Promise.all([
+          app.prisma.facility.findUnique({
+            where: { id: facilityId },
+            select: { name: true, city: true },
+          }),
+          app.prisma.party.findUnique({
+            where: { id: loan.party_id },
+            select: { name: true, nameUrdu: true },
+          }),
+        ]);
+        if (!facility || !party) throw Errors.PARTY_NOT_FOUND();
+        const buf = await renderLoanAcknowledgment({
+          facilityName: facility.name,
+          facilityCity: facility.city,
+          loanNumber: loan.loan_number,
+          partyName: party.name,
+          partyNameUrdu: party.nameUrdu,
+          issueDate: loan.issue_date,
+          principalPkr: loan.principal_pkr,
+          sourceAssetAccountCode: loan.source_asset_account_code,
+          journalEntryId: loan.issue_journal_entry_id,
+          notes: loan.notes,
+        });
+        reply
+          .header('content-type', 'application/pdf')
+          .header(
+            'content-disposition',
+            `inline; filename="${loan.loan_number}-acknowledgment.pdf"`,
+          );
+        return reply.send(buf);
+      }
+
       return sendSuccess(reply, {
         loan_number: loan.loan_number,
         party_id: loan.party_id,
@@ -118,7 +156,6 @@ export async function peshgiRoutes(app: FastifyInstance) {
         source_asset_account_code: loan.source_asset_account_code,
         journal_entry_id: loan.issue_journal_entry_id,
         notes: loan.notes,
-        // Note: PDF rendering deferred to Phase 11 polish (mirrors salary-slip).
         format: 'json',
       });
     },

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gate Pass — {{passNumber}}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 11px;
+      color: #111;
+      background: #fff;
+      padding: 8mm;
+    }
+
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #117a65;
+      padding-bottom: 4mm;
+      margin-bottom: 5mm;
+    }
+    .header h1 {
+      font-size: 17px;
+      color: #117a65;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .header .subtitle {
+      font-size: 11px;
+      color: #555;
+      margin-top: 1mm;
+    }
+    .header .ur {
+      font-family: 'Noto Nastaliq Urdu', serif;
+      font-size: 13px;
+      color: #117a65;
+      margin-top: 1mm;
+    }
+    .header .pass-no {
+      font-size: 12px;
+      color: #333;
+      margin-top: 2mm;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .direction-banner {
+      display: inline-block;
+      padding: 2mm 4mm;
+      border-radius: 2px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      margin-top: 2mm;
+    }
+    .dir-INWARD { background: #117a65; color: #fff; }
+    .dir-OUTWARD { background: #7d6608; color: #fff; }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4mm;
+      margin-bottom: 5mm;
+      padding: 3mm;
+      background: #f8f9fa;
+      border-left: 3px solid #117a65;
+    }
+    .info-grid .field { padding: 0.8mm 0; }
+    .info-grid .label { font-weight: 600; color: #444; display: inline-block; width: 38%; }
+
+    .section-title {
+      font-size: 10px;
+      font-weight: 700;
+      color: #117a65;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2mm;
+      border-bottom: 1px solid #d5d8dc;
+      padding-bottom: 1mm;
+    }
+
+    .vehicle-card {
+      padding: 3mm;
+      background: #ecf9f4;
+      margin-bottom: 5mm;
+      border: 1px solid #c2efe0;
+    }
+    .vehicle-card .row {
+      display: flex;
+      justify-content: space-between;
+      padding: 1mm 0;
+    }
+    .vehicle-card .row .label { color: #555; font-weight: 600; }
+    .vehicle-card .row .val { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+    .status-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4mm;
+      margin-bottom: 5mm;
+      font-size: 11px;
+    }
+    .status-row .cell {
+      padding: 2mm 3mm;
+      background: #f8f9fa;
+      border-left: 2px solid #117a65;
+    }
+    .status-row .cell .lbl {
+      font-size: 9px;
+      color: #777;
+      text-transform: uppercase;
+    }
+    .status-row .cell .val {
+      font-weight: 700;
+      margin-top: 0.5mm;
+    }
+
+    .sig-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 4mm;
+      margin-top: 10mm;
+    }
+    .sig-row .box {
+      border-top: 1px solid #555;
+      padding-top: 1mm;
+      text-align: center;
+      font-size: 9px;
+      color: #555;
+    }
+
+    .footer {
+      margin-top: 6mm;
+      padding-top: 3mm;
+      border-top: 1px solid #aaa;
+      font-size: 9px;
+      color: #666;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>{{facilityName}}</h1>
+    <div class="subtitle">{{facilityCity}} — Gate Pass Receipt</div>
+    <div class="ur">گیٹ پاس رسید</div>
+    <div class="pass-no">{{passNumber}}</div>
+    <span class="direction-banner dir-{{direction}}">{{direction}}</span>
+  </div>
+
+  <div class="section-title">Vehicle &amp; Driver / گاڑی اور ڈرائیور</div>
+  <div class="vehicle-card">
+    <div class="row"><span class="label">Vehicle Number / گاڑی نمبر:</span><span class="val">{{vehicleNumber}}</span></div>
+    {{#if driverName}}<div class="row"><span class="label">Driver Name / ڈرائیور کا نام:</span><span class="val">{{driverName}}</span></div>{{/if}}
+    {{#if driverPhone}}<div class="row"><span class="label">Driver Phone / فون:</span><span class="val">{{driverPhone}}</span></div>{{/if}}
+    {{#if biltyNumber}}<div class="row"><span class="label">Bilty Number / بلٹی:</span><span class="val">{{biltyNumber}}</span></div>{{/if}}
+  </div>
+
+  {{#if relatedLotNumber}}
+  <div class="section-title">Linked Operation</div>
+  <div class="info-grid">
+    <div>
+      <div class="field"><span class="label">Lot Number:</span> {{relatedLotNumber}}</div>
+      {{#if relatedDispatchNoteNumber}}<div class="field"><span class="label">Dispatch Note:</span> {{relatedDispatchNoteNumber}}</div>{{/if}}
+    </div>
+    <div></div>
+  </div>
+  {{/if}}
+
+  <div class="status-row">
+    <div class="cell">
+      <div class="lbl">Status</div>
+      <div class="val">{{status}}</div>
+    </div>
+    <div class="cell">
+      <div class="lbl">Created</div>
+      <div class="val">{{createdAt}}</div>
+    </div>
+  </div>
+
+  {{#if clearedAt}}
+  <div class="status-row">
+    <div class="cell">
+      <div class="lbl">Cleared At</div>
+      <div class="val">{{clearedAt}}</div>
+    </div>
+    {{#if turnaroundLabel}}
+    <div class="cell">
+      <div class="lbl">Turnaround</div>
+      <div class="val">{{turnaroundLabel}}</div>
+    </div>
+    {{/if}}
+  </div>
+  {{/if}}
+
+  {{#if notes}}
+  <div class="section-title">Notes</div>
+  <div style="padding: 2mm 3mm; background: #f8f9fa; font-size: 10px; line-height: 1.4; margin-bottom: 5mm;">{{notes}}</div>
+  {{/if}}
+
+  <div class="sig-row">
+    <div class="box">Security Officer<br/>سیکیورٹی</div>
+    <div class="box">Driver Acknowledgment<br/>ڈرائیور</div>
+    <div class="box">Facility Authorized<br/>مجاز افسر</div>
+  </div>
+
+  <div class="footer">
+    System-generated gate pass / سسٹم سے جاری شدہ &nbsp;•&nbsp; Retain for security records
+  </div>
+
+</body>
+</html>

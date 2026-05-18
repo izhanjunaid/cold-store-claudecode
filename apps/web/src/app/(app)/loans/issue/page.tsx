@@ -118,7 +118,7 @@ export default function IssuePeshgiPage() {
           <div><strong>Journal Entry:</strong> <span className="font-mono">{created.issue_journal_entry_id ?? '—'}</span></div>
         </div>
         <p className="text-sm text-gray-500">
-          Loan acknowledgment receipt: PDF rendering deferred to Phase 11. JSON view available via the API.
+          Open the loan to print the bilingual acknowledgment receipt.
         </p>
         <div className="flex gap-2 pt-2">
           <button

@@ -47,6 +47,7 @@
 | 8B | 34 | 46 | — | 80 | ALL PASS |
 | 9 | 6 | 27 | — | 33 | ALL PASS |
 | 10 | 10 | 20 | — | 30 | ALL PASS |
+| 11.1 | 21 | — | — | 21 | ALL PASS (deferred PDF templates) |
 
 ### Phase 10 Tests
 
