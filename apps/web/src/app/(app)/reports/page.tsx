@@ -34,25 +34,25 @@ const cards = [
   {
     title: 'Commodity Inventory',
     href: '/reports/commodity-inventory',
-    description: 'Bags by commodity, broken down by chamber. (Detail view coming in Phase 11.)',
+    description: 'Bags by commodity, expandable per-chamber breakdown.',
     minRole: 'MANAGER',
   },
   {
     title: 'Weight Variance',
     href: '/reports/weight-variance',
-    description: 'Inbound vs. outbound weight per lot. (Detail view coming in Phase 11.)',
+    description: 'Inbound vs. outbound weight per lot, flagged at ±2% variance.',
     minRole: 'MANAGER',
   },
   {
     title: 'Seasonal Summary',
     href: '/reports/seasonal-summary',
-    description: 'Total inbound, outbound, and revenue across a date range. (Detail view coming in Phase 11.)',
+    description: 'Total inbound, outbound, and revenue across a date range, per commodity.',
     minRole: 'OWNER',
   },
   {
     title: 'Ownership Transfer Log',
     href: '/reports/ownership-transfers',
-    description: 'All ownership transfers across the facility. (Detail view coming in Phase 11.)',
+    description: 'Timeline of all FULL and PARTIAL ownership transfers across the facility.',
     minRole: 'MANAGER',
   },
 ];

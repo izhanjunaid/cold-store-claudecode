@@ -50,6 +50,15 @@ export const SeasonalSummaryReportQuery = z.object({
 });
 export type SeasonalSummaryReportQueryType = z.infer<typeof SeasonalSummaryReportQuery>;
 
+export const OwnershipTransfersReportQuery = z.object({
+  date_from: dateOnly.optional(),
+  date_to: dateOnly.optional(),
+  party_id: z.string().uuid().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  per_page: z.coerce.number().int().min(1).max(500).default(50),
+});
+export type OwnershipTransfersReportQueryType = z.infer<typeof OwnershipTransfersReportQuery>;
+
 export const PartyStatementQuery = z.object({
   date_from: dateOnly.optional(),
   date_to: dateOnly.optional(),
@@ -190,6 +199,25 @@ export const SeasonalSummaryResponse = z.object({
   commodities: z.array(SeasonalSummaryCommodityRow),
 });
 export type SeasonalSummaryResponseType = z.infer<typeof SeasonalSummaryResponse>;
+
+export const OwnershipTransferRow = z.object({
+  transfer_id: z.string().uuid(),
+  lot_id: z.string().uuid(),
+  lot_number: z.string(),
+  child_lot_id: z.string().uuid().nullable(),
+  child_lot_number: z.string().nullable(),
+  from_party_id: z.string().uuid().nullable(),
+  from_party_name: z.string().nullable(),
+  to_party_id: z.string().uuid(),
+  to_party_name: z.string(),
+  quantity_bags: z.number().int(),
+  transfer_price_pkr: z.number().nullable(),
+  transfer_date: z.string(),
+  type: z.enum(['FULL', 'PARTIAL']),
+  operator_id: z.string().uuid(),
+  notes: z.string().nullable(),
+});
+export type OwnershipTransferRowType = z.infer<typeof OwnershipTransferRow>;
 
 export const PartyStatementEntry = z.object({
   id: z.string().uuid(),

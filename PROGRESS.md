@@ -1,11 +1,11 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 11 (Admin & Polish) — branch `phase/11-admin-polish` off Phase 10. Bucket 11.1 (deferred PDFs) shipped.
-- **Active Task**: 11.2 — four deferred report detail pages
+- **Active Phase**: Phase 11 (Admin & Polish) — branch `phase/11-admin-polish` off Phase 10. Buckets 11.1 (PDFs) + 11.2 (report detail pages) shipped.
+- **Active Task**: 11.3 — S-29 Visual Chamber Map
 - **Blockers**: None
 - **Last Updated**: 2026-05-18
-- **Deferred (still remaining)**: detail pages for commodity-inventory / weight-variance / seasonal-summary / ownership-transfers (stubs from Phase 10) → in flight in 11.2. Phase 6 (Quality & Spoilage) remains skipped.
+- **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision.
 
 ## Phase Completion
 
@@ -40,7 +40,7 @@
 | 8B | 34 | 46 | — | 80 |
 | 9 | 6 | 27 | — | 33 |
 | 10 | 10 | 20 | — | 30 |
-| 11 (so far) | 21 | — | — | 21 |
+| 11 (so far) | 21 | 3 | — | 24 |
 
 ## Completed Tasks Log
 
@@ -139,3 +139,4 @@
 - [2026-05-17] 10.8 — Tests: 10 unit (`aging-buckets.unit.test.ts` x6, `days-in-storage.unit.test.ts` x4) + 20 integration (`reporting.integration.test.ts`) including **AR reconciliation against GL 1110+1120+1130+1150**, format=pdf returns `application/pdf`, opening-balance math, PACCI/KATCHI filter, all 7 endpoints' happy + role gates.
 - [2026-05-18] 11.0 — Branch `phase/11-admin-polish` off `phase/10-reporting`.
 - [2026-05-18] 11.1 — Deferred PDFs shipped. New bilingual A5 Handlebars templates: `salary-slip.html`, `loan-acknowledgment.html`, `gate-pass-receipt.html`. New `renderXxxHtml/renderXxx` functions in `pdf.service.ts` + shared `htmlToA5Pdf` helper. Endpoints accept `?format=pdf` (default JSON, backwards-compatible): `GET /v1/payroll-runs/:id/lines/:lineId/slip`, `GET /v1/loans/:id/acknowledgment`, new `GET /v1/gate-passes/:id/receipt`. Web wired: payroll runs detail Slip button → blob, loan detail Download Acknowledgment button, gate console Print on each row. 21 new template unit tests pass.
+- [2026-05-18] 11.2 — Four report detail pages built; one new endpoint. New `GET /v1/reports/ownership-transfers` (MANAGER+) in `reports/ownership-transfers.ts` pairs TRANSFER_OUT events with child lots via `parentLotId` walk; `OwnershipTransfersReportQuery` + `OwnershipTransferRow` schemas added to `@coldchain/shared`. Four pages replaced (no more stubs): `/reports/commodity-inventory` (expandable per-chamber rows), `/reports/weight-variance` (variance ≥2% red-flagged, date filters), `/reports/seasonal-summary` (OWNER-only, KPI cards + per-commodity table), `/reports/ownership-transfers` (timeline grouped by date, FULL/PARTIAL badges). Reports hub copy updated. 3 new integration tests pass (222 total).

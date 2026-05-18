@@ -9,7 +9,7 @@
 
 - [x] 11.0 — Branch setup
 - [x] 11.1 — Deferred PDFs (salary slip, loan acknowledgment, gate pass receipt)
-- [ ] 11.2 — Four deferred report detail pages + new `/v1/reports/ownership-transfers` endpoint
+- [x] 11.2 — Four deferred report detail pages + new `/v1/reports/ownership-transfers` endpoint
 - [ ] 11.3 — S-29 Visual Chamber Map (P1)
 - [ ] 11.4 — S-39 User Management (OWNER-only CRUD + must-change-password flow)
 - [ ] 11.5 — S-40 System Settings (Facility info + operational settings via JSONB)
@@ -38,3 +38,20 @@
 - `apps/web/src/app/(app)/loans/[id]/page.tsx` — Download Acknowledgment button next to existing actions.
 - `apps/web/src/app/(app)/loans/issue/page.tsx` — removed stale "PDF rendering deferred" notice.
 - `apps/web/src/app/(app)/gate/page.tsx` — Print buttons on Currently Inside and Recently Cleared lists; added `printGatePassReceipt(passId)` helper.
+
+## 11.2 — Four report detail pages (shipped)
+
+**API**
+- `apps/api/src/modules/reporting/reports/ownership-transfers.ts` — new module. `getOwnershipTransfers()` reads `TRANSFER_OUT` history rows, pairs each event with the next-available child lot via `parentLotId` (cursor-walked oldest-first to handle multiple partial transfers off the same parent). Filters: date range + party_id (either side).
+- `apps/api/src/modules/reporting/reporting.controller.ts` — `GET /v1/reports/ownership-transfers` (MANAGER+) wired.
+- `packages/shared/src/schemas/reports.ts` — `OwnershipTransfersReportQuery` (date + party filter, paginated) and `OwnershipTransferRow` shape (transfer_id, lot_number, child_lot_number, from/to party, quantity, transfer_price, type FULL|PARTIAL, notes).
+
+**Web (4 stub pages replaced)**
+- `apps/web/src/app/(app)/reports/commodity-inventory/page.tsx` — accordion list per commodity with expandable per-chamber breakdown (bags + occupancy%).
+- `apps/web/src/app/(app)/reports/weight-variance/page.tsx` — table with rows red-flagged when |variance_pct| ≥ 2%, date-range filters, paginated.
+- `apps/web/src/app/(app)/reports/seasonal-summary/page.tsx` — OWNER-only, 4 KPI cards (inbound/outbound/revenue/avg storage days) + per-commodity table. Defaults to last 6 months.
+- `apps/web/src/app/(app)/reports/ownership-transfers/page.tsx` — events grouped by date, FULL/PARTIAL badges, lot → child-lot arrow, from→to party flow, quantity + price.
+- `apps/web/src/app/(app)/reports/page.tsx` — hub copy no longer references "Phase 11" stubs.
+
+**Tests**
+- 3 new integration tests in `reporting.integration.test.ts`: happy path (PARTIAL transfer surfaces with from/to + child_lot_id), party_id filter (matches both sides), OPERATOR 403. Suite: 222 integration (was 219).

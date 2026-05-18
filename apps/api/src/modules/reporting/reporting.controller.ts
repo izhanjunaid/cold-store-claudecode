@@ -7,6 +7,7 @@ import {
   CommodityInventoryReportQuery,
   WeightVarianceReportQuery,
   SeasonalSummaryReportQuery,
+  OwnershipTransfersReportQuery,
   PartyStatementQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
@@ -22,6 +23,7 @@ import { getReceivablesAging } from './reports/receivables-aging';
 import { getCommodityInventory } from './reports/commodity-inventory';
 import { getWeightVariance } from './reports/weight-variance';
 import { getSeasonalSummary } from './reports/seasonal-summary';
+import { getOwnershipTransfers } from './reports/ownership-transfers';
 import { getPartyStatement } from './reports/party-statement';
 
 const PartyIdParam = z.object({ partyId: z.string().uuid() });
@@ -139,6 +141,25 @@ export async function reportingRoutes(app: FastifyInstance) {
         query,
       );
       return sendSuccess(reply, data);
+    },
+  });
+
+  // ==========================================================
+  // GET /v1/reports/ownership-transfers — MANAGER+
+  // ==========================================================
+  app.route({
+    method: 'GET',
+    url: '/v1/reports/ownership-transfers',
+    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    schema: { querystring: OwnershipTransfersReportQuery },
+    handler: async (request, reply) => {
+      const query = request.query as z.infer<typeof OwnershipTransfersReportQuery>;
+      const result = await getOwnershipTransfers(
+        app.prisma,
+        request.user!.facilityId,
+        query,
+      );
+      return sendSuccess(reply, result.data, result.meta);
     },
   });
 

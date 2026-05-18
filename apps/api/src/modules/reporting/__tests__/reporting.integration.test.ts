@@ -517,3 +517,78 @@ describe('GET /v1/reports/party-statement/:partyId', () => {
     expect(res.statusCode).toBe(403);
   });
 });
+
+describe('GET /v1/reports/ownership-transfers', () => {
+  let transferLotId: string;
+  let transferChildLotId: string | null = null;
+
+  beforeAll(async () => {
+    // Create a fresh active lot owned by partyA and partially transfer some bags to partyB.
+    transferLotId = await createLot({
+      ownerPartyId: partyA,
+      commodityId: POTATO_ID,
+      inboundDate: '2026-02-01',
+      quantityBags: 30,
+      acceptedWeightKg: 600,
+    });
+
+    const transferRes = await app.inject({
+      method: 'POST',
+      url: `/v1/lots/${transferLotId}/transfer`,
+      headers: authHeaders(managerToken),
+      payload: {
+        transfer_type: 'PARTIAL',
+        to_party_id: partyB,
+        quantity_bags: 10,
+        transfer_price_pkr: 500,
+        effective_date: '2026-02-05',
+      },
+    });
+    expect(transferRes.statusCode).toBe(201);
+    transferChildLotId = JSON.parse(transferRes.body).data.child_lot_id ?? null;
+  });
+
+  it('returns paginated transfer rows with from/to party names', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/reports/ownership-transfers',
+      headers: authHeaders(managerToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.meta).toMatchObject({ page: 1 });
+    const ours = body.data.find((r: any) => r.lot_id === transferLotId);
+    expect(ours).toBeDefined();
+    expect(ours.from_party_name).toBeTruthy();
+    expect(ours.to_party_name).toBeTruthy();
+    expect(ours.quantity_bags).toBe(10);
+    expect(ours.transfer_price_pkr).toBe(500);
+    expect(ours.type).toBe('PARTIAL');
+    if (transferChildLotId) {
+      expect(ours.child_lot_id).toBe(transferChildLotId);
+    }
+  });
+
+  it('filters by party_id (matches from or to side)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/reports/ownership-transfers?party_id=${partyB}`,
+      headers: authHeaders(managerToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.data.every((r: any) => r.from_party_id === partyB || r.to_party_id === partyB)).toBe(
+      true,
+    );
+  });
+
+  it('OPERATOR is denied (403)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/reports/ownership-transfers',
+      headers: authHeaders(operatorToken),
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
