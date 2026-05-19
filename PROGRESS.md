@@ -1,8 +1,8 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 11 (Admin & Polish) — branch `phase/11-admin-polish` off Phase 10. Buckets 11.1 (PDFs) + 11.2 (report detail pages) shipped.
-- **Active Task**: 11.3 — S-29 Visual Chamber Map
+- **Active Phase**: Phase 11 (Admin & Polish) — branch `phase/11-admin-polish` off Phase 10. Buckets 11.1 + 11.2 + 11.3 shipped.
+- **Active Task**: 11.4 — S-39 User Management
 - **Blockers**: None
 - **Last Updated**: 2026-05-18
 - **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision.
@@ -140,3 +140,4 @@
 - [2026-05-18] 11.0 — Branch `phase/11-admin-polish` off `phase/10-reporting`.
 - [2026-05-18] 11.1 — Deferred PDFs shipped. New bilingual A5 Handlebars templates: `salary-slip.html`, `loan-acknowledgment.html`, `gate-pass-receipt.html`. New `renderXxxHtml/renderXxx` functions in `pdf.service.ts` + shared `htmlToA5Pdf` helper. Endpoints accept `?format=pdf` (default JSON, backwards-compatible): `GET /v1/payroll-runs/:id/lines/:lineId/slip`, `GET /v1/loans/:id/acknowledgment`, new `GET /v1/gate-passes/:id/receipt`. Web wired: payroll runs detail Slip button → blob, loan detail Download Acknowledgment button, gate console Print on each row. 21 new template unit tests pass.
 - [2026-05-18] 11.2 — Four report detail pages built; one new endpoint. New `GET /v1/reports/ownership-transfers` (MANAGER+) in `reports/ownership-transfers.ts` pairs TRANSFER_OUT events with child lots via `parentLotId` walk; `OwnershipTransfersReportQuery` + `OwnershipTransferRow` schemas added to `@coldchain/shared`. Four pages replaced (no more stubs): `/reports/commodity-inventory` (expandable per-chamber rows), `/reports/weight-variance` (variance ≥2% red-flagged, date filters), `/reports/seasonal-summary` (OWNER-only, KPI cards + per-commodity table), `/reports/ownership-transfers` (timeline grouped by date, FULL/PARTIAL badges). Reports hub copy updated. 3 new integration tests pass (222 total).
+- [2026-05-19] 11.3 — S-29 Visual Chamber Map shipped. New page `/chambers/map` (MANAGER+) renders a color-coded grid (4 tiers: empty / open <70% / busy 70–89% / full ≥90%). Click → modal with active lot list (calls `GET /v1/lots?chamber_id=…&status=ACTIVE`), with links to lot detail and chamber detail. `Map View` toggle button added on `/chambers`. No backend changes.

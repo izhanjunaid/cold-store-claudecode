@@ -49,12 +49,20 @@ export default function ChamberListPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Chambers</h1>
-        <button
-          onClick={() => router.push('/chambers/new')}
-          className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium"
-        >
-          Create Chamber
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => router.push('/chambers/map')}
+            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium"
+          >
+            Map View
+          </button>
+          <button
+            onClick={() => router.push('/chambers/new')}
+            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium"
+          >
+            Create Chamber
+          </button>
+        </div>
       </div>
 
       {loading ? (
