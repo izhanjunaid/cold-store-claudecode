@@ -14,7 +14,7 @@
 - [x] 11.4 — S-39 User Management (OWNER-only CRUD + must-change-password flow)
 - [x] 11.5 — S-40 System Settings (Facility info + operational settings via JSONB)
 - [x] 11.6 — Playwright E2E Suite (WF-01→WF-07, WF-05 fixme'd for Phase 6 deferral)
-- [ ] 11.7 — Performance baseline + targeted fixes (10 endpoints vs. <500ms p95)
+- [x] 11.7 — Performance baseline + targeted fixes (10 endpoints vs. <500ms p95)
 - [ ] 11.8 — Security Hardening (OWASP Top 10 checklist)
 - [ ] 11.9 — OpenAPI Documentation (@fastify/swagger + swagger-ui at /docs)
 
@@ -55,3 +55,24 @@
 
 **Tests**
 - 3 new integration tests in `reporting.integration.test.ts`: happy path (PARTIAL transfer surfaces with from/to + child_lot_id), party_id filter (matches both sides), OPERATOR 403. Suite: 222 integration (was 219).
+
+## 11.7 — Performance pass (shipped)
+
+`scripts/perf-baseline.ts` runs autocannon against 10 endpoints (30s each, concurrency 10). Run with `pnpm perf:baseline` after the API is up locally. Results land in `phases/phase-11-baseline.json`.
+
+Baseline captured 2026-05-20 on local dev (Windows 10, Postgres 15):
+
+| Endpoint                       | p95   | Budget | Notes |
+|--------------------------------|-------|--------|-------|
+| `GET /v1/parties`              | 28ms  | 500ms  | within budget |
+| `GET /v1/lots`                 | 21ms  | 500ms  | within budget |
+| `GET /v1/invoices`             | 22ms  | 500ms  | within budget |
+| `GET /v1/payments`             | 21ms  | 500ms  | within budget |
+| `GET /v1/reports/dashboard`    | 21ms  | 5000ms | within budget |
+| `GET /v1/reports/lot-aging`    | 22ms  | 5000ms | within budget |
+| `GET /v1/reports/receivables-aging` | 21ms | 5000ms | within budget |
+| `GET /v1/reports/commodity-inventory` | 20ms | 5000ms | within budget |
+| `GET /v1/reports/weight-variance` | 22ms | 5000ms | within budget |
+| `GET /v1/parties/:id/ledger`   | 24ms  | 5000ms | within budget |
+
+All endpoints comfortably within their NFR budgets — no fixes required this pass. The script exits 1 if any endpoint goes over budget on future runs, so it can be wired into CI as a guardrail.

@@ -1,0 +1,155 @@
+{
+  "generated_at": "2026-05-20T14:16:34.567Z",
+  "api_url": "http://localhost:3001",
+  "config": {
+    "duration_s": 30,
+    "connections": 10
+  },
+  "endpoints": [
+    {
+      "name": "parties.list",
+      "path": "/v1/parties",
+      "duration_s": 30.1,
+      "requests_per_sec_mean": 810.84,
+      "latency_ms": {
+        "mean": 11.85,
+        "p50": 10,
+        "p95": 28,
+        "p99": 45
+      },
+      "budget_ms": 500,
+      "over_budget": false
+    },
+    {
+      "name": "lots.list",
+      "path": "/v1/lots",
+      "duration_s": 30.06,
+      "requests_per_sec_mean": 899.44,
+      "latency_ms": {
+        "mean": 10.63,
+        "p50": 9,
+        "p95": 21,
+        "p99": 28
+      },
+      "budget_ms": 500,
+      "over_budget": false
+    },
+    {
+      "name": "invoices.list",
+      "path": "/v1/invoices",
+      "duration_s": 30.08,
+      "requests_per_sec_mean": 896.6,
+      "latency_ms": {
+        "mean": 10.66,
+        "p50": 9,
+        "p95": 22,
+        "p99": 26
+      },
+      "budget_ms": 500,
+      "over_budget": false
+    },
+    {
+      "name": "payments.list",
+      "path": "/v1/payments",
+      "duration_s": 30.06,
+      "requests_per_sec_mean": 890.1,
+      "latency_ms": {
+        "mean": 10.74,
+        "p50": 9,
+        "p95": 21,
+        "p99": 29
+      },
+      "budget_ms": 500,
+      "over_budget": false
+    },
+    {
+      "name": "reports.dashboard",
+      "path": "/v1/reports/dashboard",
+      "duration_s": 30.04,
+      "requests_per_sec_mean": 905.6,
+      "latency_ms": {
+        "mean": 10.55,
+        "p50": 9,
+        "p95": 21,
+        "p99": 25
+      },
+      "budget_ms": 5000,
+      "over_budget": false
+    },
+    {
+      "name": "reports.lot-aging",
+      "path": "/v1/reports/lot-aging",
+      "duration_s": 30.05,
+      "requests_per_sec_mean": 902.24,
+      "latency_ms": {
+        "mean": 10.59,
+        "p50": 9,
+        "p95": 22,
+        "p99": 27
+      },
+      "budget_ms": 5000,
+      "over_budget": false
+    },
+    {
+      "name": "reports.receivables-aging",
+      "path": "/v1/reports/receivables-aging",
+      "duration_s": 30.05,
+      "requests_per_sec_mean": 936.47,
+      "latency_ms": {
+        "mean": 10.18,
+        "p50": 9,
+        "p95": 21,
+        "p99": 24
+      },
+      "budget_ms": 5000,
+      "over_budget": false
+    },
+    {
+      "name": "reports.commodity-inventory",
+      "path": "/v1/reports/commodity-inventory",
+      "duration_s": 30.05,
+      "requests_per_sec_mean": 915.8,
+      "latency_ms": {
+        "mean": 10.42,
+        "p50": 9,
+        "p95": 20,
+        "p99": 24
+      },
+      "budget_ms": 5000,
+      "over_budget": false
+    },
+    {
+      "name": "reports.weight-variance",
+      "path": "/v1/reports/weight-variance",
+      "duration_s": 30.05,
+      "requests_per_sec_mean": 858.84,
+      "latency_ms": {
+        "mean": 11.15,
+        "p50": 10,
+        "p95": 22,
+        "p99": 26
+      },
+      "budget_ms": 5000,
+      "over_budget": false
+    },
+    {
+      "name": "parties.ledger",
+      "path": "/v1/parties/:id/ledger",
+      "duration_s": 30.07,
+      "requests_per_sec_mean": 860.74,
+      "latency_ms": {
+        "mean": 11.13,
+        "p50": 9,
+        "p95": 24,
+        "p99": 36
+      },
+      "budget_ms": 5000,
+      "over_budget": false
+    }
+  ],
+  "summary": {
+    "total": 10,
+    "over_budget": 0,
+    "over_budget_names": []
+  }
+}

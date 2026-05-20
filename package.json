@@ -11,12 +11,15 @@
     "typecheck": "turbo typecheck",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
+    "perf:baseline": "tsx scripts/perf-baseline.ts",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
+    "autocannon": "^8.0.0",
     "prettier": "^3.5.0",
+    "tsx": "^4.21.0",
     "turbo": "^2.4.0"
   },
   "packageManager": "pnpm@10.33.0",
