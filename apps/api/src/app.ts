@@ -27,6 +27,7 @@ import { gatePassRoutes } from './modules/gate-pass/gate-pass.controller';
 import { reportingRoutes } from './modules/reporting/reporting.controller';
 import { userRoutes } from './modules/user/user.controller';
 import { facilityRoutes } from './modules/facility/facility.controller';
+import { testRoutes } from './modules/_test/test.controller';
 
 export async function buildApp() {
   const app = Fastify({
@@ -79,6 +80,11 @@ export async function buildApp() {
   await app.register(reportingRoutes);
   await app.register(userRoutes);
   await app.register(facilityRoutes);
+
+  // E2E-only test routes. Double-guarded: NODE_ENV check AND env var check.
+  if (process.env['NODE_ENV'] !== 'production' && process.env['ALLOW_TEST_RESET'] === '1') {
+    await app.register(testRoutes);
+  }
 
   return app;
 }

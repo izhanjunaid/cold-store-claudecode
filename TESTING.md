@@ -19,8 +19,17 @@
 
 ### E2E Tests (Playwright)
 - **Target**: All 7 critical workflows from docs/12_e2e_workflows.md
-- **Location**: `apps/web/e2e/`
-- **Run**: `npx playwright test`
+- **Location**: `apps/web/e2e/` (config at repo root `playwright.config.ts`)
+- **Run**: `pnpm e2e` (or `pnpm e2e:ui` for the inspector)
+- **Requirements**: API server must be launched with `ALLOW_TEST_RESET=1` and `NODE_ENV != production`. The Playwright config auto-spawns both dev servers with the env var set; no manual launch is needed locally. The test-only route `POST /v1/_test/reset` truncates operational rows for the e2e facility (id `0000…0001`) and is double-guarded against production registration.
+- **Spec → workflow mapping**:
+  - `wf-01-inbound.spec.ts` — WF-01 Produce Inbound
+  - `wf-02-ownership-transfer.spec.ts` — WF-02 Mid-Storage Ownership Transfer
+  - `wf-03-partial-withdrawal.spec.ts` — WF-03 Partial Withdrawal w/ Service Charges
+  - `wf-04-full-withdrawal-settlement.spec.ts` — WF-04 Full Withdrawal & Settlement
+  - `wf-05-quality-spoilage.spec.ts` — WF-05 Quality / Spoilage (`fixme`'d; M6 deferred)
+  - `wf-06-month-end.spec.ts` — WF-06 Month-End Financial Reconciliation
+  - `wf-07-peshgi.spec.ts` — WF-07 Peshgi Loan Issue & Recovery
 
 ## Critical E2E Workflows (from PRD Section 6)
 
@@ -51,6 +60,7 @@
 | 11.2 | — | 3 | — | 3 | ALL PASS (ownership-transfers report endpoint) |
 | 11.4 | — | 9 | — | 9 | ALL PASS (user management + change-password) |
 | 11.5 | — | 3 | — | 3 | ALL PASS (facility settings + audit-trigger fix) |
+| 11.6 | — | — | 6+1 fixme | 7 | E2E suite scaffolded; 6 specs run, WF-05 fixme (Phase 6 deferred) |
 
 ### Phase 10 Tests
 

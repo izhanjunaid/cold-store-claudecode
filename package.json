@@ -9,6 +9,8 @@
     "test:unit": "turbo test:unit",
     "test:integration": "turbo test:integration",
     "typecheck": "turbo typecheck",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
   },
