@@ -15,7 +15,7 @@
 - [x] 11.5 — S-40 System Settings (Facility info + operational settings via JSONB)
 - [x] 11.6 — Playwright E2E Suite (WF-01→WF-07, WF-05 fixme'd for Phase 6 deferral)
 - [x] 11.7 — Performance baseline + targeted fixes (10 endpoints vs. <500ms p95)
-- [ ] 11.8 — Security Hardening (OWASP Top 10 checklist)
+- [x] 11.8 — Security Hardening (OWASP Top 10 checklist)
 - [ ] 11.9 — OpenAPI Documentation (@fastify/swagger + swagger-ui at /docs)
 
 ## Definition of Done
