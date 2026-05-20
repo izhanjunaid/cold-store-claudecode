@@ -41,7 +41,9 @@ export default function LoginPage() {
       });
 
       setUser(result.user, result.access_token, result.refresh_token);
-      router.push(defaultRouteForRole(result.user.role));
+      router.push(
+        defaultRouteForRole(result.user.role, (result.user as { must_change_password?: boolean }).must_change_password),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {

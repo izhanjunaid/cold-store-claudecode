@@ -145,4 +145,10 @@ export const Errors = {
       'Credit authorization can only be granted by MANAGER or higher',
       403,
     ),
+  // Phase 11 — User management
+  USER_NOT_FOUND: () => new AppError('USER_NOT_FOUND', 'User does not exist', 404),
+  USER_EMAIL_TAKEN: () =>
+    new AppError('USER_EMAIL_TAKEN', 'A user with this email already exists', 409, 'email'),
+  USER_WRONG_PASSWORD: () =>
+    new AppError('USER_WRONG_PASSWORD', 'Current password is incorrect', 422, 'current_password'),
 } as const;

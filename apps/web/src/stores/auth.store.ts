@@ -6,6 +6,7 @@ interface User {
   name: string;
   role: string;
   facility_id: string;
+  must_change_password?: boolean;
 }
 
 interface AuthState {

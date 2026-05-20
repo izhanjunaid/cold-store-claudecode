@@ -1,12 +1,15 @@
 import type { FastifyInstance } from 'fastify';
-import { LoginRequest, RefreshRequest } from '@coldchain/shared';
+import { LoginRequest, RefreshRequest, ChangePasswordRequest } from '@coldchain/shared';
+import type { z } from 'zod';
 import { AuthService } from './auth.service';
 import { AuthRepository } from './auth.repository';
+import { UserService } from '../user/user.service';
 import { sendSuccess } from '../../common/response';
 import { Errors } from '../../common/errors';
 
 export async function authRoutes(app: FastifyInstance) {
   const service = new AuthService(new AuthRepository(app.prisma));
+  const userService = new UserService(app.prisma);
 
   // POST /v1/auth/login
   app.route({
@@ -54,6 +57,23 @@ export async function authRoutes(app: FastifyInstance) {
     preHandler: [app.authenticate],
     handler: async (request, reply) => {
       const result = await service.me(request.user!.userId);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/auth/change-password — any authenticated user
+  app.route({
+    method: 'POST',
+    url: '/v1/auth/change-password',
+    preHandler: [app.authenticate],
+    schema: { body: ChangePasswordRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof ChangePasswordRequest>;
+      const result = await userService.changeOwnPassword(
+        request.user!.userId,
+        body.current_password,
+        body.new_password,
+      );
       return sendSuccess(reply, result);
     },
   });

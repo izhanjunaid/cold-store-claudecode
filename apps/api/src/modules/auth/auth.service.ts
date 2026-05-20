@@ -62,6 +62,7 @@ export class AuthService {
         name: user.name,
         role: user.role,
         facility_id: user.facilityId,
+        must_change_password: user.mustChangePassword,
       },
     };
   }
@@ -126,6 +127,7 @@ export class AuthService {
       name_urdu: user.nameUrdu,
       role: user.role,
       facility_id: user.facilityId,
+      must_change_password: user.mustChangePassword,
     };
   }
 }

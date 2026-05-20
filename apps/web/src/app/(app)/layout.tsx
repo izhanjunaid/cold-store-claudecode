@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { useAuthStore } from '@/stores/auth.store';
@@ -15,10 +15,12 @@ interface MeResponse {
   name_urdu: string | null;
   role: string;
   facility_id: string;
+  must_change_password?: boolean;
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { isAuthenticated, user, setUser, loadFromStorage, logout } = useAuthStore();
 
   useEffect(() => {
@@ -47,6 +49,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         });
     }
   }, [isAuthenticated, user, router, setUser, logout]);
+
+  // Force users with must_change_password to the change-password page.
+  useEffect(() => {
+    if (user && user.must_change_password && pathname !== '/change-password') {
+      router.push('/change-password');
+    }
+  }, [user, pathname, router]);
 
   if (!isAuthenticated) {
     return null;
