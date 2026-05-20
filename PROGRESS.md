@@ -1,8 +1,8 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 11 (Admin & Polish) — branch `phase/11-admin-polish` off Phase 10. Buckets 11.1–11.4 shipped.
-- **Active Task**: 11.5 — S-40 System Settings
+- **Active Phase**: Phase 11 (Admin & Polish) — branch `phase/11-admin-polish` off Phase 10. Buckets 11.1–11.5 shipped.
+- **Active Task**: 11.6 — Playwright E2E suite (WF-01..WF-07)
 - **Blockers**: None
 - **Last Updated**: 2026-05-18
 - **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision.
@@ -40,7 +40,7 @@
 | 8B | 34 | 46 | — | 80 |
 | 9 | 6 | 27 | — | 33 |
 | 10 | 10 | 20 | — | 30 |
-| 11 (so far) | 21 | 12 | — | 33 |
+| 11 (so far) | 21 | 15 | — | 36 |
 
 ## Completed Tasks Log
 
@@ -141,4 +141,5 @@
 - [2026-05-18] 11.1 — Deferred PDFs shipped. New bilingual A5 Handlebars templates: `salary-slip.html`, `loan-acknowledgment.html`, `gate-pass-receipt.html`. New `renderXxxHtml/renderXxx` functions in `pdf.service.ts` + shared `htmlToA5Pdf` helper. Endpoints accept `?format=pdf` (default JSON, backwards-compatible): `GET /v1/payroll-runs/:id/lines/:lineId/slip`, `GET /v1/loans/:id/acknowledgment`, new `GET /v1/gate-passes/:id/receipt`. Web wired: payroll runs detail Slip button → blob, loan detail Download Acknowledgment button, gate console Print on each row. 21 new template unit tests pass.
 - [2026-05-18] 11.2 — Four report detail pages built; one new endpoint. New `GET /v1/reports/ownership-transfers` (MANAGER+) in `reports/ownership-transfers.ts` pairs TRANSFER_OUT events with child lots via `parentLotId` walk; `OwnershipTransfersReportQuery` + `OwnershipTransferRow` schemas added to `@coldchain/shared`. Four pages replaced (no more stubs): `/reports/commodity-inventory` (expandable per-chamber rows), `/reports/weight-variance` (variance ≥2% red-flagged, date filters), `/reports/seasonal-summary` (OWNER-only, KPI cards + per-commodity table), `/reports/ownership-transfers` (timeline grouped by date, FULL/PARTIAL badges). Reports hub copy updated. 3 new integration tests pass (222 total).
 - [2026-05-19] 11.3 — S-29 Visual Chamber Map shipped. New page `/chambers/map` (MANAGER+) renders a color-coded grid (4 tiers: empty / open <70% / busy 70–89% / full ≥90%). Click → modal with active lot list (calls `GET /v1/lots?chamber_id=…&status=ACTIVE`), with links to lot detail and chamber detail. `Map View` toggle button added on `/chambers`. No backend changes.
+- [2026-05-20] 11.5 — S-40 System Settings shipped. Migration `0013_fix_facility_audit_trigger` fixes a pre-existing bug in `audit_trigger_self_facility_fn` (empty `app.user_id` GUC now coalesced via NULLIF-style branch, matching the Phase 0 fix on the per-tenant trigger). Seed updated to the Phase 11 settings shape (`weight_dispute_threshold_kg`, `storage_alert_thresholds`, `gst_registered`, `number_format` enum `en-PK | en-IN`). New `apps/api/src/modules/facility/` module with `FacilityService.getFacility` + `updateFacility` (deep-ish merge into the JSONB column, whitelisted column updates). Routes: `GET /v1/facilities/me` (any authenticated) and `PATCH /v1/facilities/me` (OWNER). Shared schemas: `facility.ts` with `FacilitySettings`, `UpdateFacilityRequest`, `FacilityResponse`, plus `DEFAULT_FACILITY_SETTINGS`. Web page `/settings` with two sections (Facility Info + Operational Settings, per-commodity storage alert grid). 3 new integration tests pass (234 total).
 - [2026-05-20] 11.4 — S-39 User Management shipped. Migration `0012_user_must_change_password` adds `must_change_password` BOOLEAN column (default false). New `apps/api/src/modules/user/` with `UserService` (list/getById/create/update/resetPassword/changeOwnPassword — bcrypt rounds 12) and 5 OWNER-only routes (`GET /v1/users`, `GET /v1/users/:id`, `POST /v1/users`, `PATCH /v1/users/:id`, `POST /v1/users/:id/reset-password`). `POST /v1/auth/change-password` added (any authenticated user). Login/me responses surface `must_change_password`. `is_active=false` and `reset-password` both revoke all refresh tokens. Shared schemas: `users.ts` with `CreateUserRequest`, `UpdateUserRequest`, `ResetPasswordRequest`, `ChangePasswordRequest`, `UserResponse`. New errors: `USER_NOT_FOUND`, `USER_EMAIL_TAKEN`, `USER_WRONG_PASSWORD`. Web: `/change-password` page, `/settings/users` list + new + detail pages, `/settings/layout.tsx` with OWNER gate and sidebar nav. `(app)/layout.tsx` redirects users with `must_change_password=true` to `/change-password`. Auth store + `auth-redirect.ts` honour the flag. Test helpers register `userRoutes`. 9 new integration tests pass (231 total).

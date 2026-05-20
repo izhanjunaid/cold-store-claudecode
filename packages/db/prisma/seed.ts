@@ -21,10 +21,10 @@ async function main() {
       city: 'Lahore',
       phone: '042-35761234',
       settings: {
-        weight_dispute_threshold_pct: 2,
-        chamber_capacity_warning_pct: 90,
-        number_format: 'international',
-        gst_enabled: false,
+        weight_dispute_threshold_kg: 5,
+        storage_alert_thresholds: {},
+        gst_registered: false,
+        number_format: 'en-PK',
       },
     },
   });

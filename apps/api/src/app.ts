@@ -26,6 +26,7 @@ import { peshgiRoutes } from './modules/peshgi/peshgi.controller';
 import { gatePassRoutes } from './modules/gate-pass/gate-pass.controller';
 import { reportingRoutes } from './modules/reporting/reporting.controller';
 import { userRoutes } from './modules/user/user.controller';
+import { facilityRoutes } from './modules/facility/facility.controller';
 
 export async function buildApp() {
   const app = Fastify({
@@ -77,6 +78,7 @@ export async function buildApp() {
   await app.register(gatePassRoutes);
   await app.register(reportingRoutes);
   await app.register(userRoutes);
+  await app.register(facilityRoutes);
 
   return app;
 }

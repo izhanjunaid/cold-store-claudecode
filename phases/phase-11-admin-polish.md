@@ -12,7 +12,7 @@
 - [x] 11.2 — Four deferred report detail pages + new `/v1/reports/ownership-transfers` endpoint
 - [x] 11.3 — S-29 Visual Chamber Map (P1)
 - [x] 11.4 — S-39 User Management (OWNER-only CRUD + must-change-password flow)
-- [ ] 11.5 — S-40 System Settings (Facility info + operational settings via JSONB)
+- [x] 11.5 — S-40 System Settings (Facility info + operational settings via JSONB)
 - [ ] 11.6 — Playwright E2E Suite (WF-01→WF-07, WF-05 fixme'd for Phase 6 deferral)
 - [ ] 11.7 — Performance baseline + targeted fixes (10 endpoints vs. <500ms p95)
 - [ ] 11.8 — Security Hardening (OWASP Top 10 checklist)

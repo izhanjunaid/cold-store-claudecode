@@ -50,6 +50,7 @@
 | 11.1 | 21 | — | — | 21 | ALL PASS (deferred PDF templates) |
 | 11.2 | — | 3 | — | 3 | ALL PASS (ownership-transfers report endpoint) |
 | 11.4 | — | 9 | — | 9 | ALL PASS (user management + change-password) |
+| 11.5 | — | 3 | — | 3 | ALL PASS (facility settings + audit-trigger fix) |
 
 ### Phase 10 Tests
 

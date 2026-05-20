@@ -19,3 +19,4 @@ export * from './schemas/peshgi';
 export * from './schemas/gate-pass';
 export * from './schemas/reports';
 export * from './schemas/users';
+export * from './schemas/facility';
