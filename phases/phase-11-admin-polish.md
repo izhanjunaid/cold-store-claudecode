@@ -16,7 +16,7 @@
 - [x] 11.6 — Playwright E2E Suite (WF-01→WF-07, WF-05 fixme'd for Phase 6 deferral)
 - [x] 11.7 — Performance baseline + targeted fixes (10 endpoints vs. <500ms p95)
 - [x] 11.8 — Security Hardening (OWASP Top 10 checklist)
-- [ ] 11.9 — OpenAPI Documentation (@fastify/swagger + swagger-ui at /docs)
+- [x] 11.9 — OpenAPI Documentation (@fastify/swagger + swagger-ui at /docs)
 
 ## Definition of Done
 - All 40 screens render; 6 of 7 E2E workflows pass (WF-05 fixme for Phase 6); NFR targets met; OWASP addressed; OpenAPI at /docs.

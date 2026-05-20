@@ -1,10 +1,10 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 11 (Admin & Polish) — branch `phase/11-admin-polish` off Phase 10. Buckets 11.1–11.8 shipped.
-- **Active Task**: 11.9 — OpenAPI docs
+- **Active Phase**: Phase 11 (Admin & Polish & Pre-Launch) COMPLETE — all 9 buckets shipped on `phase/11-admin-polish`.
+- **Active Task**: Ready for pre-launch (Phase 12 / final QA) or merge to integration branch.
 - **Blockers**: None
-- **Last Updated**: 2026-05-18
+- **Last Updated**: 2026-05-20
 - **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision.
 
 ## Phase Completion
@@ -23,7 +23,7 @@
 | 8B | Cost-side (FA, Payroll, Expenses, Peshgi-API) | COMPLETED | 2026-05-06 | 2026-05-08 |
 | 9 | Gate Pass + Peshgi (UI + spec realignment + combined settlement) | COMPLETED | 2026-05-09 | 2026-05-10 |
 | 10 | Reporting & Dashboards | COMPLETED | 2026-05-17 | 2026-05-18 |
-| 11 | Admin, Polish & Pre-Launch | IN PROGRESS | 2026-05-18 | — |
+| 11 | Admin, Polish & Pre-Launch | COMPLETED | 2026-05-18 | 2026-05-20 |
 
 ## Test Counts
 
@@ -141,6 +141,7 @@
 - [2026-05-18] 11.1 — Deferred PDFs shipped. New bilingual A5 Handlebars templates: `salary-slip.html`, `loan-acknowledgment.html`, `gate-pass-receipt.html`. New `renderXxxHtml/renderXxx` functions in `pdf.service.ts` + shared `htmlToA5Pdf` helper. Endpoints accept `?format=pdf` (default JSON, backwards-compatible): `GET /v1/payroll-runs/:id/lines/:lineId/slip`, `GET /v1/loans/:id/acknowledgment`, new `GET /v1/gate-passes/:id/receipt`. Web wired: payroll runs detail Slip button → blob, loan detail Download Acknowledgment button, gate console Print on each row. 21 new template unit tests pass.
 - [2026-05-18] 11.2 — Four report detail pages built; one new endpoint. New `GET /v1/reports/ownership-transfers` (MANAGER+) in `reports/ownership-transfers.ts` pairs TRANSFER_OUT events with child lots via `parentLotId` walk; `OwnershipTransfersReportQuery` + `OwnershipTransferRow` schemas added to `@coldchain/shared`. Four pages replaced (no more stubs): `/reports/commodity-inventory` (expandable per-chamber rows), `/reports/weight-variance` (variance ≥2% red-flagged, date filters), `/reports/seasonal-summary` (OWNER-only, KPI cards + per-commodity table), `/reports/ownership-transfers` (timeline grouped by date, FULL/PARTIAL badges). Reports hub copy updated. 3 new integration tests pass (222 total).
 - [2026-05-19] 11.3 — S-29 Visual Chamber Map shipped. New page `/chambers/map` (MANAGER+) renders a color-coded grid (4 tiers: empty / open <70% / busy 70–89% / full ≥90%). Click → modal with active lot list (calls `GET /v1/lots?chamber_id=…&status=ACTIVE`), with links to lot detail and chamber detail. `Map View` toggle button added on `/chambers`. No backend changes.
+- [2026-05-20] 11.9 — OpenAPI docs shipped. `@fastify/swagger@^9` + `@fastify/swagger-ui@^5` registered in `apps/api/src/app.ts`. JSON spec exposed at `GET /docs/json` (uses `jsonSchemaTransform` from `fastify-type-provider-zod` so every existing Zod schema becomes part of the OpenAPI definition automatically — no extra annotation work). Swagger UI served at `GET /docs`. `info.title='ColdChain API'`, version 1.0.0, bearerAuth security scheme. Local smoke confirmed `/docs/json` returns OpenAPI 3.0.3 payload with all routes.
 - [2026-05-20] 11.8 — Security hardening pass shipped. `phases/phase-11-security-checklist.md` documents OWASP Top 10 status with cited file:line evidence. Findings: A01 (RBAC) verified across 19 module controllers with 128 `requireMinRole` usages; A03 (Injection) verified across 16 `$queryRawUnsafe` sites — all positional-parameterised; A05 helmet+CORS+rate-limit verified; A07 lockout-after-5 verified, session revocation on deactivate + reset verified; A09 logging — the audit-trigger fix already shipped in 11.5 (migration 0013) is the one substantive fix surfaced by the audit. A06 (component scanning) and CSP follow-up flagged for Phase 12 pre-launch.
 - [2026-05-20] 11.7 — Performance baseline shipped. `scripts/perf-baseline.ts` runs autocannon (30s × concurrency 10) against 10 high-traffic endpoints and writes `phases/phase-11-baseline.json` plus a perf table to the phase doc. Exits non-zero if any endpoint's p95 exceeds budget (500ms generic / 5s for reports + ledger). Local baseline shows all endpoints at 20–28ms p95 — no fixes required. Script can be wired into CI as a regression guardrail. devDeps: `autocannon`, `tsx`. New script: `pnpm perf:baseline`.
 - [2026-05-20] 11.6 — Playwright E2E suite shipped. New `playwright.config.ts` at the repo root auto-spawns the API (with `ALLOW_TEST_RESET=1`) and Next.js dev server on ports 3001 / 3000. Single-worker, retries=1 on CI. `apps/web/e2e/fixtures.ts` extends Playwright with a `loginAs(role)` fixture (hits POST /v1/auth/login programmatically and writes tokens to localStorage). `apps/web/e2e/global-setup.ts` calls a new `POST /v1/_test/reset` route (`apps/api/src/modules/_test/test.controller.ts`) that wipes operational rows for the e2e facility. The route is double-guarded: registered only when `NODE_ENV !== 'production'` AND `ALLOW_TEST_RESET === '1'`, and throws at registration time if `NODE_ENV === 'production'`. Seven specs: `wf-01-inbound`, `wf-02-ownership-transfer`, `wf-03-partial-withdrawal`, `wf-04-full-withdrawal-settlement`, `wf-05-quality-spoilage` (`test.fixme` for Phase 6 deferral), `wf-06-month-end`, `wf-07-peshgi`. Root npm scripts: `pnpm e2e`, `pnpm e2e:ui`.

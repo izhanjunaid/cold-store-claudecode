@@ -3,7 +3,13 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
-import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
+import swagger from '@fastify/swagger';
+import swaggerUi from '@fastify/swagger-ui';
+import {
+  serializerCompiler,
+  validatorCompiler,
+  jsonSchemaTransform,
+} from 'fastify-type-provider-zod';
 import errorHandler from './plugins/error-handler';
 import facilityScope from './plugins/facility-scope';
 import authPlugin from './plugins/auth';
@@ -53,6 +59,30 @@ export async function buildApp() {
   await app.register(errorHandler);
   await app.register(facilityScope);
   await app.register(authPlugin);
+
+  // OpenAPI / Swagger
+  await app.register(swagger, {
+    openapi: {
+      info: {
+        title: 'ColdChain API',
+        version: '1.0.0',
+        description:
+          'Cold storage management platform — REST API. All operational endpoints are namespaced under `/v1/` and scoped via the `X-Facility-ID` header.',
+      },
+      servers: [{ url: 'http://localhost:3001', description: 'Local dev' }],
+      components: {
+        securitySchemes: {
+          bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        },
+      },
+      security: [{ bearerAuth: [] }],
+    },
+    transform: jsonSchemaTransform,
+  });
+  await app.register(swaggerUi, {
+    routePrefix: '/docs',
+    uiConfig: { docExpansion: 'none', deepLinking: true },
+  });
 
   // Health check
   app.get('/health', async () => {
