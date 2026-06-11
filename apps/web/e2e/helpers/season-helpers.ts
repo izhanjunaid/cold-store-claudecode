@@ -9,7 +9,7 @@ export async function shot(page: Page, name: string): Promise<string> {
   return path;
 }
 
-export interface RoleHeaders {
+export interface RoleHeaders extends Record<string, string> {
   Authorization: string;
   'X-Facility-ID': string;
 }

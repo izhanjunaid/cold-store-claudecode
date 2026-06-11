@@ -38,6 +38,7 @@ export async function lotRoutes(app: FastifyInstance) {
       const result = await service.create({
         facilityId: request.user!.facilityId,
         createdBy: request.user!.userId,
+        userRole: request.user!.role,
         ownerPartyId: body.owner_party_id,
         billingPartyId: body.billing_party_id,
         commodityId: body.commodity_id,

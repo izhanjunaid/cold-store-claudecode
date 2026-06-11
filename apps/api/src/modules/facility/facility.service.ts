@@ -7,6 +7,14 @@ import {
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 
+/**
+ * Resolve a facility's raw JSON settings column into a fully-populated
+ * settings object (missing keys fall back to defaults).
+ */
+export function resolveFacilitySettings(raw: Prisma.JsonValue): FacilitySettingsType {
+  return mergeSettings(raw, undefined);
+}
+
 function mergeSettings(
   current: Prisma.JsonValue,
   patch: Partial<FacilitySettingsType> | undefined,

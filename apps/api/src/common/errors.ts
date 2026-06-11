@@ -163,4 +163,11 @@ export const Errors = {
     new AppError('USER_EMAIL_TAKEN', 'A user with this email already exists', 409, 'email'),
   USER_WRONG_PASSWORD: () =>
     new AppError('USER_WRONG_PASSWORD', 'Current password is incorrect', 422, 'current_password'),
+  // Phase 12 — Configurability
+  BACKDATING_LIMIT_EXCEEDED: (maxDays: number) =>
+    new AppError(
+      'BACKDATING_LIMIT_EXCEEDED',
+      `Date is more than ${maxDays} day(s) in the past — requires MANAGER or higher`,
+      422,
+    ),
 } as const;

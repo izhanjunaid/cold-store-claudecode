@@ -1,6 +1,8 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { LotRepository, LOT_INCLUDE_SHAPE } from './lot.repository';
 import { Errors } from '../../common/errors';
+import { roleAtLeast } from '../../plugins/auth';
+import { resolveFacilitySettings } from '../facility/facility.service';
 import { generateLotNumber } from './lot-number';
 import { renderStorageReceipt } from '../pdf/pdf.service';
 import type { StorageReceiptData } from '../pdf/pdf.service';
@@ -103,6 +105,7 @@ function toResponse(lot: LotRecord) {
 export interface CreateLotInput {
   facilityId: string;
   createdBy: string;
+  userRole?: string;
   ownerPartyId: string;
   billingPartyId?: string;
   commodityId: string;
@@ -228,15 +231,23 @@ export class LotService {
       );
     }
 
+    // Facility settings drive the capacity-warning, weight-dispute and
+    // backdating checks below.
+    const facility = await this.prisma.facility.findUnique({
+      where: { id: input.facilityId },
+    });
+    const settings = resolveFacilitySettings(facility?.settings ?? null);
+
     // 3a. Capacity check (aggregate over ACTIVE lots)
     const agg = await this.repo.sumActiveBalanceByChamber(input.facilityId, input.chamberId);
     const currentOccupancy = agg._sum.currentBalanceBags ?? 0;
     if (currentOccupancy + input.quantityBags > chamber.maxCapacityBags) {
       throw Errors.CHAMBER_CAPACITY_EXCEEDED();
     }
-    if (currentOccupancy + input.quantityBags > chamber.maxCapacityBags * 0.9) {
+    const warningPct = settings.chamber_capacity_warning_pct;
+    if (currentOccupancy + input.quantityBags > chamber.maxCapacityBags * (warningPct / 100)) {
       warnings.push(
-        `Chamber ${chamber.name} will be >90% full after this inbound`,
+        `Chamber ${chamber.name} will be >${warningPct}% full after this inbound`,
       );
     }
 
@@ -255,21 +266,11 @@ export class LotService {
       );
     }
 
-    // 5. Weight dispute detection
-    const facility = await this.prisma.facility.findUnique({
-      where: { id: input.facilityId },
-    });
-    const settings = (facility?.settings as Record<string, unknown> | null) ?? {};
-    const thresholdPct =
-      typeof settings['weight_dispute_threshold_pct'] === 'number'
-        ? (settings['weight_dispute_threshold_pct'] as number)
-        : 2;
-
+    // 5. Weight dispute detection (absolute kg threshold from settings)
     let disputeFlag = false;
     if (input.declaredWeightKg != null) {
-      const variance =
-        Math.abs(input.acceptedWeightKg - input.declaredWeightKg) / input.declaredWeightKg;
-      if (variance > thresholdPct / 100) disputeFlag = true;
+      const varianceKg = Math.abs(input.acceptedWeightKg - input.declaredWeightKg);
+      if (varianceKg > settings.weight_dispute_threshold_kg) disputeFlag = true;
     }
     if (disputeFlag && !input.weightDisputeNote) {
       throw Errors.WEIGHT_DISPUTE_UNRESOLVED();
@@ -279,6 +280,17 @@ export class LotService {
     const entryDate = new Date();
     entryDate.setHours(0, 0, 0, 0);
     const inboundDate = input.inboundDate ? new Date(input.inboundDate) : entryDate;
+
+    // 5a. Backdating guard: OPERATOR-level users may only backdate within
+    // the configured window; MANAGER+ may exceed it (audit-logged via trigger).
+    const maxBackdateDays = settings.backdating_max_days;
+    if (maxBackdateDays !== null && !roleAtLeast(input.userRole, 'MANAGER')) {
+      const earliest = new Date(entryDate);
+      earliest.setDate(earliest.getDate() - maxBackdateDays);
+      if (inboundDate < earliest) {
+        throw Errors.BACKDATING_LIMIT_EXCEEDED(maxBackdateDays);
+      }
+    }
 
     // Retry up to 5 times on unique-constraint collision (P2002) which
     // can occur under high concurrency despite the advisory lock.

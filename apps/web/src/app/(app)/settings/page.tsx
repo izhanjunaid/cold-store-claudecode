@@ -27,6 +27,12 @@ export default function SettingsPage() {
   const [gstRegistered, setGstRegistered] = useState(false);
   const [numberFormat, setNumberFormat] = useState<'en-PK' | 'en-IN'>('en-PK');
   const [alertThresholds, setAlertThresholds] = useState<Record<string, number>>({});
+  const [chamberWarningPct, setChamberWarningPct] = useState('90');
+  const [backdatingMaxDays, setBackdatingMaxDays] = useState(''); // '' = unlimited
+  const [gstDefaultRate, setGstDefaultRate] = useState('18');
+  const [surchargeEnabled, setSurchargeEnabled] = useState(false);
+  const [surchargePctPerMonth, setSurchargePctPerMonth] = useState('2');
+  const [surchargeGraceDays, setSurchargeGraceDays] = useState('30');
 
   useEffect(() => {
     Promise.all([
@@ -45,6 +51,14 @@ export default function SettingsPage() {
         setGstRegistered(f.settings.gst_registered);
         setNumberFormat(f.settings.number_format);
         setAlertThresholds(f.settings.storage_alert_thresholds ?? {});
+        setChamberWarningPct(String(f.settings.chamber_capacity_warning_pct ?? 90));
+        setBackdatingMaxDays(
+          f.settings.backdating_max_days == null ? '' : String(f.settings.backdating_max_days),
+        );
+        setGstDefaultRate(String(f.settings.gst_default_rate ?? 18));
+        setSurchargeEnabled(f.settings.late_payment_surcharge?.enabled ?? false);
+        setSurchargePctPerMonth(String(f.settings.late_payment_surcharge?.pct_per_month ?? 2));
+        setSurchargeGraceDays(String(f.settings.late_payment_surcharge?.grace_days ?? 30));
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Load failed'))
       .finally(() => setLoading(false));
@@ -72,6 +86,15 @@ export default function SettingsPage() {
             storage_alert_thresholds: cleanedThresholds,
             gst_registered: gstRegistered,
             number_format: numberFormat,
+            chamber_capacity_warning_pct: Math.min(100, Math.max(1, Math.floor(Number(chamberWarningPct) || 90))),
+            backdating_max_days:
+              backdatingMaxDays.trim() === '' ? null : Math.max(0, Math.floor(Number(backdatingMaxDays) || 0)),
+            gst_default_rate: Math.min(100, Math.max(0, Number(gstDefaultRate) || 0)),
+            late_payment_surcharge: {
+              enabled: surchargeEnabled,
+              pct_per_month: Math.min(100, Math.max(0, Number(surchargePctPerMonth) || 0)),
+              grace_days: Math.max(0, Math.floor(Number(surchargeGraceDays) || 0)),
+            },
           },
         },
       });
@@ -159,6 +182,37 @@ export default function SettingsPage() {
           </span>
         </label>
 
+        <label className="block">
+          <span className="text-sm font-medium text-gray-700">Chamber Capacity Warning (%)</span>
+          <input
+            type="number"
+            value={chamberWarningPct}
+            onChange={(e) => setChamberWarningPct((e.target as HTMLInputElement).value)}
+            className="mt-1 w-full md:w-48 border rounded-lg px-3 py-2"
+            min={1}
+            max={100}
+          />
+          <span className="text-xs text-gray-500 mt-1 block">
+            Inbound shows a warning when a chamber would exceed this occupancy after the new lot.
+          </span>
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-medium text-gray-700">Max Backdating (days)</span>
+          <input
+            type="number"
+            value={backdatingMaxDays}
+            placeholder="Unlimited"
+            onChange={(e) => setBackdatingMaxDays((e.target as HTMLInputElement).value)}
+            className="mt-1 w-full md:w-48 border rounded-lg px-3 py-2"
+            min={0}
+          />
+          <span className="text-xs text-gray-500 mt-1 block">
+            How far in the past operators may date inbound/outbound entries. Managers and above are
+            not limited. Leave empty for unlimited.
+          </span>
+        </label>
+
         <label className="flex items-center gap-2">
           <input
             type="checkbox"
@@ -167,6 +221,24 @@ export default function SettingsPage() {
           />
           <span className="text-sm font-medium text-gray-700">GST Registered</span>
         </label>
+
+        {gstRegistered && (
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Default GST Rate (%)</span>
+            <input
+              type="number"
+              value={gstDefaultRate}
+              onChange={(e) => setGstDefaultRate((e.target as HTMLInputElement).value)}
+              className="mt-1 w-full md:w-48 border rounded-lg px-3 py-2"
+              min={0}
+              max={100}
+              step="0.5"
+            />
+            <span className="text-xs text-gray-500 mt-1 block">
+              Pre-filled on new invoices. Can still be changed per invoice while in draft.
+            </span>
+          </label>
+        )}
 
         <label className="block">
           <span className="text-sm font-medium text-gray-700">Number Format</span>
@@ -235,6 +307,52 @@ export default function SettingsPage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="bg-white rounded-lg shadow p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900">Late Payment Surcharge</h2>
+        <p className="text-xs text-gray-500">
+          When enabled, overdue invoices appear on the surcharge suggestions screen where the
+          accountant can apply the computed surcharge with one click. Nothing is charged
+          automatically.
+        </p>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={surchargeEnabled}
+            onChange={(e) => setSurchargeEnabled((e.target as HTMLInputElement).checked)}
+          />
+          <span className="text-sm font-medium text-gray-700">Enable surcharge suggestions</span>
+        </label>
+        {surchargeEnabled && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="block">
+              <span className="text-sm font-medium text-gray-700">Rate (% per month)</span>
+              <input
+                type="number"
+                value={surchargePctPerMonth}
+                onChange={(e) => setSurchargePctPerMonth((e.target as HTMLInputElement).value)}
+                className="mt-1 w-full border rounded-lg px-3 py-2"
+                min={0}
+                max={100}
+                step="0.25"
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-gray-700">Grace Period (days)</span>
+              <input
+                type="number"
+                value={surchargeGraceDays}
+                onChange={(e) => setSurchargeGraceDays((e.target as HTMLInputElement).value)}
+                className="mt-1 w-full border rounded-lg px-3 py-2"
+                min={0}
+              />
+              <span className="text-xs text-gray-500 mt-1 block">
+                Days after the invoice date before surcharge months start counting.
+              </span>
+            </label>
+          </div>
+        )}
       </section>
 
       {error && <div className="text-red-700 bg-red-50 px-3 py-2 rounded text-sm">{error}</div>}

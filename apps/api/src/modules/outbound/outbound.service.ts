@@ -4,15 +4,8 @@ import { OutboundRepository, type OutboundWithRelations } from './outbound.repos
 import { generateDispatchNoteNumber } from './dispatch-note-number';
 import { renderDispatchNote } from '../pdf/pdf.service';
 import { buildInvoiceFromOutbound } from '../invoice/invoice.builder';
-
-const ROLE_RANK: Record<string, number> = {
-  OWNER: 6,
-  MANAGER: 5,
-  ACCOUNTANT: 4,
-  OPERATOR: 3,
-  SECURITY: 2,
-  VIEWER: 1,
-};
+import { roleAtLeast } from '../../plugins/auth';
+import { resolveFacilitySettings } from '../facility/facility.service';
 
 function toNumber(d: { toString(): string } | null | undefined): number | null {
   if (d == null) return null;
@@ -133,12 +126,28 @@ export class OutboundService {
       // deliberate third-party release that a MANAGER+ must authorize.
       if (params.receivingPartyId && params.receivingPartyId !== lot.owner_party_id) {
         if (!params.thirdPartyRelease) throw Errors.OUTBOUND_OWNER_MISMATCH();
-        if ((ROLE_RANK[params.userRole ?? ''] ?? 0) < ROLE_RANK['MANAGER']!) {
+        if (!roleAtLeast(params.userRole, 'MANAGER')) {
           throw Errors.OUTBOUND_THIRD_PARTY_REQUIRES_MANAGER();
         }
       }
 
       const outboundDate = new Date(params.outboundDate);
+
+      // Backdating guard: OPERATOR-level users may only backdate within the
+      // configured window; MANAGER+ may exceed it.
+      const facility = await tx.facility.findUnique({
+        where: { id: params.facilityId },
+      });
+      const settings = resolveFacilitySettings(facility?.settings ?? null);
+      const maxBackdateDays = settings.backdating_max_days;
+      if (maxBackdateDays !== null && !roleAtLeast(params.userRole, 'MANAGER')) {
+        const earliest = new Date();
+        earliest.setHours(0, 0, 0, 0);
+        earliest.setDate(earliest.getDate() - maxBackdateDays);
+        if (outboundDate < earliest) {
+          throw Errors.BACKDATING_LIMIT_EXCEEDED(maxBackdateDays);
+        }
+      }
       const dispatchNoteNumber = await generateDispatchNoteNumber(
         tx,
         params.facilityId,

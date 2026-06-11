@@ -52,6 +52,10 @@ const ROLE_HIERARCHY: Record<string, number> = {
   VIEWER: 1,
 };
 
+export function roleAtLeast(role: string | undefined, minRole: string): boolean {
+  return (ROLE_HIERARCHY[role ?? ''] ?? 0) >= (ROLE_HIERARCHY[minRole] ?? 0);
+}
+
 export function requireMinRole(minRole: string) {
   const minLevel = ROLE_HIERARCHY[minRole] ?? 0;
   return async (request: FastifyRequest, _reply: FastifyReply) => {
