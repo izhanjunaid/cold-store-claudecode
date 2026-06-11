@@ -34,6 +34,7 @@ interface FormData {
   accepted_weight_kg: string;
   weight_dispute_note: string;
   vehicle_number: string;
+  marka: string;
   quality_grade_inbound: string;
   inbound_date: string;
   book_type: string;
@@ -44,7 +45,7 @@ const EMPTY: FormData = {
   owner_party_id: '', billing_party_id: '', billing_override: false,
   commodity_id: '', variety_id: '', chamber_id: '', rate_plan_id: '',
   quantity_bags: '', declared_weight_kg: '', accepted_weight_kg: '',
-  weight_dispute_note: '', vehicle_number: '', quality_grade_inbound: '',
+  weight_dispute_note: '', vehicle_number: '', marka: '', quality_grade_inbound: '',
   inbound_date: new Date().toISOString().slice(0, 10), book_type: 'PACCI', notes: '',
 };
 
@@ -122,6 +123,7 @@ export default function LotCreatePage() {
       if (form.declared_weight_kg) payload['declared_weight_kg'] = parseFloat(form.declared_weight_kg);
       if (hasDispute && form.weight_dispute_note) payload['weight_dispute_note'] = form.weight_dispute_note;
       if (form.vehicle_number) payload['vehicle_number'] = form.vehicle_number;
+      if (form.marka) payload['marka'] = form.marka;
       if (form.quality_grade_inbound) payload['quality_grade_inbound'] = form.quality_grade_inbound;
       if (form.inbound_date) payload['inbound_date'] = form.inbound_date;
       if (form.book_type) payload['book_type'] = form.book_type;
@@ -269,6 +271,12 @@ export default function LotCreatePage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number</label>
             <input name="vehicle_number" value={form.vehicle_number} onChange={handleChange} maxLength={20} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. LEA-1234" />
+          </div>
+
+          {/* Marka (goods-identification mark on the bardana) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Marka / Brand Mark</label>
+            <input name="marka" value={form.marka} onChange={handleChange} maxLength={100} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. ABC Farms" />
           </div>
 
           {/* Quality Grade */}

@@ -7,6 +7,7 @@ export const CreateOutboundRequest = z.object({
   quantity_withdrawn_bags: z.number().int().positive(),
   outbound_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
   receiving_party_id: z.string().uuid().optional(),
+  third_party_release: z.boolean().optional(),
   vehicle_number: z.string().max(20).optional(),
   notes: z.string().optional(),
 });
@@ -33,6 +34,8 @@ export const OutboundEventResponse = z.object({
   outbound_date: z.string(),
   receiving_party_id: z.string().uuid().nullable(),
   receiving_party_name: z.string().nullable(),
+  owner_party_id_snapshot: z.string().uuid().nullable(),
+  owner_party_name: z.string().nullable(),
   vehicle_number: z.string().nullable(),
   dispatch_note_number: z.string().nullable(),
   invoice_id: z.string().uuid().nullable(),

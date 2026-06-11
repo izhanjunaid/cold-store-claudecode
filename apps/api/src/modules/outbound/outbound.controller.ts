@@ -26,11 +26,13 @@ export async function outboundRoutes(app: FastifyInstance) {
       const result = await service.create({
         facilityId: request.user!.facilityId,
         createdBy: request.user!.userId,
+        userRole: request.user!.role,
         lotId: body.lot_id,
         withdrawalType: body.withdrawal_type,
         quantityWithdrawnBags: body.quantity_withdrawn_bags,
         outboundDate: body.outbound_date,
         receivingPartyId: body.receiving_party_id,
+        thirdPartyRelease: body.third_party_release,
         vehicleNumber: body.vehicle_number,
         notes: body.notes,
       });

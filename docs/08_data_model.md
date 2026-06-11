@@ -176,6 +176,7 @@ JournalEntryLines.lot_id   ──> Lot     (revenue by lot)
 | `entry_date` | DATE | NOT NULL DEFAULT TODAY | System entry date |
 | `parent_lot_id` | UUID | FK → lots, NULLABLE | For child lots (partial transfers) |
 | `vehicle_number` | VARCHAR(20) | NULLABLE | |
+| `marka` | VARCHAR(100) | NULLABLE | Goods-identification mark on the bardana/crates. Not unique; inherited by child lots on partial transfer |
 | `status` | ENUM | NOT NULL DEFAULT 'ACTIVE' | ACTIVE\|CLOSED\|SUSPENDED |
 | `closed_at` | DATE | NULLABLE | Set on full withdrawal |
 | `storage_alert_sent` | BOOLEAN | DEFAULT FALSE | Aging alert flag |
@@ -184,7 +185,7 @@ JournalEntryLines.lot_id   ──> Lot     (revenue by lot)
 | `created_at` | TIMESTAMPTZ | NOT NULL | |
 | `created_by` | UUID | FK → users | |
 
-**Indexes**: `(facility_id, status)`, `(owner_party_id, status)`, `(chamber_id, status)`, `(inbound_date)`, `(lot_number)`
+**Indexes**: `(facility_id, status)`, `(owner_party_id, status)`, `(chamber_id, status)`, `(inbound_date)`, `(lot_number)`, `(facility_id, marka)`
 
 ---
 

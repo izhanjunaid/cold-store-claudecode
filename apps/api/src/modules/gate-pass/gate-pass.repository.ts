@@ -1,19 +1,31 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 
 const gatePassInclude = {
-  relatedLot: { select: { id: true, lotNumber: true } },
+  relatedLot: {
+    select: {
+      id: true,
+      lotNumber: true,
+      marka: true,
+      commodity: { select: { name: true, unitLabel: true } },
+    },
+  },
   relatedOutbound: {
     select: {
       id: true,
       dispatchNoteNumber: true,
+      quantityWithdrawnBags: true,
       invoice: { select: { id: true, totalPkr: true, amountPaidPkr: true, status: true } },
+      lot: { select: { marka: true, commodity: { select: { name: true, unitLabel: true } } } },
+      ownerPartySnapshot: { select: { name: true } },
     },
   },
+  party: { select: { id: true, name: true } },
 } satisfies Prisma.GatePassInclude;
 
 const gatePassListInclude = {
   relatedLot: { select: { lotNumber: true } },
-  relatedOutbound: { select: { dispatchNoteNumber: true } },
+  relatedOutbound: { select: { dispatchNoteNumber: true, quantityWithdrawnBags: true } },
+  party: { select: { id: true, name: true } },
 } satisfies Prisma.GatePassInclude;
 
 export type GatePassWithRelations = Prisma.GatePassGetPayload<{ include: typeof gatePassInclude }>;

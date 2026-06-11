@@ -33,6 +33,7 @@ interface Lot {
   inbound_date: string;
   entry_date: string;
   vehicle_number: string | null;
+  marka: string | null;
   book_type: string;
   notes: string | null;
   days_in_storage: number;
@@ -309,6 +310,13 @@ export default function LotDetailPage() {
             </div>
           )}
 
+          {lot.marka && (
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Marka</p>
+              <p className="text-sm font-bold text-gray-900 mt-1">{lot.marka}</p>
+            </div>
+          )}
+
           {lot.quality_grade_inbound && (
             <div>
               <p className="text-xs text-gray-500 uppercase tracking-wide">Quality Grade</p>
@@ -372,6 +380,13 @@ export default function LotDetailPage() {
 
           {activeTab === 'ownership' && (
             <div>
+              {lot.marka && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+                  <span className="text-gray-600">Physical marka on the bags: </span>
+                  <span className="font-bold text-gray-900">{lot.marka}</span>
+                  <span className="text-gray-500"> — stays constant across transfers; cross-check it against the current owner at dispatch.</span>
+                </div>
+              )}
               {ownershipHistory.length === 0 ? (
                 <p className="text-gray-500 text-sm">No ownership history.</p>
               ) : (

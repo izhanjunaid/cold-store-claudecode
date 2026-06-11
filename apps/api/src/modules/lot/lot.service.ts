@@ -26,6 +26,7 @@ interface LotRecord {
   entryDate: Date;
   parentLotId: string | null;
   vehicleNumber: string | null;
+  marka: string | null;
   status: 'ACTIVE' | 'CLOSED' | 'SUSPENDED';
   closedAt: Date | null;
   bookType: 'PACCI' | 'KATCHI';
@@ -88,6 +89,7 @@ function toResponse(lot: LotRecord) {
     entry_date: lot.entryDate.toISOString().slice(0, 10),
     parent_lot_id: lot.parentLotId,
     vehicle_number: lot.vehicleNumber,
+    marka: lot.marka,
     status: lot.status,
     closed_at: lot.closedAt ? lot.closedAt.toISOString().slice(0, 10) : null,
     book_type: lot.bookType,
@@ -114,6 +116,7 @@ export interface CreateLotInput {
   qualityGradeInbound?: 'A' | 'B' | 'C';
   inboundDate?: string;
   vehicleNumber?: string;
+  marka?: string;
   notes?: string;
   bookType?: 'PACCI' | 'KATCHI';
 }
@@ -133,6 +136,7 @@ export class LotService {
       chamber_id?: string;
       inbound_date_from?: string;
       inbound_date_to?: string;
+      marka?: string;
       search?: string;
       page: number;
       per_page: number;
@@ -146,6 +150,7 @@ export class LotService {
       chamberId: query.chamber_id,
       inboundDateFrom: query.inbound_date_from,
       inboundDateTo: query.inbound_date_to,
+      marka: query.marka,
       search: query.search,
       page: query.page,
       perPage: query.per_page,
@@ -303,6 +308,7 @@ export class LotService {
               inboundDate,
               entryDate,
               vehicleNumber: input.vehicleNumber,
+              marka: input.marka,
               notes: input.notes,
               bookType: input.bookType ?? 'PACCI',
               createdBy: input.createdBy,
@@ -342,7 +348,7 @@ export class LotService {
   async update(
     facilityId: string,
     id: string,
-    input: { notes?: string; qualityGradeInbound?: 'A' | 'B' | 'C' },
+    input: { notes?: string; qualityGradeInbound?: 'A' | 'B' | 'C'; marka?: string },
   ) {
     const lot = (await this.repo.findById(facilityId, id)) as LotRecord | null;
     if (!lot) throw Errors.LOT_NOT_FOUND();
@@ -353,6 +359,7 @@ export class LotService {
       ...(input.qualityGradeInbound !== undefined && {
         qualityGradeInbound: input.qualityGradeInbound,
       }),
+      ...(input.marka !== undefined && { marka: input.marka }),
     });
     return toResponse(updated as unknown as LotRecord);
   }
@@ -398,6 +405,7 @@ export class LotService {
       rateAmountPkr: typedLot.ratePlan ? Number(typedLot.ratePlan.rateAmountPkr) : 0,
       rateType: typedLot.ratePlan?.rateType ?? '',
       vehicleNumber: typedLot.vehicleNumber,
+      marka: typedLot.marka,
       operatorName: typedLot.createdByUser?.name ?? '',
       bookType: typedLot.bookType,
     };

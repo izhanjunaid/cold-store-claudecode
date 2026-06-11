@@ -66,26 +66,26 @@
 
 ### S-08: Lot List
 - **URL**: `/lots`
-- **Content**: Table: lot_number, owner, commodity, variety, quantity, current_balance, chamber, inbound_date, days_in_storage, status
-- **Filters**: Status, party, commodity, chamber, date range
+- **Content**: Table: lot_number, owner, commodity, variety, marka, quantity, current_balance, chamber, inbound_date, days_in_storage, status
+- **Filters**: Status, party, commodity, chamber, date range, marka (free-text search + dedicated marka filter)
 - **Actions**: Create New Lot, Export CSV, click row → Lot Detail
 - **Role**: All
 
 ### S-09: Lot Create (Inbound Form)
 - **URL**: `/lots/new`
-- **Content**: Form: owner_party (searchable), billing_party (defaults to owner), commodity, variety, quantity_bags, declared_weight, accepted_weight, chamber (dropdown filtered by commodity, shows capacity), rate_plan, vehicle_number, quality_grade, inbound_date, notes, photos upload. Weight dispute warning inline when threshold exceeded
+- **Content**: Form: owner_party (searchable), billing_party (defaults to owner), commodity, variety, quantity_bags, declared_weight, accepted_weight, chamber (dropdown filtered by commodity, shows capacity), rate_plan, vehicle_number, marka (optional goods mark, ≤100 chars), quality_grade, inbound_date, notes, photos upload. Weight dispute warning inline when threshold exceeded
 - **Actions**: Save (generates lot + receipt), Cancel, Link Gate Pass (optional)
 - **Role**: OPERATOR+
 
 ### S-10: Lot Detail
 - **URL**: `/lots/:id`
-- **Content**: Lot header card (number, owner, commodity, balance, status, days in storage, weight info, dispute flag). Tabs: Overview | Ownership History (timeline) | Inspections | Spoilage | Withdrawals | Billing History
+- **Content**: Lot header card (number, owner, commodity, marka, balance, status, days in storage, weight info, dispute flag). Tabs: Overview | Ownership History (timeline — shows the physical marka as a constant for the dispatch cross-check) | Inspections | Spoilage | Withdrawals | Billing History
 - **Actions**: Transfer Ownership, New Withdrawal, New Inspection, Record Spoilage, Reprint Receipt
 - **Role**: All (view); specific actions per role
 
 ### S-11: Storage Receipt (PDF Preview)
 - **URL**: `/lots/:id/receipt`
-- **Content**: Printable A4/A5 PDF: lot number, date, owner (English + Urdu), commodity, variety, quantity, weight, chamber, rate plan, cold store stamp area
+- **Content**: Printable A4/A5 PDF: lot number, date, owner (English + Urdu), commodity, variety, marka (when present), quantity, weight, chamber, rate plan, cold store stamp area
 - **Actions**: Print, Download PDF
 - **Role**: OPERATOR+
 
@@ -123,7 +123,7 @@
 
 ### S-16: Dispatch Note (PDF)
 - **URL**: `/outbound-events/:id/dispatch-note`
-- **Content**: Lot number, owner, commodity, quantity withdrawn, vehicle, date, operator signature area
+- **Content**: Lot number, owner, commodity, marka (when present), quantity withdrawn, vehicle, date, operator signature area
 - **Actions**: Print, Download
 - **Role**: OPERATOR+
 

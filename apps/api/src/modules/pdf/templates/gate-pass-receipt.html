@@ -60,6 +60,18 @@
     .dir-INWARD { background: #117a65; color: #fff; }
     .dir-OUTWARD { background: #7d6608; color: #fff; }
 
+    .mismatch-badge {
+      display: inline-block;
+      margin-top: 1mm;
+      padding: 1mm 3mm;
+      background: #a93226;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      border-radius: 2px;
+    }
+
     .info-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -160,6 +172,23 @@
     {{#if driverPhone}}<div class="row"><span class="label">Driver Phone / فون:</span><span class="val">{{driverPhone}}</span></div>{{/if}}
     {{#if biltyNumber}}<div class="row"><span class="label">Bilty Number / بلٹی:</span><span class="val">{{biltyNumber}}</span></div>{{/if}}
   </div>
+
+  {{#if hasGoodsInfo}}
+  <div class="section-title">Goods &amp; Parties / مال و فریقین</div>
+  <div class="info-grid">
+    <div>
+      {{#if commodityName}}<div class="field"><span class="label">Commodity / جنس:</span> {{commodityName}}</div>{{/if}}
+      {{#if marka}}<div class="field"><span class="label">Marka / مارکہ:</span> <strong>{{marka}}</strong></div>{{/if}}
+      {{#if declaredQuantity}}<div class="field"><span class="label">Declared / اعلان شدہ:</span> {{declaredQuantity}} {{unitLabel}}</div>{{/if}}
+      {{#if authorizedQuantity}}<div class="field"><span class="label">Authorized / منظور شدہ:</span> {{authorizedQuantity}} {{unitLabel}}</div>{{/if}}
+    </div>
+    <div>
+      {{#if depositorName}}<div class="field"><span class="label">Depositor / جمع کنندہ:</span> {{depositorName}}</div>{{/if}}
+      {{#if ownerName}}<div class="field"><span class="label">Owner / مالک:</span> {{ownerName}}</div>{{/if}}
+      {{#if quantityMismatch}}<div class="mismatch-badge">QTY MISMATCH / مقدار میں فرق</div>{{/if}}
+    </div>
+  </div>
+  {{/if}}
 
   {{#if relatedLotNumber}}
   <div class="section-title">Linked Operation</div>

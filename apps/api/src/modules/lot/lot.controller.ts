@@ -51,6 +51,7 @@ export async function lotRoutes(app: FastifyInstance) {
         qualityGradeInbound: body.quality_grade_inbound,
         inboundDate: body.inbound_date,
         vehicleNumber: body.vehicle_number,
+        marka: body.marka,
         notes: body.notes,
         bookType: body.book_type,
       });
@@ -83,6 +84,7 @@ export async function lotRoutes(app: FastifyInstance) {
       const result = await service.update(request.user!.facilityId, id, {
         notes: body.notes,
         qualityGradeInbound: body.quality_grade_inbound,
+        marka: body.marka,
       });
       return sendSuccess(reply, result);
     },

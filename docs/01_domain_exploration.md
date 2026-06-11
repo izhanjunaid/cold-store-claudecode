@@ -127,6 +127,7 @@ This makes the system structurally different from a standard 3PL warehouse. The 
 - A single chamber may contain produce from 10–30 different owner-lots
 - Physical co-mingling of same-variety produce from different owners is common in smaller operations
 - Lot-level segregation via tagging (colored tags, handwritten markers) is the current norm
+- This physical mark is the **marka** — a name/initials/symbol painted or stamped on the bardana (gunny sacks) or crates. The system digitises it as an optional `marka` field on the lot, replacing the colored-tag/handwritten-marker convention while the physical mark remains on the bags. A marka is **not unique** (one arhti may mark many farmers' lots alike) and **does not change on ownership transfer**, so at dispatch security cross-checks the *physical* marka against the *system* owner
 - System must track **virtual lot boundaries** within physical chambers
 
 ### 4.4 Weight Loss (Shrinkage / Dehydration Loss)

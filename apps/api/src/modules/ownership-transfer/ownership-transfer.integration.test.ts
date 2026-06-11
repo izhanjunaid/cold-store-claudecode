@@ -162,6 +162,41 @@ describe('Ownership Transfer', () => {
     expect(childEvents.find((e) => e.eventType === 'TRANSFER_IN')).toBeDefined();
   });
 
+  it('PARTIAL transfer: child lot inherits the parent marka', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: {
+        owner_party_id: fromPartyId,
+        commodity_id: POTATO_ID,
+        rate_plan_id: RATE_PLAN,
+        chamber_id: CHAMBER_A,
+        quantity_bags: 50,
+        accepted_weight_kg: 1000,
+        marka: 'INHERIT-MARK',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const lot = JSON.parse(res.body).data;
+
+    const transferRes = await app.inject({
+      method: 'POST',
+      url: `/v1/lots/${lot.id}/transfer`,
+      headers: authHeaders(managerToken),
+      payload: {
+        transfer_type: 'PARTIAL',
+        to_party_id: toPartyId,
+        quantity_bags: 10,
+        effective_date: '2026-04-15',
+      },
+    });
+    expect(transferRes.statusCode).toBe(201);
+
+    const child = await prisma.lot.findFirst({ where: { parentLotId: lot.id } });
+    expect(child?.marka).toBe('INHERIT-MARK');
+  });
+
   it('Second PARTIAL on same parent yields -T2', async () => {
     const lot = await createLot(60);
 

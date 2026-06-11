@@ -24,6 +24,7 @@
 | 6 | Operator | Weighs produce on facility scale; enters declared weight (10,500 kg) and accepted weight (10,200 kg) | System calculates variance: 2.86% — EXCEEDS threshold. Yellow dispute warning shown. `weight_dispute_note` becomes required |
 | 8 | Operator | Enters dispute note: "Scale variance. Farmer acknowledged. Both parties agreed on 10,200 kg." | |
 | 9 | Operator | Selects Chamber B, Rate Plan "Potato Standard 2026 (Seasonal)", enters vehicle LHR-1234 | Available chamber capacity updated in preview |
+| 9a | Operator | Enters the marka painted on the sacks (e.g. "ASLAM-7") | Recorded on the lot; later printed on the parchi and searchable in the lot list |
 | 10 | Operator | Reviews and saves lot | System: generates LOT-260301; creates inbound event; updates chamber |
 | 11 | System | Auto-generates storage receipt PDF | Printed at counter |
 | 12 | Operator | Hands printed receipt to farmer | |

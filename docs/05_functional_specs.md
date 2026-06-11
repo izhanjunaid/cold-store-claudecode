@@ -64,6 +64,7 @@ Required fields:
 Optional fields:
 - `declared_weight_kg`: as stated by transporter/farmer
 - `vehicle_number`
+- `marka`: goods-identification mark painted/stamped on the bardana or crates (free text, ≤100 chars; not unique). Used by operators and security to tell whose stack is whose in a shared chamber
 - `quality_grade`: A/B/C (or facility-defined custom grades)
 - `inbound_notes`
 - `photos` (up to 5 images)
@@ -88,7 +89,7 @@ Optional fields:
 
 **Storage Receipt (Parchi) Generation**
 - Auto-generated PDF on lot save
-- Contents: Lot number, date, owner name (English + Urdu), commodity + variety, quantity, weight, chamber, rate plan, cold store name/stamp area
+- Contents: Lot number, date, owner name (English + Urdu), commodity + variety, **marka (when present)**, quantity, weight, chamber, rate plan, cold store name/stamp area
 - Re-printable at any time from lot record
 - A4 and half-page (A5) format options
 
@@ -134,6 +135,7 @@ Supports the critical business event of mid-storage ownership change. This is a 
   - Source lot: `current_balance` reduced by transfer_quantity
   - Child lot created: new lot record with new_owner, transfer_quantity, same chamber, status=ACTIVE
   - Child lot number: `LOT-260301-0042-T1` (parent lot + `-T` suffix + sequence)
+  - Child lot **inherits the parent's `marka`** — the physical mark stays on the bags, so the new owner's child lot carries the same marka
   - Ownership history record on both parent and child lots
 - Billing: child lot starts fresh billing from transfer date
 
@@ -198,7 +200,8 @@ Manages withdrawal of produce from storage — full or partial — records outbo
 
 **Dispatch Note (Gate Pass)**
 - Generated alongside invoice
-- Contents: lot number, owner, commodity, withdrawal quantity, vehicle number (if entered), date, operator signature area
+- Contents: lot number, owner, commodity, **marka (if present)**, withdrawal quantity, vehicle number (if entered), date, operator signature area
+- At the gate, security cross-checks the physical marka on the departing bags against the dispatch note / gate pass (the marka does not change on transfer, so it must match the dispatched lot)
 - Required at facility gate for produce exit
 - System prevents dispatch note regeneration after lot is closed (can re-print but not re-generate)
 

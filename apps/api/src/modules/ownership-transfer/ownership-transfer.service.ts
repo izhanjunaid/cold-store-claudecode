@@ -165,6 +165,8 @@ export class OwnershipTransferService {
           parentLotId: parent.id,
           status: 'ACTIVE',
           bookType: parentLot.bookType,
+          // The physical marka stays on the bags, so the child lot inherits it.
+          marka: parentLot.marka,
           notes: `Created from partial transfer of ${parentLot.lotNumber}`,
           createdBy: input.operatorId,
         },

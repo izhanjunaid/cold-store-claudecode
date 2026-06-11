@@ -79,3 +79,4 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | **Parchi** | Storage receipt given at inbound |
 | **Chamber** | Refrigerated storage room within the cold store |
 | **Lot** | A discrete batch of produce from one party, tracked through its lifecycle |
+| **Marka** | Identification mark (name/initials/symbol) painted or stamped on a lot's bardana (gunny sacks) or crates so operators and security can tell whose stack is whose. Not unique; does not change on ownership transfer |

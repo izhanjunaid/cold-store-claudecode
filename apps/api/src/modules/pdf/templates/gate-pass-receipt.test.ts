@@ -69,4 +69,47 @@ describe('gate-pass-receipt template', () => {
     const html = renderGatePassReceiptHtml(SAMPLE);
     expect(html).toContain('LOT-260510-0001');
   });
+
+  it('shows declared quantity, commodity and unit label', () => {
+    const html = renderGatePassReceiptHtml({
+      ...SAMPLE,
+      declaredQuantity: 120,
+      commodityName: 'POTATO',
+      unitLabel: 'Bags',
+    });
+    expect(html).toContain('120');
+    expect(html).toContain('POTATO');
+    expect(html).toContain('Bags');
+  });
+
+  it('shows the depositor on an inward pass', () => {
+    const html = renderGatePassReceiptHtml({ ...SAMPLE, depositorName: 'Aslam Farmer' });
+    expect(html).toContain('Aslam Farmer');
+  });
+
+  it('shows the current owner + authorized quantity on an outward pass', () => {
+    const html = renderGatePassReceiptHtml({
+      ...SAMPLE,
+      direction: 'OUTWARD',
+      ownerName: 'Aslam Farmer',
+      authorizedQuantity: 100,
+    });
+    expect(html).toContain('Aslam Farmer');
+    expect(html).toContain('100');
+  });
+
+  it('shows a quantity mismatch badge when flagged', () => {
+    const html = renderGatePassReceiptHtml({ ...SAMPLE, quantityMismatch: true });
+    expect(html).toContain('MISMATCH');
+  });
+
+  it('shows the goods marka when present', () => {
+    const html = renderGatePassReceiptHtml({
+      ...SAMPLE,
+      commodityName: 'POTATO',
+      marka: 'ABC FARMS',
+    });
+    expect(html).toContain('ABC FARMS');
+    expect(html).toContain('Marka');
+  });
 });

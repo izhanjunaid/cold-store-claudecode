@@ -1,8 +1,9 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 
 const outboundInclude = {
-  lot: { select: { lotNumber: true, quantityBags: true, acceptedWeightKg: true } },
+  lot: { select: { lotNumber: true, quantityBags: true, acceptedWeightKg: true, marka: true } },
   receivingParty: { select: { name: true } },
+  ownerPartySnapshot: { select: { name: true } },
   createdByUser: { select: { name: true } },
 } satisfies Prisma.OutboundEventInclude;
 

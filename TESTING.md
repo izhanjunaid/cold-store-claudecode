@@ -61,6 +61,10 @@
 | 11.4 | — | 9 | — | 9 | ALL PASS (user management + change-password) |
 | 11.5 | — | 3 | — | 3 | ALL PASS (facility settings + audit-trigger fix) |
 | 11.6 | — | — | 6+1 fixme | 7 | E2E suite scaffolded; 6 specs run, WF-05 fixme (Phase 6 deferred) |
+| 11.10 | 4 | 12 | — | 16 | ALL PASS (gate-pass verification: qty/commodity, depositor, owner-auth) |
+| 11.11 | 7 | 5 | — | 12 | ALL PASS (marka: parchi/dispatch/gate-pass PDFs, lot store/filter/PATCH, child-lot inheritance) |
+
+> Live suite after 11.11: **124 unit + 252 integration green**.
 
 ### Phase 10 Tests
 
@@ -130,6 +134,19 @@
 - `apps/api/src/modules/gate-pass/__tests__/gate-pass-number.unit.test.ts` — 3 tests (`GP-YYMMDD-NNNN` format with 4-digit pad, prefix excludes sequence, day rollover changes prefix).
 - `apps/api/src/modules/gate-pass/__tests__/gate-pass.integration.test.ts` — 7 tests (SECURITY logs inward with GP-YYMMDD-NNNN + uppercase vehicle + ARRIVED, OPERATOR link-lot transitions to WEIGHING, SECURITY cannot link-lot 403, paid invoice → CLEARED with `turnaround_seconds > 0`, finalized-unpaid → 422 GATE_OUTWARD_BLOCKED, MANAGER credit_authorization clears, SECURITY credit_authorization 403 GATE_CREDIT_AUTH_REQUIRES_MANAGER, list active passes).
 - `apps/api/src/modules/payment/payment.integration.test.ts` (combined-settlement section) — 7 tests (one payment splits 50k invoice + 100k loan, posts JE-19 once, loan→RECOVERED, JE-02 books only invoice portion, total cash debit = payment.amount_pkr exactly; loan over-allocation 422 PESHGI_OVER_REPAYMENT; loan party mismatch 422 PAYMENT_PARTY_MISMATCH; allocating to WRITTEN_OFF loan 409 PESHGI_INACTIVE; loan-only payment skips JE-02; POST /payments/:id/allocate rejects LOAN target; cheque dishonour of combined settlement reverses both sides — scaled JE-06, per-loan REVERSAL JE, original JE-02/JE-19 marked REVERSED, net cash zero).
+
+### Phase 11.10 Tests — Gate Pass verification
+- `apps/api/src/modules/pdf/templates/gate-pass-receipt.test.ts` — +4 unit (declared quantity + commodity + unit_label render; depositor on inward; current owner + authorized qty on outward; red MISMATCH badge when flagged). 12 total in file.
+- `apps/api/src/modules/gate-pass/__tests__/gate-pass.integration.test.ts` — +7 integration. Fix #1 (5): inward stores/returns `declared_quantity`; link-lot raises `quantity_mismatch_flag` + surfaces commodity when declared ≠ lot qty; no mismatch when equal; outward surfaces `authorized_quantity` + commodity from linked outbound; outward clear flags mismatch when counted `declared_quantity` ≠ authorized. Fix #2 (2): inward records depositor `party_id` → `party_name`; unknown `party_id` → 404 PARTY_NOT_FOUND.
+- `apps/api/src/modules/outbound/outbound.integration.test.ts` — +5 integration (Fix #3): owner snapshot recorded when no receiving party; receiver == owner allowed (operator); receiver ≠ owner without flag → 422 OUTBOUND_OWNER_MISMATCH; `third_party_release` from OPERATOR → 403 OUTBOUND_THIRD_PARTY_REQUIRES_MANAGER; MANAGER + flag → 201 with owner snapshot. (Existing FULL-withdrawal test updated to the new rule: buyer-receiver now needs MANAGER + `third_party_release`.)
+
+### Phase 11.11 Tests — Marka (goods-identification mark)
+- `apps/api/src/modules/pdf/templates/storage-receipt.test.ts` — +2 unit (parchi shows the marka row when present; hides it when absent).
+- `apps/api/src/modules/pdf/templates/gate-pass-receipt.test.ts` — +1 unit (goods section shows the marka when present).
+- `apps/api/src/modules/pdf/templates/dispatch-note.test.ts` — NEW file, 4 unit (renders core dispatch fields; shows the marka when present; hides it when absent; bilingual marka row).
+- `apps/api/src/modules/lot/lot.integration.test.ts` — +4 integration (POST stores & echoes marka; marka null when omitted; `GET /v1/lots?marka=` case-insensitive prefix filter; `PATCH /v1/lots/:id` updates marka).
+- `apps/api/src/modules/ownership-transfer/ownership-transfer.integration.test.ts` — +1 integration (PARTIAL transfer: child lot inherits the parent marka).
+- `apps/api/src/modules/gate-pass/__tests__/gate-pass.integration.test.ts` — existing link-lot test extended to assert `related_marka` surfaces from the linked lot.
 
 ## Commands
 

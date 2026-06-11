@@ -171,6 +171,67 @@ describe('Lot CRUD & inbound workflow', () => {
     expect(unique.size).toBe(5);
   });
 
+  it('POST /v1/lots — stores and echoes marka', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: baseLot({ owner_party_id: ownerPartyId, quantity_bags: 10, marka: 'ABC FARMS' }),
+    });
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body);
+    expect(body.data.marka).toBe('ABC FARMS');
+  });
+
+  it('POST /v1/lots — marka is null when omitted', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: baseLot({ owner_party_id: ownerPartyId, quantity_bags: 10 }),
+    });
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).data.marka).toBeNull();
+  });
+
+  it('GET /v1/lots?marka= — case-insensitive prefix filter', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: baseLot({ owner_party_id: ownerPartyId, quantity_bags: 5, marka: 'ZZTOP-MARK' }),
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/lots?marka=zztop',
+      headers: authHeaders(operatorToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body).data as Array<{ marka: string | null }>;
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.every((l) => (l.marka ?? '').toUpperCase().startsWith('ZZTOP'))).toBe(true);
+  });
+
+  it('PATCH /v1/lots/:id — updates marka', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: baseLot({ owner_party_id: ownerPartyId, quantity_bags: 5 }),
+    });
+    const id = JSON.parse(createRes.body).data.id;
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/lots/${id}`,
+      headers: authHeaders(operatorToken),
+      payload: { marka: 'CORRECTED-MARK' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data.marka).toBe('CORRECTED-MARK');
+  });
+
   it('POST /v1/lots — weight dispute without note → 422', async () => {
     const res = await app.inject({
       method: 'POST',

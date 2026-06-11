@@ -16,6 +16,7 @@ export const CreateLotRequest = z.object({
   quality_grade_inbound: z.enum(['A', 'B', 'C']).optional(),
   inbound_date: z.string().date().optional(),
   vehicle_number: z.string().max(20).optional(),
+  marka: z.string().max(100).optional(),
   notes: z.string().optional(),
   book_type: BookType.optional(),
 });
@@ -24,6 +25,7 @@ export const CreateLotRequest = z.object({
 export const UpdateLotRequest = z.object({
   notes: z.string().optional(),
   quality_grade_inbound: z.enum(['A', 'B', 'C']).optional(),
+  marka: z.string().max(100).optional(),
 });
 
 export const LotListQuery = PaginationQuery.extend({
@@ -33,6 +35,7 @@ export const LotListQuery = PaginationQuery.extend({
   chamber_id: z.string().uuid().optional(),
   inbound_date_from: z.string().date().optional(),
   inbound_date_to: z.string().date().optional(),
+  marka: z.string().optional(),
   search: z.string().optional(),
 });
 
@@ -63,6 +66,7 @@ export const LotResponse = z.object({
   entry_date: z.string(),
   parent_lot_id: z.string().uuid().nullable(),
   vehicle_number: z.string().nullable(),
+  marka: z.string().nullable(),
   status: LotStatus,
   closed_at: z.string().nullable(),
   book_type: BookType,

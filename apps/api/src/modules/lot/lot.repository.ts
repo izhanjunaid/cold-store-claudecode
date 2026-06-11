@@ -8,6 +8,7 @@ export interface LotListFilters {
   chamberId?: string;
   inboundDateFrom?: string;
   inboundDateTo?: string;
+  marka?: string;
   search?: string;
   page: number;
   perPage: number;
@@ -39,8 +40,17 @@ export class LotRepository {
       if (filters.inboundDateFrom) where.inboundDate.gte = new Date(filters.inboundDateFrom);
       if (filters.inboundDateTo) where.inboundDate.lte = new Date(filters.inboundDateTo);
     }
+    // Dedicated marka filter — prefix match (case-insensitive) so the
+    // (facility_id, marka) index can be used for "find stack by marka".
+    if (filters.marka) {
+      where.marka = { startsWith: filters.marka, mode: 'insensitive' };
+    }
+    // Free-text search spans lot number and marka.
     if (filters.search) {
-      where.lotNumber = { contains: filters.search, mode: 'insensitive' };
+      where.OR = [
+        { lotNumber: { contains: filters.search, mode: 'insensitive' } },
+        { marka: { contains: filters.search, mode: 'insensitive' } },
+      ];
     }
 
     const [data, total] = await Promise.all([

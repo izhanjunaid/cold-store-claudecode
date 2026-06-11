@@ -76,3 +76,24 @@ Baseline captured 2026-05-20 on local dev (Windows 10, Postgres 15):
 | `GET /v1/parties/:id/ledger`   | 24ms  | 5000ms | within budget |
 
 All endpoints comfortably within their NFR budgets — no fixes required this pass. The script exits 1 if any endpoint goes over budget on future runs, so it can be wired into CI as a guardrail.
+
+## Post-phase enhancements (same branch)
+
+- [x] 11.10 — Gate Pass verification (qty/commodity, depositor, owner-auth). Migration `0014`. See PROGRESS.md for detail.
+- [x] 11.11 — Marka (goods-identification mark)
+
+### 11.11 — Marka (shipped)
+
+A **marka** is the name/initials/symbol painted or stamped on a lot's bardana (gunny sacks) or crates so operators and security can tell whose stack is whose in a shared chamber. It is **not unique** (one arhti marks many farmers' lots alike) and **does not change on ownership transfer** — the physical mark stays on the bags, so at dispatch security cross-checks the physical marka against the system owner.
+
+**DB**: migration `0015_add_marka_to_lots` — nullable `lots.marka VARCHAR(100)` + index `(facility_id, marka)`; additive/backward-compatible, applied to dev via `prisma db push`.
+
+**API/shared**: `marka` added to `CreateLotRequest` / `UpdateLotRequest` / `LotResponse` / `LotListQuery`. List supports a dedicated case-insensitive **prefix** `marka` filter (index-friendly) and folds marka into the existing `search` (contains, spans lot number + marka). `OwnershipTransferService` copies `parentLot.marka` to the child lot on partial transfer. `GatePassResponse` gains `related_marka` (sourced from the linked lot via repo/service/formatter).
+
+**PDF**: marka renders on the parchi (`storage-receipt.html`), dispatch note (`dispatch-note.html`, EN+UR), and gate-pass receipt (`gate-pass-receipt.html`) — wired from the linked lot through outbound and gate-pass.
+
+**Web**: marka input on the inbound form; Marka tile + ownership-tab cross-check banner on lot detail; dedicated marka filter + Marka column on the lots list.
+
+**Docs**: `CLAUDE.md` glossary + `docs/01,03,05,08,10,12,13`.
+
+**Tests**: +7 unit (4 new `dispatch-note.test.ts`, 2 parchi, 1 gate-pass), +5 integration (4 lot, 1 transfer; plus a `related_marka` assertion on the existing gate-pass link test). Suite: **124 unit + 252 integration green**.

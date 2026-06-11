@@ -57,7 +57,7 @@ async function cleanup() {
   await prisma.journalEntry.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
 }
 
-async function createLot(quantity = 100): Promise<{ id: string; lot_number: string }> {
+async function createLot(quantity = 100, marka?: string): Promise<{ id: string; lot_number: string }> {
   const res = await app.inject({
     method: 'POST',
     url: '/v1/lots',
@@ -70,6 +70,7 @@ async function createLot(quantity = 100): Promise<{ id: string; lot_number: stri
       quantity_bags: quantity,
       accepted_weight_kg: quantity * 20,
       inbound_date: '2026-04-10',
+      ...(marka ? { marka } : {}),
     },
   });
   expect(res.statusCode).toBe(201);
@@ -361,5 +362,169 @@ describe('Phase 9 — Gate Pass (M10)', () => {
     const body = JSON.parse(list.body);
     expect(body.data.length).toBeGreaterThan(0);
     expect(body.data.every((p: any) => ['ARRIVED', 'WEIGHING'].includes(p.status))).toBe(true);
+  });
+});
+
+describe('Gate-side quantity & commodity verification (Fix #1)', () => {
+  it('inward pass stores and returns declared_quantity', async () => {
+    await cleanup();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/inward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: 'LHR-Q100', declared_quantity: 120 },
+    });
+    expect(res.statusCode).toBe(201);
+    const data = JSON.parse(res.body).data;
+    expect(data.declared_quantity).toBe(120);
+    expect(data.quantity_mismatch_flag).toBe(false);
+  });
+
+  it('link-lot raises quantity_mismatch_flag + surfaces commodity when declared != lot quantity', async () => {
+    await cleanup();
+    const inward = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/inward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: 'LHR-Q200', declared_quantity: 60 },
+    });
+    const passId = JSON.parse(inward.body).data.id;
+    const lot = await createLot(50, 'GATE-MARK'); // declared 60 vs actual 50 → mismatch
+
+    const link = await app.inject({
+      method: 'PATCH',
+      url: `/v1/gate-passes/${passId}/link-lot`,
+      headers: authHeaders(operatorToken),
+      payload: { lot_id: lot.id },
+    });
+    expect(link.statusCode).toBe(200);
+    const data = JSON.parse(link.body).data;
+    expect(data.quantity_mismatch_flag).toBe(true);
+    expect(data.related_commodity_name).toBe('POTATO');
+    expect(data.related_unit_label).toBe('Bags');
+    // The physical marka of the linked lot surfaces for gate verification.
+    expect(data.related_marka).toBe('GATE-MARK');
+  });
+
+  it('link-lot leaves mismatch flag false when declared == lot quantity', async () => {
+    await cleanup();
+    const inward = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/inward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: 'LHR-Q300', declared_quantity: 50 },
+    });
+    const passId = JSON.parse(inward.body).data.id;
+    const lot = await createLot(50);
+
+    const link = await app.inject({
+      method: 'PATCH',
+      url: `/v1/gate-passes/${passId}/link-lot`,
+      headers: authHeaders(operatorToken),
+      payload: { lot_id: lot.id },
+    });
+    expect(JSON.parse(link.body).data.quantity_mismatch_flag).toBe(false);
+  });
+
+  it('outward pass surfaces authorized_quantity + commodity from linked outbound', async () => {
+    await cleanup();
+    const lot = await createLot(100);
+    const ob = await createOutbound(lot.id, 'LHR-Q400');
+    await finalizeAndPayInvoice(ob.invoice_id);
+
+    const inward = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/inward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: 'LHR-Q400' },
+    });
+    const passId = JSON.parse(inward.body).data.id;
+
+    const out = await app.inject({
+      method: 'POST',
+      url: `/v1/gate-passes/${passId}/outward`,
+      headers: authHeaders(securityToken),
+      payload: { outbound_event_id: ob.id },
+    });
+    expect(out.statusCode).toBe(200);
+    const data = JSON.parse(out.body).data;
+    expect(data.authorized_quantity).toBe(100);
+    expect(data.related_commodity_name).toBe('POTATO');
+    expect(data.related_unit_label).toBe('Bags');
+    // Owner snapshot chain (outbound → pass → format) surfaces on the pass.
+    expect(data.owner_party_name).toBeTruthy();
+  });
+
+  it('POST /outward honors a physical declared_quantity for mismatch detection', async () => {
+    await cleanup();
+    const lot = await createLot(100);
+    const ob = await createOutbound(lot.id, 'LHR-Q600');
+    await finalizeAndPayInvoice(ob.invoice_id);
+
+    const out = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/outward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: 'LHR-Q600', outbound_event_id: ob.id, declared_quantity: 90 },
+    });
+    expect(out.statusCode).toBe(201);
+    const data = JSON.parse(out.body).data;
+    expect(data.declared_quantity).toBe(90);
+    expect(data.authorized_quantity).toBe(100);
+    expect(data.quantity_mismatch_flag).toBe(true);
+  });
+
+  it('outward clear raises quantity_mismatch_flag when physical declared_quantity != authorized', async () => {
+    await cleanup();
+    const lot = await createLot(100);
+    const ob = await createOutbound(lot.id, 'LHR-Q500');
+    await finalizeAndPayInvoice(ob.invoice_id);
+
+    const inward = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/inward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: 'LHR-Q500' },
+    });
+    const passId = JSON.parse(inward.body).data.id;
+
+    const out = await app.inject({
+      method: 'POST',
+      url: `/v1/gate-passes/${passId}/outward`,
+      headers: authHeaders(securityToken),
+      payload: { outbound_event_id: ob.id, declared_quantity: 95 }, // counted 95 vs authorized 100
+    });
+    expect(out.statusCode).toBe(200);
+    const data = JSON.parse(out.body).data;
+    expect(data.declared_quantity).toBe(95);
+    expect(data.quantity_mismatch_flag).toBe(true);
+  });
+});
+
+describe('Depositor on inward pass (Fix #2)', () => {
+  it('inward pass records depositor party and returns party_name', async () => {
+    await cleanup();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/inward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: 'LHR-P100', party_id: testPartyId },
+    });
+    expect(res.statusCode).toBe(201);
+    const data = JSON.parse(res.body).data;
+    expect(data.party_id).toBe(testPartyId);
+    expect(data.party_name).toBeTruthy();
+  });
+
+  it('rejects inward with an unknown depositor party_id', async () => {
+    await cleanup();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/inward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: 'LHR-P200', party_id: '00000000-0000-0000-0000-0000000000ff' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).error.code).toBe('PARTY_NOT_FOUND');
   });
 });

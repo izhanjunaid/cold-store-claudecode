@@ -5,6 +5,15 @@ import { generateDispatchNoteNumber } from './dispatch-note-number';
 import { renderDispatchNote } from '../pdf/pdf.service';
 import { buildInvoiceFromOutbound } from '../invoice/invoice.builder';
 
+const ROLE_RANK: Record<string, number> = {
+  OWNER: 6,
+  MANAGER: 5,
+  ACCOUNTANT: 4,
+  OPERATOR: 3,
+  SECURITY: 2,
+  VIEWER: 1,
+};
+
 function toNumber(d: { toString(): string } | null | undefined): number | null {
   if (d == null) return null;
   return Number(d);
@@ -46,6 +55,8 @@ function formatOutbound(ob: OutboundWithRelations, invoiceId: string | null = nu
     outbound_date: ob.outboundDate.toISOString().slice(0, 10),
     receiving_party_id: ob.receivingPartyId,
     receiving_party_name: ob.receivingParty?.name ?? null,
+    owner_party_id_snapshot: ob.ownerPartyIdSnapshot ?? null,
+    owner_party_name: ob.ownerPartySnapshot?.name ?? null,
     vehicle_number: ob.vehicleNumber,
     dispatch_note_number: ob.dispatchNoteNumber,
     status: ob.status,
@@ -67,11 +78,13 @@ export class OutboundService {
   async create(params: {
     facilityId: string;
     createdBy: string;
+    userRole?: string;
     lotId: string;
     withdrawalType: string;
     quantityWithdrawnBags: number;
     outboundDate: string;
     receivingPartyId?: string;
+    thirdPartyRelease?: boolean;
     vehicleNumber?: string;
     notes?: string;
   }) {
@@ -82,9 +95,10 @@ export class OutboundService {
           id: string;
           status: string;
           current_balance_bags: number;
+          owner_party_id: string;
         }[]
       >(
-        `SELECT id, status, current_balance_bags FROM lots WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+        `SELECT id, status, current_balance_bags, owner_party_id FROM lots WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
         params.lotId,
         params.facilityId,
       );
@@ -114,6 +128,16 @@ export class OutboundService {
         if (!party) throw Errors.PARTY_NOT_FOUND();
       }
 
+      // Current-owner authorization: goods leave for the lot's CURRENT owner
+      // (kept current through M3 transfers). Releasing to anyone else is a
+      // deliberate third-party release that a MANAGER+ must authorize.
+      if (params.receivingPartyId && params.receivingPartyId !== lot.owner_party_id) {
+        if (!params.thirdPartyRelease) throw Errors.OUTBOUND_OWNER_MISMATCH();
+        if ((ROLE_RANK[params.userRole ?? ''] ?? 0) < ROLE_RANK['MANAGER']!) {
+          throw Errors.OUTBOUND_THIRD_PARTY_REQUIRES_MANAGER();
+        }
+      }
+
       const outboundDate = new Date(params.outboundDate);
       const dispatchNoteNumber = await generateDispatchNoteNumber(
         tx,
@@ -128,6 +152,7 @@ export class OutboundService {
         quantityWithdrawnBags: params.quantityWithdrawnBags,
         outboundDate,
         receivingPartyId: params.receivingPartyId ?? null,
+        ownerPartyIdSnapshot: lot.owner_party_id,
         vehicleNumber: params.vehicleNumber ?? null,
         dispatchNoteNumber,
         status: 'PENDING',
@@ -223,6 +248,7 @@ export class OutboundService {
       quantityWithdrawnBags: ob.quantityWithdrawnBags,
       outboundWeightKg: toNumber(ob.outboundWeightKg),
       vehicleNumber: ob.vehicleNumber,
+      marka: ob.lot.marka,
       operatorName: ob.createdByUser.name,
       withdrawalType: ob.withdrawalType,
     });

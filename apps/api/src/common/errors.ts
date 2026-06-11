@@ -54,6 +54,18 @@ export const Errors = {
     new AppError('OUTBOUND_ALREADY_FINALIZED', 'Outbound event is already dispatched', 409),
   OUTBOUND_WEIGHT_REQUIRED: () =>
     new AppError('OUTBOUND_WEIGHT_REQUIRED', 'Outbound weight must be recorded before finalizing', 422),
+  OUTBOUND_OWNER_MISMATCH: () =>
+    new AppError(
+      'OUTBOUND_OWNER_MISMATCH',
+      'Receiving party is not the lot owner — record an ownership transfer first, or mark this as a third-party release',
+      422,
+    ),
+  OUTBOUND_THIRD_PARTY_REQUIRES_MANAGER: () =>
+    new AppError(
+      'OUTBOUND_THIRD_PARTY_REQUIRES_MANAGER',
+      'A third-party release (receiver is not the current owner) requires MANAGER authorization',
+      403,
+    ),
   LOT_NOT_ACTIVE: () =>
     new AppError('LOT_NOT_ACTIVE', 'Lot must be ACTIVE to create a withdrawal', 409),
   INVOICE_NOT_FOUND: () => new AppError('INVOICE_NOT_FOUND', 'Invoice does not exist', 404),

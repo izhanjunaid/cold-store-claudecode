@@ -23,7 +23,12 @@ interface TempLogRecord {
   recordedByUser?: { name: string } | null;
 }
 
-function toChamberResponse(chamber: ChamberRecord, lastTemp: TempLogRecord | null = null) {
+function toChamberResponse(
+  chamber: ChamberRecord,
+  lastTemp: TempLogRecord | null = null,
+  occupancyBags: number = 0,
+) {
+  const available = Math.max(0, chamber.maxCapacityBags - occupancyBags);
   return {
     id: chamber.id,
     facility_id: chamber.facilityId,
@@ -31,8 +36,8 @@ function toChamberResponse(chamber: ChamberRecord, lastTemp: TempLogRecord | nul
     commodity_restriction_id: chamber.commodityRestrictionId ?? null,
     commodity_restriction_name: chamber.commodityRestriction?.name ?? null,
     max_capacity_bags: chamber.maxCapacityBags,
-    current_occupancy_bags: 0,
-    available_capacity_bags: chamber.maxCapacityBags,
+    current_occupancy_bags: occupancyBags,
+    available_capacity_bags: available,
     temperature_min_c: chamber.temperatureMinC ? Number(chamber.temperatureMinC) : null,
     temperature_max_c: chamber.temperatureMaxC ? Number(chamber.temperatureMaxC) : null,
     is_active: chamber.isActive,
@@ -62,12 +67,16 @@ export class ChamberService {
 
   async list(facilityId: string, isActive?: boolean) {
     const chambers = await this.repo.findMany(facilityId, isActive);
+    const occupancy = await this.repo.getOccupancyByChamberIds(
+      chambers.map((c) => c.id),
+    );
     const results = [];
     for (const chamber of chambers) {
       const lastTemp = await this.repo.getLastTemperature(chamber.id);
       results.push(toChamberResponse(
         chamber as ChamberRecord,
         lastTemp as TempLogRecord | null,
+        occupancy.get(chamber.id) ?? 0,
       ));
     }
     return results;
@@ -78,10 +87,12 @@ export class ChamberService {
     if (!chamber) throw Errors.VALIDATION_ERROR('Chamber not found');
     const lastTemp = await this.repo.getLastTemperature(id);
     const temperatureLogs = await this.repo.getTemperatureLogs(id);
+    const occupancy = await this.repo.getOccupancyByChamberIds([id]);
     return {
       ...toChamberResponse(
         chamber as ChamberRecord,
         lastTemp as TempLogRecord | null,
+        occupancy.get(id) ?? 0,
       ),
       temperature_logs: (temperatureLogs as TempLogRecord[]).map(toTempLogResponse),
     };

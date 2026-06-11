@@ -15,6 +15,8 @@ export const LogInwardRequest = z.object({
   driver_name: z.string().trim().min(1).max(100).optional(),
   driver_phone: z.string().trim().min(7).max(20).optional(),
   bilty_number: z.string().trim().min(1).max(50).optional(),
+  party_id: z.string().uuid().optional(),
+  declared_quantity: z.number().int().positive().optional(),
   notes: z.string().optional(),
 });
 export type LogInwardRequestType = z.infer<typeof LogInwardRequest>;
@@ -24,6 +26,7 @@ export const LogOutwardRequest = z.object({
   driver_name: z.string().trim().min(1).max(100).optional(),
   driver_phone: z.string().trim().min(7).max(20).optional(),
   outbound_event_id: z.string().uuid().optional(),
+  declared_quantity: z.number().int().positive().optional(),
   notes: z.string().optional(),
 });
 export type LogOutwardRequestType = z.infer<typeof LogOutwardRequest>;
@@ -36,6 +39,7 @@ export type LinkLotRequestType = z.infer<typeof LinkLotRequest>;
 export const ClearOutwardRequest = z.object({
   outbound_event_id: z.string().uuid().optional(),
   credit_authorization: z.boolean().optional(),
+  declared_quantity: z.number().int().positive().optional(),
   notes: z.string().optional(),
 });
 export type ClearOutwardRequestType = z.infer<typeof ClearOutwardRequest>;
@@ -65,6 +69,15 @@ export const GatePassResponse = z.object({
   related_lot_number: z.string().nullable().optional(),
   related_outbound_id: z.string().uuid().nullable(),
   related_dispatch_note_number: z.string().nullable().optional(),
+  related_commodity_name: z.string().nullable().optional(),
+  related_unit_label: z.string().nullable().optional(),
+  related_marka: z.string().nullable().optional(),
+  party_id: z.string().uuid().nullable().optional(),
+  party_name: z.string().nullable().optional(),
+  owner_party_name: z.string().nullable().optional(),
+  declared_quantity: z.number().int().nullable(),
+  authorized_quantity: z.number().int().nullable().optional(),
+  quantity_mismatch_flag: z.boolean(),
   notes: z.string().nullable(),
   created_at: z.string(),
   cleared_at: z.string().nullable(),

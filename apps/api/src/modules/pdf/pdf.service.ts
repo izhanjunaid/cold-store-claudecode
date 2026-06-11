@@ -38,6 +38,8 @@ export interface StorageReceiptData {
   operatorName: string;
   // Book type
   bookType: string;
+  // Marka (goods-identification mark on the bardana/crates)
+  marka?: string | null;
 }
 
 export interface TransferAcknowledgmentData {
@@ -71,6 +73,7 @@ export interface DispatchNoteData {
   outboundWeightKg: number | null;
   receivingPartyName: string | null;
   vehicleNumber: string | null;
+  marka?: string | null;
   operatorName: string;
 }
 
@@ -419,6 +422,14 @@ export interface GatePassReceiptData {
   status: string;
   relatedLotNumber: string | null;
   relatedDispatchNoteNumber: string | null;
+  commodityName?: string | null;
+  marka?: string | null;
+  unitLabel?: string | null;
+  declaredQuantity?: number | null;
+  authorizedQuantity?: number | null;
+  quantityMismatch?: boolean;
+  depositorName?: string | null;
+  ownerName?: string | null;
   createdAt: string;
   clearedAt: string | null;
   turnaroundLabel: string | null;
@@ -436,7 +447,16 @@ function getGatePassReceiptTemplate(): HandlebarsTemplateDelegate {
 }
 
 export function renderGatePassReceiptHtml(data: GatePassReceiptData): string {
-  return getGatePassReceiptTemplate()(data);
+  const hasGoodsInfo = Boolean(
+    data.commodityName ||
+      data.marka ||
+      data.declaredQuantity != null ||
+      data.authorizedQuantity != null ||
+      data.depositorName ||
+      data.ownerName ||
+      data.quantityMismatch,
+  );
+  return getGatePassReceiptTemplate()({ ...data, hasGoodsInfo });
 }
 
 export async function renderGatePassReceipt(data: GatePassReceiptData): Promise<Buffer> {

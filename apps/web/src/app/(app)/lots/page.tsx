@@ -11,6 +11,7 @@ interface Lot {
   owner_party_name: string | null;
   commodity_name: string | null;
   variety_name: string | null;
+  marka: string | null;
   chamber_name: string | null;
   quantity_bags: number;
   current_balance_bags: number;
@@ -32,6 +33,7 @@ export default function LotListPage() {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
+  const [marka, setMarka] = useState('');
   const [loading, setLoading] = useState(true);
   const perPage = 20;
 
@@ -41,6 +43,7 @@ export default function LotListPage() {
       const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
       if (status) params.set('status', status);
       if (search) params.set('search', search);
+      if (marka) params.set('marka', marka);
       const res = await apiClientList<Lot>(`/v1/lots?${params}`);
       setLots(res.data);
       setTotal(res.meta.total);
@@ -49,7 +52,7 @@ export default function LotListPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, status, search]);
+  }, [page, status, search, marka]);
 
   useEffect(() => { fetchLots(); }, [fetchLots]);
 
@@ -71,10 +74,17 @@ export default function LotListPage() {
       <div className="bg-white rounded-lg shadow p-4 mb-4 flex gap-4 flex-wrap">
         <input
           type="text"
-          placeholder="Search lot number..."
+          placeholder="Search lot number or marka..."
           value={search}
           onChange={(e) => { setSearch((e.target as HTMLInputElement).value); setPage(1); }}
           className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[200px]"
+        />
+        <input
+          type="text"
+          placeholder="Filter by marka..."
+          value={marka}
+          onChange={(e) => { setMarka((e.target as HTMLInputElement).value); setPage(1); }}
+          className="border rounded-lg px-3 py-2 text-sm min-w-[160px]"
         />
         <select
           value={status}
@@ -96,6 +106,7 @@ export default function LotListPage() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Lot #</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Owner</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Commodity</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Marka</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Chamber</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Bags</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
@@ -106,9 +117,9 @@ export default function LotListPage() {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {loading ? (
-              <tr><td colSpan={9} className="px-6 py-8 text-center text-gray-500">Loading...</td></tr>
+              <tr><td colSpan={10} className="px-6 py-8 text-center text-gray-500">Loading...</td></tr>
             ) : lots.length === 0 ? (
-              <tr><td colSpan={9} className="px-6 py-8 text-center text-gray-500">No lots found</td></tr>
+              <tr><td colSpan={10} className="px-6 py-8 text-center text-gray-500">No lots found</td></tr>
             ) : (
               lots.map((lot) => (
                 <tr
@@ -122,6 +133,7 @@ export default function LotListPage() {
                     {lot.commodity_name}
                     {lot.variety_name && <span className="text-gray-400"> / {lot.variety_name}</span>}
                   </td>
+                  <td className="px-6 py-4 text-sm font-medium text-gray-700">{lot.marka ?? <span className="text-gray-300">—</span>}</td>
                   <td className="px-6 py-4 text-sm text-gray-600">{lot.chamber_name}</td>
                   <td className="px-6 py-4 text-sm text-gray-900 text-right">{lot.quantity_bags.toLocaleString()}</td>
                   <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">{lot.current_balance_bags.toLocaleString()}</td>

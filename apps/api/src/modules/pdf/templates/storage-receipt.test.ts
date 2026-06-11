@@ -62,4 +62,15 @@ describe('storage-receipt template', () => {
     expect(html).toContain('POTATO');
     expect(html).toContain('Cardinal');
   });
+
+  it('shows the marka when present', () => {
+    const html = renderStorageReceiptHtml({ ...SAMPLE, marka: 'ABC FARMS' });
+    expect(html).toContain('ABC FARMS');
+    expect(html).toContain('Marka');
+  });
+
+  it('hides the marka row when absent', () => {
+    const html = renderStorageReceiptHtml({ ...SAMPLE, marka: null });
+    expect(html).not.toContain('Marka');
+  });
 });

@@ -22,7 +22,9 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // Use full chromium binary (not chromium-headless-shell) so local runs work
+      // without downloading the separate headless-shell package.
+      use: { ...devices['Desktop Chrome'], channel: 'chromium' },
     },
   ],
   webServer: process.env['E2E_SKIP_WEBSERVER']

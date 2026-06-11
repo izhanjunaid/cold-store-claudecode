@@ -107,10 +107,10 @@ X-Facility-ID: <facility_uuid>
 
 | Method | Endpoint | Description | Role |
 |---|---|---|---|
-| GET | `/lots` | List lots; filter by `status`, `party_id`, `commodity_id`, `chamber_id`, `inbound_date_from/to` | All |
+| GET | `/lots` | List lots; filter by `status`, `party_id`, `commodity_id`, `chamber_id`, `inbound_date_from/to`, `marka` (case-insensitive prefix), and `search` (lot number or marka, contains) | All |
 | POST | `/lots` | Create inbound lot | OPERATOR+ |
 | GET | `/lots/:id` | Lot detail + current balance + ownership current | All |
-| PATCH | `/lots/:id` | Update lot metadata (notes, grade) — logged | OPERATOR+ |
+| PATCH | `/lots/:id` | Update lot metadata (notes, grade, marka) — logged | OPERATOR+ |
 | GET | `/lots/:id/ownership-history` | Full ownership chain | All |
 | GET | `/lots/:id/inspections` | Quality inspections | All |
 | GET | `/lots/:id/spoilage` | Spoilage records | All |
@@ -131,10 +131,12 @@ X-Facility-ID: <facility_uuid>
   "rate_plan_id": "uuid",
   "inbound_date": "2026-03-01",
   "vehicle_number": "LHR-1234",
+  "marka": "ASLAM-7",
   "quality_grade_inbound": "A",
   "notes": "Good quality, no visible damage"
 }
 ```
+*`marka` is optional (≤100 chars), the goods-identification mark on the bardana/crates. It is echoed on `GET /lots/:id` as `marka`, printed on the parchi/dispatch-note/gate-pass PDFs, and inherited by child lots on partial transfer.*
 
 **POST /lots — Response (201)**
 ```json

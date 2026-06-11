@@ -32,6 +32,13 @@ export class GatePassService {
     body: LogInwardRequestType,
   ): Promise<GatePassResponseType> {
     const created = await this.prisma.$transaction(async (tx) => {
+      if (body.party_id) {
+        const party = await tx.party.findFirst({
+          where: { id: body.party_id, facilityId },
+          select: { id: true },
+        });
+        if (!party) throw Errors.PARTY_NOT_FOUND();
+      }
       const passNumber = await generateGatePassNumber(tx, facilityId, new Date());
       const row = await tx.gatePass.create({
         data: {
@@ -43,6 +50,8 @@ export class GatePassService {
           driverPhone: body.driver_phone ?? null,
           biltyNumber: body.bilty_number ?? null,
           status: 'ARRIVED',
+          partyId: body.party_id ?? null,
+          declaredQuantity: body.declared_quantity ?? null,
           notes: body.notes ?? null,
           createdBy: userId,
         },
@@ -78,6 +87,7 @@ export class GatePassService {
       const cleared = await this.clearOutwardInternal(tx, facilityId, row.id, userRole, {
         outbound_event_id: body.outbound_event_id,
         credit_authorization: body.credit_authorization,
+        declared_quantity: body.declared_quantity,
         notes: body.notes,
       });
       return cleared;
@@ -105,13 +115,17 @@ export class GatePassService {
       }
       const lot = await tx.lot.findFirst({
         where: { facilityId, id: body.lot_id },
-        select: { id: true },
+        select: { id: true, quantityBags: true },
       });
       if (!lot) throw Errors.GATE_PASS_LOT_MISMATCH();
 
+      // Gate-side reconciliation: declared count at the gate vs actual binned quantity.
+      const mismatch =
+        pass.declaredQuantity != null && pass.declaredQuantity !== lot.quantityBags;
+
       await tx.gatePass.update({
         where: { id: passId },
-        data: { relatedLotId: body.lot_id, status: 'WEIGHING' },
+        data: { relatedLotId: body.lot_id, status: 'WEIGHING', quantityMismatchFlag: mismatch },
       });
       return this.getByIdInternal(tx, facilityId, passId);
     });
@@ -168,14 +182,25 @@ export class GatePassService {
     const row = await tx.gatePass.findFirst({
       where: { facilityId, id },
       include: {
-        relatedLot: { select: { id: true, lotNumber: true } },
+        relatedLot: {
+          select: {
+            id: true,
+            lotNumber: true,
+            marka: true,
+            commodity: { select: { name: true, unitLabel: true } },
+          },
+        },
         relatedOutbound: {
           select: {
             id: true,
             dispatchNoteNumber: true,
+            quantityWithdrawnBags: true,
             invoice: { select: { id: true, totalPkr: true, amountPaidPkr: true, status: true } },
+            lot: { select: { marka: true, commodity: { select: { name: true, unitLabel: true } } } },
+            ownerPartySnapshot: { select: { name: true } },
           },
         },
+        party: { select: { id: true, name: true } },
       },
     });
     if (!row) throw Errors.GATE_PASS_NOT_FOUND();
@@ -203,6 +228,7 @@ export class GatePassService {
             dispatchNoteNumber: true,
             status: true,
             vehicleNumber: true,
+            quantityWithdrawnBags: true,
             invoice: {
               select: { id: true, status: true, totalPkr: true, amountPaidPkr: true },
             },
@@ -226,6 +252,7 @@ export class GatePassService {
           dispatchNoteNumber: true,
           status: true,
           vehicleNumber: true,
+          quantityWithdrawnBags: true,
           invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true } },
         },
       });
@@ -251,6 +278,7 @@ export class GatePassService {
           dispatchNoteNumber: true,
           status: true,
           vehicleNumber: true,
+          quantityWithdrawnBags: true,
           invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true } },
         },
       });
@@ -288,12 +316,22 @@ export class GatePassService {
       }
     }
 
+    // Gate-side reconciliation: physically-counted bags/crates vs the authorized
+    // quantity on the linked outbound. A divergence raises the mismatch flag.
+    const authorizedQty = outbound?.quantityWithdrawnBags ?? null;
+    const declaredQty = body.declared_quantity ?? null;
+    const outwardMismatch =
+      declaredQty != null && authorizedQty != null && declaredQty !== authorizedQty;
+
     await tx.gatePass.update({
       where: { id: passId },
       data: {
         status: 'CLEARED',
         clearedAt: new Date(),
         relatedOutboundId: outboundId,
+        ...(declaredQty != null
+          ? { declaredQuantity: declaredQty, quantityMismatchFlag: outwardMismatch }
+          : {}),
         notes: body.notes ?? pass.notes,
       },
     });
@@ -306,6 +344,8 @@ function formatGatePass(row: any): GatePassResponseType {
   const created: Date = row.createdAt;
   const cleared: Date | null = row.clearedAt ?? null;
   const turnaround = cleared ? Math.round((cleared.getTime() - created.getTime()) / 1000) : null;
+  const commodity = row.relatedLot?.commodity ?? row.relatedOutbound?.lot?.commodity ?? null;
+  const marka = row.relatedLot?.marka ?? row.relatedOutbound?.lot?.marka ?? null;
   return {
     id: row.id,
     pass_number: row.passNumber,
@@ -319,6 +359,15 @@ function formatGatePass(row: any): GatePassResponseType {
     related_lot_number: row.relatedLot?.lotNumber ?? null,
     related_outbound_id: row.relatedOutboundId,
     related_dispatch_note_number: row.relatedOutbound?.dispatchNoteNumber ?? null,
+    related_commodity_name: commodity?.name ?? null,
+    related_unit_label: commodity?.unitLabel ?? null,
+    related_marka: marka,
+    declared_quantity: row.declaredQuantity ?? null,
+    authorized_quantity: row.relatedOutbound?.quantityWithdrawnBags ?? null,
+    quantity_mismatch_flag: row.quantityMismatchFlag ?? false,
+    party_id: row.partyId ?? null,
+    party_name: row.party?.name ?? null,
+    owner_party_name: row.relatedOutbound?.ownerPartySnapshot?.name ?? null,
     notes: row.notes,
     created_at: created.toISOString(),
     cleared_at: cleared ? cleared.toISOString() : null,

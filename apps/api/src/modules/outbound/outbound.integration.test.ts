@@ -123,16 +123,19 @@ describe('Outbound Events', () => {
   it('2. Create FULL withdrawal: status PENDING, qty equals balance', async () => {
     const lot = await createLot(50);
 
+    // Receiver is a buyer (not the lot owner), so this is a third-party
+    // release and requires MANAGER authorization (see Fix #3).
     const res = await app.inject({
       method: 'POST',
       url: '/v1/outbound-events',
-      headers: authHeaders(operatorToken),
+      headers: authHeaders(managerToken),
       payload: {
         lot_id: lot.id,
         withdrawal_type: 'FULL',
         quantity_withdrawn_bags: 50,
         outbound_date: '2026-04-20',
         receiving_party_id: receivingPartyId,
+        third_party_release: true,
         vehicle_number: 'ABC-1234',
       },
     });
@@ -437,5 +440,100 @@ describe('Outbound Events', () => {
     const events = JSON.parse(res.body).data as Array<{ lot_id: string }>;
     expect(events.length).toBeGreaterThan(0);
     expect(events[0]?.lot_id).toBe(lot.id);
+  });
+});
+
+describe('Current-owner authorization on withdrawal (Fix #3)', () => {
+  it('snapshots the lot current owner when no receiving party (operator OK)', async () => {
+    const lot = await createLot(40);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(operatorToken),
+      payload: {
+        lot_id: lot.id,
+        withdrawal_type: 'PARTIAL',
+        quantity_withdrawn_bags: 10,
+        outbound_date: '2026-04-20',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).data.owner_party_id_snapshot).toBe(ownerPartyId);
+  });
+
+  it('allows withdrawal when the receiving party IS the current owner (operator)', async () => {
+    const lot = await createLot(40);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(operatorToken),
+      payload: {
+        lot_id: lot.id,
+        withdrawal_type: 'PARTIAL',
+        quantity_withdrawn_bags: 10,
+        outbound_date: '2026-04-20',
+        receiving_party_id: ownerPartyId,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).data.owner_party_id_snapshot).toBe(ownerPartyId);
+  });
+
+  it('blocks a withdrawal to a non-owner receiver without third_party_release', async () => {
+    const lot = await createLot(40);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(operatorToken),
+      payload: {
+        lot_id: lot.id,
+        withdrawal_type: 'PARTIAL',
+        quantity_withdrawn_bags: 10,
+        outbound_date: '2026-04-20',
+        receiving_party_id: receivingPartyId,
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error.code).toBe('OUTBOUND_OWNER_MISMATCH');
+  });
+
+  it('rejects third_party_release from a non-manager (OPERATOR)', async () => {
+    const lot = await createLot(40);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(operatorToken),
+      payload: {
+        lot_id: lot.id,
+        withdrawal_type: 'PARTIAL',
+        quantity_withdrawn_bags: 10,
+        outbound_date: '2026-04-20',
+        receiving_party_id: receivingPartyId,
+        third_party_release: true,
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).error.code).toBe('OUTBOUND_THIRD_PARTY_REQUIRES_MANAGER');
+  });
+
+  it('allows a third-party release to a non-owner when MANAGER authorizes', async () => {
+    const lot = await createLot(40);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(managerToken),
+      payload: {
+        lot_id: lot.id,
+        withdrawal_type: 'PARTIAL',
+        quantity_withdrawn_bags: 10,
+        outbound_date: '2026-04-20',
+        receiving_party_id: receivingPartyId,
+        third_party_release: true,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body).data;
+    expect(body.receiving_party_id).toBe(receivingPartyId);
+    expect(body.owner_party_id_snapshot).toBe(ownerPartyId);
   });
 });

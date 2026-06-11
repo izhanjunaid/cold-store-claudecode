@@ -440,6 +440,8 @@ model Party {
   journalEntryLines JournalEntryLine[]
   creditNotes       CreditNote[]       @relation("CreditNoteBillingParty")
   partyLoans        PartyLoan[]
+  gatePassesDeposited    GatePass[]      @relation("GatePassDepositor")
+  outboundOwnerSnapshots OutboundEvent[] @relation("OutboundOwnerSnapshot")
 
   @@index([facilityId, phonePrimary])
   @@index([facilityId, partyType])
@@ -573,6 +575,7 @@ model Lot {
   entryDate           DateTime  @map("entry_date") @db.Date
   parentLotId         String?   @map("parent_lot_id") @db.Uuid
   vehicleNumber       String?   @map("vehicle_number") @db.VarChar(20)
+  marka               String?   @map("marka") @db.VarChar(100)
   status              LotStatus @default(ACTIVE)
   closedAt            DateTime? @map("closed_at") @db.Date
   bookType            BookType  @default(PACCI) @map("book_type")
@@ -602,6 +605,7 @@ model Lot {
   @@index([chamberId, status])
   @@index([inboundDate])
   @@index([facilityId, status, inboundDate])
+  @@index([facilityId, marka])
   @@map("lots")
 }
 
@@ -640,6 +644,7 @@ model OutboundEvent {
   outboundWeightKg      Decimal?       @map("outbound_weight_kg") @db.Decimal(10, 2)
   outboundDate          DateTime       @map("outbound_date") @db.Date
   receivingPartyId      String?        @map("receiving_party_id") @db.Uuid
+  ownerPartyIdSnapshot  String?        @map("owner_party_id_snapshot") @db.Uuid
   vehicleNumber         String?        @map("vehicle_number") @db.VarChar(20)
   dispatchNoteNumber    String?        @map("dispatch_note_number") @db.VarChar(30)
   status                OutboundStatus @default(PENDING)
@@ -647,10 +652,11 @@ model OutboundEvent {
   createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz()
   createdBy             String         @map("created_by") @db.Uuid
 
-  lot            Lot        @relation(fields: [lotId], references: [id])
-  facility       Facility   @relation(fields: [facilityId], references: [id])
-  receivingParty Party?     @relation("OutboundReceiver", fields: [receivingPartyId], references: [id])
-  createdByUser  User       @relation("OutboundCreatedBy", fields: [createdBy], references: [id])
+  lot                Lot      @relation(fields: [lotId], references: [id])
+  facility           Facility @relation(fields: [facilityId], references: [id])
+  receivingParty     Party?   @relation("OutboundReceiver", fields: [receivingPartyId], references: [id])
+  ownerPartySnapshot Party?   @relation("OutboundOwnerSnapshot", fields: [ownerPartyIdSnapshot], references: [id])
+  createdByUser      User     @relation("OutboundCreatedBy", fields: [createdBy], references: [id])
   invoice        Invoice?
   gatePasses     GatePass[]
 
@@ -1200,6 +1206,9 @@ model GatePass {
   status            GatePassStatus    @default(ARRIVED)
   relatedLotId      String?           @map("related_lot_id") @db.Uuid
   relatedOutboundId String?           @map("related_outbound_id") @db.Uuid
+  declaredQuantity     Int?           @map("declared_quantity")
+  partyId              String?        @map("party_id") @db.Uuid
+  quantityMismatchFlag Boolean        @default(false) @map("quantity_mismatch_flag")
   notes             String?           @db.Text
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   clearedAt         DateTime?         @map("cleared_at") @db.Timestamptz()
@@ -1208,6 +1217,7 @@ model GatePass {
   facility        Facility       @relation(fields: [facilityId], references: [id])
   relatedLot      Lot?           @relation(fields: [relatedLotId], references: [id])
   relatedOutbound OutboundEvent? @relation(fields: [relatedOutboundId], references: [id])
+  party           Party?         @relation("GatePassDepositor", fields: [partyId], references: [id])
   createdByUser   User           @relation("GatePassCreatedBy", fields: [createdBy], references: [id])
 
   @@unique([facilityId, passNumber])
@@ -1215,5 +1225,6 @@ model GatePass {
   @@index([facilityId, vehicleNumber])
   @@index([relatedLotId])
   @@index([relatedOutboundId])
+  @@index([partyId])
   @@map("gate_passes")
 }

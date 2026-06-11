@@ -98,6 +98,7 @@ ColdChain will be the operational backbone for agri cold storage businesses, ena
 | IB-07 | Attach inbound photos for quality documentation | P1 |
 | IB-08 | Set billing terms at lot level (rate plan selection) | P0 |
 | IB-09 | Record inbound quality grade (A/B/C or custom) | P1 |
+| IB-10 | Capture & display goods marka (identification mark on bardana/crates); searchable in lot list; shown on parchi; inherited by child lots on partial transfer | P1 |
 
 ### M3: Ownership Transfer Engine
 | ID | Feature | Priority |
@@ -120,6 +121,7 @@ ColdChain will be the operational backbone for agri cold storage businesses, ena
 | OB-06 | Link dispatch to invoice (auto-trigger billing) | P0 |
 | OB-07 | Record buyer/recipient at outbound | P1 |
 | OB-08 | Require lot balance > 0 validation before withdrawal | P0 |
+| OB-09 | Print lot marka on dispatch note + gate pass so security can cross-check the physical mark on departing bags | P1 |
 
 ### M5: Billing Engine
 | ID | Feature | Priority |
