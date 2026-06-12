@@ -52,15 +52,23 @@ export default function ReceivablesAgingPage() {
     <div className="space-y-4">
       <div className="flex items-baseline justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Receivables Aging</h1>
-        <label className="text-sm text-gray-600">
-          As of:&nbsp;
-          <input
-            type="date"
-            value={asOfDate}
-            onChange={(e) => setAsOfDate(e.target.value)}
-            className="border rounded px-2 py-1"
-          />
-        </label>
+        <div className="flex items-baseline gap-4">
+          <button
+            onClick={() => router.push('/reports/surcharges')}
+            className="text-sm text-primary-600 hover:underline"
+          >
+            Late payment surcharges →
+          </button>
+          <label className="text-sm text-gray-600">
+            As of:&nbsp;
+            <input
+              type="date"
+              value={asOfDate}
+              onChange={(e) => setAsOfDate(e.target.value)}
+              className="border rounded px-2 py-1"
+            />
+          </label>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

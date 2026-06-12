@@ -34,7 +34,9 @@ function formatInvoice(inv: InvoiceWithRelations) {
     gst_amount_pkr: Number(inv.gstAmountPkr),
     total_pkr: Number(inv.totalPkr),
     amount_paid_pkr: Number(inv.amountPaidPkr),
-    balance_due_pkr: Number(inv.totalPkr) - Number(inv.amountPaidPkr),
+    surcharge_total_pkr: Number(inv.surchargeTotalPkr),
+    balance_due_pkr:
+      Number(inv.totalPkr) + Number(inv.surchargeTotalPkr) - Number(inv.amountPaidPkr),
     status: inv.status,
     finalized_at: inv.finalizedAt?.toISOString() ?? null,
     finalized_by: inv.finalizedBy ?? null,
@@ -283,7 +285,8 @@ export class InvoiceService {
       gstAmountPkr: Number(inv.gstAmountPkr),
       totalPkr: Number(inv.totalPkr),
       amountPaidPkr: Number(inv.amountPaidPkr),
-      balanceDuePkr: Number(inv.totalPkr) - Number(inv.amountPaidPkr),
+      balanceDuePkr:
+        Number(inv.totalPkr) + Number(inv.surchargeTotalPkr) - Number(inv.amountPaidPkr),
       status: inv.status,
       isDraft: inv.status === 'DRAFT',
       lineItems: inv.lineItems.map((l) => ({

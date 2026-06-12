@@ -574,9 +574,24 @@ export class PaymentService {
       orderBy: [{ creditDate: 'asc' }, { createdAt: 'asc' }],
     });
 
+    const surcharges = await this.prisma.invoiceSurcharge.findMany({
+      where: {
+        facilityId,
+        invoice: { billingPartyId: partyId, ...bookFilter },
+      },
+      select: {
+        id: true,
+        surchargeDate: true,
+        amountPkr: true,
+        createdAt: true,
+        invoice: { select: { invoiceNumber: true } },
+      },
+      orderBy: [{ surchargeDate: 'asc' }, { createdAt: 'asc' }],
+    });
+
     type RawEntry = {
       date: string;
-      type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
+      type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE' | 'SURCHARGE';
       reference: string | null;
       description: string;
       debit_pkr: number;
@@ -595,6 +610,18 @@ export class PaymentService {
         credit_pkr: 0,
         id: inv.id,
         sortKey: `${inv.invoiceDate.toISOString().slice(0, 10)}_A_${inv.createdAt.toISOString()}`,
+      })),
+      // sortKey marker 'B0' places surcharges after invoices (A) and
+      // before payments (B_) on the same date
+      ...surcharges.map((s) => ({
+        date: s.surchargeDate.toISOString().slice(0, 10),
+        type: 'SURCHARGE' as const,
+        reference: s.invoice.invoiceNumber ?? null,
+        description: `Late payment surcharge on ${s.invoice.invoiceNumber ?? 'invoice'}`,
+        debit_pkr: Number(s.amountPkr),
+        credit_pkr: 0,
+        id: s.id,
+        sortKey: `${s.surchargeDate.toISOString().slice(0, 10)}_B0_${s.createdAt.toISOString()}`,
       })),
       ...payments.map((pay) => ({
         date: pay.paymentDate.toISOString().slice(0, 10),
@@ -739,9 +766,9 @@ async function validateInvoiceAllocation(
   alloc: { invoice_id: string; allocated_amount_pkr: number },
 ) {
   const rows = await tx.$queryRawUnsafe<
-    { id: string; status: string; billing_party_id: string; total_pkr: string; amount_paid_pkr: string }[]
+    { id: string; status: string; billing_party_id: string; total_pkr: string; amount_paid_pkr: string; surcharge_total_pkr: string }[]
   >(
-    `SELECT id, status, billing_party_id, total_pkr, amount_paid_pkr FROM invoices WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+    `SELECT id, status, billing_party_id, total_pkr, amount_paid_pkr, surcharge_total_pkr FROM invoices WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
     alloc.invoice_id,
     facilityId,
   );
@@ -751,7 +778,8 @@ async function validateInvoiceAllocation(
     throw Errors.VALIDATION_ERROR('Only FINALIZED invoices can be allocated', 'invoice_id');
   }
   if (inv.billing_party_id !== partyId) throw Errors.PAYMENT_PARTY_MISMATCH();
-  const balanceDue = Number(inv.total_pkr) - Number(inv.amount_paid_pkr);
+  const balanceDue =
+    Number(inv.total_pkr) + Number(inv.surcharge_total_pkr) - Number(inv.amount_paid_pkr);
   if (alloc.allocated_amount_pkr > balanceDue + 0.001) {
     throw Errors.PAYMENT_EXCEEDS_INVOICE_BALANCE();
   }

@@ -43,6 +43,7 @@ export async function getReceivablesAging(
       invoiceDate: true,
       totalPkr: true,
       amountPaidPkr: true,
+      surchargeTotalPkr: true,
       billingPartyId: true,
       billingParty: { select: { id: true, name: true, partyType: true } },
     },
@@ -52,7 +53,8 @@ export async function getReceivablesAging(
   const byParty = new Map<string, PartyRow>();
 
   for (const inv of invoices) {
-    const due = Number(inv.totalPkr) - Number(inv.amountPaidPkr);
+    const due =
+      Number(inv.totalPkr) + Number(inv.surchargeTotalPkr) - Number(inv.amountPaidPkr);
     if (due <= 0.005) continue;
 
     const key = bucketFor(asOfDate, inv.invoiceDate);

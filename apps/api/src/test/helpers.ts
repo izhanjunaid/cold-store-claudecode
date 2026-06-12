@@ -16,6 +16,7 @@ import { lotRoutes } from '../modules/lot/lot.controller';
 import { ownershipTransferRoutes } from '../modules/ownership-transfer/ownership-transfer.controller';
 import { outboundRoutes } from '../modules/outbound/outbound.controller';
 import { invoiceRoutes } from '../modules/invoice/invoice.controller';
+import { surchargeRoutes } from '../modules/surcharge/surcharge.controller';
 import { paymentRoutes } from '../modules/payment/payment.controller';
 import { accountingRoutes } from '../modules/accounting/accounting.controller';
 import { fixedAssetRoutes } from '../modules/fixed-assets/fixed-asset.controller';
@@ -53,6 +54,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(ownershipTransferRoutes);
   await testApp.register(outboundRoutes);
   await testApp.register(invoiceRoutes);
+  await testApp.register(surchargeRoutes);
   await testApp.register(paymentRoutes);
   await testApp.register(accountingRoutes);
   await testApp.register(fixedAssetRoutes);

@@ -90,7 +90,8 @@ export const InvoiceResponse = z.object({
   gst_amount_pkr: z.number(),
   total_pkr: z.number(),
   amount_paid_pkr: z.number(),
-  balance_due_pkr: z.number(), // computed: total_pkr - amount_paid_pkr
+  surcharge_total_pkr: z.number(),
+  balance_due_pkr: z.number(), // computed: total_pkr + surcharge_total_pkr - amount_paid_pkr
   status: z.enum(['DRAFT', 'FINALIZED', 'VOID']),
   finalized_at: z.string().nullable(),
   finalized_by: z.string().uuid().nullable(),

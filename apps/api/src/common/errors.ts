@@ -176,4 +176,22 @@ export const Errors = {
       `Date is more than ${maxDays} day(s) in the past — requires MANAGER or higher`,
       422,
     ),
+  SURCHARGE_RULE_DISABLED: () =>
+    new AppError(
+      'SURCHARGE_RULE_DISABLED',
+      'Late payment surcharge rule is disabled in facility settings',
+      422,
+    ),
+  SURCHARGE_ALREADY_APPLIED: () =>
+    new AppError(
+      'SURCHARGE_ALREADY_APPLIED',
+      'Surcharge already applied for all elapsed periods on this invoice',
+      409,
+    ),
+  SURCHARGE_NOT_ELIGIBLE: () =>
+    new AppError(
+      'SURCHARGE_NOT_ELIGIBLE',
+      'Invoice is not eligible for a surcharge (not overdue beyond grace, or nothing outstanding)',
+      422,
+    ),
 } as const;

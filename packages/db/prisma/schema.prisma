@@ -185,6 +185,7 @@ enum EntryType {
   PESHGI_ISSUE
   PESHGI_RECOVERY
   PESHGI_WRITE_OFF
+  SURCHARGE
 }
 
 enum PostingStatus {
@@ -325,6 +326,7 @@ model Facility {
   expenseVouchers ExpenseVoucher[]
   partyLoans      PartyLoan[]
   gatePasses      GatePass[]
+  invoiceSurcharges InvoiceSurcharge[]
 
   @@map("facilities")
 }
@@ -368,6 +370,7 @@ model User {
   partyLoansCreated       PartyLoan[]          @relation("PartyLoanCreatedBy")
   loanRepaymentsCreated   PartyLoanRepayment[] @relation("PartyLoanRepaymentCreatedBy")
   gatePassesCreated       GatePass[]           @relation("GatePassCreatedBy")
+  surchargesCreated       InvoiceSurcharge[]   @relation("InvoiceSurchargeCreatedBy")
 
   @@unique([facilityId, email])
   @@map("users")
@@ -694,6 +697,7 @@ model Invoice {
   gstAmountPkr    Decimal       @default(0) @map("gst_amount_pkr") @db.Decimal(12, 2)
   totalPkr        Decimal       @map("total_pkr") @db.Decimal(12, 2)
   amountPaidPkr   Decimal       @default(0) @map("amount_paid_pkr") @db.Decimal(12, 2)
+  surchargeTotalPkr Decimal     @default(0) @map("surcharge_total_pkr") @db.Decimal(12, 2)
   status          InvoiceStatus @default(DRAFT)
   finalizedAt     DateTime?     @map("finalized_at") @db.Timestamptz()
   finalizedBy     String?       @map("finalized_by") @db.Uuid
@@ -713,6 +717,7 @@ model Invoice {
   lineItems       InvoiceLineItem[]
   allocations     PaymentAllocation[]
   creditNotes     CreditNote[]        @relation("CreditNoteOriginalInvoice")
+  surcharges      InvoiceSurcharge[]
 
   @@index([facilityId, invoiceNumber])
   @@index([facilityId, status])
@@ -743,6 +748,30 @@ model InvoiceLineItem {
 
   @@index([invoiceId])
   @@map("invoice_line_items")
+}
+
+// Phase 12: applied late-payment surcharges (JE-21: DR AR / CR 4210)
+model InvoiceSurcharge {
+  id                 String   @id @default(uuid()) @db.Uuid
+  facilityId         String   @map("facility_id") @db.Uuid
+  invoiceId          String   @map("invoice_id") @db.Uuid
+  surchargeDate      DateTime @map("surcharge_date") @db.Date
+  monthsCharged      Int      @map("months_charged")
+  baseOutstandingPkr Decimal  @map("base_outstanding_pkr") @db.Decimal(12, 2)
+  ratePctPerMonth    Decimal  @map("rate_pct_per_month") @db.Decimal(5, 2)
+  amountPkr          Decimal  @map("amount_pkr") @db.Decimal(12, 2)
+  journalEntryId     String?  @unique @map("journal_entry_id") @db.Uuid
+  notes              String?  @db.Text
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy          String   @map("created_by") @db.Uuid
+
+  facility      Facility      @relation(fields: [facilityId], references: [id])
+  invoice       Invoice       @relation(fields: [invoiceId], references: [id])
+  journalEntry  JournalEntry? @relation("InvoiceSurchargeJE", fields: [journalEntryId], references: [id])
+  createdByUser User          @relation("InvoiceSurchargeCreatedBy", fields: [createdBy], references: [id])
+
+  @@index([facilityId, invoiceId])
+  @@map("invoice_surcharges")
 }
 
 // ============================================================
@@ -861,6 +890,7 @@ model JournalEntry {
   partyLoanIssue        PartyLoan?             @relation("PartyLoanIssueJE")
   partyLoanWriteOff     PartyLoan?             @relation("PartyLoanWriteOffJE")
   partyLoanRepayment    PartyLoanRepayment?    @relation("PartyLoanRepaymentJE")
+  invoiceSurcharge      InvoiceSurcharge?      @relation("InvoiceSurchargeJE")
 
   @@unique([facilityId, entryNumber])
   @@index([facilityId, entryDate])

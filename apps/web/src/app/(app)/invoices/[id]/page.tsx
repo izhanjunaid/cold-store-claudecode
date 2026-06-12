@@ -17,6 +17,16 @@ interface InvoiceLine {
   service_charge_id: string | null;
 }
 
+interface SurchargeRecord {
+  id: string;
+  surcharge_date: string;
+  months_charged: number;
+  base_outstanding_pkr: number;
+  rate_pct_per_month: number;
+  amount_pkr: number;
+  notes: string | null;
+}
+
 interface Invoice {
   id: string;
   invoice_number: string | null;
@@ -31,6 +41,7 @@ interface Invoice {
   discount_type: 'PERCENT' | 'FIXED' | null;
   discount_value: number | null;
   discount_amount_pkr: number;
+  surcharge_total_pkr: number;
   gst_rate: number;
   gst_amount_pkr: number;
   total_pkr: number;
@@ -64,6 +75,7 @@ export default function InvoiceDetailPage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [surcharges, setSurcharges] = useState<SurchargeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -97,6 +109,11 @@ export default function InvoiceDetailPage() {
     try {
       const data = await apiClient<Invoice>(`/v1/invoices/${id}`);
       setInvoice(data);
+      if (data.surcharge_total_pkr > 0) {
+        setSurcharges(await apiClient<SurchargeRecord[]>(`/v1/invoices/${id}/surcharges`));
+      } else {
+        setSurcharges([]);
+      }
     } catch (e: any) {
       setError(e.message || 'Failed to load invoice');
     } finally {
@@ -377,6 +394,12 @@ export default function InvoiceDetailPage() {
               <span>Total</span>
               <span>PKR {invoice.total_pkr.toLocaleString()}</span>
             </div>
+            {invoice.surcharge_total_pkr > 0 && (
+              <div className="flex justify-between text-orange-700">
+                <span>Late Payment Surcharge</span>
+                <span>PKR {invoice.surcharge_total_pkr.toLocaleString()}</span>
+              </div>
+            )}
             <div className="flex justify-between text-green-700">
               <span>Amount Paid</span>
               <span>PKR {invoice.amount_paid_pkr.toLocaleString()}</span>
@@ -388,6 +411,39 @@ export default function InvoiceDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Applied surcharges */}
+      {surcharges.length > 0 && (
+        <div className="bg-white rounded-lg shadow overflow-hidden mb-4">
+          <div className="px-6 py-4 border-b">
+            <h2 className="font-semibold text-gray-900">Applied Surcharges</h2>
+          </div>
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Months</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Base (PKR)</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rate</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount (PKR)</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {surcharges.map((s) => (
+                <tr key={s.id}>
+                  <td className="px-4 py-2">{s.surcharge_date}</td>
+                  <td className="px-4 py-2 text-right">{s.months_charged}</td>
+                  <td className="px-4 py-2 text-right">{s.base_outstanding_pkr.toLocaleString()}</td>
+                  <td className="px-4 py-2 text-right">{s.rate_pct_per_month}%/mo</td>
+                  <td className="px-4 py-2 text-right font-medium">{s.amount_pkr.toLocaleString()}</td>
+                  <td className="px-4 py-2 text-gray-500">{s.notes ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Add Line Modal */}
       {showAddLine && (
