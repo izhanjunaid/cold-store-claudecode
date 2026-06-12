@@ -782,6 +782,47 @@ describe('Invoice — draft-stage discount (Phase 12)', () => {
     expect(JSON.parse(res.body).error.code).toBe('INVOICE_ALREADY_FINALIZED');
   });
 
+  it('G1. GST default rate prefills invoice when facility is GST-registered', async () => {
+    const facility = await prisma.facility.findUnique({
+      where: { id: TEST_FACILITY_ID },
+      select: { settings: true },
+    });
+    const original = (facility?.settings ?? {}) as Record<string, unknown>;
+    try {
+      await prisma.facility.update({
+        where: { id: TEST_FACILITY_ID },
+        data: { settings: { ...original, gst_registered: true, gst_default_rate: 17 } as never },
+      });
+      const invoiceId = await draftInvoice(20); // subtotal 1000
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/invoices/${invoiceId}`,
+        headers: authHeaders(managerToken),
+      });
+      const inv = JSON.parse(res.body).data;
+      expect(inv.gst_rate).toBe(17);
+      expect(inv.gst_amount_pkr).toBe(170);
+      expect(inv.total_pkr).toBe(1170);
+    } finally {
+      await prisma.facility.update({
+        where: { id: TEST_FACILITY_ID },
+        data: { settings: original as never },
+      });
+    }
+  });
+
+  it('G2. GST stays 0 when facility is not GST-registered', async () => {
+    const invoiceId = await draftInvoice(10);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+    });
+    const inv = JSON.parse(res.body).data;
+    expect(inv.gst_rate).toBe(0);
+    expect(inv.gst_amount_pkr).toBe(0);
+  });
+
   it('D8. Finalizing a discounted invoice posts DR 4910 in JE-01', async () => {
     const invoiceId = await draftInvoice(20); // subtotal 1000
     await app.inject({

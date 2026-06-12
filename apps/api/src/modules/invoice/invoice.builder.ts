@@ -1,5 +1,6 @@
 import type { Prisma } from '@coldchain/db';
 import { computeStorageCharge } from './storage-charge';
+import { resolveFacilitySettings } from '../facility/facility.service';
 
 const builderInclude = {
   lot: { select: { lotNumber: true } },
@@ -57,6 +58,16 @@ export async function buildInvoiceFromOutbound(
 
   const subTotal = charge.amountPkr;
 
+  // GST default: pre-fill from facility settings when GST-registered.
+  // Still editable per invoice while DRAFT (PATCH /v1/invoices/:id).
+  const facility = await tx.facility.findUnique({
+    where: { id: outbound.facilityId },
+  });
+  const settings = resolveFacilitySettings(facility?.settings ?? null);
+  const gstRate = settings.gst_registered ? settings.gst_default_rate : 0;
+  const gstAmount = Math.round(subTotal * (gstRate / 100) * 100) / 100;
+  const total = Math.round((subTotal + gstAmount) * 100) / 100;
+
   return tx.invoice.create({
     data: {
       facilityId: outbound.facilityId,
@@ -67,9 +78,9 @@ export async function buildInvoiceFromOutbound(
       periodStart,
       periodEnd,
       subTotalPkr: subTotal,
-      gstRate: 0,
-      gstAmountPkr: 0,
-      totalPkr: subTotal,
+      gstRate,
+      gstAmountPkr: gstAmount,
+      totalPkr: total,
       amountPaidPkr: 0,
       status: 'DRAFT',
       bookType: lot.bookType,
