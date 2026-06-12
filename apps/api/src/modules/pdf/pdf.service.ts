@@ -202,6 +202,8 @@ export interface InvoicePdfData {
   periodStart: string;
   periodEnd: string;
   subTotalPkr: number;
+  discountLabel: string | null;
+  discountAmountPkr: number;
   gstRate: number;
   gstAmountPkr: number;
   totalPkr: number;

@@ -164,6 +164,12 @@ export const Errors = {
   USER_WRONG_PASSWORD: () =>
     new AppError('USER_WRONG_PASSWORD', 'Current password is incorrect', 422, 'current_password'),
   // Phase 12 — Configurability
+  INVOICE_DISCOUNT_EXCEEDS_SUBTOTAL: () =>
+    new AppError(
+      'INVOICE_DISCOUNT_EXCEEDS_SUBTOTAL',
+      'Discount cannot exceed the invoice subtotal',
+      422,
+    ),
   BACKDATING_LIMIT_EXCEEDED: (maxDays: number) =>
     new AppError(
       'BACKDATING_LIMIT_EXCEEDED',

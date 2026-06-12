@@ -1,5 +1,10 @@
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import { arAccountForParty, ACCOUNT_GST_PAYABLE, revenueAccountForCommodity } from './types';
+import {
+  arAccountForParty,
+  ACCOUNT_GST_PAYABLE,
+  ACCOUNT_DISCOUNTS_ALLOWED,
+  revenueAccountForCommodity,
+} from './types';
 
 type InvoiceLineInput = {
   lineType: string;
@@ -15,6 +20,7 @@ type Input = {
   invoiceDate: Date;
   totalPkr: number;
   gstAmountPkr: number;
+  discountAmountPkr?: number;
   bookType: 'PACCI' | 'KATCHI';
   billingParty: { id: string; partyType: string; name: string };
   lot: { id: string; lotNumber: string; commodityName: string };
@@ -25,6 +31,8 @@ type Input = {
  * JE-01: Invoice Finalized.
  *
  *   DR  AR (1110/1120/1130/1150)        total_pkr
+ *   DR  4910      Discounts Allowed      discount_amount_pkr (if any) — contra-revenue,
+ *                                        revenue stays gross
  *     CR  4010-4050 Storage Revenue       storage portion (by commodity)
  *     CR  4110-4150 Service Revenue       services (by service charge revenue_account_code)
  *     CR  2020      GST Payable           gst_amount_pkr (if any)
@@ -97,6 +105,18 @@ export function buildJE01InvoiceFinalized(input: Input): JournalEntryDraft {
       partyId: input.billingParty.id,
       lotId: input.lot.id,
       description: `Advance applied to invoice ${input.invoiceNumber}`,
+    });
+  }
+
+  const discount = input.discountAmountPkr ?? 0;
+  if (discount > 0) {
+    lines.push({
+      accountCode: ACCOUNT_DISCOUNTS_ALLOWED,
+      debitAmount: round2(discount),
+      creditAmount: 0,
+      partyId: input.billingParty.id,
+      lotId: input.lot.id,
+      description: `Discount allowed — invoice ${input.invoiceNumber}`,
     });
   }
 

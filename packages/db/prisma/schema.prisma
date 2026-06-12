@@ -103,6 +103,11 @@ enum InvoiceStatus {
   WRITTEN_OFF
 }
 
+enum DiscountType {
+  PERCENT
+  FIXED
+}
+
 enum InvoiceLineType {
   STORAGE
   SERVICE
@@ -682,6 +687,9 @@ model Invoice {
   periodStart     DateTime      @map("period_start") @db.Date
   periodEnd       DateTime      @map("period_end") @db.Date
   subTotalPkr     Decimal       @map("sub_total_pkr") @db.Decimal(12, 2)
+  discountType      DiscountType? @map("discount_type")
+  discountValue     Decimal?      @map("discount_value") @db.Decimal(12, 2)
+  discountAmountPkr Decimal       @default(0) @map("discount_amount_pkr") @db.Decimal(12, 2)
   gstRate         Decimal       @default(0) @map("gst_rate") @db.Decimal(5, 2)
   gstAmountPkr    Decimal       @default(0) @map("gst_amount_pkr") @db.Decimal(12, 2)
   totalPkr        Decimal       @map("total_pkr") @db.Decimal(12, 2)

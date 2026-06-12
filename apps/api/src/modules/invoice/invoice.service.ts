@@ -7,6 +7,7 @@ import { renderInvoice } from '../pdf/pdf.service';
 import type {
   InvoiceListQueryType,
   AddInvoiceLineRequestType,
+  UpdateDraftInvoiceRequestType,
   FinalizeInvoiceRequestType,
 } from '@coldchain/shared';
 import type { JournalEntryService } from '../accounting/journal-entry.service';
@@ -26,6 +27,9 @@ function formatInvoice(inv: InvoiceWithRelations) {
     period_start: inv.periodStart.toISOString().slice(0, 10),
     period_end: inv.periodEnd.toISOString().slice(0, 10),
     sub_total_pkr: Number(inv.subTotalPkr),
+    discount_type: inv.discountType ?? null,
+    discount_value: inv.discountValue != null ? Number(inv.discountValue) : null,
+    discount_amount_pkr: Number(inv.discountAmountPkr),
     gst_rate: Number(inv.gstRate),
     gst_amount_pkr: Number(inv.gstAmountPkr),
     total_pkr: Number(inv.totalPkr),
@@ -121,6 +125,34 @@ export class InvoiceService {
     });
   }
 
+  async updateDraft(
+    facilityId: string,
+    invoiceId: string,
+    body: UpdateDraftInvoiceRequestType,
+  ) {
+    const inv = await this.repo.findById(facilityId, invoiceId);
+    if (!inv) throw Errors.INVOICE_NOT_FOUND();
+    if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
+
+    return this.prisma.$transaction(async (tx) => {
+      const data: Prisma.InvoiceUpdateInput = {};
+      if (body.gst_rate !== undefined) data.gstRate = body.gst_rate;
+      if (body.discount !== undefined) {
+        if (body.discount === null) {
+          data.discountType = null;
+          data.discountValue = null;
+        } else {
+          data.discountType = body.discount.type;
+          data.discountValue = body.discount.value;
+        }
+      }
+      await tx.invoice.update({ where: { id: invoiceId }, data });
+      await this.repo.recomputeTotals(tx, invoiceId);
+      const updated = await refreshInvoice(tx, invoiceId);
+      return formatInvoice(updated!);
+    });
+  }
+
   async removeLine(facilityId: string, invoiceId: string, lineId: string) {
     const inv = await this.repo.findById(facilityId, invoiceId);
     if (!inv) throw Errors.INVOICE_NOT_FOUND();
@@ -186,6 +218,7 @@ export class InvoiceService {
           invoiceDate: context.invoiceDate,
           totalPkr: Number(context.totalPkr),
           gstAmountPkr: Number(context.gstAmountPkr),
+          discountAmountPkr: Number(context.discountAmountPkr),
           bookType: context.bookType as 'PACCI' | 'KATCHI',
           billingParty: {
             id: context.billingParty.id,
@@ -239,6 +272,13 @@ export class InvoiceService {
       periodStart: inv.periodStart.toISOString().slice(0, 10),
       periodEnd: inv.periodEnd.toISOString().slice(0, 10),
       subTotalPkr: Number(inv.subTotalPkr),
+      discountLabel:
+        Number(inv.discountAmountPkr) > 0
+          ? inv.discountType === 'PERCENT'
+            ? `Discount (${Number(inv.discountValue)}%)`
+            : 'Discount'
+          : null,
+      discountAmountPkr: Number(inv.discountAmountPkr),
       gstRate: Number(inv.gstRate),
       gstAmountPkr: Number(inv.gstAmountPkr),
       totalPkr: Number(inv.totalPkr),

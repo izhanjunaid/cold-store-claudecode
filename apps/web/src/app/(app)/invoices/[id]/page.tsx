@@ -28,6 +28,9 @@ interface Invoice {
   period_start: string;
   period_end: string;
   sub_total_pkr: number;
+  discount_type: 'PERCENT' | 'FIXED' | null;
+  discount_value: number | null;
+  discount_amount_pkr: number;
   gst_rate: number;
   gst_amount_pkr: number;
   total_pkr: number;
@@ -72,6 +75,14 @@ export default function InvoiceDetailPage() {
   const [linePrice, setLinePrice] = useState('');
   const [lineError, setLineError] = useState('');
   const [lineSubmitting, setLineSubmitting] = useState(false);
+
+  // Discount / GST editor state
+  const [showAdjust, setShowAdjust] = useState(false);
+  const [adjGstRate, setAdjGstRate] = useState('0');
+  const [adjDiscountType, setAdjDiscountType] = useState<'PERCENT' | 'FIXED'>('PERCENT');
+  const [adjDiscountValue, setAdjDiscountValue] = useState('');
+  const [adjError, setAdjError] = useState('');
+  const [adjSubmitting, setAdjSubmitting] = useState(false);
 
   // Finalize state
   const [showFinalize, setShowFinalize] = useState(false);
@@ -128,6 +139,40 @@ export default function InvoiceDetailPage() {
       await fetchInvoice();
     } catch (e: any) {
       alert(e.message || 'Failed to remove line');
+    }
+  }
+
+  function openAdjust() {
+    if (!invoice) return;
+    setAdjGstRate(String(invoice.gst_rate));
+    setAdjDiscountType(invoice.discount_type ?? 'PERCENT');
+    setAdjDiscountValue(invoice.discount_value != null ? String(invoice.discount_value) : '');
+    setAdjError('');
+    setShowAdjust(true);
+  }
+
+  async function handleAdjust(clearDiscount = false) {
+    setAdjSubmitting(true);
+    setAdjError('');
+    try {
+      const value = parseFloat(adjDiscountValue);
+      await apiClient<Invoice>(`/v1/invoices/${id}`, {
+        method: 'PATCH',
+        body: {
+          gst_rate: parseFloat(adjGstRate) || 0,
+          discount: clearDiscount
+            ? null
+            : adjDiscountValue && value > 0
+              ? { type: adjDiscountType, value }
+              : undefined,
+        },
+      });
+      setShowAdjust(false);
+      await fetchInvoice();
+    } catch (e: any) {
+      setAdjError(e.message || 'Failed to update invoice');
+    } finally {
+      setAdjSubmitting(false);
     }
   }
 
@@ -300,11 +345,30 @@ export default function InvoiceDetailPage() {
 
         {/* Totals */}
         <div className="px-6 py-4 bg-gray-50 border-t">
-          <div className="ml-auto w-64 space-y-1 text-sm">
+          <div className="ml-auto w-72 space-y-1 text-sm">
+            {canManage && isDraft && (
+              <div className="flex justify-end pb-1">
+                <button
+                  onClick={openAdjust}
+                  className="text-xs text-primary-600 hover:underline font-medium"
+                >
+                  Edit discount / GST
+                </button>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-gray-500">Subtotal</span>
               <span className="font-medium">PKR {invoice.sub_total_pkr.toLocaleString()}</span>
             </div>
+            {invoice.discount_amount_pkr > 0 && (
+              <div className="flex justify-between text-amber-700">
+                <span>
+                  Discount
+                  {invoice.discount_type === 'PERCENT' ? ` (${invoice.discount_value}%)` : ''}
+                </span>
+                <span>− PKR {invoice.discount_amount_pkr.toLocaleString()}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-gray-500">GST ({invoice.gst_rate}%)</span>
               <span>PKR {invoice.gst_amount_pkr.toLocaleString()}</span>
@@ -388,6 +452,91 @@ export default function InvoiceDetailPage() {
               >
                 {lineSubmitting ? 'Adding…' : 'Add Line'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Adjust Discount / GST Modal */}
+      {showAdjust && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <h2 className="text-lg font-semibold mb-4">Discount & GST</h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">GST Rate (%)</label>
+                <input
+                  type="number"
+                  value={adjGstRate}
+                  onChange={(e) => setAdjGstRate((e.target as HTMLInputElement).value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Discount Type</label>
+                  <select
+                    value={adjDiscountType}
+                    onChange={(e) =>
+                      setAdjDiscountType((e.target as HTMLSelectElement).value as 'PERCENT' | 'FIXED')
+                    }
+                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="PERCENT">Percent (%)</option>
+                    <option value="FIXED">Fixed (PKR)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Value{adjDiscountType === 'PERCENT' ? ' (%)' : ' (PKR)'}
+                  </label>
+                  <input
+                    type="number"
+                    value={adjDiscountValue}
+                    onChange={(e) => setAdjDiscountValue((e.target as HTMLInputElement).value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm"
+                    min="0"
+                    step="0.01"
+                    placeholder="No discount"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">
+                GST is calculated on the post-discount amount. The discount posts to the
+                Discounts Allowed account when the invoice is finalized.
+              </p>
+              {adjError && <p className="text-red-600 text-sm">{adjError}</p>}
+            </div>
+            <div className="flex justify-between gap-3 mt-5">
+              {invoice.discount_amount_pkr > 0 ? (
+                <button
+                  onClick={() => handleAdjust(true)}
+                  disabled={adjSubmitting}
+                  className="px-4 py-2 border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50 disabled:opacity-50"
+                >
+                  Remove Discount
+                </button>
+              ) : (
+                <span />
+              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setShowAdjust(false); setAdjError(''); }}
+                  className="px-4 py-2 border rounded-lg text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleAdjust(false)}
+                  disabled={adjSubmitting}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {adjSubmitting ? 'Saving…' : 'Apply'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

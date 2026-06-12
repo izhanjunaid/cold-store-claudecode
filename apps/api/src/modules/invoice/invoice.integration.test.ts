@@ -636,3 +636,188 @@ describe('Invoice — Billing Engine', () => {
     expect(invoiceCount).toBe(1);
   });
 });
+
+describe('Invoice — draft-stage discount (Phase 12)', () => {
+  async function draftInvoice(quantity = 20): Promise<string> {
+    const lot = await createLot({
+      ratePlanId: RATE_PLAN_SEASONAL,
+      quantity,
+      inboundDate: '2026-03-01',
+    });
+    const { invoiceId } = await finalizeOutbound({
+      lotId: lot.id,
+      quantity,
+      outboundDate: '2026-04-01',
+    });
+    return invoiceId;
+  }
+
+  it('D1. PATCH percent discount recomputes totals (MANAGER)', async () => {
+    const invoiceId = await draftInvoice(20); // seasonal: 20 × 50 = 1000
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+      payload: { discount: { type: 'PERCENT', value: 10 } },
+    });
+    expect(res.statusCode).toBe(200);
+    const inv = JSON.parse(res.body).data;
+    expect(inv.sub_total_pkr).toBe(1000);
+    expect(inv.discount_type).toBe('PERCENT');
+    expect(inv.discount_value).toBe(10);
+    expect(inv.discount_amount_pkr).toBe(100);
+    expect(inv.total_pkr).toBe(900);
+    expect(inv.balance_due_pkr).toBe(900);
+  });
+
+  it('D2. PATCH fixed discount + gst_rate: GST computed on post-discount base', async () => {
+    const invoiceId = await draftInvoice(20); // subtotal 1000
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+      payload: { gst_rate: 10, discount: { type: 'FIXED', value: 200 } },
+    });
+    expect(res.statusCode).toBe(200);
+    const inv = JSON.parse(res.body).data;
+    expect(inv.discount_amount_pkr).toBe(200);
+    expect(inv.gst_rate).toBe(10);
+    // GST on (1000 - 200) = 80; total = 1000 - 200 + 80 = 880
+    expect(inv.gst_amount_pkr).toBe(80);
+    expect(inv.total_pkr).toBe(880);
+  });
+
+  it('D3. PATCH discount null clears it', async () => {
+    const invoiceId = await draftInvoice(10); // subtotal 500
+    await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+      payload: { discount: { type: 'FIXED', value: 100 } },
+    });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+      payload: { discount: null },
+    });
+    expect(res.statusCode).toBe(200);
+    const inv = JSON.parse(res.body).data;
+    expect(inv.discount_type).toBeNull();
+    expect(inv.discount_amount_pkr).toBe(0);
+    expect(inv.total_pkr).toBe(500);
+  });
+
+  it('D4. ACCOUNTANT cannot PATCH a draft invoice → 403', async () => {
+    const invoiceId = await draftInvoice(10);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(accountantToken),
+      payload: { discount: { type: 'PERCENT', value: 5 } },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('D5. Fixed discount exceeding subtotal → 422', async () => {
+    const invoiceId = await draftInvoice(10); // subtotal 500
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+      payload: { discount: { type: 'FIXED', value: 600 } },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error.code).toBe('INVOICE_DISCOUNT_EXCEEDS_SUBTOTAL');
+  });
+
+  it('D6. Removing a line that would push FIXED discount above subtotal → 422', async () => {
+    const invoiceId = await draftInvoice(20); // storage 1000
+    // add service 200 → subtotal 1200
+    const addRes = await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${invoiceId}/lines`,
+      headers: authHeaders(managerToken),
+      payload: { line_type: 'SERVICE', description: 'Loading', quantity: 20, unit_price_pkr: 10 },
+    });
+    expect(addRes.statusCode).toBe(201);
+    const serviceLineId = JSON.parse(addRes.body).data.line_items.find(
+      (l: any) => l.line_type === 'SERVICE',
+    ).id;
+
+    // discount 1100 ≤ 1200 OK
+    const discRes = await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+      payload: { discount: { type: 'FIXED', value: 1100 } },
+    });
+    expect(discRes.statusCode).toBe(200);
+
+    // removing the 200 line would make subtotal 1000 < discount 1100 → reject
+    const delRes = await app.inject({
+      method: 'DELETE',
+      url: `/v1/invoices/${invoiceId}/lines/${serviceLineId}`,
+      headers: authHeaders(managerToken),
+    });
+    expect(delRes.statusCode).toBe(422);
+    expect(JSON.parse(delRes.body).error.code).toBe('INVOICE_DISCOUNT_EXCEEDS_SUBTOTAL');
+  });
+
+  it('D7. PATCH after finalize → 409', async () => {
+    const invoiceId = await draftInvoice(10);
+    await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${invoiceId}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+      payload: { discount: { type: 'PERCENT', value: 5 } },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('INVOICE_ALREADY_FINALIZED');
+  });
+
+  it('D8. Finalizing a discounted invoice posts DR 4910 in JE-01', async () => {
+    const invoiceId = await draftInvoice(20); // subtotal 1000
+    await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+      payload: { discount: { type: 'PERCENT', value: 10 } }, // 100
+    });
+    const finRes = await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${invoiceId}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(finRes.statusCode).toBe(200);
+
+    const inv = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { journalEntryId: true },
+    });
+    expect(inv?.journalEntryId).toBeTruthy();
+    const lines = await prisma.journalEntryLine.findMany({
+      where: { journalEntryId: inv!.journalEntryId! },
+    });
+    const discountLine = lines.find((l) => l.accountCode === '4910');
+    expect(discountLine).toBeDefined();
+    expect(Number(discountLine!.debitAmount)).toBe(100);
+    // AR debit is net of discount
+    const arLine = lines.find((l) => l.accountCode === '1110');
+    expect(Number(arLine!.debitAmount)).toBe(900);
+    // revenue credited gross
+    const revLine = lines.find((l) => l.accountCode === '4010');
+    expect(Number(revLine!.creditAmount)).toBe(1000);
+    // balanced
+    const d = lines.reduce((s, l) => s + Number(l.debitAmount), 0);
+    const c = lines.reduce((s, l) => s + Number(l.creditAmount), 0);
+    expect(d).toBeCloseTo(c);
+  });
+});

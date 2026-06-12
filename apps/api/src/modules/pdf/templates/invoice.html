@@ -306,6 +306,12 @@
         <td class="label">Subtotal</td>
         <td class="value">{{subTotalPkr}}</td>
       </tr>
+      {{#if discountLabel}}
+      <tr>
+        <td class="label">{{discountLabel}}</td>
+        <td class="value">-{{discountAmountPkr}}</td>
+      </tr>
+      {{/if}}
       <tr>
         <td class="label">GST ({{gstRate}}%)</td>
         <td class="value">{{gstAmountPkr}}</td>

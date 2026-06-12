@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   AddInvoiceLineRequest,
+  UpdateDraftInvoiceRequest,
   FinalizeInvoiceRequest,
   InvoiceListQuery,
 } from '@coldchain/shared';
@@ -46,6 +47,20 @@ export async function invoiceRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const result = await service.getById(request.user!.facilityId, id);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // PATCH /v1/invoices/:id — MANAGER+ (DRAFT only: gst_rate, discount)
+  app.route({
+    method: 'PATCH',
+    url: '/v1/invoices/:id',
+    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    schema: { params: IdParam, body: UpdateDraftInvoiceRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof UpdateDraftInvoiceRequest>;
+      const result = await service.updateDraft(request.user!.facilityId, id, body);
       return sendSuccess(reply, result);
     },
   });

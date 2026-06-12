@@ -83,6 +83,69 @@ describe('JE template balance enforcement', () => {
     expect(t.d).toBeCloseTo(t.c);
   });
 
+  it('JE-01 with discount debits 4910 Discounts Allowed and stays balanced', () => {
+    // subTotal 10000, discount 500, no GST → total 9500
+    const draft = buildJE01InvoiceFinalized({
+      invoiceId: 'inv-disc-1',
+      invoiceNumber: 'INV-D1',
+      invoiceDate: new Date('2026-06-01'),
+      totalPkr: 9500,
+      gstAmountPkr: 0,
+      discountAmountPkr: 500,
+      bookType: 'PACCI',
+      billingParty: farmerParty,
+      lot,
+      lines: [{ lineType: 'STORAGE', description: 'Storage', amountPkr: 10000 }],
+    });
+    const t = totals(draft.lines);
+    expect(t.d).toBeCloseTo(t.c);
+    expect(draft.lines.find((l) => l.accountCode === '4910')?.debitAmount).toBe(500);
+    expect(draft.lines.find((l) => l.accountCode === '1110')?.debitAmount).toBe(9500);
+    // revenue stays gross
+    expect(draft.lines.find((l) => l.accountCode === '4010')?.creditAmount).toBe(10000);
+  });
+
+  it('JE-01 with discount + advance + GST stays balanced', () => {
+    // subTotal 10000, discount 1000, gst 10% on 9000 = 900, advance 2000
+    // total = 10000 - 1000 + 900 - 2000 = 7900
+    const draft = buildJE01InvoiceFinalized({
+      invoiceId: 'inv-disc-2',
+      invoiceNumber: 'INV-D2',
+      invoiceDate: new Date('2026-06-01'),
+      totalPkr: 7900,
+      gstAmountPkr: 900,
+      discountAmountPkr: 1000,
+      bookType: 'PACCI',
+      billingParty: farmerParty,
+      lot,
+      lines: [
+        { lineType: 'STORAGE', description: 'Storage', amountPkr: 10000 },
+        { lineType: 'ADVANCE_APPLIED', description: 'Advance offset', amountPkr: -2000 },
+      ],
+    });
+    const t = totals(draft.lines);
+    expect(t.d).toBeCloseTo(t.c);
+    expect(draft.lines.find((l) => l.accountCode === '4910')?.debitAmount).toBe(1000);
+    expect(draft.lines.find((l) => l.accountCode === '2010')?.debitAmount).toBe(2000);
+    expect(draft.lines.find((l) => l.accountCode === '2020')?.creditAmount).toBe(900);
+  });
+
+  it('JE-01 with zero discount emits no 4910 line', () => {
+    const draft = buildJE01InvoiceFinalized({
+      invoiceId: 'inv-disc-3',
+      invoiceNumber: 'INV-D3',
+      invoiceDate: new Date('2026-06-01'),
+      totalPkr: 1000,
+      gstAmountPkr: 0,
+      discountAmountPkr: 0,
+      bookType: 'PACCI',
+      billingParty: farmerParty,
+      lot,
+      lines: [{ lineType: 'STORAGE', description: 'Storage', amountPkr: 1000 }],
+    });
+    expect(draft.lines.find((l) => l.accountCode === '4910')).toBeUndefined();
+  });
+
   it('JE-02 balances DR Cash CR AR', () => {
     const draft = buildJE02PaymentReceived({
       paymentId: 'pay1',

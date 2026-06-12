@@ -22,6 +22,19 @@ export const AddInvoiceLineRequest = z.object({
 });
 export type AddInvoiceLineRequestType = z.infer<typeof AddInvoiceLineRequest>;
 
+// UpdateDraftInvoiceRequest - edit gst_rate / discount while invoice is DRAFT
+export const UpdateDraftInvoiceRequest = z.object({
+  gst_rate: z.number().min(0).max(100).optional(),
+  discount: z
+    .object({
+      type: z.enum(['PERCENT', 'FIXED']),
+      value: z.number().positive(),
+    })
+    .nullable()
+    .optional(), // null clears the discount; undefined leaves it unchanged
+});
+export type UpdateDraftInvoiceRequestType = z.infer<typeof UpdateDraftInvoiceRequest>;
+
 // FinalizeInvoiceRequest
 export const FinalizeInvoiceRequest = z.object({
   notes: z.string().optional(),
@@ -70,6 +83,9 @@ export const InvoiceResponse = z.object({
   period_start: z.string(),
   period_end: z.string(),
   sub_total_pkr: z.number(),
+  discount_type: z.enum(['PERCENT', 'FIXED']).nullable(),
+  discount_value: z.number().nullable(),
+  discount_amount_pkr: z.number(),
   gst_rate: z.number(),
   gst_amount_pkr: z.number(),
   total_pkr: z.number(),

@@ -44,6 +44,7 @@ export const COMMODITY_REVENUE_ACCOUNT: Record<string, string> = {
 export const ACCOUNT_GST_PAYABLE = '2020';
 export const ACCOUNT_ADVANCE_RECEIPTS = '2010';
 export const ACCOUNT_BAD_DEBT = '6080';
+export const ACCOUNT_DISCOUNTS_ALLOWED = '4910';
 
 export function arAccountForParty(partyType: string): string {
   return PARTY_AR_ACCOUNT[partyType] ?? '1150';

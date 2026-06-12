@@ -408,6 +408,8 @@ async function main() {
     { code: '4210', name: 'Late Payment Surcharge', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT' },
     { code: '4220', name: 'Damage Settlement Received', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT' },
     { code: '4230', name: 'Gain on Disposal of Asset', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT' },
+    { code: '4900', name: 'Contra Revenue', cls: 'REVENUE', type: 'HEADER', parent: null, normal: 'CREDIT' },
+    { code: '4910', name: 'Discounts Allowed', cls: 'REVENUE', type: 'DETAIL', parent: '4900', normal: 'DEBIT' },
 
     // CLASS 5: COST OF SERVICES (Direct)
     { code: '5000', name: 'Direct Operating Costs', cls: 'COST_OF_SERVICE', type: 'HEADER', parent: null, normal: 'DEBIT' },
