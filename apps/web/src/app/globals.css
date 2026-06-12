@@ -1,3 +1,59 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 98%; /* slate-50 page surface */
+    --foreground: 222 47% 11%; /* slate-900 */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 142 76% 36%; /* green-600 — primary actions, active nav, positive states only */
+    --primary-foreground: 138 76% 97%; /* green-50 */
+    --secondary: 210 40% 96%; /* slate-100 */
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%; /* slate-500 */
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --success: 142 76% 36%;
+    --success-foreground: 138 76% 97%;
+    --warning: 38 92% 50%; /* amber-500 */
+    --warning-foreground: 26 83% 14%;
+    --border: 214 32% 91%; /* slate-200 */
+    --input: 214 32% 91%;
+    --ring: 142 76% 36%;
+    --radius: 0.5rem;
+
+    /* Dark-green sidebar rail (brand element) */
+    --sidebar: 144 61% 10%;
+    --sidebar-foreground: 138 62% 88%;
+    --sidebar-muted: 140 30% 60%;
+    --sidebar-accent: 143 64% 20%; /* hover/active bg */
+    --sidebar-accent-foreground: 138 76% 97%;
+    --sidebar-border: 143 50% 16%;
+
+    --chart-1: 142 76% 36%;
+    --chart-2: 215 16% 47%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 199 89% 48%;
+    --chart-5: 0 72% 51%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  [dir='rtl'],
+  .urdu {
+    font-family: var(--font-urdu), serif;
+  }
+}

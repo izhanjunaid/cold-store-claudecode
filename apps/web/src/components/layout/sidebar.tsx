@@ -2,56 +2,112 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-
-const navItems = [
-  { label: 'Dashboard', href: '/dashboard', icon: '/' },
-  { label: 'Financial', href: '/dashboards/financial', icon: 'F' },
-  { label: 'Parties', href: '/parties', icon: 'P' },
-  { label: 'Lots', href: '/lots', icon: 'L' },
-  { label: 'Chambers', href: '/chambers', icon: 'C' },
-  { label: 'Rate Plans', href: '/billing/rate-plans', icon: 'R' },
-  { label: 'Service Charges', href: '/billing/service-charges', icon: '$' },
-  { label: 'Invoices', href: '/invoices', icon: 'I' },
-  { label: 'Payments', href: '/payments', icon: '$' },
-  { label: 'Quality', href: '/quality', icon: 'Q' },
-  { label: 'Gate Pass', href: '/gate', icon: 'G' },
-  { label: 'Loans', href: '/loans', icon: 'A' },
-  { label: 'Reports', href: '/reports', icon: 'R' },
-  { label: 'Accounting', href: '/accounting', icon: 'J' },
-  { label: 'Settings', href: '/settings', icon: 'S' },
-];
+import { PanelLeftClose, PanelLeftOpen, Snowflake } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/stores/auth.store';
+import { useUiStore } from '@/stores/ui.store';
+import { navGroupsForRole } from '@/components/layout/nav-config';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { user } = useAuthStore();
+  const { sidebarCollapsed, toggleSidebar } = useUiStore();
+
+  const groups = navGroupsForRole(user?.role);
 
   return (
-    <aside className="w-56 bg-primary-900 text-white min-h-screen flex flex-col">
-      <div className="p-4 border-b border-primary-700">
-        <h1 className="text-lg font-bold">ColdChain</h1>
-        <p className="text-xs text-primary-300">Cold Storage Management</p>
+    <aside
+      className={cn(
+        'sticky top-0 flex h-screen flex-col bg-sidebar text-sidebar-foreground transition-[width] duration-200',
+        sidebarCollapsed ? 'w-14' : 'w-60',
+      )}
+    >
+      <div
+        className={cn(
+          'flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border',
+          sidebarCollapsed ? 'justify-center px-0' : 'px-4',
+        )}
+      >
+        <Snowflake className="h-6 w-6 shrink-0 text-primary-300" aria-hidden />
+        {!sidebarCollapsed && (
+          <div className="min-w-0">
+            <h1 className="truncate text-sm font-semibold leading-tight text-white">ColdChain</h1>
+            <p className="truncate text-[11px] leading-tight text-sidebar-muted">
+              Cold Storage Management
+            </p>
+          </div>
+        )}
       </div>
 
-      <nav className="flex-1 py-2">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center px-4 py-2.5 text-sm transition-colors ${
-                isActive
-                  ? 'bg-primary-700 text-white font-medium'
-                  : 'text-primary-200 hover:bg-primary-800 hover:text-white'
-              }`}
-            >
-              <span className="w-6 h-6 rounded bg-primary-700 text-xs flex items-center justify-center mr-3 font-mono">
-                {item.icon}
-              </span>
-              {item.label}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 overflow-y-auto py-2" aria-label="Main navigation">
+        {groups.map((group) => (
+          <div key={group.label} className="mb-1 px-2">
+            {!sidebarCollapsed && (
+              <div className="px-2 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-sidebar-muted">
+                {group.label}
+              </div>
+            )}
+            {sidebarCollapsed && <div className="mx-2 my-2 border-t border-sidebar-border" />}
+            <ul>
+              {group.items.map((item) => {
+                const isActive =
+                  pathname === item.href || pathname.startsWith(item.href + '/');
+                const Icon = item.icon;
+                const link = (
+                  <Link
+                    href={item.href}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={cn(
+                      'flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors',
+                      sidebarCollapsed && 'justify-center px-0 py-2',
+                      isActive
+                        ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+                        : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground',
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                    {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                  </Link>
+                );
+                return (
+                  <li key={item.href}>
+                    {sidebarCollapsed ? (
+                      <Tooltip delayDuration={0}>
+                        <TooltipTrigger asChild>{link}</TooltipTrigger>
+                        <TooltipContent side="right">{item.label}</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      link
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
       </nav>
+
+      <div className="shrink-0 border-t border-sidebar-border p-2">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={cn(
+            'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground',
+            sidebarCollapsed && 'justify-center px-0 py-2',
+          )}
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen className="h-4 w-4" aria-hidden />
+          ) : (
+            <>
+              <PanelLeftClose className="h-4 w-4" aria-hidden />
+              <span>Collapse</span>
+            </>
+          )}
+        </button>
+      </div>
     </aside>
   );
 }

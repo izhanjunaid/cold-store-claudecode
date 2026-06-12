@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
+import { Breadcrumbs } from '@/components/layout/breadcrumbs';
 import { useAuthStore } from '@/stores/auth.store';
 import { apiClient } from '@/lib/api-client';
 import { Providers } from './providers';
@@ -63,11 +64,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <Providers>
-      <div className="flex min-h-screen bg-gray-50">
+      <div className="flex min-h-screen bg-background">
         <Sidebar />
-        <div className="flex-1 flex flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
           <Topbar />
-          <main className="flex-1 p-6">{children}</main>
+          <main className="flex-1 p-6">
+            <Breadcrumbs />
+            {children}
+          </main>
         </div>
       </div>
     </Providers>

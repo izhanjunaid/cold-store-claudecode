@@ -2,6 +2,11 @@
 
 import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NuqsAdapter } from 'nuqs/adapters/next/app';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { Toaster } from '@/components/ui/sonner';
+import { PageMetaProvider } from '@/components/layout/page-meta';
+import { CommandPaletteProvider } from '@/components/layout/command-palette';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -16,5 +21,18 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }),
   );
 
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <NuqsAdapter>
+        <TooltipProvider delayDuration={200}>
+          <PageMetaProvider>
+            <CommandPaletteProvider>
+              {children}
+              <Toaster richColors position="top-right" />
+            </CommandPaletteProvider>
+          </PageMetaProvider>
+        </TooltipProvider>
+      </NuqsAdapter>
+    </QueryClientProvider>
+  );
 }
