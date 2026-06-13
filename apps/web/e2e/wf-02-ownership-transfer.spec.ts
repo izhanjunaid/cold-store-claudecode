@@ -48,7 +48,7 @@ test.describe('WF-02 — Mid-Storage Ownership Transfer', () => {
     ).json();
 
     const commodities = (await (await request.get(`${API_URL}/v1/commodities`, { headers })).json()).data;
-    const chambers = await (await request.get(`${API_URL}/v1/chambers`, { headers })).json();
+    const chambers = (await (await request.get(`${API_URL}/v1/chambers`, { headers })).json()).data;
     const ratePlans = (await (await request.get(`${API_URL}/v1/rate-plans`, { headers })).json()).data;
 
     const lot = (

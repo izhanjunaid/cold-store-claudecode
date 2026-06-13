@@ -44,7 +44,7 @@ test.describe('WF-03 — Partial Withdrawal', () => {
     ).data;
 
     const commodities = (await (await request.get(`${API_URL}/v1/commodities`, { headers: opHeaders })).json()).data;
-    const chambers = await (await request.get(`${API_URL}/v1/chambers`, { headers: opHeaders })).json();
+    const chambers = (await (await request.get(`${API_URL}/v1/chambers`, { headers: opHeaders })).json()).data;
     const ratePlans = (await (await request.get(`${API_URL}/v1/rate-plans`, { headers: opHeaders })).json()).data;
 
     // Inbound 60 days ago so MONTHLY rate plans produce a non-zero invoice.

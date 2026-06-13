@@ -58,7 +58,7 @@ test.describe('WF-04 — Full Withdrawal & Settlement', () => {
     ).data;
 
     const commodities = (await (await request.get(`${API_URL}/v1/commodities`, { headers: opHeaders })).json()).data;
-    const chambers = await (await request.get(`${API_URL}/v1/chambers`, { headers: opHeaders })).json();
+    const chambers = (await (await request.get(`${API_URL}/v1/chambers`, { headers: opHeaders })).json()).data;
     const ratePlans = (await (await request.get(`${API_URL}/v1/rate-plans`, { headers: opHeaders })).json()).data;
 
     const inboundDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);

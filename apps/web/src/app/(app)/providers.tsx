@@ -7,6 +7,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { PageMetaProvider } from '@/components/layout/page-meta';
 import { CommandPaletteProvider } from '@/components/layout/command-palette';
+import { ConfirmDialogProvider } from '@/components/form/confirm-dialog';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -26,10 +27,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <NuqsAdapter>
         <TooltipProvider delayDuration={200}>
           <PageMetaProvider>
-            <CommandPaletteProvider>
-              {children}
-              <Toaster richColors position="top-right" />
-            </CommandPaletteProvider>
+            <ConfirmDialogProvider>
+              <CommandPaletteProvider>
+                {children}
+                <Toaster richColors position="top-right" />
+              </CommandPaletteProvider>
+            </ConfirmDialogProvider>
           </PageMetaProvider>
         </TooltipProvider>
       </NuqsAdapter>

@@ -44,7 +44,7 @@ test.describe('WF-01 — Produce Inbound', () => {
       }),
     ]);
     const commodities = (await commoditiesRes.json()).data;
-    const chambers = await chambersRes.json();
+    const chambers = (await chambersRes.json()).data;
     const ratePlans = (await ratePlansRes.json()).data;
     expect(commodities.length).toBeGreaterThan(0);
     expect(chambers.length).toBeGreaterThan(0);
