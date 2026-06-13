@@ -2,48 +2,49 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+import { FileText, RefreshCw } from 'lucide-react';
 import { apiClient, apiClientList, ApiError } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { hasMinRole } from '@/lib/rbac';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { StatusBadge } from '@/components/ui/status-badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { PageHeader } from '@/components/layout/page-header';
 
 interface GatePass {
   id: string;
   pass_number: string;
-  direction: 'INWARD' | 'OUTWARD';
   vehicle_number: string;
   driver_name: string | null;
-  driver_phone: string | null;
-  bilty_number: string | null;
   status: 'ARRIVED' | 'WEIGHING' | 'CLEARED' | 'CANCELLED';
-  related_lot_id: string | null;
   related_lot_number: string | null;
   related_outbound_id: string | null;
   related_dispatch_note_number: string | null;
-  notes: string | null;
   created_at: string;
-  cleared_at: string | null;
   turnaround_seconds: number | null;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  ARRIVED: 'bg-emerald-100 text-emerald-800',
-  WEIGHING: 'bg-amber-100 text-amber-800',
-  CLEARED: 'bg-gray-100 text-gray-700',
-  CANCELLED: 'bg-red-100 text-red-700',
+const STATUS_TONE: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = {
+  ARRIVED: 'success',
+  WEIGHING: 'warning',
+  CLEARED: 'muted',
+  CANCELLED: 'danger',
 };
 
-const ROLE_RANK: Record<string, number> = {
-  VIEWER: 0,
-  SECURITY: 1,
-  OPERATOR: 2,
-  ACCOUNTANT: 3,
-  MANAGER: 4,
-  OWNER: 5,
-};
+const GATE_ALLOWED_ROLES = ['OWNER', 'MANAGER', 'OPERATOR', 'SECURITY'];
 
 function relativeTime(iso: string): string {
-  const d = new Date(iso);
-  const ms = Date.now() - d.getTime();
-  const min = Math.floor(ms / 60000);
+  const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
   if (min < 1) return 'just now';
   if (min < 60) return `${min}m ago`;
   const hr = Math.floor(min / 60);
@@ -56,52 +57,39 @@ function formatTurnaround(seconds: number | null): string {
   if (seconds < 60) return `${seconds}s`;
   const m = Math.floor(seconds / 60);
   if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
-
-const GATE_ALLOWED_ROLES = ['OWNER', 'MANAGER', 'OPERATOR', 'SECURITY'];
 
 async function printGatePassReceipt(passId: string) {
   const token = localStorage.getItem('access_token');
   const facilityId = localStorage.getItem('facility_id');
   const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
   const res = await fetch(`${apiUrl}/v1/gate-passes/${passId}/receipt?format=pdf`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'X-Facility-ID': facilityId ?? '',
-    },
+    headers: { Authorization: `Bearer ${token}`, 'X-Facility-ID': facilityId ?? '' },
   });
   if (!res.ok) {
-    alert(`Receipt download failed (${res.status})`);
+    toast.error(`Receipt download failed (${res.status})`);
     return;
   }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
+  window.open(URL.createObjectURL(await res.blob()), '_blank');
 }
 
 export default function GatePassConsolePage() {
   const router = useRouter();
   const { user } = useAuthStore();
-
-  const canManager = (ROLE_RANK[user?.role ?? ''] ?? -1) >= ROLE_RANK['MANAGER']!;
+  const canManager = !!user && hasMinRole(user.role, 'MANAGER');
   const canSecurity = GATE_ALLOWED_ROLES.includes(user?.role ?? '');
 
   const [passes, setPasses] = useState<GatePass[]>([]);
   const [recentCleared, setRecentCleared] = useState<GatePass[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  // Inward form
   const [vehicle, setVehicle] = useState('');
   const [driver, setDriver] = useState('');
   const [phone, setPhone] = useState('');
   const [bilty, setBilty] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [flash, setFlash] = useState<string | null>(null);
 
-  // Outward modal
   const [outwardModal, setOutwardModal] = useState<GatePass | null>(null);
   const [outwardOutboundId, setOutwardOutboundId] = useState('');
   const [creditAuth, setCreditAuth] = useState(false);
@@ -115,15 +103,12 @@ export default function GatePassConsolePage() {
       const today = new Date().toISOString().slice(0, 10);
       const [active, cleared] = await Promise.all([
         apiClientList<GatePass>('/v1/gate-passes?active=true&page_size=50'),
-        apiClientList<GatePass>(
-          `/v1/gate-passes?status=CLEARED&date_from=${today}&page_size=20`,
-        ),
+        apiClientList<GatePass>(`/v1/gate-passes?status=CLEARED&date_from=${today}&page_size=20`),
       ]);
       setPasses(active.data);
       setRecentCleared(cleared.data);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load');
+    } catch {
+      /* handled */
     } finally {
       setLoading(false);
     }
@@ -141,8 +126,9 @@ export default function GatePassConsolePage() {
 
   if (!canSecurity) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <p className="text-gray-500">Gate Pass access required.</p>
+      <div>
+        <PageHeader title="Gate Pass Console" />
+        <p className="text-muted-foreground">Gate Pass access required.</p>
       </div>
     );
   }
@@ -151,7 +137,6 @@ export default function GatePassConsolePage() {
     e.preventDefault();
     if (!vehicle.trim()) return;
     setSubmitting(true);
-    setError(null);
     try {
       await apiClient<GatePass>('/v1/gate-passes/inward', {
         method: 'POST',
@@ -166,11 +151,10 @@ export default function GatePassConsolePage() {
       setDriver('');
       setPhone('');
       setBilty('');
-      setFlash('Inward pass logged');
-      setTimeout(() => setFlash(null), 2000);
+      toast.success('Inward pass logged');
       fetchActive();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to log inward');
+      toast.error(err instanceof Error ? err.message : 'Failed to log inward');
     } finally {
       setSubmitting(false);
     }
@@ -182,30 +166,20 @@ export default function GatePassConsolePage() {
     setOutwardErr(null);
     setOutwardBlocked(false);
     try {
-      const cleared = await apiClient<GatePass>(
-        `/v1/gate-passes/${outwardModal.id}/outward`,
-        {
-          method: 'POST',
-          body: {
-            ...(outwardOutboundId ? { outbound_event_id: outwardOutboundId } : {}),
-            ...(creditAuth ? { credit_authorization: true } : {}),
-          },
+      const cleared = await apiClient<GatePass>(`/v1/gate-passes/${outwardModal.id}/outward`, {
+        method: 'POST',
+        body: {
+          ...(outwardOutboundId ? { outbound_event_id: outwardOutboundId } : {}),
+          ...(creditAuth ? { credit_authorization: true } : {}),
         },
-      );
+      });
       setOutwardModal(null);
       setOutwardOutboundId('');
       setCreditAuth(false);
-      setFlash(
-        `Cleared ${cleared.vehicle_number} — TAT ${formatTurnaround(
-          cleared.turnaround_seconds,
-        )}`,
-      );
-      setTimeout(() => setFlash(null), 3000);
+      toast.success(`Cleared ${cleared.vehicle_number} — TAT ${formatTurnaround(cleared.turnaround_seconds)}`);
       fetchActive();
     } catch (err) {
-      const isBlocked =
-        err instanceof ApiError && err.code === 'GATE_OUTWARD_BLOCKED';
-      setOutwardBlocked(isBlocked);
+      setOutwardBlocked(err instanceof ApiError && err.code === 'GATE_OUTWARD_BLOCKED');
       setOutwardErr(err instanceof Error ? err.message : 'Failed to clear outward');
     } finally {
       setOutwardLoading(false);
@@ -213,284 +187,181 @@ export default function GatePassConsolePage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Gate Pass Console</h1>
-        <p className="text-sm text-gray-600">Log arriving vehicles and clear outbound dispatches.</p>
+    <div>
+      <PageHeader title="Gate Pass Console" description="Log arriving vehicles and clear outbound dispatches." />
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Log Arrival */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Log Arrival</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={submitInward} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label>Vehicle Number <span className="text-destructive">*</span></Label>
+                <Input
+                  type="text"
+                  value={vehicle}
+                  onChange={(e) => setVehicle(e.target.value)}
+                  onBlur={() => setVehicle((v) => v.toUpperCase())}
+                  placeholder="LHR-1234"
+                  required
+                  className="h-12 font-mono text-lg"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Driver Name</Label>
+                <Input type="text" value={driver} onChange={(e) => setDriver(e.target.value)} placeholder="Ali Khan" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Driver Phone</Label>
+                <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0300-1234567" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Bilty Number</Label>
+                <Input type="text" value={bilty} onChange={(e) => setBilty(e.target.value)} placeholder="Optional transporter receipt" />
+              </div>
+              <Button type="submit" disabled={submitting || !vehicle.trim()} className="h-12 w-full text-base">
+                {submitting ? 'Logging…' : 'Log Inward'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Vehicles Currently Inside */}
+        <Card>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Vehicles Currently Inside</CardTitle>
+            <Button variant="ghost" size="sm" onClick={fetchActive}>
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+              Refresh
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
+            ) : passes.length === 0 ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">No vehicles currently inside.</p>
+            ) : (
+              <ul className="space-y-3">
+                {passes.map((p) => (
+                  <li key={p.id} className="flex items-center gap-3 rounded-lg border p-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-base font-bold">{p.vehicle_number}</span>
+                        <StatusBadge status={p.status} tone={STATUS_TONE[p.status]} />
+                      </div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        {p.pass_number} • {p.driver_name ?? 'unknown driver'} • {relativeTime(p.created_at)}
+                        {p.related_lot_number && <span className="ml-1">• Lot {p.related_lot_number}</span>}
+                      </div>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => printGatePassReceipt(p.id)}>
+                      Print
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setOutwardModal(p);
+                        setOutwardOutboundId(p.related_outbound_id ?? '');
+                        setCreditAuth(false);
+                        setOutwardErr(null);
+                        setOutwardBlocked(false);
+                      }}
+                    >
+                      Clear Outward
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
-      {error && (
-        <div className="bg-red-50 text-red-800 p-3 rounded-lg text-sm">{error}</div>
-      )}
-      {flash && (
-        <div className="bg-emerald-50 text-emerald-800 p-3 rounded-lg text-sm">{flash}</div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* LEFT — Log Arrival */}
-        <form
-          onSubmit={submitInward}
-          className="bg-white rounded-xl shadow p-6 space-y-4"
-        >
-          <h2 className="text-lg font-bold text-gray-900">Log Arrival</h2>
-
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">Vehicle Number *</span>
-            <input
-              type="text"
-              value={vehicle}
-              onChange={(e) => setVehicle((e.target as HTMLInputElement).value)}
-              onBlur={() => setVehicle((v) => v.toUpperCase())}
-              placeholder="LHR-1234"
-              required
-              className="mt-1 w-full h-14 px-4 text-xl font-mono border-2 border-gray-300 rounded-lg focus:outline-none focus:border-emerald-500"
-            />
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">Driver Name</span>
-            <input
-              type="text"
-              value={driver}
-              onChange={(e) => setDriver((e.target as HTMLInputElement).value)}
-              placeholder="Ali Khan"
-              className="mt-1 w-full h-12 px-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:border-emerald-500"
-            />
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">Driver Phone</span>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone((e.target as HTMLInputElement).value)}
-              placeholder="0300-1234567"
-              className="mt-1 w-full h-12 px-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:border-emerald-500"
-            />
-          </label>
-
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">Bilty Number</span>
-            <input
-              type="text"
-              value={bilty}
-              onChange={(e) => setBilty((e.target as HTMLInputElement).value)}
-              placeholder="Optional transporter receipt"
-              className="mt-1 w-full h-12 px-4 text-base border border-gray-300 rounded-lg focus:outline-none focus:border-emerald-500"
-            />
-          </label>
-
-          <button
-            type="submit"
-            disabled={submitting || !vehicle.trim()}
-            className="w-full h-16 bg-emerald-600 text-white text-lg font-bold rounded-lg hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {submitting ? 'Logging…' : 'LOG INWARD'}
-          </button>
-        </form>
-
-        {/* RIGHT — Vehicles Currently Inside */}
-        <div className="bg-white rounded-xl shadow p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-gray-900">Vehicles Currently Inside</h2>
-            <button
-              onClick={fetchActive}
-              className="text-sm text-blue-600 hover:underline"
-            >
-              Refresh
-            </button>
-          </div>
-          {loading ? (
-            <div className="text-gray-500 text-sm py-12 text-center">Loading…</div>
-          ) : passes.length === 0 ? (
-            <div className="text-gray-500 text-sm py-12 text-center">
-              No vehicles currently inside.
-            </div>
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="text-base">Recently Cleared Today</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {recentCleared.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">No clearances yet today.</p>
           ) : (
-            <ul className="space-y-3">
-              {passes.map((p) => (
-                <li key={p.id} className="border rounded-lg p-3 flex items-center gap-3">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-base font-bold text-gray-900">
-                        {p.vehicle_number}
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                          STATUS_COLORS[p.status]
-                        }`}
-                      >
-                        {p.status}
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {p.pass_number} • {p.driver_name ?? 'unknown driver'} •{' '}
-                      {relativeTime(p.created_at)}
-                      {p.related_lot_number && (
-                        <span className="ml-1">• Lot {p.related_lot_number}</span>
-                      )}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => printGatePassReceipt(p.id)}
-                    className="border border-gray-300 text-gray-700 text-sm font-medium px-3 py-2 rounded-lg hover:bg-gray-50"
-                  >
+            <ul className="divide-y">
+              {recentCleared.map((p) => (
+                <li key={p.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <span className="font-mono font-bold">{p.vehicle_number}</span>
+                  <span className="flex-1 truncate text-muted-foreground">
+                    {p.pass_number} • {p.driver_name ?? '—'}
+                  </span>
+                  <span className="whitespace-nowrap font-medium text-green-700">TAT {formatTurnaround(p.turnaround_seconds)}</span>
+                  <Button variant="link" size="sm" className="h-auto p-0" onClick={() => printGatePassReceipt(p.id)}>
+                    <FileText className="h-3.5 w-3.5" aria-hidden />
                     Print
-                  </button>
-                  <button
-                    onClick={() => {
-                      setOutwardModal(p);
-                      setOutwardOutboundId(p.related_outbound_id ?? '');
-                      setCreditAuth(false);
-                      setOutwardErr(null);
-                      setOutwardBlocked(false);
-                    }}
-                    className="bg-gray-900 text-white text-sm font-medium px-3 py-2 rounded-lg hover:bg-gray-800"
-                  >
-                    Clear Outward
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
-      <div className="bg-white rounded-xl shadow p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">Recently Cleared Today</h2>
-        {recentCleared.length === 0 ? (
-          <div className="text-gray-500 text-sm py-6 text-center">
-            No clearances yet today.
-          </div>
-        ) : (
-          <ul className="divide-y">
-            {recentCleared.map((p) => (
-              <li
-                key={p.id}
-                className="py-2 flex items-center justify-between gap-3 text-sm"
-              >
-                <span className="font-mono font-bold text-gray-900">
-                  {p.vehicle_number}
-                </span>
-                <span className="text-gray-500 flex-1 truncate">
-                  {p.pass_number} • {p.driver_name ?? '—'}
-                </span>
-                <span className="font-medium text-emerald-700 whitespace-nowrap">
-                  TAT {formatTurnaround(p.turnaround_seconds)}
-                </span>
-                <button
-                  onClick={() => printGatePassReceipt(p.id)}
-                  className="text-blue-600 hover:underline text-xs"
+      <Dialog open={!!outwardModal} onOpenChange={(o) => !o && setOutwardModal(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear Outward — {outwardModal?.vehicle_number}</DialogTitle>
+          </DialogHeader>
+          {outwardModal && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Pass {outwardModal.pass_number}
+                {outwardModal.related_dispatch_note_number ? ` • Dispatch ${outwardModal.related_dispatch_note_number}` : ''}
+              </p>
+              <div className="space-y-1.5">
+                <Label>Outbound Event ID (optional)</Label>
+                <Input
+                  value={outwardOutboundId}
+                  onChange={(e) => setOutwardOutboundId(e.target.value)}
+                  placeholder="Auto-match by vehicle if blank"
+                  className="font-mono"
+                />
+              </div>
+              {canManager && (
+                <label htmlFor="credit-auth" className="flex items-center gap-2 text-sm">
+                  <input
+                    id="credit-auth"
+                    type="checkbox"
+                    checked={creditAuth}
+                    onChange={(e) => setCreditAuth(e.target.checked)}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  Authorize on credit (override unpaid invoice)
+                </label>
+              )}
+              {outwardErr && (
+                <div
+                  className={
+                    outwardBlocked
+                      ? 'rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive'
+                      : 'rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800'
+                  }
                 >
-                  Print
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {outwardModal && (
-        <OutwardModal
-          pass={outwardModal}
-          canManager={canManager}
-          outboundId={outwardOutboundId}
-          setOutboundId={setOutwardOutboundId}
-          creditAuth={creditAuth}
-          setCreditAuth={setCreditAuth}
-          submit={submitOutward}
-          loading={outwardLoading}
-          error={outwardErr}
-          blocked={outwardBlocked}
-          onCancel={() => setOutwardModal(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-function OutwardModal({
-  pass,
-  canManager,
-  outboundId,
-  setOutboundId,
-  creditAuth,
-  setCreditAuth,
-  submit,
-  loading,
-  error,
-  blocked,
-  onCancel,
-}: {
-  pass: GatePass;
-  canManager: boolean;
-  outboundId: string;
-  setOutboundId: (v: string) => void;
-  creditAuth: boolean;
-  setCreditAuth: (v: boolean) => void;
-  submit: () => void;
-  loading: boolean;
-  error: string | null;
-  blocked: boolean;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
-        <h3 className="text-lg font-bold text-gray-900">Clear Outward — {pass.vehicle_number}</h3>
-        <p className="text-sm text-gray-600">
-          Pass {pass.pass_number}
-          {pass.related_dispatch_note_number ? ` • Dispatch ${pass.related_dispatch_note_number}` : ''}
-        </p>
-
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Outbound Event ID (optional)</span>
-          <input
-            type="text"
-            value={outboundId}
-            onChange={(e) => setOutboundId((e.target as HTMLInputElement).value)}
-            placeholder="Auto-match by vehicle if blank"
-            className="mt-1 w-full h-10 px-3 text-sm font-mono border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-          />
-        </label>
-
-        {canManager && (
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={creditAuth}
-              onChange={(e) => setCreditAuth((e.target as HTMLInputElement).checked)}
-            />
-            <span>Authorize on credit (override unpaid invoice)</span>
-          </label>
-        )}
-
-        {error && (
-          <div
-            className={`p-3 rounded-lg text-sm ${
-              blocked ? 'bg-red-50 text-red-800 font-medium' : 'bg-amber-50 text-amber-800'
-            }`}
-          >
-            {blocked ? 'Payment Pending — escalate to Manager' : error}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 pt-2">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={submit}
-            disabled={loading}
-            className="bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {loading ? 'Clearing…' : 'Clear Outward'}
-          </button>
-        </div>
-      </div>
+                  {outwardBlocked ? 'Payment Pending — escalate to Manager' : outwardErr}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOutwardModal(null)}>
+              Cancel
+            </Button>
+            <Button onClick={submitOutward} disabled={outwardLoading}>
+              {outwardLoading ? 'Clearing…' : 'Clear Outward'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

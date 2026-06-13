@@ -2,8 +2,27 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+import { Banknote, FileText, Plus, Trash2 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { hasMinRole } from '@/lib/rbac';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { StatusBadge } from '@/components/ui/status-badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { PageHeader } from '@/components/layout/page-header';
+import { useConfirm } from '@/components/form';
 
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
@@ -14,9 +33,7 @@ interface InvoiceLine {
   quantity: number;
   unit_price_pkr: number;
   amount_pkr: number;
-  service_charge_id: string | null;
 }
-
 interface Invoice {
   id: string;
   invoice_number: string | null;
@@ -38,80 +55,69 @@ interface Invoice {
   balance_due_pkr: number;
   status: 'DRAFT' | 'FINALIZED' | 'VOID';
   finalized_at: string | null;
-  notes: string | null;
   line_items: InvoiceLine[];
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  DRAFT: 'bg-yellow-100 text-yellow-800',
-  FINALIZED: 'bg-green-100 text-green-800',
-  VOID: 'bg-gray-100 text-gray-800',
+const LINE_TYPE_TONE: Record<string, 'info' | 'success' | 'danger' | 'warning'> = {
+  STORAGE: 'info',
+  SERVICE: 'success',
+  ADJUSTMENT: 'danger',
+  ADVANCE_APPLIED: 'warning',
 };
 
-const LINE_TYPE_COLORS: Record<string, string> = {
-  STORAGE: 'bg-blue-100 text-blue-800',
-  SERVICE: 'bg-green-100 text-green-800',
-  ADJUSTMENT: 'bg-red-100 text-red-800',
-  ADVANCE_APPLIED: 'bg-yellow-100 text-yellow-800',
-};
-
-const ROLE_RANK: Record<string, number> = {
-  SECURITY: 0, OPERATOR: 1, ACCOUNTANT: 2, MANAGER: 3, OWNER: 4,
-};
+function Info({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-0.5 text-sm font-medium">{value}</p>
+    </div>
+  );
+}
 
 export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const confirm = useConfirm();
   const { user } = useAuthStore();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Add line modal state
   const [showAddLine, setShowAddLine] = useState(false);
   const [lineType, setLineType] = useState<'SERVICE' | 'ADJUSTMENT'>('SERVICE');
   const [lineDesc, setLineDesc] = useState('');
   const [lineQty, setLineQty] = useState('1');
   const [linePrice, setLinePrice] = useState('');
-  const [lineError, setLineError] = useState('');
   const [lineSubmitting, setLineSubmitting] = useState(false);
 
-  // Discount / GST editor state
   const [showAdjust, setShowAdjust] = useState(false);
   const [adjGstRate, setAdjGstRate] = useState('0');
   const [adjDiscountType, setAdjDiscountType] = useState<'PERCENT' | 'FIXED'>('PERCENT');
   const [adjDiscountValue, setAdjDiscountValue] = useState('');
-  const [adjError, setAdjError] = useState('');
   const [adjSubmitting, setAdjSubmitting] = useState(false);
 
-  // Finalize state
-  const [showFinalize, setShowFinalize] = useState(false);
-  const [finalizeNotes, setFinalizeNotes] = useState('');
-  const [finalizeSubmitting, setFinalizeSubmitting] = useState(false);
-  const [finalizeError, setFinalizeError] = useState('');
-
-  const canManage = user && (ROLE_RANK[user?.role ?? ''] ?? -1) >= 3; // MANAGER
+  const canManage = !!user && hasMinRole(user.role, 'MANAGER');
 
   const fetchInvoice = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiClient<Invoice>(`/v1/invoices/${id}`);
-      setInvoice(data);
-    } catch (e: any) {
-      setError(e.message || 'Failed to load invoice');
+      setInvoice(await apiClient<Invoice>(`/v1/invoices/${id}`));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load invoice');
     } finally {
       setLoading(false);
     }
   }, [id]);
 
-  useEffect(() => { fetchInvoice(); }, [fetchInvoice]);
+  useEffect(() => {
+    fetchInvoice();
+  }, [fetchInvoice]);
 
   async function handleAddLine() {
     if (!lineDesc.trim() || !linePrice) return;
     setLineSubmitting(true);
-    setLineError('');
     try {
-      await apiClient<Invoice>(`/v1/invoices/${id}/lines`, {
+      await apiClient(`/v1/invoices/${id}/lines`, {
         method: 'POST',
         body: {
           line_type: lineType,
@@ -124,21 +130,24 @@ export default function InvoiceDetailPage() {
       setLineDesc('');
       setLineQty('1');
       setLinePrice('');
+      toast.success('Line added');
       await fetchInvoice();
-    } catch (e: any) {
-      setLineError(e.message || 'Failed to add line');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to add line');
     } finally {
       setLineSubmitting(false);
     }
   }
 
   async function handleDeleteLine(lineId: string) {
-    if (!confirm('Remove this line item?')) return;
+    const ok = await confirm({ title: 'Remove this line item?', confirmText: 'Remove', destructive: true });
+    if (!ok) return;
     try {
-      await apiClient<Invoice>(`/v1/invoices/${id}/lines/${lineId}`, { method: 'DELETE' });
+      await apiClient(`/v1/invoices/${id}/lines/${lineId}`, { method: 'DELETE' });
+      toast.success('Line removed');
       await fetchInvoice();
-    } catch (e: any) {
-      alert(e.message || 'Failed to remove line');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to remove line');
     }
   }
 
@@ -147,16 +156,14 @@ export default function InvoiceDetailPage() {
     setAdjGstRate(String(invoice.gst_rate));
     setAdjDiscountType(invoice.discount_type ?? 'PERCENT');
     setAdjDiscountValue(invoice.discount_value != null ? String(invoice.discount_value) : '');
-    setAdjError('');
     setShowAdjust(true);
   }
 
   async function handleAdjust(clearDiscount = false) {
     setAdjSubmitting(true);
-    setAdjError('');
     try {
       const value = parseFloat(adjDiscountValue);
-      await apiClient<Invoice>(`/v1/invoices/${id}`, {
+      await apiClient(`/v1/invoices/${id}`, {
         method: 'PATCH',
         body: {
           gst_rate: parseFloat(adjGstRate) || 0,
@@ -168,413 +175,282 @@ export default function InvoiceDetailPage() {
         },
       });
       setShowAdjust(false);
+      toast.success('Invoice updated');
       await fetchInvoice();
-    } catch (e: any) {
-      setAdjError(e.message || 'Failed to update invoice');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update invoice');
     } finally {
       setAdjSubmitting(false);
     }
   }
 
   async function handleFinalize() {
-    setFinalizeSubmitting(true);
-    setFinalizeError('');
+    if (!invoice) return;
+    const ok = await confirm({
+      title: 'Finalize Invoice',
+      description: `This assigns an invoice number and locks the invoice for editing. Total: PKR ${invoice.total_pkr.toLocaleString()}.`,
+      confirmText: 'Confirm',
+    });
+    if (!ok) return;
     try {
-      await apiClient<Invoice>(`/v1/invoices/${id}/finalize`, {
-        method: 'POST',
-        body: { notes: finalizeNotes || undefined },
-      });
-      setShowFinalize(false);
+      await apiClient(`/v1/invoices/${id}/finalize`, { method: 'POST', body: {} });
+      toast.success('Invoice finalized');
       await fetchInvoice();
-    } catch (e: any) {
-      setFinalizeError(e.message || 'Failed to finalize invoice');
-    } finally {
-      setFinalizeSubmitting(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to finalize invoice');
     }
   }
 
   async function handlePdf() {
-    const token = localStorage.getItem('access_token');
-    const facilityId = localStorage.getItem('facility_id');
-    const res = await fetch(`${API_URL}/v1/invoices/${id}/pdf`, {
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
-      },
-    });
-    if (!res.ok) { alert('Failed to load PDF'); return; }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
+    try {
+      const token = localStorage.getItem('access_token');
+      const facilityId = localStorage.getItem('facility_id');
+      const res = await fetch(`${API_URL}/v1/invoices/${id}/pdf`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
+        },
+      });
+      if (!res.ok) throw new Error('Failed to load PDF');
+      window.open(URL.createObjectURL(await res.blob()), '_blank');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load PDF');
+    }
   }
 
-  if (loading) return <div className="text-center py-16 text-gray-500">Loading...</div>;
-  if (error) return <div className="text-center py-16 text-red-500">{error}</div>;
+  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (error) return <p className="text-destructive">{error}</p>;
   if (!invoice) return null;
 
   const isDraft = invoice.status === 'DRAFT';
 
   return (
-    <div className="max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <button onClick={() => router.back()} className="text-sm text-primary-600 hover:underline mb-2 block">
-            ← Back
-          </button>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {invoice.invoice_number ?? 'DRAFT Invoice'}
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className={`px-3 py-1 text-sm font-medium rounded-full ${STATUS_COLORS[invoice.status]}`}>
-            {invoice.status}
-          </span>
-          <button
-            onClick={handlePdf}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
-          >
-            Print PDF
-          </button>
-          {canManage && isDraft && (
-            <button
-              onClick={() => setShowFinalize(true)}
-              className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700"
-            >
-              Finalize Invoice
-            </button>
-          )}
-          {invoice?.status === 'FINALIZED' && invoice.balance_due_pkr > 0 && (
-            <button
-              onClick={() => router.push(`/payments/new?party_id=${invoice.billing_party_id}`)}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700"
-            >
-              Record Payment
-            </button>
-          )}
-        </div>
+    <div className="max-w-4xl">
+      <PageHeader
+        title={invoice.invoice_number ?? 'DRAFT Invoice'}
+        crumb={invoice.invoice_number ?? 'Draft'}
+        actions={
+          <>
+            <Button variant="outline" onClick={handlePdf}>
+              <FileText className="h-4 w-4" aria-hidden />
+              Print PDF
+            </Button>
+            {canManage && isDraft && (
+              <Button onClick={handleFinalize}>Finalize Invoice</Button>
+            )}
+            {invoice.status === 'FINALIZED' && invoice.balance_due_pkr > 0 && (
+              <Button onClick={() => router.push(`/payments/new?party_id=${invoice.billing_party_id}`)}>
+                <Banknote className="h-4 w-4" aria-hidden />
+                Record Payment
+              </Button>
+            )}
+          </>
+        }
+      />
+
+      <div className="mb-4">
+        <StatusBadge status={invoice.status} />
       </div>
 
-      {/* Info card */}
-      <div className="bg-white rounded-lg shadow p-6 mb-4 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-        <div>
-          <p className="text-gray-500 text-xs uppercase font-medium mb-1">Billing Party</p>
-          <p className="font-semibold">{invoice.billing_party_name}</p>
-        </div>
-        <div>
-          <p className="text-gray-500 text-xs uppercase font-medium mb-1">Lot</p>
-          <button
-            onClick={() => router.push(`/lots/${invoice.lot_id}`)}
-            className="font-mono text-primary-600 hover:underline"
-          >
-            {invoice.lot_number}
-          </button>
-        </div>
-        <div>
-          <p className="text-gray-500 text-xs uppercase font-medium mb-1">Invoice Date</p>
-          <p>{invoice.invoice_date}</p>
-        </div>
-        <div>
-          <p className="text-gray-500 text-xs uppercase font-medium mb-1">Period Start</p>
-          <p>{invoice.period_start}</p>
-        </div>
-        <div>
-          <p className="text-gray-500 text-xs uppercase font-medium mb-1">Period End</p>
-          <p>{invoice.period_end}</p>
-        </div>
-        {invoice.finalized_at && (
-          <div>
-            <p className="text-gray-500 text-xs uppercase font-medium mb-1">Finalized At</p>
-            <p>{new Date(invoice.finalized_at).toLocaleString()}</p>
-          </div>
-        )}
-      </div>
+      <Card className="mb-4">
+        <CardContent className="grid grid-cols-2 gap-4 pt-6 text-sm md:grid-cols-3">
+          <Info label="Billing Party" value={invoice.billing_party_name} />
+          <Info
+            label="Lot"
+            value={
+              <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/lots/${invoice.lot_id}`)}>
+                {invoice.lot_number}
+              </Button>
+            }
+          />
+          <Info label="Invoice Date" value={invoice.invoice_date} />
+          <Info label="Period Start" value={invoice.period_start} />
+          <Info label="Period End" value={invoice.period_end} />
+          {invoice.finalized_at && <Info label="Finalized At" value={new Date(invoice.finalized_at).toLocaleString()} />}
+        </CardContent>
+      </Card>
 
-      {/* Line items */}
-      <div className="bg-white rounded-lg shadow overflow-hidden mb-4">
-        <div className="flex items-center justify-between px-6 py-4 border-b">
-          <h2 className="font-semibold text-gray-900">Line Items</h2>
+      <Card>
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h2 className="text-sm font-semibold">Line Items</h2>
           {canManage && isDraft && (
-            <button
-              onClick={() => setShowAddLine(true)}
-              className="px-3 py-1 bg-primary-600 text-white rounded text-sm hover:bg-primary-700"
-            >
-              + Add Line
-            </button>
+            <Button size="sm" variant="outline" onClick={() => setShowAddLine(true)}>
+              <Plus className="h-4 w-4" aria-hidden />
+              Add Line
+            </Button>
           )}
         </div>
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Unit Price</th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount (PKR)</th>
-              {canManage && isDraft && <th className="px-4 py-3" />}
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-100">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Type</TableHead>
+              <TableHead>Description</TableHead>
+              <TableHead className="text-right">Qty</TableHead>
+              <TableHead className="text-right">Unit Price</TableHead>
+              <TableHead className="text-right">Amount</TableHead>
+              {canManage && isDraft && <TableHead />}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {invoice.line_items.map((line) => (
-              <tr key={line.id} className={line.line_type === 'ADJUSTMENT' ? 'text-red-700' : ''}>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${LINE_TYPE_COLORS[line.line_type]}`}>
-                    {line.line_type}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-sm">{line.description}</td>
-                <td className="px-4 py-3 text-sm text-right">{line.quantity}</td>
-                <td className="px-4 py-3 text-sm text-right">{line.unit_price_pkr.toLocaleString()}</td>
-                <td className="px-4 py-3 text-sm text-right font-medium">{line.amount_pkr.toLocaleString()}</td>
+              <TableRow key={line.id}>
+                <TableCell>
+                  <StatusBadge status={line.line_type} tone={LINE_TYPE_TONE[line.line_type]} />
+                </TableCell>
+                <TableCell>{line.description}</TableCell>
+                <TableCell className="text-right tabular-nums">{line.quantity}</TableCell>
+                <TableCell className="text-right tabular-nums">{line.unit_price_pkr.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums font-medium">{line.amount_pkr.toLocaleString()}</TableCell>
                 {canManage && isDraft && (
-                  <td className="px-4 py-3 text-center">
+                  <TableCell className="text-center">
                     {line.line_type !== 'STORAGE' && line.line_type !== 'ADVANCE_APPLIED' && (
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
                         onClick={() => handleDeleteLine(line.id)}
-                        className="text-red-500 hover:text-red-700 text-xs font-medium"
+                        aria-label="Remove line"
                       >
-                        Remove
-                      </button>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     )}
-                  </td>
+                  </TableCell>
                 )}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
 
-        {/* Totals */}
-        <div className="px-6 py-4 bg-gray-50 border-t">
+        <div className="border-t bg-muted/30 px-4 py-4">
           <div className="ml-auto w-72 space-y-1 text-sm">
             {canManage && isDraft && (
               <div className="flex justify-end pb-1">
-                <button
-                  onClick={openAdjust}
-                  className="text-xs text-primary-600 hover:underline font-medium"
-                >
+                <Button variant="link" className="h-auto p-0 text-xs" onClick={openAdjust}>
                   Edit discount / GST
-                </button>
+                </Button>
               </div>
             )}
             <div className="flex justify-between">
-              <span className="text-gray-500">Subtotal</span>
-              <span className="font-medium">PKR {invoice.sub_total_pkr.toLocaleString()}</span>
+              <span className="text-muted-foreground">Subtotal</span>
+              <span className="font-medium tabular-nums">PKR {invoice.sub_total_pkr.toLocaleString()}</span>
             </div>
             {invoice.discount_amount_pkr > 0 && (
               <div className="flex justify-between text-amber-700">
-                <span>
-                  Discount
-                  {invoice.discount_type === 'PERCENT' ? ` (${invoice.discount_value}%)` : ''}
-                </span>
-                <span>− PKR {invoice.discount_amount_pkr.toLocaleString()}</span>
+                <span>Discount{invoice.discount_type === 'PERCENT' ? ` (${invoice.discount_value}%)` : ''}</span>
+                <span className="tabular-nums">− PKR {invoice.discount_amount_pkr.toLocaleString()}</span>
               </div>
             )}
             <div className="flex justify-between">
-              <span className="text-gray-500">GST ({invoice.gst_rate}%)</span>
-              <span>PKR {invoice.gst_amount_pkr.toLocaleString()}</span>
+              <span className="text-muted-foreground">GST ({invoice.gst_rate}%)</span>
+              <span className="tabular-nums">PKR {invoice.gst_amount_pkr.toLocaleString()}</span>
             </div>
-            <div className="flex justify-between font-bold text-base border-t pt-1">
+            <div className="flex justify-between border-t pt-1 text-base font-bold">
               <span>Total</span>
-              <span>PKR {invoice.total_pkr.toLocaleString()}</span>
+              <span className="tabular-nums">PKR {invoice.total_pkr.toLocaleString()}</span>
             </div>
             <div className="flex justify-between text-green-700">
               <span>Amount Paid</span>
-              <span>PKR {invoice.amount_paid_pkr.toLocaleString()}</span>
+              <span className="tabular-nums">PKR {invoice.amount_paid_pkr.toLocaleString()}</span>
             </div>
-            <div className="flex justify-between font-bold text-red-700">
+            <div className="flex justify-between font-bold text-destructive">
               <span>Balance Due</span>
-              <span>PKR {invoice.balance_due_pkr.toLocaleString()}</span>
+              <span className="tabular-nums">PKR {invoice.balance_due_pkr.toLocaleString()}</span>
             </div>
           </div>
         </div>
-      </div>
+      </Card>
 
-      {/* Add Line Modal */}
-      {showAddLine && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-            <h2 className="text-lg font-semibold mb-4">Add Line Item</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+      {/* Add Line dialog */}
+      <Dialog open={showAddLine} onOpenChange={setShowAddLine}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Line Item</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Type</Label>
+              <select
+                value={lineType}
+                onChange={(e) => setLineType(e.target.value as 'SERVICE' | 'ADJUSTMENT')}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option value="SERVICE">Service</option>
+                <option value="ADJUSTMENT">Adjustment</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Description</Label>
+              <Input value={lineDesc} onChange={(e) => setLineDesc(e.target.value)} placeholder="e.g. Loading charge" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Quantity</Label>
+                <Input type="number" min={0.01} step={0.01} value={lineQty} onChange={(e) => setLineQty(e.target.value)} className="tabular-nums" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Unit Price (PKR){lineType === 'ADJUSTMENT' ? ' (±)' : ''}</Label>
+                <Input type="number" step={0.01} value={linePrice} onChange={(e) => setLinePrice(e.target.value)} className="tabular-nums" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddLine(false)}>Cancel</Button>
+            <Button onClick={handleAddLine} disabled={lineSubmitting || !lineDesc.trim() || !linePrice}>
+              {lineSubmitting ? 'Adding…' : 'Add Line'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Discount / GST dialog */}
+      <Dialog open={showAdjust} onOpenChange={setShowAdjust}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Discount &amp; GST</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>GST Rate (%)</Label>
+              <Input type="number" min={0} max={100} step={0.5} value={adjGstRate} onChange={(e) => setAdjGstRate(e.target.value)} className="tabular-nums" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Discount Type</Label>
                 <select
-                  value={lineType}
-                  onChange={(e) => setLineType((e.target as HTMLSelectElement).value as 'SERVICE' | 'ADJUSTMENT')}
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  value={adjDiscountType}
+                  onChange={(e) => setAdjDiscountType(e.target.value as 'PERCENT' | 'FIXED')}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
-                  <option value="SERVICE">Service</option>
-                  <option value="ADJUSTMENT">Adjustment</option>
+                  <option value="PERCENT">Percent (%)</option>
+                  <option value="FIXED">Fixed (PKR)</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                <input
-                  type="text"
-                  value={lineDesc}
-                  onChange={(e) => setLineDesc((e.target as HTMLInputElement).value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  placeholder="e.g. Loading charge"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
-                  <input
-                    type="number"
-                    value={lineQty}
-                    onChange={(e) => setLineQty((e.target as HTMLInputElement).value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
-                    min="0.01"
-                    step="0.01"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Unit Price (PKR){lineType === 'ADJUSTMENT' ? ' (can be negative)' : ''}
-                  </label>
-                  <input
-                    type="number"
-                    value={linePrice}
-                    onChange={(e) => setLinePrice((e.target as HTMLInputElement).value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
-                    step="0.01"
-                  />
-                </div>
-              </div>
-              {lineError && <p className="text-red-600 text-sm">{lineError}</p>}
-            </div>
-            <div className="flex justify-end gap-3 mt-5">
-              <button onClick={() => { setShowAddLine(false); setLineError(''); }} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-              <button
-                onClick={handleAddLine}
-                disabled={lineSubmitting || !lineDesc.trim() || !linePrice}
-                className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 disabled:opacity-50"
-              >
-                {lineSubmitting ? 'Adding…' : 'Add Line'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Adjust Discount / GST Modal */}
-      {showAdjust && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-            <h2 className="text-lg font-semibold mb-4">Discount & GST</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">GST Rate (%)</label>
-                <input
-                  type="number"
-                  value={adjGstRate}
-                  onChange={(e) => setAdjGstRate((e.target as HTMLInputElement).value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                  min="0"
-                  max="100"
-                  step="0.5"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Discount Type</label>
-                  <select
-                    value={adjDiscountType}
-                    onChange={(e) =>
-                      setAdjDiscountType((e.target as HTMLSelectElement).value as 'PERCENT' | 'FIXED')
-                    }
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
-                  >
-                    <option value="PERCENT">Percent (%)</option>
-                    <option value="FIXED">Fixed (PKR)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Value{adjDiscountType === 'PERCENT' ? ' (%)' : ' (PKR)'}
-                  </label>
-                  <input
-                    type="number"
-                    value={adjDiscountValue}
-                    onChange={(e) => setAdjDiscountValue((e.target as HTMLInputElement).value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
-                    min="0"
-                    step="0.01"
-                    placeholder="No discount"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-gray-500">
-                GST is calculated on the post-discount amount. The discount posts to the
-                Discounts Allowed account when the invoice is finalized.
-              </p>
-              {adjError && <p className="text-red-600 text-sm">{adjError}</p>}
-            </div>
-            <div className="flex justify-between gap-3 mt-5">
-              {invoice.discount_amount_pkr > 0 ? (
-                <button
-                  onClick={() => handleAdjust(true)}
-                  disabled={adjSubmitting}
-                  className="px-4 py-2 border border-red-300 text-red-600 rounded-lg text-sm hover:bg-red-50 disabled:opacity-50"
-                >
-                  Remove Discount
-                </button>
-              ) : (
-                <span />
-              )}
-              <div className="flex gap-3">
-                <button
-                  onClick={() => { setShowAdjust(false); setAdjError(''); }}
-                  className="px-4 py-2 border rounded-lg text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => handleAdjust(false)}
-                  disabled={adjSubmitting}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 disabled:opacity-50"
-                >
-                  {adjSubmitting ? 'Saving…' : 'Apply'}
-                </button>
+              <div className="space-y-1.5">
+                <Label>Value{adjDiscountType === 'PERCENT' ? ' (%)' : ' (PKR)'}</Label>
+                <Input type="number" min={0} step={0.01} value={adjDiscountValue} onChange={(e) => setAdjDiscountValue(e.target.value)} placeholder="No discount" className="tabular-nums" />
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Finalize Modal */}
-      {showFinalize && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-            <h2 className="text-lg font-semibold mb-2">Finalize Invoice</h2>
-            <p className="text-sm text-gray-600 mb-4">
-              This will assign an invoice number and lock the invoice for editing.
-              Total: <strong>PKR {invoice.total_pkr.toLocaleString()}</strong>
+            <p className="text-xs text-muted-foreground">
+              GST is calculated on the post-discount amount. The discount posts to the Discounts Allowed account when the invoice is finalized.
             </p>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
-              <textarea
-                value={finalizeNotes}
-                onChange={(e) => setFinalizeNotes((e.target as HTMLTextAreaElement).value)}
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-                rows={2}
-                placeholder="Any notes for this invoice..."
-              />
-            </div>
-            {finalizeError && <p className="text-red-600 text-sm mt-2">{finalizeError}</p>}
-            <div className="flex justify-end gap-3 mt-5">
-              <button onClick={() => { setShowFinalize(false); setFinalizeError(''); }} className="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-              <button
-                onClick={handleFinalize}
-                disabled={finalizeSubmitting}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50"
-              >
-                {finalizeSubmitting ? 'Finalizing…' : 'Confirm Finalize'}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+          <DialogFooter className="sm:justify-between">
+            {invoice.discount_amount_pkr > 0 ? (
+              <Button variant="outline" className="text-destructive" onClick={() => handleAdjust(true)} disabled={adjSubmitting}>
+                Remove Discount
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowAdjust(false)}>Cancel</Button>
+              <Button onClick={() => handleAdjust(false)} disabled={adjSubmitting}>
+                {adjSubmitting ? 'Saving…' : 'Apply'}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

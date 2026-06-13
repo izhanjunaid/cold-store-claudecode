@@ -1,29 +1,38 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
+import { Plus, X } from 'lucide-react';
 import { apiClient, apiClientList } from '@/lib/api-client';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Combobox } from '@/components/ui/combobox';
+import { PageHeader } from '@/components/layout/page-header';
+import { cn } from '@/lib/utils';
 
 interface Party {
   id: string;
   name: string;
+  party_type?: string;
   is_active: boolean;
 }
-
 interface InvoiceSummary {
   id: string;
   invoice_number: string | null;
-  total_pkr: number;
-  amount_paid_pkr: number;
   balance_due_pkr: number;
-  invoice_date: string;
-  status: string;
 }
-
 interface AllocationRow {
   invoice_id: string;
   allocated_amount_pkr: string;
 }
+
+const SELECT_CLASS =
+  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 export default function NewPaymentPage() {
   const router = useRouter();
@@ -54,47 +63,50 @@ export default function NewPaymentPage() {
   }, []);
 
   const fetchInvoices = useCallback(async (pid: string) => {
-    if (!pid) { setInvoices([]); return; }
+    if (!pid) {
+      setInvoices([]);
+      return;
+    }
     try {
-      const res = await apiClientList<InvoiceSummary>(`/v1/invoices?party_id=${pid}&status=FINALIZED&page_size=100`);
+      const res = await apiClientList<InvoiceSummary>(
+        `/v1/invoices?party_id=${pid}&status=FINALIZED&page_size=100`,
+      );
       setInvoices(res.data.filter((i) => i.balance_due_pkr > 0));
     } catch {
       setInvoices([]);
     }
   }, []);
 
-  useEffect(() => { fetchInvoices(partyId); }, [partyId, fetchInvoices]);
+  useEffect(() => {
+    fetchInvoices(partyId);
+  }, [partyId, fetchInvoices]);
+
+  const partyOptions = useMemo(
+    () => parties.map((p) => ({ value: p.id, label: p.name, hint: p.party_type })),
+    [parties],
+  );
 
   const totalAllocated = allocations.reduce((s, a) => s + (parseFloat(a.allocated_amount_pkr) || 0), 0);
 
-  const addAllocation = () => {
-    setAllocations((prev) => [...prev, { invoice_id: '', allocated_amount_pkr: '' }]);
-  };
-
-  const removeAllocation = (idx: number) => {
-    setAllocations((prev) => prev.filter((_, i) => i !== idx));
-  };
-
-  const updateAllocation = (idx: number, field: keyof AllocationRow, value: string) => {
-    setAllocations((prev) => prev.map((a, i) => i === idx ? { ...a, [field]: value } : a));
-  };
+  const updateAllocation = (idx: number, field: keyof AllocationRow, value: string) =>
+    setAllocations((prev) => prev.map((a, i) => (i === idx ? { ...a, [field]: value } : a)));
 
   const fillBalance = (idx: number) => {
     const alloc = allocations[idx];
-    if (!alloc) return;
-    const inv = invoices.find((i) => i.id === alloc.invoice_id);
-    if (!inv) return;
-    updateAllocation(idx, 'allocated_amount_pkr', String(inv.balance_due_pkr));
+    const inv = invoices.find((i) => i.id === alloc?.invoice_id);
+    if (inv) updateAllocation(idx, 'allocated_amount_pkr', String(inv.balance_due_pkr));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!partyId) { setError('Please select a party.'); return; }
-    if (!amountPkr || parseFloat(amountPkr) <= 0) { setError('Amount must be positive.'); return; }
+    if (!partyId) return setError('Please select a party.');
+    if (!amountPkr || parseFloat(amountPkr) <= 0) return setError('Amount must be positive.');
 
-    const validAllocations = isAdvance ? [] : allocations
-      .filter((a) => a.invoice_id && parseFloat(a.allocated_amount_pkr) > 0)
-      .map((a) => ({ invoice_id: a.invoice_id, allocated_amount_pkr: parseFloat(a.allocated_amount_pkr) }));
+    const validAllocations = isAdvance
+      ? []
+      : allocations
+          .filter((a) => a.invoice_id && parseFloat(a.allocated_amount_pkr) > 0)
+          .map((a) => ({ invoice_id: a.invoice_id, allocated_amount_pkr: parseFloat(a.allocated_amount_pkr) }));
 
     setSubmitting(true);
     setError('');
@@ -108,234 +120,188 @@ export default function NewPaymentPage() {
           payment_method: paymentMethod,
           reference_number: referenceNumber || undefined,
           is_advance: isAdvance,
-          cheque_date: (paymentMethod === 'CHEQUE' && chequeDate) ? chequeDate : undefined,
+          cheque_date: paymentMethod === 'CHEQUE' && chequeDate ? chequeDate : undefined,
           notes: notes || undefined,
           allocations: validAllocations,
         },
       });
+      toast.success('Payment recorded');
       router.push(`/payments/${result.id}`);
-    } catch (err: any) {
-      setError(err.message || 'Failed to record payment');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to record payment');
       setSubmitting(false);
     }
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center h-64"><p className="text-gray-500">Loading...</p></div>;
-  }
+  if (loading) return <p className="text-muted-foreground">Loading…</p>;
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <div className="flex items-center gap-4 mb-6">
-        <button onClick={() => router.back()} className="text-gray-500 hover:text-gray-700">←</button>
-        <h1 className="text-2xl font-bold text-gray-900">Record Payment</h1>
-      </div>
+    <div className="max-w-2xl">
+      <PageHeader title="Record Payment" crumb="New" />
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">{error}</div>
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {error}
+          </div>
         )}
 
-        <div className="bg-white rounded-lg shadow p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900">Payment Details</h2>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Party *</label>
-            <select
-              value={partyId}
-              onChange={(e) => { setPartyId((e.target as HTMLSelectElement).value); setAllocations([]); }}
-              required
-              className="w-full border rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="">Select party...</option>
-              {parties.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date *</label>
-              <input
-                type="date"
-                value={paymentDate}
-                onChange={(e) => setPaymentDate((e.target as HTMLInputElement).value)}
-                required
-                className="w-full border rounded-lg px-3 py-2 text-sm"
+        <Card>
+          <CardContent className="space-y-4 pt-6">
+            <div className="space-y-1.5">
+              <Label>Party <span className="text-destructive">*</span></Label>
+              <Combobox
+                options={partyOptions}
+                value={partyId}
+                onChange={(v) => {
+                  setPartyId(v);
+                  setAllocations([]);
+                }}
+                placeholder="Select party…"
+                searchPlaceholder="Search parties…"
+                testId="combobox-party_id"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Amount (PKR) *</label>
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={amountPkr}
-                onChange={(e) => setAmountPkr((e.target as HTMLInputElement).value)}
-                required
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-                placeholder="0.00"
-              />
-            </div>
-          </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method *</label>
-              <select
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod((e.target as HTMLSelectElement).value)}
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-              >
-                <option value="CASH">Cash</option>
-                <option value="CHEQUE">Cheque</option>
-                <option value="BANK_TRANSFER">Bank Transfer</option>
-                <option value="MOBILE_WALLET">Mobile Wallet</option>
-              </select>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Payment Date <span className="text-destructive">*</span></Label>
+                <Input type="date" name="payment_date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="tabular-nums" required />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Amount (PKR) <span className="text-destructive">*</span></Label>
+                <Input type="number" name="amount_pkr" min={0.01} step={0.01} value={amountPkr} onChange={(e) => setAmountPkr(e.target.value)} placeholder="0.00" className="tabular-nums" required />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Reference Number</label>
-              <input
-                type="text"
-                value={referenceNumber}
-                onChange={(e) => setReferenceNumber((e.target as HTMLInputElement).value)}
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-                placeholder="Cheque #, transfer ref..."
-              />
-            </div>
-          </div>
 
-          {paymentMethod === 'CHEQUE' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Cheque Date</label>
-              <input
-                type="date"
-                value={chequeDate}
-                onChange={(e) => setChequeDate((e.target as HTMLInputElement).value)}
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Payment Method <span className="text-destructive">*</span></Label>
+                <select name="payment_method" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className={SELECT_CLASS}>
+                  <option value="CASH">Cash</option>
+                  <option value="CHEQUE">Cheque</option>
+                  <option value="BANK_TRANSFER">Bank Transfer</option>
+                  <option value="MOBILE_WALLET">Mobile Wallet</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Reference Number</Label>
+                <Input name="reference_number" value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} placeholder="Cheque #, transfer ref…" />
+              </div>
             </div>
-          )}
 
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="is_advance"
-              checked={isAdvance}
-              onChange={(e) => { setIsAdvance((e.target as HTMLInputElement).checked); setAllocations([]); }}
-              className="rounded"
-            />
-            <label htmlFor="is_advance" className="text-sm font-medium text-gray-700">
+            {paymentMethod === 'CHEQUE' && (
+              <div className="space-y-1.5">
+                <Label>Cheque Date</Label>
+                <Input type="date" name="cheque_date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} className="tabular-nums" />
+              </div>
+            )}
+
+            <label className="flex items-center gap-2.5 text-sm">
+              <Checkbox checked={isAdvance} onCheckedChange={(c) => { setIsAdvance(!!c); setAllocations([]); }} />
               Advance payment (no invoice allocation)
             </label>
-          </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes((e.target as HTMLTextAreaElement).value)}
-              rows={2}
-              className="w-full border rounded-lg px-3 py-2 text-sm"
-            />
-          </div>
-        </div>
+            <div className="space-y-1.5">
+              <Label>Notes</Label>
+              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+            </div>
+          </CardContent>
+        </Card>
 
         {!isAdvance && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Invoice Allocations</h2>
-              <button
-                type="button"
-                onClick={addAllocation}
-                disabled={!partyId || invoices.length === 0}
-                className="text-blue-600 text-sm hover:underline disabled:opacity-40"
-              >
-                + Add Invoice
-              </button>
-            </div>
-
-            {partyId && invoices.length === 0 && (
-              <p className="text-sm text-gray-500 italic">No finalized invoices with outstanding balance for this party.</p>
-            )}
-
-            {allocations.map((alloc, idx) => (
-              <div key={idx} className="flex gap-3 items-end mb-3">
-                <div className="flex-1">
-                  <label className="block text-xs text-gray-500 mb-1">Invoice</label>
-                  <select
-                    value={alloc.invoice_id}
-                    onChange={(e) => updateAllocation(idx, 'invoice_id', (e.target as HTMLSelectElement).value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
-                  >
-                    <option value="">Select invoice...</option>
-                    {invoices.map((inv) => (
-                      <option key={inv.id} value={inv.id}>
-                        {inv.invoice_number ?? 'Draft'} — Balance: PKR {inv.balance_due_pkr.toLocaleString()}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="w-40">
-                  <label className="block text-xs text-gray-500 mb-1">Amount (PKR)</label>
-                  <input
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={alloc.allocated_amount_pkr}
-                    onChange={(e) => updateAllocation(idx, 'allocated_amount_pkr', (e.target as HTMLInputElement).value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
-                    placeholder="0.00"
-                  />
-                </div>
-                {alloc.invoice_id && (
-                  <button
-                    type="button"
-                    onClick={() => fillBalance(idx)}
-                    className="text-xs text-blue-600 hover:underline whitespace-nowrap pb-2"
-                  >
-                    Fill balance
-                  </button>
-                )}
-                <button
+          <Card>
+            <CardContent className="pt-6">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-sm font-semibold">Invoice Allocations</h2>
+                <Button
                   type="button"
-                  onClick={() => removeAllocation(idx)}
-                  className="text-red-500 hover:text-red-700 pb-2"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAllocations((prev) => [...prev, { invoice_id: '', allocated_amount_pkr: '' }])}
+                  disabled={!partyId || invoices.length === 0}
                 >
-                  ×
-                </button>
+                  <Plus className="h-4 w-4" aria-hidden />
+                  Add Invoice
+                </Button>
               </div>
-            ))}
 
-            {allocations.length > 0 && (
-              <div className="text-sm text-right text-gray-600 mt-2">
-                Total allocated: <span className="font-medium">PKR {totalAllocated.toLocaleString()}</span>
-                {amountPkr && (
-                  <span className={`ml-2 ${totalAllocated > parseFloat(amountPkr) ? 'text-red-600' : 'text-green-600'}`}>
-                    / PKR {parseFloat(amountPkr).toLocaleString()}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
+              {partyId && invoices.length === 0 && (
+                <p className="text-sm italic text-muted-foreground">
+                  No finalized invoices with outstanding balance for this party.
+                </p>
+              )}
+
+              {allocations.map((alloc, idx) => (
+                <div key={idx} className="mb-3 flex items-end gap-3">
+                  <div className="flex-1 space-y-1.5">
+                    <Label className="text-xs">Invoice</Label>
+                    <select
+                      name="allocation_invoice"
+                      value={alloc.invoice_id}
+                      onChange={(e) => updateAllocation(idx, 'invoice_id', e.target.value)}
+                      className={SELECT_CLASS}
+                    >
+                      <option value="">Select invoice…</option>
+                      {invoices.map((inv) => (
+                        <option key={inv.id} value={inv.id}>
+                          {inv.invoice_number ?? 'Draft'} — Balance: PKR {inv.balance_due_pkr.toLocaleString()}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="w-40 space-y-1.5">
+                    <Label className="text-xs">Amount (PKR)</Label>
+                    <Input
+                      type="number"
+                      name="allocation_amount"
+                      min={0.01}
+                      step={0.01}
+                      value={alloc.allocated_amount_pkr}
+                      onChange={(e) => updateAllocation(idx, 'allocated_amount_pkr', e.target.value)}
+                      placeholder="0.00"
+                      className="tabular-nums"
+                    />
+                  </div>
+                  {alloc.invoice_id && (
+                    <Button type="button" variant="link" className="h-9 px-1 text-xs" onClick={() => fillBalance(idx)}>
+                      Fill balance
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 text-destructive"
+                    onClick={() => setAllocations((prev) => prev.filter((_, i) => i !== idx))}
+                    aria-label="Remove allocation"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+
+              {allocations.length > 0 && (
+                <div className="mt-2 text-right text-sm text-muted-foreground">
+                  Total allocated: <span className="font-medium tabular-nums">PKR {totalAllocated.toLocaleString()}</span>
+                  {amountPkr && (
+                    <span className={cn('ml-2', totalAllocated > parseFloat(amountPkr) ? 'text-destructive' : 'text-green-600')}>
+                      / PKR {parseFloat(amountPkr).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
 
-        <div className="flex gap-4 justify-end">
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="px-4 py-2 border rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-          >
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" onClick={() => router.back()}>
             Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-          >
-            {submitting ? 'Recording...' : 'Record Payment'}
-          </button>
+          </Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? 'Recording…' : 'Record Payment'}
+          </Button>
         </div>
       </form>
     </div>

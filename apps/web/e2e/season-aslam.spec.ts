@@ -338,26 +338,21 @@ test.describe('Muhammad Aslam — full potato season', () => {
       await expect(page.getByRole('heading', { name: /record payment/i })).toBeVisible({
         timeout: 15_000,
       });
-      await page.locator('select').first().selectOption(partyId);
-      // Amount and method
-      await page.locator('input[type="number"]').first().fill(String(opts.paymentAmount));
-      await page.locator('select').nth(1).selectOption(opts.paymentMethod);
+      // Party is preselected from ?party_id= and shown in a Combobox; confirm it.
+      await pickCombobox(page, 'combobox-party_id', aslam.name);
+      // Amount and method (name-based selectors after the redesign)
+      await page.locator('input[name="amount_pkr"]').fill(String(opts.paymentAmount));
+      await page.locator('select[name="payment_method"]').selectOption(opts.paymentMethod);
       if (opts.paymentRef) {
         await page.locator('input[placeholder*="Cheque"]').fill(opts.paymentRef);
       }
       if (opts.paymentMethod === 'CHEQUE') {
-        await page.locator('input[type="date"]').nth(1).fill(todayISO());
+        await page.locator('input[name="cheque_date"]').fill(todayISO());
       }
-      // Add allocation row, pick our invoice, fill balance
-      await page.getByRole('button', { name: /\+ add invoice/i }).click();
-      await page
-        .locator('select')
-        .last()
-        .selectOption(invoiceId);
-      await page
-        .locator('input[type="number"]')
-        .last()
-        .fill(String(opts.paymentAmount));
+      // Add allocation row, pick our invoice, fill the amount
+      await page.getByRole('button', { name: /add invoice/i }).click();
+      await page.locator('select[name="allocation_invoice"]').last().selectOption(invoiceId);
+      await page.locator('input[name="allocation_amount"]').last().fill(String(opts.paymentAmount));
 
       await shot(page, `${opts.shotPrefix}-e-payment-form.png`);
 
