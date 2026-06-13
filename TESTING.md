@@ -30,6 +30,7 @@
   - `wf-05-quality-spoilage.spec.ts` — WF-05 Quality / Spoilage (`fixme`'d; M6 deferred)
   - `wf-06-month-end.spec.ts` — WF-06 Month-End Financial Reconciliation
   - `wf-07-peshgi.spec.ts` — WF-07 Peshgi Loan Issue & Recovery
+  - `wf-08-late-payment-surcharge.spec.ts` — WF-08 Late Payment Surcharge (Phase 12; uses `POST /v1/_test/backdate-invoice`)
 
 ## Critical E2E Workflows (from PRD Section 6)
 
@@ -63,8 +64,29 @@
 | 11.6 | — | — | 6+1 fixme | 7 | E2E suite scaffolded; 6 specs run, WF-05 fixme (Phase 6 deferred) |
 | 11.10 | 4 | 12 | — | 16 | ALL PASS (gate-pass verification: qty/commodity, depositor, owner-auth) |
 | 11.11 | 7 | 5 | — | 12 | ALL PASS (marka: parchi/dispatch/gate-pass PDFs, lot store/filter/PATCH, child-lot inheritance) |
+| 12.1 | — | 14 | — | 14 | ALL PASS (facility settings round-trip + lot/outbound capacity/weight-kg/backdating enforcement) |
+| 12.2 | 3 | 8 | — | 11 | ALL PASS (JE-01 discount variants; PATCH discount RBAC/clamp/finalize-4910/after-finalize) |
+| 12.3 | — | 2 | — | 2 | ALL PASS (GST default prefill on/off) |
+| 12.4 | 8 | 7 | — | 15 | ALL PASS (surcharge calc edges + JE-21; suggest/apply/idempotency/settle/RBAC/disabled) |
+| 12.5 | — | — | 1* | 1 | wf-08 + wf-04 discount step (typecheck-clean; CI-run) |
 
 > Live suite after 11.11: **124 unit + 252 integration green**.
+> Live suite after Phase 12: **135 unit + 283 integration green**.
+> \* Phase 12 E2E specs run in CI against a dedicated stack (`ALLOW_TEST_RESET=1`); not executed in the dev session. Their asserted API behavior is fully covered by the 12.1–12.4 integration tests.
+
+### Phase 12 Tests
+
+**Unit (11)**
+- `apps/api/src/modules/surcharge/__tests__/surcharge-calc.unit.test.ts` — 8 tests (grace boundary day 59/60/89/90, months-already-charged subtraction, principal clamp / paid-off, disabled rule, rounding; + JE-21 balance & 4210 routing)
+- `apps/api/src/modules/accounting/__tests__/journal-entry-templates.unit.test.ts` — 3 new JE-01 tests (discount debits 4910 & balances; discount+advance+GST; zero discount → no 4910 line)
+
+**Integration (31)**
+- `lot-settings.integration.test.ts` (10): chamber warning at configured % (and no-warn below); weight dispute in absolute kg (small variance / raised threshold / over-threshold → 422); backdating matrix (OPERATOR blocked / MANAGER allowed / null unlimited) for both inbound and outbound
+- `facility.integration.test.ts` (+4): Phase-12 defaults for legacy rows; PATCH round-trip; reset `backdating_max_days` to null; reject out-of-range
+- `invoice.integration.test.ts` (+10): discount D1–D8 (percent/fixed recompute, null clear, ACCOUNTANT 403, > subtotal 422, line-removal clamp 422, after-finalize 409, finalize posts DR 4910 net-AR/gross-revenue) + GST G1/G2 (prefill when registered / 0 when not)
+- `surcharge.integration.test.ts` (7): S1 suggestions; S2 apply → record + surcharge_total + DR 1120/CR 4210 + audit row; S3 same-period reapply 409 + incremental month; S4 payment settles total+surcharge + aging includes surcharge; S5 list applied; S6 OPERATOR 403 / not-overdue 422; S7 disabled rule → empty + 422
+
+**Accounting CoA count**: assertion updated 81 → 83 (adds 4900 Contra Revenue + 4910 Discounts Allowed).
 
 ### Phase 10 Tests
 

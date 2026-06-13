@@ -1,8 +1,9 @@
 /**
  * WF-04 Full Withdrawal & Season Settlement (docs/12_e2e_workflows.md §4).
  *
- * Full withdrawal → invoice finalize → payment → balance_due = 0.
- * Mirrors the existing WF-04 integration test but exercises the UI path.
+ * Full withdrawal → draft-stage discount → invoice finalize → payment →
+ * balance_due = 0. Mirrors the existing WF-04 integration test but exercises
+ * the UI path, and covers the Phase 12 draft-stage discount.
  */
 import { test, expect, API_URL, FACILITY_ID, resetFacility } from './fixtures';
 
@@ -106,6 +107,22 @@ test.describe('WF-04 — Full Withdrawal & Settlement', () => {
       ).json()
     ).data.invoice_id;
 
+    // Phase 12: apply a 10% draft-stage discount before finalizing.
+    const draftInvoice = (
+      await (
+        await request.get(`${API_URL}/v1/invoices/${draftInvoiceId}`, { headers: mgrHeaders })
+      ).json()
+    ).data;
+    const subTotal = Number(draftInvoice.sub_total_pkr);
+    const discountRes = await request.patch(`${API_URL}/v1/invoices/${draftInvoiceId}`, {
+      data: { discount: { type: 'PERCENT', value: 10 } },
+      headers: mgrHeaders,
+    });
+    expect(discountRes.ok()).toBeTruthy();
+    const discounted = (await discountRes.json()).data;
+    expect(Number(discounted.discount_amount_pkr)).toBeCloseTo(subTotal * 0.1, 2);
+    expect(Number(discounted.total_pkr)).toBeCloseTo(subTotal * 0.9, 2);
+
     // Finalize the invoice.
     const finalRes = await request.post(`${API_URL}/v1/invoices/${draftInvoiceId}/finalize`, {
       data: {},
@@ -114,9 +131,9 @@ test.describe('WF-04 — Full Withdrawal & Settlement', () => {
     expect(finalRes.ok()).toBeTruthy();
     const invoice = (await finalRes.json()).data;
     expect(invoice.status).toBe('FINALIZED');
-    expect(Number(invoice.total_pkr)).toBeGreaterThan(0);
+    expect(Number(invoice.total_pkr)).toBeCloseTo(subTotal * 0.9, 2);
 
-    // Record a CASH payment matching the invoice total.
+    // Record a CASH payment matching the discounted invoice total.
     const payRes = await request.post(`${API_URL}/v1/payments`, {
       data: {
         party_id: party.id,
@@ -124,7 +141,9 @@ test.describe('WF-04 — Full Withdrawal & Settlement', () => {
         payment_method: 'CASH',
         payment_date: new Date().toISOString().slice(0, 10),
         book_type: 'PACCI',
-        allocations: [{ target: 'INVOICE', invoice_id: invoice.id, amount_pkr: Number(invoice.total_pkr) }],
+        allocations: [
+          { target: 'INVOICE', invoice_id: invoice.id, allocated_amount_pkr: Number(invoice.total_pkr) },
+        ],
       },
       headers: acctHeaders,
     });

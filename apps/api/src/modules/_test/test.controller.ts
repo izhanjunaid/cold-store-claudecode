@@ -8,9 +8,15 @@
  * from a known state.
  */
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { sendSuccess } from '../../common/response';
 
 const E2E_FACILITY_ID = '00000000-0000-0000-0000-000000000001';
+
+const BackdateInvoiceBody = z.object({
+  invoice_id: z.string().uuid(),
+  days_overdue: z.number().int().min(0),
+});
 
 export async function testRoutes(app: FastifyInstance) {
   if (process.env['NODE_ENV'] === 'production') {
@@ -40,6 +46,9 @@ export async function testRoutes(app: FastifyInstance) {
       await app.prisma.paymentAllocation.deleteMany({
         where: { payment: { facilityId: E2E_FACILITY_ID } },
       });
+
+      // Surcharges reference invoices and journal entries — clear before both.
+      await app.prisma.invoiceSurcharge.deleteMany({ where: { facilityId: E2E_FACILITY_ID } });
 
       await app.prisma.journalEntryLine.deleteMany({
         where: { facilityId: E2E_FACILITY_ID },
@@ -71,6 +80,27 @@ export async function testRoutes(app: FastifyInstance) {
       await app.prisma.periodLock.deleteMany({ where: { facilityId: E2E_FACILITY_ID } });
 
       return sendSuccess(reply, { status: 'reset', facility_id: E2E_FACILITY_ID });
+    },
+  });
+
+  // Backdate an invoice's date so surcharge/aging flows can be exercised
+  // without waiting real calendar days.
+  app.route({
+    method: 'POST',
+    url: '/v1/_test/backdate-invoice',
+    schema: { body: BackdateInvoiceBody },
+    handler: async (request, reply) => {
+      const { invoice_id, days_overdue } = request.body as z.infer<typeof BackdateInvoiceBody>;
+      const invoiceDate = new Date(Date.now() - days_overdue * 24 * 60 * 60 * 1000);
+      invoiceDate.setHours(0, 0, 0, 0);
+      await app.prisma.invoice.update({
+        where: { id: invoice_id },
+        data: { invoiceDate },
+      });
+      return sendSuccess(reply, {
+        invoice_id,
+        invoice_date: invoiceDate.toISOString().slice(0, 10),
+      });
     },
   });
 }
