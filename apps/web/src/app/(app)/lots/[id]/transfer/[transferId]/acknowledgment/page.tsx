@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { Download } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/layout/page-header';
 
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
@@ -44,36 +47,35 @@ export default function AcknowledgmentPage() {
 
   if (error) {
     return (
-      <div className="p-6">
-        <p className="text-red-600 mb-4">Failed to load acknowledgment: {error}</p>
-        <button onClick={() => router.push(`/lots/${lotId}`)} className="text-primary-600 hover:underline text-sm">
+      <div>
+        <p className="mb-4 text-destructive">Failed to load acknowledgment: {error}</p>
+        <Button variant="outline" onClick={() => router.push(`/lots/${lotId}`)}>
           Back to Lot
-        </button>
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push(`/lots/${lotId}`)} className="text-gray-400 hover:text-gray-600">&#8592;</button>
-          <h1 className="text-xl font-bold text-gray-900">Transfer Acknowledgment</h1>
-        </div>
-        {blobUrl && (
-          <a
-            href={blobUrl}
-            download={`transfer-${transferId.slice(0, 8)}.pdf`}
-            className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700"
-          >
-            Download PDF
-          </a>
-        )}
-      </div>
+    <div className="flex h-[calc(100vh-8rem)] flex-col">
+      <PageHeader
+        title="Transfer Acknowledgment"
+        crumb="Acknowledgment"
+        actions={
+          blobUrl ? (
+            <Button asChild>
+              <a href={blobUrl} download={`transfer-${transferId.slice(0, 8)}.pdf`}>
+                <Download className="h-4 w-4" aria-hidden />
+                Download PDF
+              </a>
+            </Button>
+          ) : undefined
+        }
+      />
       {blobUrl ? (
-        <iframe src={blobUrl} className="flex-1 w-full border rounded-lg bg-white" title="Transfer Acknowledgment PDF" />
+        <iframe src={blobUrl} className="w-full flex-1 rounded-lg border bg-card" title="Transfer Acknowledgment PDF" />
       ) : (
-        <div className="text-gray-500 text-sm">Loading PDF...</div>
+        <p className="text-sm text-muted-foreground">Loading PDF…</p>
       )}
     </div>
   );

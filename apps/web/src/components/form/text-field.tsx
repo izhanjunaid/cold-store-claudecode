@@ -24,6 +24,8 @@ interface TextFieldProps<T extends FieldValues> {
   className?: string;
   /** Forwarded as the input's name attribute (defaults to `name`) for E2E selectors. */
   inputName?: string;
+  /** Text direction — pass 'rtl' for Urdu fields. */
+  dir?: 'ltr' | 'rtl';
 }
 
 export function TextField<T extends FieldValues>({
@@ -37,6 +39,7 @@ export function TextField<T extends FieldValues>({
   maxLength,
   className,
   inputName,
+  dir,
 }: TextFieldProps<T>) {
   return (
     <FormField
@@ -54,6 +57,7 @@ export function TextField<T extends FieldValues>({
               value={field.value ?? ''}
               name={inputName ?? name}
               type={type}
+              dir={dir}
               placeholder={placeholder}
               maxLength={maxLength}
             />

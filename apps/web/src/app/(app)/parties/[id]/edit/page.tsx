@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
+import { PageHeader } from '@/components/layout/page-header';
 import { PartyForm } from '@/components/party/party-form';
 
 interface PartyData {
@@ -22,22 +23,23 @@ interface PartyData {
 
 export default function PartyEditPage() {
   const params = useParams();
+  const partyId = params['id'] as string;
   const [party, setParty] = useState<PartyData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiClient<PartyData>(`/v1/parties/${params['id']}`)
+    apiClient<PartyData>(`/v1/parties/${partyId}`)
       .then(setParty)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [params['id']]);
+  }, [partyId]);
 
-  if (loading) return <div className="text-gray-500">Loading...</div>;
-  if (!party) return <div className="text-red-500">Party not found</div>;
+  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (!party) return <p className="text-destructive">Party not found</p>;
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Edit Party: {party.name}</h1>
+      <PageHeader title={`Edit Party: ${party.name}`} crumb="Edit" />
       <PartyForm
         mode="edit"
         partyId={party.id}

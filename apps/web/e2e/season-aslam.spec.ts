@@ -23,6 +23,7 @@ import {
   shot,
   todayISO,
 } from './helpers/season-helpers';
+import { pickCombobox } from './helpers/ui';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -137,12 +138,13 @@ test.describe('Muhammad Aslam — full potato season', () => {
         timeout: 15_000,
       });
 
-      // Wait for the reference data dropdowns to populate
-      await expect(page.locator(`select[name="owner_party_id"] option[value="${partyId}"]`)).toHaveCount(1, {
+      // Wait for the reference data to populate (commodity is a native select).
+      await expect(page.locator(`select[name="commodity_id"] option[value="${refs.commodityId}"]`)).toHaveCount(1, {
         timeout: 15_000,
       });
 
-      await page.locator('select[name="owner_party_id"]').selectOption(partyId);
+      // Owner is now a type-ahead Combobox (large party list).
+      await pickCombobox(page, 'combobox-owner_party_id', aslam.name);
       await page.locator('select[name="commodity_id"]').selectOption(refs.commodityId);
       // Wait for chambers + rate plans to filter after commodity selection
       await expect(page.locator(`select[name="chamber_id"] option[value="${refs.chamberId}"]`)).toHaveCount(1, {
@@ -153,6 +155,11 @@ test.describe('Muhammad Aslam — full potato season', () => {
       await page.locator('input[name="quantity_bags"]').fill('500');
       await page.locator('input[name="accepted_weight_kg"]').fill('49850');
       await page.locator('input[name="declared_weight_kg"]').fill('50000');
+      // 150 kg variance exceeds the facility's 5 kg dispute threshold → note required.
+      await expect(page.locator('textarea[name="weight_dispute_note"]')).toBeVisible({ timeout: 5_000 });
+      await page
+        .locator('textarea[name="weight_dispute_note"]')
+        .fill('150 kg shrinkage accepted by farmer at weigh-in.');
       await page.locator('input[name="vehicle_number"]').fill(plates.inbound);
       await page.locator('select[name="quality_grade_inbound"]').selectOption('A');
       // Inbound 120 days ago — well inside the seeded "Potato Seasonal 2026" window (Mar 1 – Sep 30)
@@ -176,19 +183,23 @@ test.describe('Muhammad Aslam — full potato season', () => {
 
       await shot(page, '03b-lot-detail.png');
 
-      // Fetch the parchi PDF and save it (best-effort — Puppeteer in dev can be slow)
-      try {
-        const pdfRes = await request.get(`${API_URL}/v1/lots/${lotId}/receipt`, {
-          headers: opHeaders,
-          timeout: 60_000,
-        });
-        if (pdfRes.ok() && (pdfRes.headers()['content-type'] ?? '').match(/pdf/i)) {
-          fs.writeFileSync(path.join(ARTIFACT_DIR, '03c-parchi.pdf'), await pdfRes.body());
-        } else {
-          console.warn(`parchi PDF skipped (status ${pdfRes.status()})`);
+      // Fetch the parchi PDF and save it (best-effort — Puppeteer in dev can be slow).
+      // Skippable: on dev boxes where Chromium can't launch, a PDF request wedges
+      // the API event loop, so E2E_SKIP_PDF lets the UI flow be verified standalone.
+      if (!process.env['E2E_SKIP_PDF']) {
+        try {
+          const pdfRes = await request.get(`${API_URL}/v1/lots/${lotId}/receipt`, {
+            headers: opHeaders,
+            timeout: 60_000,
+          });
+          if (pdfRes.ok() && (pdfRes.headers()['content-type'] ?? '').match(/pdf/i)) {
+            fs.writeFileSync(path.join(ARTIFACT_DIR, '03c-parchi.pdf'), await pdfRes.body());
+          } else {
+            console.warn(`parchi PDF skipped (status ${pdfRes.status()})`);
+          }
+        } catch (err) {
+          console.warn(`parchi PDF threw: ${err instanceof Error ? err.message : String(err)}`);
         }
-      } catch (err) {
-        console.warn(`parchi PDF threw: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
 
@@ -490,6 +501,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
 
     // ─────────────────────────────────────────────────────────────────────
     await test.step('09 — party statement PDF', async () => {
+      if (process.env['E2E_SKIP_PDF']) return; // Puppeteer unavailable in this env
       const today = todayISO();
       const url =
         `${API_URL}/v1/reports/party-statement` +
