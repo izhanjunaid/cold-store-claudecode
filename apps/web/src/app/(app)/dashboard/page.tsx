@@ -2,58 +2,35 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  ReferenceLine,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, ReferenceLine, Tooltip, ResponsiveContainer } from 'recharts';
+import { CheckCircle2 } from 'lucide-react';
 import type { DashboardResponseType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
+import { hasMinRole } from '@/lib/rbac';
 import { apiClient } from '@/lib/api-client';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { PageHeader } from '@/components/layout/page-header';
 
-const ROLE_RANK: Record<string, number> = {
-  OWNER: 6,
-  MANAGER: 5,
-  ACCOUNTANT: 4,
-  OPERATOR: 3,
-  SECURITY: 2,
-  VIEWER: 1,
-};
+const fmt = (n: number) => n.toLocaleString('en-PK', { maximumFractionDigits: 0 });
+const fmtPkr = (n: number) => `Rs ${fmt(n)}`;
 
-function fmt(n: number): string {
-  return n.toLocaleString('en-PK', { maximumFractionDigits: 0 });
-}
-
-function fmtPkr(n: number): string {
-  return `Rs ${n.toLocaleString('en-PK', { maximumFractionDigits: 0 })}`;
-}
-
-function KpiCard({
-  label,
-  value,
-  subline,
-}: {
-  label: string;
-  value: string;
-  subline?: string;
-}) {
+function KpiCard({ label, value, subline }: { label: string; value: string; subline?: string }) {
   return (
-    <div className="bg-white rounded-lg shadow p-5">
-      <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
-      <div className="mt-2 text-3xl font-bold text-gray-900">{value}</div>
-      {subline && <div className="mt-1 text-xs text-gray-500">{subline}</div>}
-    </div>
+    <Card>
+      <CardContent className="pt-5">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className="mt-1.5 text-3xl font-bold tabular-nums text-foreground">{value}</div>
+        {subline && <div className="mt-1 text-xs text-muted-foreground">{subline}</div>}
+      </CardContent>
+    </Card>
   );
 }
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const router = useRouter();
-  const canView = (ROLE_RANK[user?.role ?? ''] ?? 0) >= ROLE_RANK['OPERATOR']!;
+  const canView = hasMinRole(user?.role, 'OPERATOR');
 
   const { data, isLoading, error } = useQuery<DashboardResponseType>({
     queryKey: ['dashboard', user?.facility_id],
@@ -64,148 +41,125 @@ export default function DashboardPage() {
 
   if (!canView) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center">
-        <h1 className="text-xl font-bold text-gray-900 mb-2">Access denied</h1>
-        <p className="text-gray-600">
-          Your role ({user?.role}) does not have permission to view the dashboard.
-        </p>
+      <div>
+        <PageHeader title="Operational Dashboard" />
+        <p className="text-muted-foreground">Your role ({user?.role}) cannot view the dashboard.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Operational Dashboard</h1>
-        <span className="text-xs text-gray-500">
-          {isLoading ? 'Loading…' : 'Auto-refreshes every 30s'}
-        </span>
-      </div>
+    <div>
+      <PageHeader
+        title="Operational Dashboard"
+        description={isLoading ? 'Loading…' : 'Live facility overview · auto-refreshes every 30s'}
+      />
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-800 rounded p-4 text-sm">
+        <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {(error as Error).message}
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
         <KpiCard label="Active Lots" value={fmt(data?.active_lots ?? 0)} />
         <KpiCard label="Total Bags" value={fmt(data?.total_bags ?? 0)} />
-        <KpiCard
-          label="Occupancy"
-          value={`${data?.occupancy_pct?.toFixed(1) ?? '0.0'}%`}
-        />
-        <KpiCard
-          label="Today's Inbound"
-          value={fmt(data?.today_inbound_bags ?? 0)}
-          subline="bags accepted today"
-        />
-        <KpiCard
-          label="Today's Outbound"
-          value={fmt(data?.today_outbound_bags ?? 0)}
-          subline="bags dispatched today"
-        />
+        <KpiCard label="Occupancy" value={`${data?.occupancy_pct?.toFixed(1) ?? '0.0'}%`} />
+        <KpiCard label="Today's Inbound" value={fmt(data?.today_inbound_bags ?? 0)} subline="bags accepted today" />
+        <KpiCard label="Today's Outbound" value={fmt(data?.today_outbound_bags ?? 0)} subline="bags dispatched today" />
       </div>
 
       {data?.financial && (
-        <div>
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-3">
-            Financial Snapshot
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="mb-6">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Financial Snapshot</h2>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <KpiCard label="AR Outstanding" value={fmtPkr(data.financial.ar_total_pkr)} />
-            <KpiCard
-              label="Collected Today"
-              value={fmtPkr(data.financial.collected_today_pkr)}
-            />
-            <KpiCard
-              label="Overdue 90+"
-              value={fmtPkr(data.financial.overdue_90_plus_pkr)}
-            />
+            <KpiCard label="Collected Today" value={fmtPkr(data.financial.collected_today_pkr)} />
+            <KpiCard label="Overdue 90+" value={fmtPkr(data.financial.overdue_90_plus_pkr)} />
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg shadow p-5">
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-3">
-            Chamber Occupancy
-          </h2>
-          {data?.chambers.length ? (
-            <div style={{ width: '100%', height: 240 }}>
-              <ResponsiveContainer>
-                <BarChart data={data.chambers}>
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
-                  <Tooltip
-                    formatter={(value: number, _name, p) => [
-                      `${fmt(p.payload.bags)}/${fmt(p.payload.capacity)} bags (${value}%)`,
-                      'Occupancy',
-                    ]}
-                  />
-                  <ReferenceLine y={90} stroke="#dc2626" strokeDasharray="3 3" />
-                  <Bar
-                    dataKey="occupancy_pct"
-                    fill="#1e40af"
-                    onClick={(c: { id?: string }) => c.id && router.push(`/chambers/${c.id}`)}
-                    cursor="pointer"
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <div className="text-sm text-gray-500">No chambers configured.</div>
-          )}
-        </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Chamber Occupancy</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {data?.chambers.length ? (
+              <div style={{ width: '100%', height: 240 }}>
+                <ResponsiveContainer>
+                  <BarChart data={data.chambers}>
+                    <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" stroke="hsl(var(--muted-foreground))" />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 8, border: '1px solid hsl(var(--border))', fontSize: 12 }}
+                      formatter={(value: number, _name, p) => [
+                        `${fmt(p.payload.bags)}/${fmt(p.payload.capacity)} bags (${value}%)`,
+                        'Occupancy',
+                      ]}
+                    />
+                    <ReferenceLine y={90} stroke="hsl(var(--destructive))" strokeDasharray="3 3" />
+                    <Bar
+                      dataKey="occupancy_pct"
+                      fill="hsl(var(--chart-1))"
+                      radius={[4, 4, 0, 0]}
+                      onClick={(c: { id?: string }) => c.id && router.push(`/chambers/${c.id}`)}
+                      cursor="pointer"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No chambers configured.</p>
+            )}
+          </CardContent>
+        </Card>
 
-        <div className="bg-white rounded-lg shadow p-5">
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-3">
-            Attention Required
-          </h2>
-          {data?.attention_required.length ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-gray-500 border-b">
-                  <th className="py-2">Lot #</th>
-                  <th>Owner</th>
-                  <th>Commodity</th>
-                  <th className="text-right">Days</th>
-                  <th className="text-right">Threshold</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.attention_required.map((row) => (
-                  <tr
-                    key={row.lot_id}
-                    className="border-b last:border-0 hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.push(`/lots/${row.lot_id}`)}
-                  >
-                    <td className="py-2 font-mono text-xs">{row.lot_number}</td>
-                    <td>{row.owner_name}</td>
-                    <td>{row.commodity_name}</td>
-                    <td className="text-right font-medium text-red-700">
-                      {row.days_in_storage}
-                    </td>
-                    <td className="text-right text-gray-500">{row.threshold}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="flex items-center gap-2 text-sm text-emerald-700">
-              <span aria-hidden>✓</span>
-              <span>No lots over storage threshold.</span>
-            </div>
-          )}
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Attention Required</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {data?.attention_required.length ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Lot #</TableHead>
+                    <TableHead>Owner</TableHead>
+                    <TableHead>Commodity</TableHead>
+                    <TableHead className="text-right">Days</TableHead>
+                    <TableHead className="text-right">Threshold</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.attention_required.map((row) => (
+                    <TableRow key={row.lot_id} className="cursor-pointer" onClick={() => router.push(`/lots/${row.lot_id}`)}>
+                      <TableCell className="font-mono text-xs text-primary-700">{row.lot_number}</TableCell>
+                      <TableCell>{row.owner_name}</TableCell>
+                      <TableCell>{row.commodity_name}</TableCell>
+                      <TableCell className="text-right font-medium tabular-nums text-destructive">{row.days_in_storage}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{row.threshold}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="flex items-center gap-2 py-6 text-sm text-green-600">
+                <CheckCircle2 className="h-4 w-4" aria-hidden />
+                No lots over storage threshold.
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="bg-gray-50 border border-dashed border-gray-300 rounded-lg p-5">
-        <div className="text-sm font-bold text-gray-700">Spoilage Queue</div>
-        <div className="mt-1 text-xs text-gray-500">
-          Spoilage review and inspections are part of Phase 11 — Quality module. Once
-          shipped, you&apos;ll see pending inspections and confirmed spoilage events here.
-        </div>
+      <div className="mt-6 rounded-lg border border-dashed bg-muted/30 p-5">
+        <div className="text-sm font-semibold text-foreground">Spoilage Queue</div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Spoilage review and inspections are part of the Quality module. Once shipped, pending
+          inspections and confirmed spoilage events appear here.
+        </p>
       </div>
     </div>
   );
