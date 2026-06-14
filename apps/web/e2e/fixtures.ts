@@ -28,21 +28,40 @@ interface LoginResult {
   user: { id: string; email: string; role: string; facility_id: string };
 }
 
+// Cache one token per role for the whole run. Role switches are frequent in
+// long workflows; re-logging in each time trips the auth rate limiter (429).
+const tokenCache = new Map<string, LoginResult>();
+
 async function apiLogin(role: string): Promise<LoginResult> {
+  const cached = tokenCache.get(role);
+  if (cached) return cached;
+
   const cred = ROLE_CREDENTIALS[role];
   if (!cred) throw new Error(`Unknown role: ${role}`);
-  const res = await fetch(`${API_URL}/v1/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Facility-ID': FACILITY_ID },
-    body: JSON.stringify({ email: cred.email, password: cred.password }),
-  });
-  if (!res.ok) throw new Error(`Login as ${role} failed: ${res.status}`);
-  const body = await res.json();
-  return {
-    accessToken: body.data.access_token,
-    refreshToken: body.data.refresh_token,
-    user: body.data.user,
-  };
+
+  // Retry with backoff if the rate limiter (429) kicks in.
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const res = await fetch(`${API_URL}/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Facility-ID': FACILITY_ID },
+      body: JSON.stringify({ email: cred.email, password: cred.password }),
+    });
+    if (res.ok) {
+      const body = await res.json();
+      const result: LoginResult = {
+        accessToken: body.data.access_token,
+        refreshToken: body.data.refresh_token,
+        user: body.data.user,
+      };
+      tokenCache.set(role, result);
+      return result;
+    }
+    lastStatus = res.status;
+    if (res.status !== 429) break;
+    await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+  }
+  throw new Error(`Login as ${role} failed: ${lastStatus}`);
 }
 
 export async function resetFacility(): Promise<void> {

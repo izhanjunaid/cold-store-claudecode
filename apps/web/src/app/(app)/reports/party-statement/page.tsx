@@ -4,15 +4,12 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-
-const ROLE_RANK: Record<string, number> = {
-  OWNER: 6,
-  MANAGER: 5,
-  ACCOUNTANT: 4,
-  OPERATOR: 3,
-  SECURITY: 2,
-  VIEWER: 1,
-};
+import { hasMinRole } from '@/lib/rbac';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { PageHeader } from '@/components/layout/page-header';
 
 interface PartyOption {
   id: string;
@@ -23,16 +20,13 @@ interface PartyOption {
 function defaultRange() {
   const to = new Date();
   const from = new Date(to.getTime() - 365 * 86_400_000);
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  };
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
 }
 
 export default function PartyStatementPickerPage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
-  const canView = (ROLE_RANK[user?.role ?? ''] ?? 0) >= ROLE_RANK['ACCOUNTANT']!;
+  const canView = hasMinRole(user?.role, 'ACCOUNTANT');
 
   const range = defaultRange();
   const [partyQuery, setPartyQuery] = useState('');
@@ -63,11 +57,9 @@ export default function PartyStatementPickerPage() {
 
   if (!canView) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center">
-        <h1 className="text-xl font-bold text-gray-900 mb-2">Access denied</h1>
-        <p className="text-gray-600">
-          Party statement requires ACCOUNTANT role or higher.
-        </p>
+      <div>
+        <PageHeader title="Party Statement" />
+        <p className="text-muted-foreground">Party statement requires ACCOUNTANT role or higher.</p>
       </div>
     );
   }
@@ -75,126 +67,95 @@ export default function PartyStatementPickerPage() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!partyId) return;
-    const qs = new URLSearchParams({
-      date_from: dateFrom,
-      date_to: dateTo,
-      book_type: bookType,
-    });
+    const qs = new URLSearchParams({ date_from: dateFrom, date_to: dateTo, book_type: bookType });
     router.push(`/reports/party-statement/${partyId}?${qs.toString()}`);
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Party Statement</h1>
-      <form onSubmit={submit} className="bg-white rounded-lg shadow p-6 space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Party</label>
-          {partyId ? (
-            <div className="flex items-center justify-between border rounded px-3 py-2 bg-gray-50">
-              <span>
-                <strong>{partyName}</strong>
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setPartyId('');
-                  setPartyName('');
-                  setPartyQuery('');
-                }}
-                className="text-xs text-blue-600 hover:underline"
-              >
-                Change
-              </button>
-            </div>
-          ) : (
-            <div className="relative">
-              <input
-                type="text"
-                value={partyQuery}
-                onChange={(e) => setPartyQuery(e.target.value)}
-                placeholder="Search by name (min 2 chars)…"
-                className="w-full border rounded px-3 py-2"
-              />
-              {partyResults.length > 0 && (
-                <ul className="absolute z-10 bg-white shadow-md rounded mt-1 w-full max-h-60 overflow-auto border">
-                  {partyResults.map((p) => (
-                    <li
-                      key={p.id}
-                      onClick={() => {
-                        setPartyId(p.id);
-                        setPartyName(p.name);
-                        setPartyResults([]);
-                        setPartyQuery('');
-                      }}
-                      className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
-                    >
-                      <strong>{p.name}</strong>{' '}
-                      <span className="text-xs text-gray-500">({p.party_type})</span>
-                    </li>
-                  ))}
-                </ul>
+    <div className="max-w-2xl">
+      <PageHeader title="Party Statement" description="Generate a statement of account for any party" />
+      <Card>
+        <CardContent className="pt-6">
+          <form onSubmit={submit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Party</Label>
+              {partyId ? (
+                <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2">
+                  <strong className="text-sm">{partyName}</strong>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => {
+                      setPartyId('');
+                      setPartyName('');
+                      setPartyQuery('');
+                    }}
+                  >
+                    Change
+                  </Button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <Input
+                    value={partyQuery}
+                    onChange={(e) => setPartyQuery(e.target.value)}
+                    placeholder="Search by name (min 2 chars)…"
+                  />
+                  {partyResults.length > 0 && (
+                    <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-popover shadow-md">
+                      {partyResults.map((p) => (
+                        <li
+                          key={p.id}
+                          onClick={() => {
+                            setPartyId(p.id);
+                            setPartyName(p.name);
+                            setPartyResults([]);
+                            setPartyQuery('');
+                          }}
+                          className="cursor-pointer px-3 py-2 text-sm hover:bg-accent"
+                        >
+                          <strong>{p.name}</strong>{' '}
+                          <span className="text-xs text-muted-foreground">({p.party_type})</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Date from
-            </label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Date to
-            </label>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="w-full border rounded px-3 py-2"
-            />
-          </div>
-        </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Date from</Label>
+                <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="tabular-nums" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Date to</Label>
+                <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="tabular-nums" />
+              </div>
+            </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Book type
-          </label>
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                checked={bookType === 'PACCI'}
-                onChange={() => setBookType('PACCI')}
-              />
-              PACCI (official)
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                checked={bookType === 'KATCHI'}
-                onChange={() => setBookType('KATCHI')}
-              />
-              KATCHI (informal)
-            </label>
-          </div>
-        </div>
+            <div className="space-y-2">
+              <Label>Book type</Label>
+              <div className="flex gap-4 text-sm">
+                <label className="flex items-center gap-2">
+                  <input type="radio" checked={bookType === 'PACCI'} onChange={() => setBookType('PACCI')} />
+                  PACCI (official)
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="radio" checked={bookType === 'KATCHI'} onChange={() => setBookType('KATCHI')} />
+                  KATCHI (informal)
+                </label>
+              </div>
+            </div>
 
-        <button
-          type="submit"
-          disabled={!partyId}
-          className="px-4 py-2 bg-primary-700 text-white rounded hover:bg-primary-800 disabled:opacity-50"
-        >
-          View Statement
-        </button>
-      </form>
+            <Button type="submit" disabled={!partyId}>
+              View Statement
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

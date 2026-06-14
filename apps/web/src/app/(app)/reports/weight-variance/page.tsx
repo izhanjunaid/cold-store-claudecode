@@ -1,173 +1,104 @@
 'use client';
 
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { WeightVarianceRowType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
-import { apiClientList, type PaginatedResult } from '@/lib/api-client';
+import { hasMinRole } from '@/lib/rbac';
+import { Input } from '@/components/ui/input';
+import { PageHeader } from '@/components/layout/page-header';
+import { DataTable, useTableState, type DataTableColumn } from '@/components/data-table';
+import { useListQuery } from '@/hooks/use-list-query';
+import { qk } from '@/lib/query-keys';
 
-const ROLE_RANK: Record<string, number> = {
-  OWNER: 6,
-  MANAGER: 5,
-  ACCOUNTANT: 4,
-  OPERATOR: 3,
-  SECURITY: 2,
-  VIEWER: 1,
-};
+const THRESHOLD = 2;
+const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
-const VARIANCE_THRESHOLD_PCT = 2;
+const columns: DataTableColumn<WeightVarianceRowType>[] = [
+  { id: 'lot_number', header: 'Lot #', enableHiding: false, cell: (r) => <span className="font-mono text-xs text-primary-700">{r.lot_number}</span>, csv: (r) => r.lot_number },
+  { id: 'owner', header: 'Owner', cell: (r) => r.owner_name, csv: (r) => r.owner_name },
+  { id: 'inbound', header: 'Inbound (kg)', numeric: true, cell: (r) => num(r.inbound_kg_prorated), csv: (r) => r.inbound_kg_prorated },
+  { id: 'outbound', header: 'Outbound (kg)', numeric: true, cell: (r) => num(r.outbound_kg_total), csv: (r) => r.outbound_kg_total },
+  {
+    id: 'variance_kg',
+    header: 'Variance (kg)',
+    numeric: true,
+    cell: (r) => <span className={Math.abs(r.variance_pct) >= THRESHOLD ? 'font-medium text-destructive' : ''}>{num(r.variance_kg)}</span>,
+    csv: (r) => r.variance_kg,
+  },
+  {
+    id: 'variance_pct',
+    header: 'Variance %',
+    numeric: true,
+    cell: (r) => <span className={Math.abs(r.variance_pct) >= THRESHOLD ? 'font-medium text-destructive' : ''}>{r.variance_pct.toFixed(2)}%</span>,
+    csv: (r) => r.variance_pct,
+  },
+  { id: 'outbounds', header: 'Outbounds', numeric: true, cell: (r) => r.finalized_outbound_count, csv: (r) => r.finalized_outbound_count },
+];
 
 export default function WeightVariancePage() {
   const user = useAuthStore((s) => s.user);
   const router = useRouter();
-  const canView = (ROLE_RANK[user?.role ?? ''] ?? 0) >= ROLE_RANK['MANAGER']!;
+  const canView = hasMinRole(user?.role, 'MANAGER');
 
-  const [page, setPage] = useState(1);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const perPage = 50;
+  const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(
+    ['date_from', 'date_to'],
+    { defaultPerPage: 50 },
+  );
+  const params = useMemo(
+    () => ({ page: state.page, per_page: state.perPage, ...state.filters }),
+    [state],
+  );
 
-  const qs = new URLSearchParams({ page: String(page), per_page: String(perPage) });
-  if (dateFrom) qs.set('date_from', dateFrom);
-  if (dateTo) qs.set('date_to', dateTo);
-
-  const { data, isLoading } = useQuery<PaginatedResult<WeightVarianceRowType>>({
-    queryKey: ['weight-variance', user?.facility_id, page, dateFrom, dateTo],
-    queryFn: () =>
-      apiClientList<WeightVarianceRowType>(`/v1/reports/weight-variance?${qs.toString()}`),
-    enabled: canView && !!user,
-  });
+  const { data, isLoading, isError } = useListQuery<WeightVarianceRowType>(
+    qk.reports.report('weight-variance', params),
+    '/v1/reports/weight-variance',
+    params,
+    { enabled: canView && !!user },
+  );
 
   if (!canView) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center">
-        <h1 className="text-xl font-bold text-gray-900 mb-2">Access denied</h1>
-        <p className="text-gray-600">Weight variance requires MANAGER role or higher.</p>
+      <div>
+        <PageHeader title="Weight Variance" />
+        <p className="text-muted-foreground">Weight variance requires MANAGER role or higher.</p>
       </div>
     );
   }
 
-  const total = data?.meta.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / perPage));
-
   return (
-    <div className="space-y-4">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Weight Variance</h1>
-        <button
-          onClick={() => router.push('/reports')}
-          className="text-sm text-blue-600 hover:underline"
-        >
-          ← Back to reports
-        </button>
-      </div>
-
-      <div className="bg-white rounded-lg shadow p-4 flex flex-wrap items-end gap-3 text-sm">
-        <div>
-          <label className="block text-xs text-gray-500 uppercase mb-1">From</label>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => { setPage(1); setDateFrom((e.target as HTMLInputElement).value); }}
-            className="border rounded px-2 py-1"
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-gray-500 uppercase mb-1">To</label>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => { setPage(1); setDateTo((e.target as HTMLInputElement).value); }}
-            className="border rounded px-2 py-1"
-          />
-        </div>
-        <button
-          onClick={() => { setDateFrom(''); setDateTo(''); setPage(1); }}
-          className="px-3 py-1 border rounded text-gray-600 hover:bg-gray-50"
-        >
-          Clear
-        </button>
-        <div className="ml-auto text-xs text-gray-500">
-          Rows highlighted red have |variance| ≥ {VARIANCE_THRESHOLD_PCT}%
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-            <tr>
-              <th className="text-left py-3 px-4">Lot #</th>
-              <th className="text-left">Owner</th>
-              <th className="text-right">Inbound (kg)</th>
-              <th className="text-right">Outbound (kg)</th>
-              <th className="text-right">Variance (kg)</th>
-              <th className="text-right">Variance %</th>
-              <th className="text-right">Outbounds</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              <tr>
-                <td colSpan={7} className="text-center py-8 text-gray-500">
-                  Loading…
-                </td>
-              </tr>
-            ) : data?.data.length ? (
-              data.data.map((row) => {
-                const flagged = Math.abs(row.variance_pct) >= VARIANCE_THRESHOLD_PCT;
-                return (
-                  <tr
-                    key={row.lot_id}
-                    className={`border-t hover:bg-gray-50 cursor-pointer ${flagged ? 'bg-red-50' : ''}`}
-                    onClick={() => router.push(`/lots/${row.lot_id}`)}
-                  >
-                    <td className="py-2 px-4 font-mono text-xs">{row.lot_number}</td>
-                    <td>{row.owner_name}</td>
-                    <td className="text-right">{row.inbound_kg_prorated.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                    <td className="text-right">{row.outbound_kg_total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                    <td className={`text-right ${flagged ? 'text-red-700 font-medium' : ''}`}>
-                      {row.variance_kg.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                    </td>
-                    <td className={`text-right ${flagged ? 'text-red-700 font-medium' : ''}`}>
-                      {row.variance_pct.toFixed(2)}%
-                    </td>
-                    <td className="text-right text-gray-500">{row.finalized_outbound_count}</td>
-                  </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan={7} className="text-center py-8 text-gray-500">
-                  No finalized outbounds in range.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm">
-          <button
-            disabled={page === 1}
-            onClick={() => setPage((p) => p - 1)}
-            className="px-3 py-1 rounded border disabled:opacity-50"
-          >
-            Prev
-          </button>
-          <span className="text-gray-600">
-            Page {page} of {totalPages} ({total} total)
-          </span>
-          <button
-            disabled={page === totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className="px-3 py-1 rounded border disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div>
-      )}
+    <div>
+      <PageHeader title="Weight Variance" description={`Inbound vs outbound weight per lot · flagged at ±${THRESHOLD}%`} />
+      <DataTable
+        columns={columns}
+        data={data?.data ?? []}
+        meta={data?.meta}
+        isLoading={isLoading}
+        isError={isError}
+        sort={state.sort}
+        onSortChange={setSort}
+        page={state.page}
+        perPage={state.perPage}
+        onPageChange={setPage}
+        onPerPageChange={setPerPage}
+        perPageOptions={[50, 100]}
+        getRowId={(r) => r.lot_id}
+        onRowClick={(r) => router.push(`/lots/${r.lot_id}`)}
+        filterValues={state.filters}
+        onFilterChange={setFilter}
+        onResetFilters={resetFilters}
+        toolbar={{
+          extra: (
+            <div className="flex items-center gap-2">
+              <Input type="date" aria-label="From date" value={state.filters['date_from'] ?? ''} onChange={(e) => setFilter('date_from', e.target.value)} className="h-8 w-auto tabular-nums" />
+              <span className="text-muted-foreground">–</span>
+              <Input type="date" aria-label="To date" value={state.filters['date_to'] ?? ''} onChange={(e) => setFilter('date_to', e.target.value)} className="h-8 w-auto tabular-nums" />
+            </div>
+          ),
+        }}
+        csvFilename="weight-variance"
+        emptyState={{ title: 'No finalized outbounds in range' }}
+      />
     </div>
   );
 }

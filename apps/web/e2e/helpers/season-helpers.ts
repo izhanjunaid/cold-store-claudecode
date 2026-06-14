@@ -14,20 +14,34 @@ export interface RoleHeaders extends Record<string, string> {
   'X-Facility-ID': string;
 }
 
+const headerCache = new Map<string, RoleHeaders>();
+
 export async function authHeaders(role: keyof typeof ROLE_CREDENTIALS): Promise<RoleHeaders> {
+  const cached = headerCache.get(role);
+  if (cached) return cached;
   const cred = ROLE_CREDENTIALS[role];
   if (!cred) throw new Error(`Unknown role ${role}`);
-  const res = await fetch(`${API_URL}/v1/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Facility-ID': FACILITY_ID },
-    body: JSON.stringify({ email: cred.email, password: cred.password }),
-  });
-  if (!res.ok) throw new Error(`Login as ${role} failed: ${res.status}`);
-  const body = await res.json();
-  return {
-    Authorization: `Bearer ${body.data.access_token}`,
-    'X-Facility-ID': FACILITY_ID,
-  };
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const res = await fetch(`${API_URL}/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Facility-ID': FACILITY_ID },
+      body: JSON.stringify({ email: cred.email, password: cred.password }),
+    });
+    if (res.ok) {
+      const body = await res.json();
+      const headers: RoleHeaders = {
+        Authorization: `Bearer ${body.data.access_token}`,
+        'X-Facility-ID': FACILITY_ID,
+      };
+      headerCache.set(role, headers);
+      return headers;
+    }
+    lastStatus = res.status;
+    if (res.status !== 429) break;
+    await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+  }
+  throw new Error(`Login as ${role} failed: ${lastStatus}`);
 }
 
 export interface FacilityRefs {

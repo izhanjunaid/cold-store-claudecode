@@ -245,7 +245,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
       vehicle: string;
       withdrawalType: 'PARTIAL' | 'FULL';
       paymentMethod: 'CASH' | 'CHEQUE' | 'BANK_TRANSFER';
-      paymentAmount: number; // PKR — what the accountant actually receives
+      payFull: boolean; // pay the full invoice balance (true) or a ~60% partial (false)
       paymentRef?: string;
       creditAuthorize?: boolean; // true if the gate clear needs a manager override
       shotPrefix: string;
@@ -298,11 +298,12 @@ test.describe('Muhammad Aslam — full potato season', () => {
         { headers: mgrHeaders },
       );
       const invList = await invListRes.json();
-      const allInvoices = invList.data ?? invList;
-      // Latest invoice for this lot
-      const draftInvoice = allInvoices[0];
+      const allInvoices = (invList.data ?? invList) as Array<{ id: string; status: string }>;
+      // The just-dispatched outbound creates a fresh DRAFT invoice; pick that one
+      // (earlier withdrawals on this lot leave FINALIZED invoices in the list).
+      const draftInvoice = allInvoices.find((i) => i.status === 'DRAFT') ?? allInvoices[0];
       expect(draftInvoice).toBeTruthy();
-      const invoiceId = draftInvoice.id as string;
+      const invoiceId = draftInvoice!.id;
 
       // (d) MANAGER: finalize the invoice
       await page.goto(`/invoices/${invoiceId}`);
@@ -332,6 +333,11 @@ test.describe('Muhammad Aslam — full potato season', () => {
       const invoiceTotal = Number((finalInvoice.data ?? finalInvoice).total_pkr);
       expect(invoiceTotal).toBeGreaterThan(0);
 
+      // Pay against the ACTUAL finalized balance (the billing engine is the source
+      // of truth — hardcoded amounts drift with the seeded rate plan).
+      const balanceDue = Number((finalInvoice.data ?? finalInvoice).balance_due_pkr);
+      const payAmount = opts.payFull ? balanceDue : Math.max(1, Math.round(balanceDue * 0.6));
+
       // (e) ACCOUNTANT: record the payment
       await loginAs('ACCOUNTANT');
       await page.goto(`/payments/new?party_id=${partyId}`);
@@ -341,7 +347,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
       // Party is preselected from ?party_id= and shown in a Combobox; confirm it.
       await pickCombobox(page, 'combobox-party_id', aslam.name);
       // Amount and method (name-based selectors after the redesign)
-      await page.locator('input[name="amount_pkr"]').fill(String(opts.paymentAmount));
+      await page.locator('input[name="amount_pkr"]').fill(String(payAmount));
       await page.locator('select[name="payment_method"]').selectOption(opts.paymentMethod);
       if (opts.paymentRef) {
         await page.locator('input[placeholder*="Cheque"]').fill(opts.paymentRef);
@@ -352,7 +358,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
       // Add allocation row, pick our invoice, fill the amount
       await page.getByRole('button', { name: /add invoice/i }).click();
       await page.locator('select[name="allocation_invoice"]').last().selectOption(invoiceId);
-      await page.locator('input[name="allocation_amount"]').last().fill(String(opts.paymentAmount));
+      await page.locator('input[name="allocation_amount"]').last().fill(String(payAmount));
 
       await shot(page, `${opts.shotPrefix}-e-payment-form.png`);
 
@@ -422,7 +428,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
         vehicle: plates.out1,
         withdrawalType: 'PARTIAL',
         paymentMethod: 'CASH',
-        paymentAmount: 50_000, // 200 bags × Rs 250/bag (seasonal rate) = 50,000
+        payFull: true,
         shotPrefix: '05',
       });
       invoice1Total = r.invoiceTotal;
@@ -437,7 +443,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
         vehicle: plates.out2,
         withdrawalType: 'PARTIAL',
         paymentMethod: 'CHEQUE',
-        paymentAmount: 50_000,
+        payFull: true,
         paymentRef: 'MCB-7788231',
         shotPrefix: '06',
       });
@@ -446,8 +452,8 @@ test.describe('Muhammad Aslam — full potato season', () => {
     });
 
     await test.step('07 — final withdrawal (100 bags FULL, partial pay + credit auth)', async () => {
-      // Final 100 bags @ Rs 250 = Rs 25,000 owed.
-      // Aslam pays Rs 15,000 by bank transfer → Rs 10,000 remains → manager credit-authorizes the gate.
+      // Final 100 bags FULL withdrawal. Aslam pays ~60% by bank transfer; the
+      // remainder is left outstanding → manager credit-authorizes the gate.
       const r = await runWithdrawal({
         label: '#3 — 100 bags credit',
         bags: 100,
@@ -455,7 +461,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
         vehicle: plates.out3,
         withdrawalType: 'FULL',
         paymentMethod: 'BANK_TRANSFER',
-        paymentAmount: 15_000,
+        payFull: false,
         paymentRef: 'HBL-TRX-998877',
         creditAuthorize: true,
         shotPrefix: '07',
@@ -479,15 +485,16 @@ test.describe('Muhammad Aslam — full potato season', () => {
 
     // ─────────────────────────────────────────────────────────────────────
     await test.step('08 — review ledger (party detail → Ledger tab)', async () => {
-      await loginAs('OPERATOR');
+      // The party ledger requires ACCOUNTANT+ (matches the API authz).
+      await loginAs('ACCOUNTANT');
       await page.goto(`/parties/${partyId}`);
       await expect(page.getByText(aslam.name).first()).toBeVisible({ timeout: 10_000 });
-      await page.getByRole('button', { name: /^ledger$/i }).click();
+      await page.getByRole('tab', { name: /^ledger$/i }).click();
       await expect(page.getByText(/outstanding/i)).toBeVisible({ timeout: 15_000 });
       await shot(page, '08-ledger.png');
 
       const ledger = await (
-        await request.get(`${API_URL}/v1/parties/${partyId}/ledger`, { headers: opHeaders })
+        await request.get(`${API_URL}/v1/parties/${partyId}/ledger`, { headers: acctHeaders })
       ).json();
       const data = ledger.data ?? ledger;
       expect(Number(data.total_debit_pkr)).toBe(invoice1Total + invoice2Total + invoice3Total);
