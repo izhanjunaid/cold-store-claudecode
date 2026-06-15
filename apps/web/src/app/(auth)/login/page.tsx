@@ -2,20 +2,19 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Snowflake } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { apiClient } from '@/lib/api-client';
 import { defaultRouteForRole } from '@/lib/auth-redirect';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface LoginResponse {
   access_token: string;
   refresh_token: string;
-  user: {
-    id: string;
-    email: string;
-    name: string;
-    role: string;
-    facility_id: string;
-  };
+  user: { id: string; email: string; name: string; role: string; facility_id: string };
 }
 
 export default function LoginPage() {
@@ -30,19 +29,18 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     try {
       const result = await apiClient<LoginResponse>('/v1/auth/login', {
         method: 'POST',
         body: { email, password },
-        headers: {
-          'X-Facility-ID': '00000000-0000-0000-0000-000000000001',
-        },
+        headers: { 'X-Facility-ID': '00000000-0000-0000-0000-000000000001' },
       });
-
       setUser(result.user, result.access_token, result.refresh_token);
       router.push(
-        defaultRouteForRole(result.user.role, (result.user as { must_change_password?: boolean }).must_change_password),
+        defaultRouteForRole(
+          result.user.role,
+          (result.user as { must_change_password?: boolean }).must_change_password,
+        ),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -52,58 +50,40 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-md">
-        <div className="bg-white rounded-lg shadow-lg p-8">
-          <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-primary-800">ColdChain</h1>
-            <p className="text-gray-500 mt-1">Cold Storage Management Platform</p>
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex flex-col items-center gap-2 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <Snowflake className="h-6 w-6" aria-hidden />
           </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="bg-red-50 text-red-700 p-3 rounded-md text-sm">{error}</div>
-            )}
-
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                placeholder="admin@coldchain.pk"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                placeholder="Enter your password"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2 px-4 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Signing in...' : 'Sign In'}
-            </button>
-          </form>
+          <div>
+            <h1 className="text-xl font-semibold text-foreground">ColdChain</h1>
+            <p className="text-sm text-muted-foreground">Cold Storage Management Platform</p>
+          </div>
         </div>
+
+        <Card>
+          <CardContent className="pt-6">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {error}
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="email">Email</Label>
+                <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="admin@coldchain.pk" autoComplete="username" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="password">Password</Label>
+                <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Enter your password" autoComplete="current-password" />
+              </div>
+              <Button type="submit" disabled={loading} className="w-full">
+                {loading ? 'Signing in…' : 'Sign In'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
