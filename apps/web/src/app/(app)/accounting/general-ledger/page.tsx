@@ -2,13 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { PageHeader } from '@/components/layout/page-header';
 
 interface Account {
   account_code: string;
   account_name: string;
   account_type: 'HEADER' | 'DETAIL';
 }
-
 interface GLEntry {
   date: string;
   entry_number: string;
@@ -20,19 +23,26 @@ interface GLEntry {
   credit_pkr: number;
   balance_pkr: number;
 }
-
 interface GLResponse {
   account_code: string;
   account_name: string;
-  account_class: string;
-  normal_balance: 'DEBIT' | 'CREDIT';
-  date_from: string | null;
-  date_to: string | null;
   opening_balance_pkr: number;
   total_debit_pkr: number;
   total_credit_pkr: number;
   closing_balance_pkr: number;
   entries: GLEntry[];
+}
+
+const SELECT_CLASS =
+  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+
+function Summary({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={`mt-0.5 font-mono tabular-nums ${bold ? 'font-semibold' : ''}`}>{value}</div>
+    </div>
+  );
 }
 
 export default function GeneralLedgerPage() {
@@ -48,11 +58,8 @@ export default function GeneralLedgerPage() {
     apiClient<Account[]>('/v1/accounting/accounts?is_active=true').then((all) => {
       const detail = all.filter((a) => a.account_type === 'DETAIL');
       setAccounts(detail);
-      if (detail.length > 0 && !accountCode) {
-        setAccountCode(detail[0]!.account_code);
-      }
+      if (detail.length > 0) setAccountCode((prev) => prev || detail[0]!.account_code);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -62,100 +69,85 @@ export default function GeneralLedgerPage() {
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
     if (bookType) params.set('book_type', bookType);
-    apiClient<GLResponse>(`/v1/accounting/general-ledger?${params}`)
-      .then(setData)
-      .finally(() => setLoading(false));
+    apiClient<GLResponse>(`/v1/accounting/general-ledger?${params}`).then(setData).finally(() => setLoading(false));
   }, [accountCode, dateFrom, dateTo, bookType]);
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">General Ledger</h1>
+      <PageHeader title="General Ledger" description="Every line that hit a single account" />
 
-      <div className="bg-white rounded-lg shadow p-4 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-        <select
-          value={accountCode}
-          onChange={(e) => setAccountCode((e.target as HTMLSelectElement).value)}
-          className="border rounded-lg px-3 py-2 text-sm font-mono"
-        >
-          <option value="">Select account...</option>
-          {accounts.map((a) => (
-            <option key={a.account_code} value={a.account_code}>
-              {a.account_code} — {a.account_name}
-            </option>
-          ))}
-        </select>
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom((e.target as HTMLInputElement).value)} className="border rounded-lg px-3 py-2 text-sm" />
-        <input type="date" value={dateTo} onChange={(e) => setDateTo((e.target as HTMLInputElement).value)} className="border rounded-lg px-3 py-2 text-sm" />
-        <select value={bookType} onChange={(e) => setBookType((e.target as HTMLSelectElement).value)} className="border rounded-lg px-3 py-2 text-sm">
-          <option value="">PACCI + KATCHI</option>
-          <option value="PACCI">PACCI</option>
-          <option value="KATCHI">KATCHI</option>
-        </select>
-      </div>
+      <Card className="mb-4">
+        <CardContent className="grid grid-cols-1 gap-3 pt-6 md:grid-cols-4">
+          <select value={accountCode} onChange={(e) => setAccountCode(e.target.value)} className={`${SELECT_CLASS} font-mono`}>
+            <option value="">Select account…</option>
+            {accounts.map((a) => (
+              <option key={a.account_code} value={a.account_code}>
+                {a.account_code} — {a.account_name}
+              </option>
+            ))}
+          </select>
+          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="tabular-nums" />
+          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="tabular-nums" />
+          <select value={bookType} onChange={(e) => setBookType(e.target.value)} className={SELECT_CLASS}>
+            <option value="">PACCI + KATCHI</option>
+            <option value="PACCI">PACCI</option>
+            <option value="KATCHI">KATCHI</option>
+          </select>
+        </CardContent>
+      </Card>
 
       {loading ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">Loading...</div>
+        <p className="text-muted-foreground">Loading…</p>
       ) : !data ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">Select an account</div>
+        <p className="text-muted-foreground">Select an account.</p>
       ) : (
         <>
-          <div className="bg-white rounded-lg shadow p-4 mb-4 grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-            <div>
-              <div className="text-gray-500">Account</div>
-              <div className="font-semibold">{data.account_code} — {data.account_name}</div>
-            </div>
-            <div>
-              <div className="text-gray-500">Opening</div>
-              <div className="font-mono">{data.opening_balance_pkr.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-gray-500">Total Debit</div>
-              <div className="font-mono">{data.total_debit_pkr.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-gray-500">Total Credit</div>
-              <div className="font-mono">{data.total_credit_pkr.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-gray-500">Closing</div>
-              <div className="font-mono font-semibold">{data.closing_balance_pkr.toLocaleString()}</div>
-            </div>
-          </div>
+          <Card className="mb-4">
+            <CardContent className="grid grid-cols-2 gap-4 pt-6 text-sm md:grid-cols-5">
+              <Summary label="Account" value={`${data.account_code} — ${data.account_name}`} bold />
+              <Summary label="Opening" value={data.opening_balance_pkr.toLocaleString()} />
+              <Summary label="Total Debit" value={data.total_debit_pkr.toLocaleString()} />
+              <Summary label="Total Credit" value={data.total_credit_pkr.toLocaleString()} />
+              <Summary label="Closing" value={data.closing_balance_pkr.toLocaleString()} bold />
+            </CardContent>
+          </Card>
 
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Entry</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Party</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lot</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Debit</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Credit</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Entry</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Party</TableHead>
+                  <TableHead>Lot</TableHead>
+                  <TableHead className="text-right">Debit</TableHead>
+                  <TableHead className="text-right">Credit</TableHead>
+                  <TableHead className="text-right">Balance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {data.entries.length === 0 ? (
-                  <tr><td colSpan={8} className="px-6 py-8 text-center text-gray-500">No activity</td></tr>
+                  <TableRow>
+                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No activity</TableCell>
+                  </TableRow>
                 ) : (
                   data.entries.map((e) => (
-                    <tr key={`${e.entry_id}-${e.date}-${e.entry_number}`} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 text-sm text-gray-600">{e.date}</td>
-                      <td className="px-3 py-2 text-xs font-mono">{e.entry_number}</td>
-                      <td className="px-3 py-2 text-sm text-gray-700 max-w-md truncate">{e.description}</td>
-                      <td className="px-3 py-2 text-sm text-gray-600">{e.party_name ?? '—'}</td>
-                      <td className="px-3 py-2 text-xs font-mono">{e.lot_number ?? '—'}</td>
-                      <td className="px-3 py-2 text-sm text-right">{e.debit_pkr > 0 ? e.debit_pkr.toLocaleString() : ''}</td>
-                      <td className="px-3 py-2 text-sm text-right">{e.credit_pkr > 0 ? e.credit_pkr.toLocaleString() : ''}</td>
-                      <td className="px-3 py-2 text-sm text-right font-semibold">{e.balance_pkr.toLocaleString()}</td>
-                    </tr>
+                    <TableRow key={`${e.entry_id}-${e.date}-${e.entry_number}`}>
+                      <TableCell>{e.date}</TableCell>
+                      <TableCell className="font-mono text-xs">{e.entry_number}</TableCell>
+                      <TableCell className="max-w-md truncate">{e.description}</TableCell>
+                      <TableCell>{e.party_name ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{e.lot_number ?? '—'}</TableCell>
+                      <TableCell className="text-right tabular-nums">{e.debit_pkr > 0 ? e.debit_pkr.toLocaleString() : ''}</TableCell>
+                      <TableCell className="text-right tabular-nums">{e.credit_pkr > 0 ? e.credit_pkr.toLocaleString() : ''}</TableCell>
+                      <TableCell className="text-right tabular-nums font-semibold">{e.balance_pkr.toLocaleString()}</TableCell>
+                    </TableRow>
                   ))
                 )}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </Card>
         </>
       )}
     </div>

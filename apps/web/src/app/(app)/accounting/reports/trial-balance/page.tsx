@@ -1,26 +1,30 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { CheckCircle2, TriangleAlert } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { PageHeader } from '@/components/layout/page-header';
 
 interface Row {
   account_code: string;
   account_name: string;
   account_class: string;
-  normal_balance: 'DEBIT' | 'CREDIT';
   debit_balance_pkr: number;
   credit_balance_pkr: number;
 }
-
 interface TB {
-  date_from: string | null;
-  date_to: string;
   rows: Row[];
   total_debit_pkr: number;
   total_credit_pkr: number;
   is_balanced: boolean;
 }
 
+const SELECT_CLASS =
+  'flex h-9 w-auto rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function TrialBalancePage() {
@@ -36,75 +40,81 @@ export default function TrialBalancePage() {
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
     if (bookType) params.set('book_type', bookType);
-    apiClient<TB>(`/v1/accounting/trial-balance?${params}`)
-      .then(setData)
-      .finally(() => setLoading(false));
+    apiClient<TB>(`/v1/accounting/trial-balance?${params}`).then(setData).finally(() => setLoading(false));
   }, [dateFrom, dateTo, bookType]);
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Trial Balance</h1>
-
-      <div className="bg-white rounded-lg shadow p-4 mb-4 flex gap-3">
-        <label className="block">
-          <span className="text-xs text-gray-500 block">From</span>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom((e.target as HTMLInputElement).value)} className="border rounded-lg px-3 py-2 text-sm" />
-        </label>
-        <label className="block">
-          <span className="text-xs text-gray-500 block">To</span>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo((e.target as HTMLInputElement).value)} className="border rounded-lg px-3 py-2 text-sm" />
-        </label>
-        <label className="block">
-          <span className="text-xs text-gray-500 block">Book</span>
-          <select value={bookType} onChange={(e) => setBookType((e.target as HTMLSelectElement).value)} className="border rounded-lg px-3 py-2 text-sm">
-            <option value="">PACCI + KATCHI</option>
-            <option value="PACCI">PACCI</option>
-            <option value="KATCHI">KATCHI</option>
-          </select>
-        </label>
-      </div>
+      <PageHeader
+        title="Trial Balance"
+        description="Debits = credits across all accounts"
+        actions={
+          <div className="flex items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">From</Label>
+              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9 w-auto tabular-nums" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">To</Label>
+              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9 w-auto tabular-nums" />
+            </div>
+            <select value={bookType} onChange={(e) => setBookType(e.target.value)} className={SELECT_CLASS}>
+              <option value="">PACCI + KATCHI</option>
+              <option value="PACCI">PACCI</option>
+              <option value="KATCHI">KATCHI</option>
+            </select>
+          </div>
+        }
+      />
 
       {loading ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">Loading...</div>
+        <p className="text-muted-foreground">Loading…</p>
       ) : !data ? null : (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Account</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Class</th>
-                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Debit</th>
-                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Credit</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Code</TableHead>
+                <TableHead>Account</TableHead>
+                <TableHead>Class</TableHead>
+                <TableHead className="text-right">Debit</TableHead>
+                <TableHead className="text-right">Credit</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.rows.length === 0 ? (
-                <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No activity in this period</td></tr>
-              ) : data.rows.map((r) => (
-                <tr key={r.account_code}>
-                  <td className="px-4 py-2 text-sm font-mono">{r.account_code}</td>
-                  <td className="px-4 py-2 text-sm">{r.account_name}</td>
-                  <td className="px-4 py-2 text-xs text-gray-500">{r.account_class}</td>
-                  <td className="px-4 py-2 text-sm text-right">{r.debit_balance_pkr > 0 ? r.debit_balance_pkr.toLocaleString() : ''}</td>
-                  <td className="px-4 py-2 text-sm text-right">{r.credit_balance_pkr > 0 ? r.credit_balance_pkr.toLocaleString() : ''}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot className="bg-gray-50 font-semibold">
-              <tr>
-                <td colSpan={3} className="px-4 py-3 text-sm text-right">Totals</td>
-                <td className="px-4 py-3 text-sm text-right">{data.total_debit_pkr.toLocaleString()}</td>
-                <td className="px-4 py-3 text-sm text-right">{data.total_credit_pkr.toLocaleString()}</td>
-              </tr>
-              <tr className={data.is_balanced ? 'text-green-700' : 'text-red-700'}>
-                <td colSpan={5} className="px-4 py-2 text-sm text-right">
-                  {data.is_balanced ? '✓ Trial balance balanced' : '✗ UNBALANCED — system error, investigate immediately'}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+                <TableRow>
+                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">No activity in this period</TableCell>
+                </TableRow>
+              ) : (
+                data.rows.map((r) => (
+                  <TableRow key={r.account_code}>
+                    <TableCell className="font-mono">{r.account_code}</TableCell>
+                    <TableCell>{r.account_name}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{r.account_class}</TableCell>
+                    <TableCell className="text-right tabular-nums">{r.debit_balance_pkr > 0 ? r.debit_balance_pkr.toLocaleString() : ''}</TableCell>
+                    <TableCell className="text-right tabular-nums">{r.credit_balance_pkr > 0 ? r.credit_balance_pkr.toLocaleString() : ''}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+            <TableFooter>
+              <TableRow>
+                <TableCell colSpan={3} className="text-right font-semibold">Totals</TableCell>
+                <TableCell className="text-right font-semibold tabular-nums">{data.total_debit_pkr.toLocaleString()}</TableCell>
+                <TableCell className="text-right font-semibold tabular-nums">{data.total_credit_pkr.toLocaleString()}</TableCell>
+              </TableRow>
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={5} className="text-right">
+                  <span className={`inline-flex items-center gap-1.5 ${data.is_balanced ? 'text-green-600' : 'text-destructive'}`}>
+                    {data.is_balanced ? <CheckCircle2 className="h-4 w-4" /> : <TriangleAlert className="h-4 w-4" />}
+                    {data.is_balanced ? 'Trial balance balanced' : 'UNBALANCED — investigate immediately'}
+                  </span>
+                </TableCell>
+              </TableRow>
+            </TableFooter>
+          </Table>
+        </Card>
       )}
     </div>
   );
