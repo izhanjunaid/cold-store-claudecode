@@ -2,14 +2,19 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { hasMinRole } from '@/lib/rbac';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { PageHeader } from '@/components/layout/page-header';
 
-const ROLE_RANK: Record<string, number> = {
-  SECURITY: 0, OPERATOR: 1, ACCOUNTANT: 2, MANAGER: 3, OWNER: 4,
-};
+const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
-// Common 5XXX/6XXX expense accounts (subset for selector)
 const EXPENSE_ACCOUNTS = [
   { code: '5010', name: 'Electricity — Refrigeration' },
   { code: '5020', name: 'Electricity — Facility (Non-Refrig.)' },
@@ -28,7 +33,7 @@ const EXPENSE_ACCOUNTS = [
 export default function NewExpenseVoucherPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const canCreate = (ROLE_RANK[user?.role ?? ''] ?? -1) >= 2;
+  const canCreate = hasMinRole(user?.role, 'ACCOUNTANT');
 
   const [voucherDate, setVoucherDate] = useState(new Date().toISOString().slice(0, 10));
   const [accountCode, setAccountCode] = useState('5010');
@@ -41,7 +46,12 @@ export default function NewExpenseVoucherPage() {
   const [error, setError] = useState<string | null>(null);
 
   if (!canCreate) {
-    return <div className="flex items-center justify-center h-64"><p className="text-gray-500">Need ACCOUNTANT+.</p></div>;
+    return (
+      <div>
+        <PageHeader title="New Expense Voucher" />
+        <p className="text-muted-foreground">Requires ACCOUNTANT role or higher.</p>
+      </div>
+    );
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -61,9 +71,10 @@ export default function NewExpenseVoucherPage() {
           is_accrual: isAccrual,
         },
       });
+      toast.success('Draft voucher created');
       router.push(`/accounting/expenses/${created.id}`);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create voucher');
     } finally {
       setSubmitting(false);
     }
@@ -71,60 +82,60 @@ export default function NewExpenseVoucherPage() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">New Expense Voucher</h1>
-      <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 space-y-4">
-        <p className="text-sm text-gray-600">Voucher starts as DRAFT. After creation: Approve (MANAGER+) → Pay (JE-17A) or Accrue (JE-17B) then Pay (JE-17B-PAY).</p>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Voucher Date *</label>
-            <input type="date" required value={voucherDate} onChange={(e) => setVoucherDate(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Expense Account *</label>
-            <select value={accountCode} onChange={(e) => setAccountCode(e.target.value)} className="w-full border rounded-lg px-3 py-2">
-              {EXPENSE_ACCOUNTS.map((a) => (
-                <option key={a.code} value={a.code}>{a.code} — {a.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
-          <input type="text" required value={description} onChange={(e) => setDescription(e.target.value)} className="w-full border rounded-lg px-3 py-2" placeholder="e.g., LESCO refrigeration bill — April 2026" />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Vendor</label>
-            <input type="text" value={vendor} onChange={(e) => setVendor(e.target.value)} className="w-full border rounded-lg px-3 py-2" placeholder="e.g., LESCO" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Reference / Bill #</label>
-            <input type="text" value={refNumber} onChange={(e) => setRefNumber(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Amount (PKR) *</label>
-          <input type="number" required min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-        </div>
-
-        <div>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={isAccrual} onChange={(e) => setIsAccrual(e.target.checked)} />
-            <span className="text-sm font-medium text-gray-700">This is an accrual (bill received, payment scheduled later)</span>
-          </label>
-          <p className="text-xs text-gray-500 mt-1 ml-6">If checked, after approval you accrue (JE-17B: DR 5XXX/6XXX, CR 2040), then pay later (JE-17B-PAY: DR 2040, CR 1010/1020).</p>
-        </div>
-
-        {error && <div className="text-red-700 bg-red-50 px-3 py-2 rounded text-sm">{error}</div>}
-        <div className="flex gap-3 pt-2">
-          <button type="submit" disabled={submitting} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50">{submitting ? 'Creating...' : 'Create Draft'}</button>
-          <button type="button" onClick={() => router.back()} className="border border-gray-300 px-4 py-2 rounded-lg">Cancel</button>
-        </div>
-      </form>
+      <PageHeader title="New Expense Voucher" crumb="New" />
+      <Card>
+        <CardContent className="pt-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Voucher starts as DRAFT. After creation: Approve (MANAGER+) → Pay (JE-17A) or Accrue (JE-17B) then Pay later.
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Voucher Date <span className="text-destructive">*</span></Label>
+                <Input type="date" required value={voucherDate} onChange={(e) => setVoucherDate(e.target.value)} className="tabular-nums" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Expense Account <span className="text-destructive">*</span></Label>
+                <select value={accountCode} onChange={(e) => setAccountCode(e.target.value)} className={SELECT_CLASS}>
+                  {EXPENSE_ACCOUNTS.map((a) => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Description <span className="text-destructive">*</span></Label>
+              <Input required value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. LESCO refrigeration bill — April 2026" />
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Vendor</Label>
+                <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="e.g. LESCO" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Reference / Bill #</Label>
+                <Input value={refNumber} onChange={(e) => setRefNumber(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Amount (PKR) <span className="text-destructive">*</span></Label>
+              <Input type="number" required min={0.01} step={0.01} value={amount} onChange={(e) => setAmount(e.target.value)} className="tabular-nums" />
+            </div>
+            <div className="rounded-md border p-3">
+              <label className="flex items-center gap-2.5 text-sm">
+                <Checkbox checked={isAccrual} onCheckedChange={(c) => setIsAccrual(!!c)} />
+                This is an accrual (bill received, payment scheduled later)
+              </label>
+              <p className="mt-1 pl-6 text-xs text-muted-foreground">
+                If checked, after approval you accrue (JE-17B), then pay later (JE-17B-PAY).
+              </p>
+            </div>
+            {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+            <div className="flex gap-3">
+              <Button type="submit" disabled={submitting}>{submitting ? 'Creating…' : 'Create Draft'}</Button>
+              <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }
