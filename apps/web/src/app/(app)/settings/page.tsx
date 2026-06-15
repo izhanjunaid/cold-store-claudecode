@@ -1,12 +1,30 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import type { FacilityResponseType } from '@coldchain/shared';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { PageHeader } from '@/components/layout/page-header';
 
 interface Commodity {
   id: string;
   name: string;
+}
+
+function Field({ label, hint, children, className }: { label: string; hint?: string; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={className}>
+      <Label className="mb-1.5 block">{label}</Label>
+      {children}
+      {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
 }
 
 export default function SettingsPage() {
@@ -15,9 +33,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  // Form state
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
@@ -28,7 +44,7 @@ export default function SettingsPage() {
   const [numberFormat, setNumberFormat] = useState<'en-PK' | 'en-IN'>('en-PK');
   const [alertThresholds, setAlertThresholds] = useState<Record<string, number>>({});
   const [chamberWarningPct, setChamberWarningPct] = useState('90');
-  const [backdatingMaxDays, setBackdatingMaxDays] = useState(''); // '' = unlimited
+  const [backdatingMaxDays, setBackdatingMaxDays] = useState('');
   const [gstDefaultRate, setGstDefaultRate] = useState('18');
   const [surchargeEnabled, setSurchargeEnabled] = useState(false);
   const [surchargePctPerMonth, setSurchargePctPerMonth] = useState('2');
@@ -52,9 +68,7 @@ export default function SettingsPage() {
         setNumberFormat(f.settings.number_format);
         setAlertThresholds(f.settings.storage_alert_thresholds ?? {});
         setChamberWarningPct(String(f.settings.chamber_capacity_warning_pct ?? 90));
-        setBackdatingMaxDays(
-          f.settings.backdating_max_days == null ? '' : String(f.settings.backdating_max_days),
-        );
+        setBackdatingMaxDays(f.settings.backdating_max_days == null ? '' : String(f.settings.backdating_max_days));
         setGstDefaultRate(String(f.settings.gst_default_rate ?? 18));
         setSurchargeEnabled(f.settings.late_payment_surcharge?.enabled ?? false);
         setSurchargePctPerMonth(String(f.settings.late_payment_surcharge?.pct_per_month ?? 2));
@@ -65,8 +79,6 @@ export default function SettingsPage() {
   }, []);
 
   async function save() {
-    setError(null);
-    setSavedAt(null);
     setSaving(true);
     try {
       const cleanedThresholds: Record<string, number> = {};
@@ -87,8 +99,7 @@ export default function SettingsPage() {
             gst_registered: gstRegistered,
             number_format: numberFormat,
             chamber_capacity_warning_pct: Math.min(100, Math.max(1, Math.floor(Number(chamberWarningPct) || 90))),
-            backdating_max_days:
-              backdatingMaxDays.trim() === '' ? null : Math.max(0, Math.floor(Number(backdatingMaxDays) || 0)),
+            backdating_max_days: backdatingMaxDays.trim() === '' ? null : Math.max(0, Math.floor(Number(backdatingMaxDays) || 0)),
             gst_default_rate: Math.min(100, Math.max(0, Number(gstDefaultRate) || 0)),
             late_payment_surcharge: {
               enabled: surchargeEnabled,
@@ -99,277 +110,139 @@ export default function SettingsPage() {
         },
       });
       setFacility(updated);
-      setSavedAt(Date.now());
+      toast.success('Settings saved');
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+      toast.error(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setSaving(false);
     }
   }
 
-  if (loading) return <div className="text-gray-500 p-4">Loading…</div>;
-  if (!facility) return <div className="text-red-700 p-4">{error ?? 'Failed to load facility'}</div>;
+  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (!facility) return <p className="text-destructive">{error ?? 'Failed to load facility'}</p>;
 
   return (
-    <div className="space-y-4 max-w-3xl">
-      <h1 className="text-2xl font-bold text-gray-900">System Settings</h1>
+    <div className="max-w-3xl">
+      <PageHeader
+        title="System Settings"
+        description="Facility profile and operational policy"
+        actions={<Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save Settings'}</Button>}
+      />
 
-      <section className="bg-white rounded-lg shadow p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">Facility Information</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">Name *</span>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName((e.target as HTMLInputElement).value)}
-              className="mt-1 w-full border rounded-lg px-3 py-2"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">City *</span>
-            <input
-              type="text"
-              value={city}
-              onChange={(e) => setCity((e.target as HTMLInputElement).value)}
-              className="mt-1 w-full border rounded-lg px-3 py-2"
-            />
-          </label>
-          <label className="block md:col-span-2">
-            <span className="text-sm font-medium text-gray-700">Address</span>
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress((e.target as HTMLInputElement).value)}
-              className="mt-1 w-full border rounded-lg px-3 py-2"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">Phone</span>
-            <input
-              type="text"
-              value={phone}
-              onChange={(e) => setPhone((e.target as HTMLInputElement).value)}
-              className="mt-1 w-full border rounded-lg px-3 py-2"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">GST Number</span>
-            <input
-              type="text"
-              value={gstNumber}
-              onChange={(e) => setGstNumber((e.target as HTMLInputElement).value)}
-              className="mt-1 w-full border rounded-lg px-3 py-2 font-mono"
-            />
-          </label>
-        </div>
-      </section>
+      <div className="space-y-5">
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Facility Information</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+            <Field label="City"><Input value={city} onChange={(e) => setCity(e.target.value)} /></Field>
+            <Field label="Address" className="md:col-span-2"><Input value={address} onChange={(e) => setAddress(e.target.value)} /></Field>
+            <Field label="Phone"><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
+            <Field label="GST Number"><Input value={gstNumber} onChange={(e) => setGstNumber(e.target.value)} className="font-mono" /></Field>
+          </CardContent>
+        </Card>
 
-      <section className="bg-white rounded-lg shadow p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">Operational Settings</h2>
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Operational Settings</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <Field label="Weight Dispute Threshold (kg)" hint="Flag lots whose accepted vs declared weight differs by ≥ this many kg.">
+                <Input type="number" min={0} value={weightThreshold} onChange={(e) => setWeightThreshold(e.target.value)} className="tabular-nums" />
+              </Field>
+              <Field label="Chamber Capacity Warning (%)" hint="Warn when a chamber would exceed this occupancy after a new lot.">
+                <Input type="number" min={1} max={100} value={chamberWarningPct} onChange={(e) => setChamberWarningPct(e.target.value)} className="tabular-nums" />
+              </Field>
+              <Field label="Max Backdating (days)" hint="How far back operators may date entries. Empty = unlimited; managers+ exempt.">
+                <Input type="number" min={0} value={backdatingMaxDays} placeholder="Unlimited" onChange={(e) => setBackdatingMaxDays(e.target.value)} className="tabular-nums" />
+              </Field>
+            </div>
 
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Weight Dispute Threshold (kg)</span>
-          <input
-            type="number"
-            value={weightThreshold}
-            onChange={(e) => setWeightThreshold((e.target as HTMLInputElement).value)}
-            className="mt-1 w-full md:w-48 border rounded-lg px-3 py-2"
-            min={0}
-          />
-          <span className="text-xs text-gray-500 mt-1 block">
-            Lots whose accepted weight differs from declared by ≥ this many kg are flagged.
-          </span>
-        </label>
-
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Chamber Capacity Warning (%)</span>
-          <input
-            type="number"
-            value={chamberWarningPct}
-            onChange={(e) => setChamberWarningPct((e.target as HTMLInputElement).value)}
-            className="mt-1 w-full md:w-48 border rounded-lg px-3 py-2"
-            min={1}
-            max={100}
-          />
-          <span className="text-xs text-gray-500 mt-1 block">
-            Inbound shows a warning when a chamber would exceed this occupancy after the new lot.
-          </span>
-        </label>
-
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Max Backdating (days)</span>
-          <input
-            type="number"
-            value={backdatingMaxDays}
-            placeholder="Unlimited"
-            onChange={(e) => setBackdatingMaxDays((e.target as HTMLInputElement).value)}
-            className="mt-1 w-full md:w-48 border rounded-lg px-3 py-2"
-            min={0}
-          />
-          <span className="text-xs text-gray-500 mt-1 block">
-            How far in the past operators may date inbound/outbound entries. Managers and above are
-            not limited. Leave empty for unlimited.
-          </span>
-        </label>
-
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={gstRegistered}
-            onChange={(e) => setGstRegistered((e.target as HTMLInputElement).checked)}
-          />
-          <span className="text-sm font-medium text-gray-700">GST Registered</span>
-        </label>
-
-        {gstRegistered && (
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">Default GST Rate (%)</span>
-            <input
-              type="number"
-              value={gstDefaultRate}
-              onChange={(e) => setGstDefaultRate((e.target as HTMLInputElement).value)}
-              className="mt-1 w-full md:w-48 border rounded-lg px-3 py-2"
-              min={0}
-              max={100}
-              step="0.5"
-            />
-            <span className="text-xs text-gray-500 mt-1 block">
-              Pre-filled on new invoices. Can still be changed per invoice while in draft.
-            </span>
-          </label>
-        )}
-
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Number Format</span>
-          <div className="mt-2 flex gap-4">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name="numberFormat"
-                checked={numberFormat === 'en-PK'}
-                onChange={() => setNumberFormat('en-PK')}
-              />
-              en-PK (1,00,000)
+            <label className="flex items-center gap-2.5 text-sm">
+              <Checkbox checked={gstRegistered} onCheckedChange={(c) => setGstRegistered(!!c)} />
+              GST Registered
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name="numberFormat"
-                checked={numberFormat === 'en-IN'}
-                onChange={() => setNumberFormat('en-IN')}
-              />
-              en-IN (1,00,000)
+            {gstRegistered && (
+              <Field label="Default GST Rate (%)" hint="Pre-filled on new invoices; editable per draft invoice." className="md:w-64">
+                <Input type="number" min={0} max={100} step={0.5} value={gstDefaultRate} onChange={(e) => setGstDefaultRate(e.target.value)} className="tabular-nums" />
+              </Field>
+            )}
+
+            <div>
+              <Label className="mb-2 block">Number Format</Label>
+              <div className="flex gap-4 text-sm">
+                <label className="flex items-center gap-2"><input type="radio" name="numberFormat" checked={numberFormat === 'en-PK'} onChange={() => setNumberFormat('en-PK')} /> en-PK (1,00,000)</label>
+                <label className="flex items-center gap-2"><input type="radio" name="numberFormat" checked={numberFormat === 'en-IN'} onChange={() => setNumberFormat('en-IN')} /> en-IN (1,00,000)</label>
+              </div>
+            </div>
+
+            <div>
+              <Label className="mb-1 block">Storage Alert Thresholds (days)</Label>
+              <p className="mb-2 text-xs text-muted-foreground">Per-commodity day count; Lot Aging flags lots older than this.</p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Commodity</TableHead>
+                    <TableHead className="text-right">Threshold (days)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {commodities.length === 0 ? (
+                    <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">No commodities configured.</TableCell></TableRow>
+                  ) : (
+                    commodities.map((c) => (
+                      <TableRow key={c.id}>
+                        <TableCell>{c.name}</TableCell>
+                        <TableCell className="text-right">
+                          <Input
+                            type="number"
+                            min={1}
+                            value={alertThresholds[c.id] ?? ''}
+                            placeholder="—"
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              setAlertThresholds((prev) => {
+                                const next = { ...prev };
+                                if (raw === '') delete next[c.id];
+                                else next[c.id] = Number(raw);
+                                return next;
+                              });
+                            }}
+                            className="ml-auto h-8 w-24 text-right tabular-nums"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Late Payment Surcharge</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              When enabled, overdue invoices appear on the surcharge suggestions screen for one-click
+              application. Nothing is charged automatically.
+            </p>
+            <label className="flex items-center gap-2.5 text-sm">
+              <Checkbox checked={surchargeEnabled} onCheckedChange={(c) => setSurchargeEnabled(!!c)} />
+              Enable surcharge suggestions
             </label>
-          </div>
-        </label>
+            {surchargeEnabled && (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field label="Rate (% per month)">
+                  <Input type="number" min={0} max={100} step={0.25} value={surchargePctPerMonth} onChange={(e) => setSurchargePctPerMonth(e.target.value)} className="tabular-nums" />
+                </Field>
+                <Field label="Grace Period (days)" hint="Days after invoice date before surcharge months count.">
+                  <Input type="number" min={0} value={surchargeGraceDays} onChange={(e) => setSurchargeGraceDays(e.target.value)} className="tabular-nums" />
+                </Field>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-        <div>
-          <span className="text-sm font-medium text-gray-700">Storage Alert Thresholds (days)</span>
-          <p className="text-xs text-gray-500 mt-1 mb-2">
-            Per-commodity day count. Lot Aging report flags lots in storage longer than the value here.
-          </p>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs uppercase text-gray-500">
-                <th className="text-left py-1">Commodity</th>
-                <th className="text-right">Threshold (days)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {commodities.length === 0 ? (
-                <tr><td colSpan={2} className="text-gray-500 py-3 text-center">No commodities configured.</td></tr>
-              ) : (
-                commodities.map((c) => (
-                  <tr key={c.id}>
-                    <td className="py-1">{c.name}</td>
-                    <td className="text-right">
-                      <input
-                        type="number"
-                        value={alertThresholds[c.id] ?? ''}
-                        placeholder="—"
-                        onChange={(e) => {
-                          const raw = (e.target as HTMLInputElement).value;
-                          setAlertThresholds((prev) => {
-                            const next = { ...prev };
-                            if (raw === '') delete next[c.id];
-                            else next[c.id] = Number(raw);
-                            return next;
-                          });
-                        }}
-                        className="w-24 border rounded px-2 py-1 text-right"
-                        min={1}
-                      />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="bg-white rounded-lg shadow p-6 space-y-4">
-        <h2 className="text-lg font-semibold text-gray-900">Late Payment Surcharge</h2>
-        <p className="text-xs text-gray-500">
-          When enabled, overdue invoices appear on the surcharge suggestions screen where the
-          accountant can apply the computed surcharge with one click. Nothing is charged
-          automatically.
-        </p>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={surchargeEnabled}
-            onChange={(e) => setSurchargeEnabled((e.target as HTMLInputElement).checked)}
-          />
-          <span className="text-sm font-medium text-gray-700">Enable surcharge suggestions</span>
-        </label>
-        {surchargeEnabled && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label className="block">
-              <span className="text-sm font-medium text-gray-700">Rate (% per month)</span>
-              <input
-                type="number"
-                value={surchargePctPerMonth}
-                onChange={(e) => setSurchargePctPerMonth((e.target as HTMLInputElement).value)}
-                className="mt-1 w-full border rounded-lg px-3 py-2"
-                min={0}
-                max={100}
-                step="0.25"
-              />
-            </label>
-            <label className="block">
-              <span className="text-sm font-medium text-gray-700">Grace Period (days)</span>
-              <input
-                type="number"
-                value={surchargeGraceDays}
-                onChange={(e) => setSurchargeGraceDays((e.target as HTMLInputElement).value)}
-                className="mt-1 w-full border rounded-lg px-3 py-2"
-                min={0}
-              />
-              <span className="text-xs text-gray-500 mt-1 block">
-                Days after the invoice date before surcharge months start counting.
-              </span>
-            </label>
-          </div>
-        )}
-      </section>
-
-      {error && <div className="text-red-700 bg-red-50 px-3 py-2 rounded text-sm">{error}</div>}
-      {savedAt && (
-        <div className="text-emerald-700 bg-emerald-50 px-3 py-2 rounded text-sm">
-          Saved at {new Date(savedAt).toLocaleTimeString()}
-        </div>
-      )}
-
-      <div>
-        <button
-          onClick={save}
-          disabled={saving}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : 'Save Settings'}
-        </button>
+        <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save Settings'}</Button>
       </div>
     </div>
   );

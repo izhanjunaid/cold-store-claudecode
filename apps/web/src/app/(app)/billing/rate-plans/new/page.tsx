@@ -2,24 +2,20 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { PageHeader } from '@/components/layout/page-header';
 
 interface Commodity {
   id: string;
   name: string;
 }
 
-interface FormData {
-  name: string;
-  commodity_id: string;
-  rate_type: string;
-  rate_amount_pkr: string;
-  season_start_date: string;
-  season_end_date: string;
-  min_billing_days: string;
-}
-
-const EMPTY_FORM: FormData = {
+const EMPTY = {
   name: '',
   commodity_id: '',
   rate_type: 'SEASONAL_PER_BAG',
@@ -28,10 +24,11 @@ const EMPTY_FORM: FormData = {
   season_end_date: '',
   min_billing_days: '1',
 };
+const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 export default function RatePlanCreatePage() {
   const router = useRouter();
-  const [form, setForm] = useState<FormData>(EMPTY_FORM);
+  const [form, setForm] = useState(EMPTY);
   const [commodities, setCommodities] = useState<Commodity[]>([]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -40,18 +37,13 @@ export default function RatePlanCreatePage() {
     apiClient<Commodity[]>('/v1/commodities').then(setCommodities).catch(() => {});
   }, []);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const target = e.target as HTMLInputElement;
-    setForm(prev => ({ ...prev, [target.name]: target.value }));
-  };
-
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const isSeasonal = form.rate_type === 'SEASONAL_PER_BAG';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSubmitting(true);
-
     try {
       const payload: Record<string, unknown> = {
         name: form.name,
@@ -64,8 +56,8 @@ export default function RatePlanCreatePage() {
         payload['season_start_date'] = form.season_start_date;
         payload['season_end_date'] = form.season_end_date;
       }
-
       await apiClient('/v1/rate-plans', { method: 'POST', body: payload });
+      toast.success('Rate plan created');
       router.push('/billing/rate-plans');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create rate plan');
@@ -75,63 +67,60 @@ export default function RatePlanCreatePage() {
   };
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Create Rate Plan</h1>
-
-      <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 max-w-2xl">
-        {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-            <input name="name" value={form.name} onChange={handleChange} required className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. Potato Seasonal 2026" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Commodity</label>
-            <select name="commodity_id" value={form.commodity_id} onChange={handleChange} className="w-full border rounded-lg px-3 py-2 text-sm">
-              <option value="">All Commodities</option>
-              {commodities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Rate Type *</label>
-            <select name="rate_type" value={form.rate_type} onChange={handleChange} className="w-full border rounded-lg px-3 py-2 text-sm">
-              <option value="SEASONAL_PER_BAG">Seasonal / Bag</option>
-              <option value="MONTHLY_PER_BAG">Monthly / Bag</option>
-              <option value="DAILY_PER_BAG">Daily / Bag</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Rate Amount (PKR) *</label>
-            <input name="rate_amount_pkr" type="number" step="0.01" min="0.01" value={form.rate_amount_pkr} onChange={handleChange} required className="w-full border rounded-lg px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Min Billing Days</label>
-            <input name="min_billing_days" type="number" min="1" value={form.min_billing_days} onChange={handleChange} className="w-full border rounded-lg px-3 py-2 text-sm" />
-          </div>
-          {isSeasonal && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Season Start *</label>
-                <input name="season_start_date" type="date" value={form.season_start_date} onChange={handleChange} required={isSeasonal} className="w-full border rounded-lg px-3 py-2 text-sm" />
+    <div className="max-w-2xl">
+      <PageHeader title="Create Rate Plan" crumb="New" />
+      <Card>
+        <CardContent className="pt-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+            <div className="space-y-1.5">
+              <Label>Name <span className="text-destructive">*</span></Label>
+              <Input value={form.name} onChange={(e) => set('name', e.target.value)} required placeholder="e.g. Potato Seasonal 2026" />
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Commodity</Label>
+                <select value={form.commodity_id} onChange={(e) => set('commodity_id', e.target.value)} className={SELECT_CLASS}>
+                  <option value="">All Commodities</option>
+                  {commodities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Season End *</label>
-                <input name="season_end_date" type="date" value={form.season_end_date} onChange={handleChange} required={isSeasonal} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <div className="space-y-1.5">
+                <Label>Rate Type <span className="text-destructive">*</span></Label>
+                <select value={form.rate_type} onChange={(e) => set('rate_type', e.target.value)} className={SELECT_CLASS}>
+                  <option value="SEASONAL_PER_BAG">Seasonal / Bag</option>
+                  <option value="MONTHLY_PER_BAG">Monthly / Bag</option>
+                  <option value="DAILY_PER_BAG">Daily / Bag</option>
+                </select>
               </div>
-            </>
-          )}
-        </div>
-
-        <div className="mt-6 flex gap-3">
-          <button type="submit" disabled={submitting} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium disabled:opacity-50">
-            {submitting ? 'Creating...' : 'Create Rate Plan'}
-          </button>
-          <button type="button" onClick={() => router.back()} className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">
-            Cancel
-          </button>
-        </div>
-      </form>
+              <div className="space-y-1.5">
+                <Label>Rate Amount (PKR) <span className="text-destructive">*</span></Label>
+                <Input type="number" step={0.01} min={0.01} value={form.rate_amount_pkr} onChange={(e) => set('rate_amount_pkr', e.target.value)} required className="tabular-nums" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Min Billing Days</Label>
+                <Input type="number" min={1} value={form.min_billing_days} onChange={(e) => set('min_billing_days', e.target.value)} className="tabular-nums" />
+              </div>
+              {isSeasonal && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label>Season Start <span className="text-destructive">*</span></Label>
+                    <Input type="date" value={form.season_start_date} onChange={(e) => set('season_start_date', e.target.value)} required className="tabular-nums" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Season End <span className="text-destructive">*</span></Label>
+                    <Input type="date" value={form.season_end_date} onChange={(e) => set('season_end_date', e.target.value)} required className="tabular-nums" />
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <Button type="submit" disabled={submitting}>{submitting ? 'Creating…' : 'Create Rate Plan'}</Button>
+              <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

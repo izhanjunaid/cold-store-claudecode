@@ -2,20 +2,25 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { toast } from 'sonner';
+import { Pencil, Plus } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { PageHeader } from '@/components/layout/page-header';
+import { useConfirm } from '@/components/form';
 
 interface RatePlan {
   id: string;
   name: string;
-  commodity_id: string | null;
   commodity_name: string | null;
   rate_type: string;
   rate_amount_pkr: number;
   season_start_date: string | null;
   season_end_date: string | null;
-  min_billing_days: number;
   is_active: boolean;
-  created_at: string;
 }
 
 const RATE_TYPE_LABELS: Record<string, string> = {
@@ -23,11 +28,13 @@ const RATE_TYPE_LABELS: Record<string, string> = {
   MONTHLY_PER_BAG: 'Monthly / Bag',
   DAILY_PER_BAG: 'Daily / Bag',
 };
+const SELECT_CLASS = 'flex h-9 w-auto rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 export default function RatePlanListPage() {
+  const confirm = useConfirm();
   const [plans, setPlans] = useState<RatePlan[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<string>('');
+  const [activeFilter, setActiveFilter] = useState('');
 
   const fetchPlans = useCallback(async () => {
     setLoading(true);
@@ -35,113 +42,99 @@ export default function RatePlanListPage() {
       const params = new URLSearchParams();
       if (activeFilter) params.set('is_active', activeFilter);
       const qs = params.toString();
-      const res = await apiClient<RatePlan[]>(`/v1/rate-plans${qs ? `?${qs}` : ''}`);
-      setPlans(res);
-    } catch {
-      // handled by apiClient
+      setPlans(await apiClient<RatePlan[]>(`/v1/rate-plans${qs ? `?${qs}` : ''}`));
     } finally {
       setLoading(false);
     }
   }, [activeFilter]);
 
-  useEffect(() => { fetchPlans(); }, [fetchPlans]);
+  useEffect(() => {
+    fetchPlans();
+  }, [fetchPlans]);
 
   const handleDeactivate = async (id: string) => {
+    if (!(await confirm({ title: 'Deactivate rate plan?', confirmText: 'Deactivate', destructive: true }))) return;
     try {
       await apiClient(`/v1/rate-plans/${id}`, { method: 'DELETE' });
+      toast.success('Deactivated');
       fetchPlans();
-    } catch {
-      // handled
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed');
     }
   };
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Rate Plans</h1>
-        <Link
-          href="/billing/rate-plans/new"
-          className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium"
-        >
-          New Rate Plan
-        </Link>
-      </div>
+      <PageHeader
+        title="Rate Plans"
+        description="Storage tariffs by commodity and billing basis"
+        actions={
+          <>
+            <select value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)} className={SELECT_CLASS}>
+              <option value="">All Status</option>
+              <option value="true">Active</option>
+              <option value="false">Inactive</option>
+            </select>
+            <Button asChild>
+              <Link href="/billing/rate-plans/new">
+                <Plus className="h-4 w-4" aria-hidden />
+                New Rate Plan
+              </Link>
+            </Button>
+          </>
+        }
+      />
 
-      <div className="bg-white rounded-lg shadow p-4 mb-4 flex gap-4">
-        <select
-          value={activeFilter}
-          onChange={(e) => setActiveFilter((e.target as HTMLSelectElement).value)}
-          className="border rounded-lg px-3 py-2 text-sm"
-        >
-          <option value="">All Status</option>
-          <option value="true">Active</option>
-          <option value="false">Inactive</option>
-        </select>
-      </div>
-
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Commodity</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate Type</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate (PKR)</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Season</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Commodity</TableHead>
+              <TableHead>Rate Type</TableHead>
+              <TableHead className="text-right">Rate (PKR)</TableHead>
+              <TableHead>Season</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading ? (
-              <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500">Loading...</td></tr>
+              <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">Loading…</TableCell></TableRow>
             ) : plans.length === 0 ? (
-              <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500">No rate plans found</td></tr>
+              <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">No rate plans found</TableCell></TableRow>
             ) : (
               plans.map((plan) => (
-                <tr key={plan.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{plan.name}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{plan.commodity_name || 'All'}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {RATE_TYPE_LABELS[plan.rate_type] || plan.rate_type}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-900 font-medium">
-                    Rs. {plan.rate_amount_pkr.toLocaleString()}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {plan.season_start_date && plan.season_end_date
-                      ? `${plan.season_start_date} - ${plan.season_end_date}`
-                      : '-'}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${plan.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                      {plan.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm">
-                    <div className="flex gap-2">
-                      <Link
-                        href={`/billing/rate-plans/${plan.id}/edit`}
-                        className="text-primary-600 hover:text-primary-800"
-                      >
-                        Edit
-                      </Link>
+                <TableRow key={plan.id}>
+                  <TableCell className="font-medium">{plan.name}</TableCell>
+                  <TableCell>{plan.commodity_name || 'All'}</TableCell>
+                  <TableCell>{RATE_TYPE_LABELS[plan.rate_type] || plan.rate_type}</TableCell>
+                  <TableCell className="text-right tabular-nums font-medium">Rs. {plan.rate_amount_pkr.toLocaleString()}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {plan.season_start_date && plan.season_end_date ? `${plan.season_start_date} – ${plan.season_end_date}` : '—'}
+                  </TableCell>
+                  <TableCell><StatusBadge status={plan.is_active ? 'ACTIVE' : 'INACTIVE'} /></TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button asChild variant="ghost" size="sm">
+                        <Link href={`/billing/rate-plans/${plan.id}/edit`}>
+                          <Pencil className="h-3.5 w-3.5" aria-hidden />
+                          Edit
+                        </Link>
+                      </Button>
                       {plan.is_active && (
-                        <button
-                          onClick={() => handleDeactivate(plan.id)}
-                          className="text-red-600 hover:text-red-800"
-                        >
+                        <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDeactivate(plan.id)}>
                           Deactivate
-                        </button>
+                        </Button>
                       )}
                     </div>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))
             )}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
     </div>
   );
 }
