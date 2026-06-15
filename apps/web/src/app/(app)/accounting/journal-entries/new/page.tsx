@@ -2,8 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+import { CheckCircle2, Plus, TriangleAlert, X } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { PageHeader } from '@/components/layout/page-header';
 
 interface Account {
   account_code: string;
@@ -11,7 +19,6 @@ interface Account {
   account_type: 'HEADER' | 'DETAIL';
   is_active: boolean;
 }
-
 interface Line {
   account_code: string;
   debit_amount: string;
@@ -19,14 +26,9 @@ interface Line {
   description: string;
 }
 
+const SELECT_CLASS = 'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 const today = () => new Date().toISOString().slice(0, 10);
-
-const emptyLine = (): Line => ({
-  account_code: '',
-  debit_amount: '',
-  credit_amount: '',
-  description: '',
-});
+const emptyLine = (): Line => ({ account_code: '', debit_amount: '', credit_amount: '', description: '' });
 
 export default function NewJournalEntryPage() {
   const router = useRouter();
@@ -45,47 +47,36 @@ export default function NewJournalEntryPage() {
   }, []);
 
   const detailAccounts = accounts.filter((a) => a.account_type === 'DETAIL' && a.is_active);
-
   const totalDebit = lines.reduce((s, l) => s + (parseFloat(l.debit_amount) || 0), 0);
   const totalCredit = lines.reduce((s, l) => s + (parseFloat(l.credit_amount) || 0), 0);
   const balanced = Math.abs(totalDebit - totalCredit) < 0.005 && totalDebit > 0;
 
-  const updateLine = (idx: number, patch: Partial<Line>) => {
-    setLines((current) => current.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
-  };
-
+  const updateLine = (idx: number, patch: Partial<Line>) => setLines((c) => c.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   const addLine = () => setLines((c) => [...c, emptyLine()]);
   const removeLine = (idx: number) => setLines((c) => (c.length > 2 ? c.filter((_, i) => i !== idx) : c));
 
   const submit = async () => {
     setError(null);
-    if (!description.trim()) {
-      setError('Description is required');
-      return;
-    }
-    if (!balanced) {
-      setError('Debits and credits must balance to a positive total');
-      return;
-    }
-    const payload = {
-      entry_date: entryDate,
-      description: description.trim(),
-      book_type: bookType,
-      posting_status: postingStatus,
-      lines: lines.map((l) => ({
-        account_code: l.account_code,
-        debit_amount: parseFloat(l.debit_amount) || 0,
-        credit_amount: parseFloat(l.credit_amount) || 0,
-        description: l.description.trim() || undefined,
-      })),
-    };
-
+    if (!description.trim()) return setError('Description is required');
+    if (!balanced) return setError('Debits and credits must balance to a positive total');
     setSubmitting(true);
     try {
       const created = await apiClient<{ id: string }>('/v1/accounting/journal-entries', {
         method: 'POST',
-        body: payload,
+        body: {
+          entry_date: entryDate,
+          description: description.trim(),
+          book_type: bookType,
+          posting_status: postingStatus,
+          lines: lines.map((l) => ({
+            account_code: l.account_code,
+            debit_amount: parseFloat(l.debit_amount) || 0,
+            credit_amount: parseFloat(l.credit_amount) || 0,
+            description: l.description.trim() || undefined,
+          })),
+        },
       });
+      toast.success(postingStatus === 'POSTED' ? 'Entry posted' : 'Draft saved');
       router.push(`/accounting/journal-entries/${created.id}`);
     } catch (e) {
       setError((e as Error).message);
@@ -98,152 +89,95 @@ export default function NewJournalEntryPage() {
 
   return (
     <div className="max-w-4xl">
-      <button onClick={() => router.push('/accounting/journal-entries')} className="text-sm text-blue-600 hover:underline mb-4">
-        ← Back
-      </button>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">New Manual Journal Entry</h1>
+      <PageHeader title="New Manual Journal Entry" crumb="New" />
 
-      <div className="bg-white rounded-lg shadow p-6 mb-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">Entry Date</span>
-            <input
-              type="date"
-              value={entryDate}
-              onChange={(e) => setEntryDate((e.target as HTMLInputElement).value)}
-              className="mt-1 block w-full border rounded-lg px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">Book Type</span>
-            <select
-              value={bookType}
-              onChange={(e) => setBookType((e.target as HTMLSelectElement).value as 'PACCI' | 'KATCHI')}
-              className="mt-1 block w-full border rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="PACCI">PACCI (Official)</option>
-              {isOwner && <option value="KATCHI">KATCHI (Internal — OWNER only)</option>}
-            </select>
-          </label>
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700">Status</span>
-            <select
-              value={postingStatus}
-              onChange={(e) => setPostingStatus((e.target as HTMLSelectElement).value as 'AUTO_DRAFT' | 'POSTED')}
-              className="mt-1 block w-full border rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="AUTO_DRAFT">Save as Draft</option>
-              <option value="POSTED">Post immediately</option>
-            </select>
-          </label>
-        </div>
+      <Card className="mb-4">
+        <CardContent className="space-y-4 pt-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label>Entry Date</Label>
+              <Input type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} className="tabular-nums" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Book Type</Label>
+              <select value={bookType} onChange={(e) => setBookType(e.target.value as 'PACCI' | 'KATCHI')} className={SELECT_CLASS + ' h-9'}>
+                <option value="PACCI">PACCI (Official)</option>
+                {isOwner && <option value="KATCHI">KATCHI (Internal — OWNER only)</option>}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Status</Label>
+              <select value={postingStatus} onChange={(e) => setPostingStatus(e.target.value as 'AUTO_DRAFT' | 'POSTED')} className={SELECT_CLASS + ' h-9'}>
+                <option value="AUTO_DRAFT">Save as Draft</option>
+                <option value="POSTED">Post immediately</option>
+              </select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Description</Label>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Reclassify Q1 storage adjustment" />
+          </div>
+        </CardContent>
+      </Card>
 
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700">Description</span>
-          <input
-            value={description}
-            onChange={(e) => setDescription((e.target as HTMLInputElement).value)}
-            placeholder="e.g. Reclassify Q1 storage adjustment"
-            className="mt-1 block w-full border rounded-lg px-3 py-2 text-sm"
-          />
-        </label>
-      </div>
-
-      <div className="bg-white rounded-lg shadow overflow-hidden mb-4">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase w-72">Account</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-              <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">Debit</th>
-              <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase w-32">Credit</th>
-              <th className="w-8"></th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+      <Card className="mb-4">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-72">Account</TableHead>
+              <TableHead>Description</TableHead>
+              <TableHead className="w-32 text-right">Debit</TableHead>
+              <TableHead className="w-32 text-right">Credit</TableHead>
+              <TableHead className="w-8" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {lines.map((l, idx) => (
-              <tr key={idx}>
-                <td className="px-3 py-2">
-                  <select
-                    value={l.account_code}
-                    onChange={(e) => updateLine(idx, { account_code: (e.target as HTMLSelectElement).value })}
-                    className="w-full border rounded px-2 py-1 text-sm font-mono"
-                  >
-                    <option value="">Select account...</option>
-                    {detailAccounts.map((a) => (
-                      <option key={a.account_code} value={a.account_code}>
-                        {a.account_code} — {a.account_name}
-                      </option>
-                    ))}
+              <TableRow key={idx}>
+                <TableCell>
+                  <select value={l.account_code} onChange={(e) => updateLine(idx, { account_code: e.target.value })} className={`${SELECT_CLASS} font-mono`}>
+                    <option value="">Select account…</option>
+                    {detailAccounts.map((a) => <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.account_name}</option>)}
                   </select>
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    value={l.description}
-                    onChange={(e) => updateLine(idx, { description: (e.target as HTMLInputElement).value })}
-                    placeholder="Optional"
-                    className="w-full border rounded px-2 py-1 text-sm"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={l.debit_amount}
-                    onChange={(e) => updateLine(idx, { debit_amount: (e.target as HTMLInputElement).value, credit_amount: '' })}
-                    className="w-full border rounded px-2 py-1 text-sm text-right"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={l.credit_amount}
-                    onChange={(e) => updateLine(idx, { credit_amount: (e.target as HTMLInputElement).value, debit_amount: '' })}
-                    className="w-full border rounded px-2 py-1 text-sm text-right"
-                  />
-                </td>
-                <td className="px-3 py-2">
+                </TableCell>
+                <TableCell>
+                  <Input value={l.description} onChange={(e) => updateLine(idx, { description: e.target.value })} placeholder="Optional" className="h-8" />
+                </TableCell>
+                <TableCell>
+                  <Input type="number" step={0.01} min={0} value={l.debit_amount} onChange={(e) => updateLine(idx, { debit_amount: e.target.value, credit_amount: '' })} className="h-8 text-right tabular-nums" />
+                </TableCell>
+                <TableCell>
+                  <Input type="number" step={0.01} min={0} value={l.credit_amount} onChange={(e) => updateLine(idx, { credit_amount: e.target.value, debit_amount: '' })} className="h-8 text-right tabular-nums" />
+                </TableCell>
+                <TableCell>
                   {lines.length > 2 && (
-                    <button onClick={() => removeLine(idx)} className="text-red-500 hover:text-red-700">×</button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeLine(idx)} aria-label="Remove line"><X className="h-4 w-4" /></Button>
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-          <tfoot className="bg-gray-50">
-            <tr>
-              <td className="px-3 py-2 text-right text-sm" colSpan={2}>
-                <button onClick={addLine} className="text-blue-600 hover:underline text-sm">+ Add line</button>
-              </td>
-              <td className="px-3 py-2 text-sm text-right font-semibold">{totalDebit.toLocaleString()}</td>
-              <td className="px-3 py-2 text-sm text-right font-semibold">{totalCredit.toLocaleString()}</td>
-              <td></td>
-            </tr>
-            <tr className={balanced ? 'text-green-700' : 'text-red-700'}>
-              <td colSpan={5} className="px-3 py-2 text-sm text-right">
-                {balanced ? `✓ Balanced (Rs. ${totalDebit.toLocaleString()})` : `✗ Unbalanced — diff Rs. ${Math.abs(totalDebit - totalCredit).toLocaleString()}`}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+        <div className="flex items-center justify-between border-t bg-muted/30 px-4 py-3 text-sm">
+          <Button variant="link" className="h-auto p-0" onClick={addLine}><Plus className="h-4 w-4" aria-hidden />Add line</Button>
+          <div className="flex items-center gap-6">
+            <span className="tabular-nums">Dr {totalDebit.toLocaleString()}</span>
+            <span className="tabular-nums">Cr {totalCredit.toLocaleString()}</span>
+            <span className={`inline-flex items-center gap-1.5 font-medium ${balanced ? 'text-green-600' : 'text-destructive'}`}>
+              {balanced ? <CheckCircle2 className="h-4 w-4" /> : <TriangleAlert className="h-4 w-4" />}
+              {balanced ? 'Balanced' : `Diff ${Math.abs(totalDebit - totalCredit).toLocaleString()}`}
+            </span>
+          </div>
+        </div>
+      </Card>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
 
       <div className="flex gap-3">
-        <button
-          onClick={submit}
-          disabled={submitting || !balanced}
-          className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-        >
-          {submitting ? 'Saving...' : postingStatus === 'POSTED' ? 'Post Entry' : 'Save Draft'}
-        </button>
-        <button onClick={() => router.push('/accounting/journal-entries')} className="text-sm text-gray-600 hover:underline">
-          Cancel
-        </button>
+        <Button onClick={submit} disabled={submitting || !balanced}>
+          {submitting ? 'Saving…' : postingStatus === 'POSTED' ? 'Post Entry' : 'Save Draft'}
+        </Button>
+        <Button variant="outline" onClick={() => router.push('/accounting/journal-entries')}>Cancel</Button>
       </div>
     </div>
   );
