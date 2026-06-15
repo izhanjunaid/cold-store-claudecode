@@ -1,9 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { PageHeader } from '@/components/layout/page-header';
+import { cn } from '@/lib/utils';
 
 interface TemperatureLog {
   id: string;
@@ -12,177 +18,143 @@ interface TemperatureLog {
   recorded_by_name?: string;
   source: string;
 }
-
 interface ChamberDetail {
   id: string;
   name: string;
-  commodity_restriction_id: string | null;
   commodity_restriction_name: string | null;
   max_capacity_bags: number;
   current_occupancy_bags: number;
-  available_capacity_bags: number;
   temperature_min_c: number | null;
   temperature_max_c: number | null;
   is_active: boolean;
   notes: string | null;
-  last_temperature: { temperature_c: number; recorded_at: string; source: string } | null;
   temperature_logs: TemperatureLog[];
 }
 
 export default function ChamberDetailPage() {
   const params = useParams();
+  const chamberId = params['id'] as string;
   const [chamber, setChamber] = useState<ChamberDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [tempInput, setTempInput] = useState('');
   const [loggingTemp, setLoggingTemp] = useState(false);
 
-  const fetchChamber = () => {
-    apiClient<ChamberDetail>(`/v1/chambers/${params['id']}`)
-      .then(setChamber)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  };
+  const fetchChamber = useCallback(() => {
+    apiClient<ChamberDetail>(`/v1/chambers/${chamberId}`).then(setChamber).catch(() => {}).finally(() => setLoading(false));
+  }, [chamberId]);
 
-  useEffect(() => { fetchChamber(); }, [params['id']]);
+  useEffect(() => {
+    fetchChamber();
+  }, [fetchChamber]);
 
   const handleLogTemp = async () => {
     if (!tempInput) return;
     setLoggingTemp(true);
     try {
-      await apiClient(`/v1/chambers/${params['id']}/temperature`, {
+      await apiClient(`/v1/chambers/${chamberId}/temperature`, {
         method: 'POST',
         body: { temperature_c: parseFloat(tempInput), source: 'MANUAL' },
       });
       setTempInput('');
       fetchChamber();
     } catch {
-      // handled
+      /* handled */
     } finally {
       setLoggingTemp(false);
     }
   };
 
-  if (loading) return <div className="text-gray-500 p-6">Loading...</div>;
-  if (!chamber) return <div className="text-red-500 p-6">Chamber not found</div>;
+  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (!chamber) return <p className="text-destructive">Chamber not found</p>;
 
-  const occupancyPct = Math.round((chamber.current_occupancy_bags / chamber.max_capacity_bags) * 100);
+  const pct = Math.round((chamber.current_occupancy_bags / chamber.max_capacity_bags) * 100);
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <Link href="/chambers" className="text-sm text-primary-600 hover:underline mb-1 block">Back to Chambers</Link>
-          <h1 className="text-2xl font-bold text-gray-900">{chamber.name}</h1>
-        </div>
+      <PageHeader title={chamber.name} crumb={chamber.name} />
+
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Chamber Info</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="divide-y text-sm">
+              <div className="flex justify-between py-1.5"><dt className="text-muted-foreground">Commodity</dt><dd className="font-medium">{chamber.commodity_restriction_name || 'Multi-commodity'}</dd></div>
+              <div className="flex justify-between py-1.5"><dt className="text-muted-foreground">Capacity</dt><dd className="font-medium tabular-nums">{chamber.max_capacity_bags.toLocaleString()} bags</dd></div>
+              <div className="flex justify-between py-1.5"><dt className="text-muted-foreground">Temp Range</dt><dd className="font-medium">{chamber.temperature_min_c ?? '?'}°C – {chamber.temperature_max_c ?? '?'}°C</dd></div>
+              <div className="flex justify-between py-1.5"><dt className="text-muted-foreground">Status</dt><dd><StatusBadge status={chamber.is_active ? 'ACTIVE' : 'INACTIVE'} /></dd></div>
+            </dl>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Occupancy</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-4 text-center">
+              <span className="text-4xl font-bold tabular-nums">{pct}%</span>
+              <p className="mt-1 text-sm text-muted-foreground tabular-nums">
+                {chamber.current_occupancy_bags.toLocaleString()} / {chamber.max_capacity_bags.toLocaleString()} bags
+              </p>
+            </div>
+            <div className="h-3 w-full overflow-hidden rounded-full bg-secondary">
+              <div className={cn('h-3 rounded-full', pct > 90 ? 'bg-destructive' : pct > 75 ? 'bg-warning' : 'bg-primary')} style={{ width: `${Math.min(100, pct)}%` }} />
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Info + Occupancy */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-sm font-medium text-gray-500 uppercase mb-4">Chamber Info</h2>
-          <dl className="space-y-3">
-            <div className="flex justify-between">
-              <dt className="text-sm text-gray-500">Commodity</dt>
-              <dd className="text-sm text-gray-900">{chamber.commodity_restriction_name || 'Multi-commodity'}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-sm text-gray-500">Capacity</dt>
-              <dd className="text-sm text-gray-900">{chamber.max_capacity_bags.toLocaleString()} bags</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-sm text-gray-500">Temp Range</dt>
-              <dd className="text-sm text-gray-900">{chamber.temperature_min_c ?? '?'}&deg;C - {chamber.temperature_max_c ?? '?'}&deg;C</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-sm text-gray-500">Status</dt>
-              <dd>
-                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${chamber.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                  {chamber.is_active ? 'Active' : 'Inactive'}
-                </span>
-              </dd>
-            </div>
-          </dl>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-sm font-medium text-gray-500 uppercase mb-4">Occupancy</h2>
-          <div className="text-center mb-4">
-            <span className="text-4xl font-bold text-gray-900">{occupancyPct}%</span>
-            <p className="text-sm text-gray-500 mt-1">
-              {chamber.current_occupancy_bags.toLocaleString()} / {chamber.max_capacity_bags.toLocaleString()} bags
-            </p>
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-sm">Temperature History</CardTitle>
+          <div className="flex items-center gap-2">
+            <Input type="number" step={0.1} placeholder="Temp °C" value={tempInput} onChange={(e) => setTempInput(e.target.value)} className="h-8 w-28 tabular-nums" />
+            <Button size="sm" onClick={handleLogTemp} disabled={loggingTemp || !tempInput}>
+              {loggingTemp ? 'Logging…' : 'Log Temp'}
+            </Button>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className={`h-3 rounded-full ${occupancyPct > 90 ? 'bg-red-500' : occupancyPct > 75 ? 'bg-yellow-500' : 'bg-green-500'}`}
-              style={{ width: `${occupancyPct}%` }}
-            />
-          </div>
-          <p className="text-xs text-gray-400 mt-3">Active lots table will populate in Phase 2</p>
-        </div>
-      </div>
-
-      {/* Temperature Log */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-medium text-gray-500 uppercase">Temperature History</h2>
-          <div className="flex gap-2 items-center">
-            <input
-              type="number"
-              step="0.1"
-              placeholder="Temp &deg;C"
-              value={tempInput}
-              onChange={(e) => setTempInput((e.target as HTMLInputElement).value)}
-              className="border rounded-lg px-3 py-1.5 text-sm w-28"
-            />
-            <button
-              onClick={handleLogTemp}
-              disabled={loggingTemp || !tempInput}
-              className="px-3 py-1.5 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 disabled:opacity-50"
-            >
-              {loggingTemp ? 'Logging...' : 'Log Temp'}
-            </button>
-          </div>
-        </div>
-
-        {chamber.temperature_logs.length === 0 ? (
-          <p className="text-sm text-gray-400">No temperature readings recorded yet.</p>
-        ) : (
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead>
-              <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date/Time</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Temperature</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Recorded By</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {chamber.temperature_logs.map(log => {
-                const inRange = chamber.temperature_min_c !== null && chamber.temperature_max_c !== null
-                  ? log.temperature_c >= chamber.temperature_min_c && log.temperature_c <= chamber.temperature_max_c
-                  : true;
-                return (
-                  <tr key={log.id}>
-                    <td className="px-4 py-2 text-sm text-gray-600">{new Date(log.recorded_at).toLocaleString()}</td>
-                    <td className={`px-4 py-2 text-sm font-medium ${inRange ? 'text-green-700' : 'text-red-700'}`}>
-                      {log.temperature_c}&deg;C
-                    </td>
-                    <td className="px-4 py-2 text-sm text-gray-600">{log.recorded_by_name || '-'}</td>
-                    <td className="px-4 py-2 text-sm text-gray-500">{log.source}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+        </CardHeader>
+        <CardContent>
+          {chamber.temperature_logs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No temperature readings recorded yet.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date/Time</TableHead>
+                  <TableHead>Temperature</TableHead>
+                  <TableHead>Recorded By</TableHead>
+                  <TableHead>Source</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {chamber.temperature_logs.map((log) => {
+                  const inRange =
+                    chamber.temperature_min_c !== null && chamber.temperature_max_c !== null
+                      ? log.temperature_c >= chamber.temperature_min_c && log.temperature_c <= chamber.temperature_max_c
+                      : true;
+                  return (
+                    <TableRow key={log.id}>
+                      <TableCell>{new Date(log.recorded_at).toLocaleString()}</TableCell>
+                      <TableCell className={cn('font-medium tabular-nums', inRange ? 'text-green-700' : 'text-destructive')}>{log.temperature_c}°C</TableCell>
+                      <TableCell>{log.recorded_by_name || '—'}</TableCell>
+                      <TableCell className="text-muted-foreground">{log.source}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {chamber.notes && (
-        <div className="mt-6 bg-white rounded-lg shadow p-6">
-          <h2 className="text-sm font-medium text-gray-500 uppercase mb-2">Notes</h2>
-          <p className="text-sm text-gray-700">{chamber.notes}</p>
-        </div>
+        <Card className="mt-6">
+          <CardHeader><CardTitle className="text-sm">Notes</CardTitle></CardHeader>
+          <CardContent><p className="text-sm">{chamber.notes}</p></CardContent>
+        </Card>
       )}
     </div>
   );
