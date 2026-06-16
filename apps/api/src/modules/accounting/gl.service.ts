@@ -114,14 +114,27 @@ export class GlService {
   }
 
   /**
-   * Trial balance: per-account ending balance over [date_from, date_to].
+   * Trial balance over [date_from, date_to] — professional 6-column form:
+   *   Opening (Dr/Cr) · Period movement (Dr/Cr) · Closing (Dr/Cr)
    *
-   * For each account, compute SUM(debit) - SUM(credit). Place positive value in `debit_balance`
-   * if the account's normal_balance is DEBIT (or the net is debit), otherwise in `credit_balance`.
-   * Total debit must equal total credit.
+   * Opening = net of all postings strictly BEFORE date_from (0 if no date_from).
+   * Movement = gross period debits and credits.
+   * Closing = opening net + period net, placed on the resulting side.
+   * Rows are grouped by account class with per-class subtotals; the grand
+   * closing totals must balance (total Dr == total Cr).
    */
   async getTrialBalance(facilityId: string, query: TrialBalanceQueryType) {
-    const dateClause: Prisma.JournalEntryWhereInput['entryDate'] | undefined =
+    const baseEntry = (clause: Prisma.JournalEntryWhereInput['entryDate']): Prisma.JournalEntryLineWhereInput => ({
+      facilityId,
+      journalEntry: {
+        facilityId,
+        postingStatus: 'POSTED',
+        ...(query.book_type ? { bookType: query.book_type } : {}),
+        ...(clause ? { entryDate: clause } : {}),
+      },
+    });
+
+    const periodClause: Prisma.JournalEntryWhereInput['entryDate'] | undefined =
       query.date_from || query.date_to
         ? {
             ...(query.date_from ? { gte: new Date(query.date_from) } : {}),
@@ -129,71 +142,124 @@ export class GlService {
           }
         : undefined;
 
-    const lines = await this.prisma.journalEntryLine.findMany({
-      where: {
-        facilityId,
-        journalEntry: {
-          facilityId,
-          postingStatus: 'POSTED',
-          ...(query.book_type ? { bookType: query.book_type } : {}),
-          ...(dateClause ? { entryDate: dateClause } : {}),
-        },
-      },
+    const periodLines = await this.prisma.journalEntryLine.findMany({
+      where: baseEntry(periodClause),
       select: { accountCode: true, debitAmount: true, creditAmount: true },
     });
+
+    // Opening balances: all postings strictly before date_from
+    const openingByCode = new Map<string, { debit: number; credit: number }>();
+    if (query.date_from) {
+      const openingLines = await this.prisma.journalEntryLine.findMany({
+        where: baseEntry({ lt: new Date(query.date_from) }),
+        select: { accountCode: true, debitAmount: true, creditAmount: true },
+      });
+      for (const l of openingLines) {
+        const cur = openingByCode.get(l.accountCode) ?? { debit: 0, credit: 0 };
+        cur.debit += Number(l.debitAmount);
+        cur.credit += Number(l.creditAmount);
+        openingByCode.set(l.accountCode, cur);
+      }
+    }
+
+    const periodByCode = new Map<string, { debit: number; credit: number }>();
+    for (const l of periodLines) {
+      const cur = periodByCode.get(l.accountCode) ?? { debit: 0, credit: 0 };
+      cur.debit += Number(l.debitAmount);
+      cur.credit += Number(l.creditAmount);
+      periodByCode.set(l.accountCode, cur);
+    }
 
     const accounts = await this.prisma.chartOfAccounts.findMany({
       where: { facilityId },
       orderBy: { accountCode: 'asc' },
     });
 
-    const sumByCode = new Map<string, { debit: number; credit: number }>();
-    for (const l of lines) {
-      const cur = sumByCode.get(l.accountCode) ?? { debit: 0, credit: 0 };
-      cur.debit += Number(l.debitAmount);
-      cur.credit += Number(l.creditAmount);
-      sumByCode.set(l.accountCode, cur);
-    }
+    const blankSub = () => ({
+      opening_debit_pkr: 0,
+      opening_credit_pkr: 0,
+      movement_debit_pkr: 0,
+      movement_credit_pkr: 0,
+      debit_balance_pkr: 0,
+      credit_balance_pkr: 0,
+    });
 
-    let totalDebit = 0;
-    let totalCredit = 0;
-    const rows: Array<{
-      account_code: string;
-      account_name: string;
-      account_class: string;
-      normal_balance: NormalBalance;
-      debit_balance_pkr: number;
-      credit_balance_pkr: number;
-    }> = [];
+    const groupMap = new Map<string, { account_class: string; label: string; rows: TrialBalanceRow[]; subtotal: ReturnType<typeof blankSub> }>();
+    const totals = blankSub();
 
     for (const a of accounts) {
-      const sums = sumByCode.get(a.accountCode);
-      if (!sums || (sums.debit === 0 && sums.credit === 0)) continue;
-      const net = sums.debit - sums.credit;
-      const debitBal = net > 0 ? net : 0;
-      const creditBal = net < 0 ? -net : 0;
-      totalDebit += debitBal;
-      totalCredit += creditBal;
-      rows.push({
+      const open = openingByCode.get(a.accountCode) ?? { debit: 0, credit: 0 };
+      const per = periodByCode.get(a.accountCode) ?? { debit: 0, credit: 0 };
+      const openingNet = open.debit - open.credit;
+      const closingNet = openingNet + (per.debit - per.credit);
+      if (openingNet === 0 && per.debit === 0 && per.credit === 0 && closingNet === 0) continue;
+
+      const row: TrialBalanceRow = {
         account_code: a.accountCode,
         account_name: a.accountName,
         account_class: a.accountClass,
         normal_balance: a.normalBalance,
-        debit_balance_pkr: round2(debitBal),
-        credit_balance_pkr: round2(creditBal),
-      });
+        opening_debit_pkr: round2(Math.max(openingNet, 0)),
+        opening_credit_pkr: round2(Math.max(-openingNet, 0)),
+        movement_debit_pkr: round2(per.debit),
+        movement_credit_pkr: round2(per.credit),
+        debit_balance_pkr: round2(Math.max(closingNet, 0)),
+        credit_balance_pkr: round2(Math.max(-closingNet, 0)),
+      };
+
+      let g = groupMap.get(a.accountClass);
+      if (!g) {
+        g = { account_class: a.accountClass, label: CLASS_LABEL[a.accountClass] ?? a.accountClass, rows: [], subtotal: blankSub() };
+        groupMap.set(a.accountClass, g);
+      }
+      g.rows.push(row);
+      for (const k of Object.keys(totals) as (keyof ReturnType<typeof blankSub>)[]) {
+        g.subtotal[k] = round2(g.subtotal[k] + row[k]);
+        totals[k] = round2(totals[k] + row[k]);
+      }
     }
+
+    const groups = CLASS_ORDER.filter((c) => groupMap.has(c)).map((c) => groupMap.get(c)!);
 
     return {
       date_from: query.date_from ?? null,
       date_to: query.date_to ?? new Date().toISOString().slice(0, 10),
-      rows,
-      total_debit_pkr: round2(totalDebit),
-      total_credit_pkr: round2(totalCredit),
-      is_balanced: Math.abs(totalDebit - totalCredit) < 0.005,
+      groups,
+      // Flat row list retained for convenience / back-compat
+      rows: groups.flatMap((g) => g.rows),
+      total_opening_debit_pkr: totals.opening_debit_pkr,
+      total_opening_credit_pkr: totals.opening_credit_pkr,
+      total_movement_debit_pkr: totals.movement_debit_pkr,
+      total_movement_credit_pkr: totals.movement_credit_pkr,
+      total_debit_pkr: totals.debit_balance_pkr,
+      total_credit_pkr: totals.credit_balance_pkr,
+      is_balanced: Math.abs(totals.debit_balance_pkr - totals.credit_balance_pkr) < 0.005,
     };
   }
 }
+
+interface TrialBalanceRow {
+  account_code: string;
+  account_name: string;
+  account_class: string;
+  normal_balance: NormalBalance;
+  opening_debit_pkr: number;
+  opening_credit_pkr: number;
+  movement_debit_pkr: number;
+  movement_credit_pkr: number;
+  debit_balance_pkr: number;
+  credit_balance_pkr: number;
+}
+
+const CLASS_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'COST_OF_SERVICE', 'EXPENSE'] as const;
+const CLASS_LABEL: Record<string, string> = {
+  ASSET: 'Assets',
+  LIABILITY: 'Liabilities',
+  EQUITY: 'Equity',
+  REVENUE: 'Revenue',
+  COST_OF_SERVICE: 'Cost of Service',
+  EXPENSE: 'Operating Expenses',
+};
 
 function signedDelta(debit: number, credit: number, normal: NormalBalance): number {
   return normal === 'DEBIT' ? debit - credit : credit - debit;

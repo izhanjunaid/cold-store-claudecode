@@ -495,7 +495,7 @@ describe('Phase 8 — Period locks', () => {
 });
 
 describe('Phase 8 — Trial balance & financial statements', () => {
-  it('trial balance is balanced', async () => {
+  it('trial balance is balanced with grouped, multi-column rows', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/accounting/trial-balance?date_to=2026-12-31',
@@ -505,9 +505,28 @@ describe('Phase 8 — Trial balance & financial statements', () => {
     const body = JSON.parse(res.body).data;
     expect(body.is_balanced).toBe(true);
     expect(body.total_debit_pkr).toBeCloseTo(body.total_credit_pkr);
+    // Period movement is itself balanced (every JE balances)
+    expect(body.total_movement_debit_pkr).toBeCloseTo(body.total_movement_credit_pkr);
+
+    // Grouped by class; each row's opening + movement nets to its closing side
+    expect(Array.isArray(body.groups)).toBe(true);
+    expect(body.groups.length).toBeGreaterThan(0);
+    for (const g of body.groups) {
+      let subDebit = 0;
+      let subCredit = 0;
+      for (const r of g.rows) {
+        const openNet = r.opening_debit_pkr - r.opening_credit_pkr;
+        const closeNet = openNet + (r.movement_debit_pkr - r.movement_credit_pkr);
+        expect(r.debit_balance_pkr - r.credit_balance_pkr).toBeCloseTo(closeNet);
+        subDebit += r.debit_balance_pkr;
+        subCredit += r.credit_balance_pkr;
+      }
+      expect(g.subtotal.debit_balance_pkr).toBeCloseTo(subDebit);
+      expect(g.subtotal.credit_balance_pkr).toBeCloseTo(subCredit);
+    }
   });
 
-  it('balance sheet is balanced (Assets = Liab + Equity)', async () => {
+  it('balance sheet is classified and balanced (Assets = Liab + Equity)', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/accounting/balance-sheet?as_of_date=2026-12-31',
@@ -516,18 +535,54 @@ describe('Phase 8 — Trial balance & financial statements', () => {
     const body = JSON.parse(res.body).data;
     expect(body.is_balanced).toBe(true);
     expect(body.total_assets_pkr).toBeCloseTo(body.total_liabilities_and_equity_pkr);
+
+    // Classified subtotals roll up to the section totals
+    expect(body.total_current_assets_pkr + body.total_non_current_assets_pkr).toBeCloseTo(body.total_assets_pkr);
+    expect(body.total_current_liabilities_pkr + body.total_non_current_liabilities_pkr).toBeCloseTo(body.total_liabilities_pkr);
+    expect(body.total_liabilities_pkr + body.total_equity_pkr).toBeCloseTo(body.total_liabilities_and_equity_pkr);
+    expect(Array.isArray(body.current_asset_groups)).toBe(true);
   });
 
-  it('P&L returns revenue and net profit fields', async () => {
+  it('P&L returns nested sections that tie out (gross/operating/net + EBITDA)', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/accounting/profit-loss?date_from=2026-01-01&date_to=2026-12-31',
       headers: authHeaders(accountantToken),
     });
     const body = JSON.parse(res.body).data;
-    expect(body).toHaveProperty('total_revenue_pkr');
+    expect(body).toHaveProperty('net_revenue_pkr');
+    expect(body).toHaveProperty('revenue_groups');
     expect(body).toHaveProperty('gross_profit_pkr');
+    expect(body).toHaveProperty('operating_profit_pkr');
+    expect(body).toHaveProperty('ebitda_pkr');
     expect(body).toHaveProperty('net_profit_pkr');
+
+    // Net revenue = operating revenue − contra
+    expect(body.net_revenue_pkr).toBeCloseTo(body.total_operating_revenue_pkr - body.total_contra_revenue_pkr);
+    // Gross profit = net revenue − cost of service
+    expect(body.gross_profit_pkr).toBeCloseTo(body.net_revenue_pkr - body.total_cost_of_service_pkr);
+    // Operating profit = gross profit − operating expenses
+    expect(body.operating_profit_pkr).toBeCloseTo(body.gross_profit_pkr - body.total_operating_expense_pkr);
+    // Net profit = operating profit + other income
+    expect(body.net_profit_pkr).toBeCloseTo(body.operating_profit_pkr + body.total_other_income_pkr);
+    // EBITDA = operating profit + D&A
+    expect(body.ebitda_pkr).toBeCloseTo(body.operating_profit_pkr + body.depreciation_amortisation_pkr);
+  });
+
+  it('P&L net profit equals balance-sheet current-year P&L for the same period/book', async () => {
+    const plRes = await app.inject({
+      method: 'GET',
+      url: '/v1/accounting/profit-loss?date_from=2026-01-01&date_to=2026-12-31',
+      headers: authHeaders(accountantToken),
+    });
+    const bsRes = await app.inject({
+      method: 'GET',
+      url: '/v1/accounting/balance-sheet?as_of_date=2026-12-31',
+      headers: authHeaders(accountantToken),
+    });
+    const pl = JSON.parse(plRes.body).data;
+    const bs = JSON.parse(bsRes.body).data;
+    expect(pl.net_profit_pkr).toBeCloseTo(bs.current_year_pl_pkr);
   });
 });
 

@@ -177,15 +177,39 @@ export const TrialBalanceRow = z.object({
   account_name: z.string(),
   account_class: AccountClass,
   normal_balance: NormalBalance,
+  opening_debit_pkr: z.number(),
+  opening_credit_pkr: z.number(),
+  movement_debit_pkr: z.number(),
+  movement_credit_pkr: z.number(),
   debit_balance_pkr: z.number(),
   credit_balance_pkr: z.number(),
 });
 export type TrialBalanceRowType = z.infer<typeof TrialBalanceRow>;
 
+export const TrialBalanceGroup = z.object({
+  account_class: AccountClass,
+  label: z.string(),
+  rows: z.array(TrialBalanceRow),
+  subtotal: z.object({
+    opening_debit_pkr: z.number(),
+    opening_credit_pkr: z.number(),
+    movement_debit_pkr: z.number(),
+    movement_credit_pkr: z.number(),
+    debit_balance_pkr: z.number(),
+    credit_balance_pkr: z.number(),
+  }),
+});
+export type TrialBalanceGroupType = z.infer<typeof TrialBalanceGroup>;
+
 export const TrialBalanceResponse = z.object({
   date_from: z.string().nullable(),
   date_to: z.string(),
+  groups: z.array(TrialBalanceGroup),
   rows: z.array(TrialBalanceRow),
+  total_opening_debit_pkr: z.number(),
+  total_opening_credit_pkr: z.number(),
+  total_movement_debit_pkr: z.number(),
+  total_movement_credit_pkr: z.number(),
   total_debit_pkr: z.number(),
   total_credit_pkr: z.number(),
   is_balanced: z.boolean(),
@@ -210,19 +234,49 @@ export const StatementLine = z.object({
 });
 export type StatementLineType = z.infer<typeof StatementLine>;
 
+export const StatementGroup = z.object({
+  code: z.string(),
+  name: z.string(),
+  lines: z.array(StatementLine),
+  subtotal_pkr: z.number(),
+});
+export type StatementGroupType = z.infer<typeof StatementGroup>;
+
 export const ProfitLossResponse = z.object({
   date_from: z.string(),
   date_to: z.string(),
-  revenue_lines: z.array(StatementLine),
-  total_revenue_pkr: z.number(),
+
+  revenue_groups: z.array(StatementGroup),
+  total_operating_revenue_pkr: z.number(),
+  contra_revenue_lines: z.array(StatementLine),
+  total_contra_revenue_pkr: z.number(),
+  net_revenue_pkr: z.number(),
+
   cost_of_service_lines: z.array(StatementLine),
   total_cost_of_service_pkr: z.number(),
   gross_profit_pkr: z.number(),
   gross_profit_pct: z.number(),
-  expense_lines: z.array(StatementLine),
-  total_expense_pkr: z.number(),
+
+  operating_expense_lines: z.array(StatementLine),
+  total_operating_expense_pkr: z.number(),
+  operating_profit_pkr: z.number(),
+  operating_profit_pct: z.number(),
+
+  other_income_lines: z.array(StatementLine),
+  total_other_income_pkr: z.number(),
+
+  depreciation_amortisation_pkr: z.number(),
+  ebitda_pkr: z.number(),
+  ebitda_pct: z.number(),
+
   net_profit_pkr: z.number(),
   net_profit_pct: z.number(),
+
+  // Back-compat flat fields
+  revenue_lines: z.array(StatementLine),
+  total_revenue_pkr: z.number(),
+  expense_lines: z.array(StatementLine),
+  total_expense_pkr: z.number(),
 });
 export type ProfitLossResponseType = z.infer<typeof ProfitLossResponse>;
 
@@ -235,15 +289,29 @@ export type ProfitLossQueryType = z.infer<typeof ProfitLossQuery>;
 
 export const BalanceSheetResponse = z.object({
   as_of_date: z.string(),
-  asset_lines: z.array(StatementLine),
+
+  current_asset_groups: z.array(StatementGroup),
+  total_current_assets_pkr: z.number(),
+  non_current_asset_groups: z.array(StatementGroup),
+  total_non_current_assets_pkr: z.number(),
   total_assets_pkr: z.number(),
-  liability_lines: z.array(StatementLine),
+
+  current_liability_groups: z.array(StatementGroup),
+  total_current_liabilities_pkr: z.number(),
+  non_current_liability_groups: z.array(StatementGroup),
+  total_non_current_liabilities_pkr: z.number(),
   total_liabilities_pkr: z.number(),
+
   equity_lines: z.array(StatementLine),
   current_year_pl_pkr: z.number(),
   total_equity_pkr: z.number(),
   total_liabilities_and_equity_pkr: z.number(),
+
   is_balanced: z.boolean(),
+
+  // Back-compat flat fields
+  asset_lines: z.array(StatementLine),
+  liability_lines: z.array(StatementLine),
 });
 export type BalanceSheetResponseType = z.infer<typeof BalanceSheetResponse>;
 
