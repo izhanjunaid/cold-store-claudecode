@@ -2,17 +2,23 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { hasMinRole } from '@/lib/rbac';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { PageHeader } from '@/components/layout/page-header';
 
-const ROLE_RANK: Record<string, number> = {
-  SECURITY: 0, OPERATOR: 1, ACCOUNTANT: 2, MANAGER: 3, OWNER: 4,
-};
+const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 export default function NewEmployeePage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const canCreate = (ROLE_RANK[user?.role ?? ''] ?? -1) >= 3;
+  const canCreate = hasMinRole(user?.role, 'MANAGER');
 
   const [name, setName] = useState('');
   const [nameUrdu, setNameUrdu] = useState('');
@@ -29,7 +35,12 @@ export default function NewEmployeePage() {
   const [error, setError] = useState<string | null>(null);
 
   if (!canCreate) {
-    return <div className="flex items-center justify-center h-64"><p className="text-gray-500">Need MANAGER+ role.</p></div>;
+    return (
+      <div>
+        <PageHeader title="New Employee" />
+        <p className="text-muted-foreground">Requires MANAGER role or higher.</p>
+      </div>
+    );
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -50,11 +61,11 @@ export default function NewEmployeePage() {
       };
       if (type === 'SALARIED') payload['basic_salary_pkr'] = Number(salary);
       else payload['daily_wage_pkr'] = Number(wage);
-
       const created = await apiClient<{ id: string }>('/v1/employees', { method: 'POST', body: payload });
+      toast.success('Employee created');
       router.push(`/accounting/payroll/employees/${created.id}`);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create employee');
     } finally {
       setSubmitting(false);
     }
@@ -62,80 +73,76 @@ export default function NewEmployeePage() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">New Employee</h1>
-      <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-            <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name (Urdu)</label>
-            <input type="text" dir="rtl" value={nameUrdu} onChange={(e) => setNameUrdu(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-          </div>
-        </div>
+      <PageHeader title="New Employee" crumb="New" />
+      <Card>
+        <CardContent className="pt-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Name <span className="text-destructive">*</span></Label>
+                <Input required value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Name (Urdu)</Label>
+                <Input dir="rtl" value={nameUrdu} onChange={(e) => setNameUrdu(e.target.value)} className="font-urdu" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>CNIC</Label>
+                <Input value={cnic} onChange={(e) => setCnic(e.target.value)} placeholder="42101-1234567-8" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Type <span className="text-destructive">*</span></Label>
+                <select value={type} onChange={(e) => setType(e.target.value as 'SALARIED' | 'DAILY_WAGE')} className={SELECT_CLASS}>
+                  <option value="SALARIED">Salaried (monthly)</option>
+                  <option value="DAILY_WAGE">Daily Wage</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Designation</Label>
+                <Input value={designation} onChange={(e) => setDesignation(e.target.value)} placeholder="Manager, Loader, etc." />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Join Date <span className="text-destructive">*</span></Label>
+                <Input type="date" required value={joinDate} onChange={(e) => setJoinDate(e.target.value)} className="tabular-nums" />
+              </div>
+            </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">CNIC</label>
-            <input type="text" value={cnic} onChange={(e) => setCnic(e.target.value)} className="w-full border rounded-lg px-3 py-2" placeholder="42101-1234567-8" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
-            <select value={type} onChange={(e) => setType(e.target.value as any)} className="w-full border rounded-lg px-3 py-2">
-              <option value="SALARIED">Salaried (monthly)</option>
-              <option value="DAILY_WAGE">Daily Wage</option>
-            </select>
-          </div>
-        </div>
+            {type === 'SALARIED' ? (
+              <div className="space-y-1.5">
+                <Label>Basic Salary (PKR/month) <span className="text-destructive">*</span></Label>
+                <Input type="number" required min={0} step={0.01} value={salary} onChange={(e) => setSalary(e.target.value)} className="tabular-nums" />
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label>Daily Wage (PKR/day) <span className="text-destructive">*</span></Label>
+                <Input type="number" required min={0} step={0.01} value={wage} onChange={(e) => setWage(e.target.value)} className="tabular-nums" />
+              </div>
+            )}
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Designation</label>
-            <input type="text" value={designation} onChange={(e) => setDesignation(e.target.value)} className="w-full border rounded-lg px-3 py-2" placeholder="Manager, Loader, etc." />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Join Date *</label>
-            <input type="date" required value={joinDate} onChange={(e) => setJoinDate(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-          </div>
-        </div>
+            <label className="flex items-center gap-2.5 text-sm">
+              <Checkbox checked={eobiRegistered} onCheckedChange={(c) => setEobiRegistered(!!c)} />
+              EOBI registered (Rs. 375 employee + Rs. 1,875 employer per month)
+            </label>
 
-        {type === 'SALARIED' ? (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Basic Salary (PKR/month) *</label>
-            <input type="number" required min="0" step="0.01" value={salary} onChange={(e) => setSalary(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-          </div>
-        ) : (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Daily Wage (PKR/day) *</label>
-            <input type="number" required min="0" step="0.01" value={wage} onChange={(e) => setWage(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-          </div>
-        )}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Bank Account Number</Label>
+                <Input value={bankAcct} onChange={(e) => setBankAcct(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Bank Name</Label>
+                <Input value={bankName} onChange={(e) => setBankName(e.target.value)} />
+              </div>
+            </div>
 
-        <div>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={eobiRegistered} onChange={(e) => setEobiRegistered(e.target.checked)} />
-            <span className="text-sm font-medium text-gray-700">EOBI registered (Rs. 375 employee + Rs. 1,875 employer per month)</span>
-          </label>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Bank Account Number</label>
-            <input type="text" value={bankAcct} onChange={(e) => setBankAcct(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
-            <input type="text" value={bankName} onChange={(e) => setBankName(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
-          </div>
-        </div>
-
-        {error && <div className="text-red-700 bg-red-50 px-3 py-2 rounded text-sm">{error}</div>}
-        <div className="flex gap-3 pt-2">
-          <button type="submit" disabled={submitting} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50">{submitting ? 'Creating...' : 'Create Employee'}</button>
-          <button type="button" onClick={() => router.back()} className="border border-gray-300 px-4 py-2 rounded-lg">Cancel</button>
-        </div>
-      </form>
+            {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+            <div className="flex gap-3">
+              <Button type="submit" disabled={submitting}>{submitting ? 'Creating…' : 'Create Employee'}</Button>
+              <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

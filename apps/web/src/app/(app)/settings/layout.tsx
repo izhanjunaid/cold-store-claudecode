@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useAuthStore } from '@/stores/auth.store';
+import { Card, CardContent } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -18,10 +20,12 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   if (!user) return null;
   if (!isOwner) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center">
-        <h1 className="text-xl font-bold text-gray-900 mb-2">Access denied</h1>
-        <p className="text-gray-600">Settings are OWNER-only.</p>
-      </div>
+      <Card>
+        <CardContent className="py-8 text-center">
+          <h1 className="mb-2 text-lg font-semibold">Access denied</h1>
+          <p className="text-muted-foreground">Settings are OWNER-only.</p>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -31,8 +35,8 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-6">
-      <aside className="bg-white rounded-lg shadow p-3 h-fit">
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_1fr]">
+      <aside className="h-fit">
         <nav className="flex flex-col gap-1">
           {nav.map((item) => {
             const active =
@@ -43,9 +47,10 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
               <Link
                 key={item.href}
                 href={item.href}
-                className={`px-3 py-2 rounded text-sm font-medium ${
-                  active ? 'bg-blue-100 text-blue-800' : 'text-gray-700 hover:bg-gray-100'
-                }`}
+                className={cn(
+                  'rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                  active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                )}
               >
                 {item.label}
               </Link>
