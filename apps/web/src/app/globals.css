@@ -57,3 +57,39 @@
     font-family: var(--font-urdu), serif;
   }
 }
+
+/* ============================================================
+   Print — financial statements
+   Reveal only the .print-area (statement + frame); hide all app
+   chrome (sidebar, topbar, toolbar) without touching their markup.
+   ============================================================ */
+@media print {
+  body {
+    background: #fff;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .print-avoid-break {
+    break-inside: avoid;
+  }
+  .print-hide {
+    display: none !important;
+  }
+  @page {
+    margin: 16mm;
+  }
+}
