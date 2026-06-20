@@ -74,4 +74,36 @@ describe('Service Charge CRUD', () => {
     });
     expect(res.statusCode).toBe(403);
   });
+
+  async function createCharge(name: string): Promise<string> {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/service-charges',
+      headers: authHeaders(managerToken),
+      payload: { name, unit_type: 'FLAT', unit_price_pkr: 5 },
+    });
+    return JSON.parse(res.body).data.id;
+  }
+
+  it('DELETE /v1/service-charges/:id — deactivates (MANAGER)', async () => {
+    const id = await createCharge('Test Delete A');
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/service-charges/${id}`,
+      headers: authHeaders(managerToken),
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('DELETE with application/json content-type but no body → 400, not 500', async () => {
+    const id = await createCharge('Test Delete B');
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/service-charges/${id}`,
+      headers: { ...authHeaders(managerToken), 'content-type': 'application/json' },
+    });
+    // FST_ERR_CTP_EMPTY_JSON_BODY carries statusCode 400 — the error handler must
+    // honour it rather than masking it as INTERNAL_ERROR (500).
+    expect(res.statusCode).toBe(400);
+  });
 });

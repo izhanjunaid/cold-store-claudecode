@@ -39,6 +39,19 @@ async function errorHandler(app: FastifyInstance) {
       });
     }
 
+    // Framework errors that already carry a client (4xx) status — e.g. malformed
+    // or empty JSON body (FST_ERR_CTP_EMPTY_JSON_BODY), unsupported media type.
+    // Honour their status instead of masking a 4xx as a 500.
+    if (typeof error.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 500) {
+      return reply.status(error.statusCode).send({
+        success: false,
+        error: {
+          code: (error as { code?: string }).code || 'BAD_REQUEST',
+          message: error.message,
+        },
+      });
+    }
+
     // Unknown errors
     app.log.error(error);
     return reply.status(500).send({

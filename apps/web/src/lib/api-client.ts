@@ -27,15 +27,20 @@ async function apiFetch(path: string, options: ApiOptions = {}) {
   const facilityId =
     typeof window !== 'undefined' ? localStorage.getItem('facility_id') : null;
 
+  // Only declare a JSON content-type when we actually send a body. A body-less
+  // request (e.g. DELETE) with `Content-Type: application/json` is rejected by
+  // Fastify (FST_ERR_CTP_EMPTY_JSON_BODY) before it reaches the handler.
+  const hasBody = options.body !== undefined && options.body !== null;
+
   const res = await fetch(`${API_URL}${path}`, {
     method: options.method || 'GET',
     headers: {
-      'Content-Type': 'application/json',
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
       ...options.headers,
     },
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    body: hasBody ? JSON.stringify(options.body) : undefined,
   });
 
   const data = await res.json();
