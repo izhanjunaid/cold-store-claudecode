@@ -1,13 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { apiClient } from '@/lib/api-client';
+import { Plus, X } from 'lucide-react';
+import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -44,6 +47,19 @@ const METHOD_LABELS: Record<string, string> = {
   MOBILE_WALLET: 'Mobile Wallet',
 };
 
+const SELECT_CLASS =
+  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+
+interface InvoiceSummary {
+  id: string;
+  invoice_number: string | null;
+  balance_due_pkr: number;
+}
+interface AllocationRow {
+  invoice_id: string;
+  allocated_amount_pkr: string;
+}
+
 function Info({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
@@ -68,12 +84,78 @@ export default function PaymentDetailPage() {
 
   const isAccountant = !!user && hasMinRole(user.role, 'ACCOUNTANT');
 
+  const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
+  const [rows, setRows] = useState<AllocationRow[]>([]);
+  const [applyError, setApplyError] = useState('');
+  const [applying, setApplying] = useState(false);
+  const applyingRef = useRef(false);
+
+  const canApplyAdvance = isAccountant && payment?.status === 'ADVANCE';
+
   useEffect(() => {
     apiClient<Payment>(`/v1/payments/${id}`)
       .then(setPayment)
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [id]);
+
+  // An advance can only be applied while status is ADVANCE — the one envelope
+  // in which the backend posts JE-04 (DR 2010 / CR receivable). Once applied,
+  // status flips to ALLOCATED and this panel disappears.
+  useEffect(() => {
+    if (!canApplyAdvance || !payment) return;
+    apiClientList<InvoiceSummary>(
+      `/v1/invoices?party_id=${payment.party_id}&status=FINALIZED&page_size=100`,
+    )
+      .then((res) => {
+        const open = res.data.filter((i) => i.balance_due_pkr > 0);
+        setInvoices(open);
+        setRows(open.length > 0 ? [{ invoice_id: '', allocated_amount_pkr: '' }] : []);
+      })
+      .catch(() => {});
+  }, [canApplyAdvance, payment]);
+
+  const totalToApply = rows.reduce((s, r) => s + (parseFloat(r.allocated_amount_pkr) || 0), 0);
+
+  const updateRow = (idx: number, field: keyof AllocationRow, value: string) =>
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+
+  const fillBalance = (idx: number) => {
+    const inv = invoices.find((i) => i.id === rows[idx]?.invoice_id);
+    if (inv) updateRow(idx, 'allocated_amount_pkr', String(inv.balance_due_pkr));
+  };
+
+  const handleApplyAdvance = async () => {
+    if (applyingRef.current || !payment) return;
+    const valid = rows
+      .filter((r) => r.invoice_id && parseFloat(r.allocated_amount_pkr) > 0)
+      .map((r) => ({ invoice_id: r.invoice_id, allocated_amount_pkr: parseFloat(r.allocated_amount_pkr) }));
+    if (valid.length === 0) {
+      setApplyError('Select an invoice and enter an amount to apply.');
+      return;
+    }
+    if (totalToApply > payment.amount_pkr + 0.001) {
+      setApplyError('Total to apply exceeds the advance amount.');
+      return;
+    }
+    applyingRef.current = true;
+    setApplying(true);
+    setApplyError('');
+    try {
+      const updated = await apiClient<Payment>(`/v1/payments/${id}/allocate`, {
+        method: 'POST',
+        body: { allocations: valid },
+      });
+      setPayment(updated);
+      toast.success('Advance applied');
+      // Stay disabled through the re-render — the panel unmounts once status
+      // is no longer ADVANCE, so we intentionally don't reset the guard here.
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : 'Failed to apply advance');
+      applyingRef.current = false;
+      setApplying(false);
+    }
+  };
 
   const handleDishonour = async () => {
     const ok = await confirm({
@@ -182,6 +264,101 @@ export default function PaymentDetailPage() {
                 ))}
               </TableBody>
             </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {canApplyAdvance && (
+        <Card className="mb-4 border-l-4 border-l-primary/40">
+          <CardHeader>
+            <CardTitle className="text-sm">Apply Advance</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {invoices.length === 0 ? (
+              <p className="text-sm italic text-muted-foreground">
+                No finalized invoices with outstanding balance for this party.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Applying drains the advance liability (2010) and settles the invoice (JE-04). This can only be done once.
+                </p>
+                {applyError && (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {applyError}
+                  </div>
+                )}
+                {rows.map((row, idx) => (
+                  <div key={idx} className="flex items-end gap-3">
+                    <div className="flex-1 space-y-1.5">
+                      <Label className="text-xs">Invoice</Label>
+                      <select
+                        value={row.invoice_id}
+                        onChange={(e) => updateRow(idx, 'invoice_id', e.target.value)}
+                        className={SELECT_CLASS}
+                      >
+                        <option value="">Select invoice…</option>
+                        {invoices.map((inv) => (
+                          <option key={inv.id} value={inv.id}>
+                            {inv.invoice_number ?? inv.id.slice(0, 8)} — Balance: PKR {inv.balance_due_pkr.toLocaleString()}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="w-40 space-y-1.5">
+                      <Label className="text-xs">Amount (PKR)</Label>
+                      <Input
+                        type="number"
+                        min={0.01}
+                        step={0.01}
+                        value={row.allocated_amount_pkr}
+                        onChange={(e) => updateRow(idx, 'allocated_amount_pkr', e.target.value)}
+                        placeholder="0.00"
+                        className="tabular-nums"
+                      />
+                    </div>
+                    {row.invoice_id && (
+                      <Button type="button" variant="link" className="h-9 px-1 text-xs" onClick={() => fillBalance(idx)}>
+                        Fill balance
+                      </Button>
+                    )}
+                    {rows.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-destructive"
+                        onClick={() => setRows((prev) => prev.filter((_, i) => i !== idx))}
+                        aria-label="Remove allocation"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                <div className="flex items-center justify-between">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRows((prev) => [...prev, { invoice_id: '', allocated_amount_pkr: '' }])}
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                    Add Invoice
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    To apply:{' '}
+                    <span className="font-medium tabular-nums">PKR {totalToApply.toLocaleString()}</span> / PKR{' '}
+                    {payment.amount_pkr.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-end">
+                  <Button onClick={handleApplyAdvance} disabled={applying}>
+                    {applying ? 'Applying…' : 'Apply Advance'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
