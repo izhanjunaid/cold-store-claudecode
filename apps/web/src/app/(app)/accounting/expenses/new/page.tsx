@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
@@ -43,6 +43,10 @@ export default function NewExpenseVoucherPage() {
   const [amount, setAmount] = useState('');
   const [isAccrual, setIsAccrual] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Synchronous guard: `submitting` state only disables the button on the next
+  // render, leaving a window where rapid clicks fire multiple POSTs (duplicate
+  // drafts) and a burst of navigations that crashes the dev render worker.
+  const submittingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!canCreate) {
@@ -56,6 +60,8 @@ export default function NewExpenseVoucherPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -73,9 +79,11 @@ export default function NewExpenseVoucherPage() {
       });
       toast.success('Draft voucher created');
       router.push(`/accounting/expenses/${created.id}`);
+      // Stay disabled through the (slow, dev-mode) navigation — resetting here
+      // would re-open the duplicate-submit window before the route transitions.
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create voucher');
-    } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
