@@ -318,6 +318,65 @@ describe('Phase 8 — Journal entries (forward path)', () => {
     expect(Number(lines.find((l) => l.accountCode === '1020')!.debitAmount)).toBe(3000);
     expect(Number(lines.find((l) => l.accountCode === '2010')!.creditAmount)).toBe(3000);
   });
+
+  it('ADVANCE applied to invoice posts JE-04 (DR 2010 / CR 1110), drains 2010, settles invoice', async () => {
+    const { invoiceId, totalPkr } = await createInvoiceAndFinalize();
+
+    // Record an advance for the same party — JE-03 credits the 2010 liability.
+    const advRes = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: testParty,
+        payment_date: '2026-04-30',
+        amount_pkr: totalPkr,
+        payment_method: 'BANK_TRANSFER',
+        is_advance: true,
+      },
+    });
+    expect(advRes.statusCode).toBe(201);
+    const advance = JSON.parse(advRes.body).data;
+    expect(advance.status).toBe('ADVANCE');
+
+    const je03 = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payments', sourceId: advance.id, entryType: 'ADVANCE' },
+      include: { lines: true },
+    });
+    expect(Number(je03!.lines.find((l) => l.accountCode === '2010')!.creditAmount)).toBeCloseTo(totalPkr);
+
+    // Apply the advance to the finalized invoice — the exact path the new
+    // "Apply Advance" UI button triggers.
+    const allocRes = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${advance.id}/allocate`,
+      headers: authHeaders(accountantToken),
+      payload: { allocations: [{ invoice_id: invoiceId, allocated_amount_pkr: totalPkr }] },
+    });
+    expect(allocRes.statusCode).toBe(200);
+    expect(JSON.parse(allocRes.body).data.status).toBe('ALLOCATED');
+
+    // JE-04 posted: DR 2010 Advance Receipts / CR 1110 Farmer Receivable.
+    const je04 = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payments', sourceId: advance.id, entryType: 'ADVANCE_APPLIED' },
+      include: { lines: true },
+    });
+    expect(je04).not.toBeNull();
+    expect(je04?.postingStatus).toBe('POSTED');
+    expect(Number(je04!.lines.find((l) => l.accountCode === '2010')!.debitAmount)).toBeCloseTo(totalPkr);
+    expect(Number(je04!.lines.find((l) => l.accountCode === '1110')!.creditAmount)).toBeCloseTo(totalPkr);
+
+    // The advance liability nets to zero for this payment: created by JE-03, drained by JE-04.
+    const net2010 = [je03!, je04!]
+      .flatMap((je) => je.lines)
+      .filter((l) => l.accountCode === '2010')
+      .reduce((s, l) => s + Number(l.creditAmount) - Number(l.debitAmount), 0);
+    expect(net2010).toBeCloseTo(0);
+
+    // Invoice balance is settled.
+    const inv = await prisma.invoice.findUnique({ where: { id: invoiceId } });
+    expect(Number(inv!.amountPaidPkr)).toBeCloseTo(totalPkr);
+  });
 });
 
 describe('Phase 8 — Manual journal entries (S-36)', () => {
