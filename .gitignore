@@ -5,7 +5,18 @@ dist/
 .env
 .env.local
 .env.production
+.env.production.local
 *.log
+
+# Production deploy (Phase 13) — secrets, client PII, local artifacts
+backups/
+/client-config.json
+/client-config.*.json
+test-results/
+.playwright-cli/
+cloudflared.exe
+cloudflared.out
+ngrok.out
 coverage/
 .DS_Store
 *.tsbuildinfo

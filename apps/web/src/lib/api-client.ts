@@ -1,4 +1,7 @@
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
+// Empty string => same-origin relative requests (production: web + API share one
+// origin behind Caddy). Unset => the dev default below. We use `??` (not `||`) so an
+// explicit empty value is preserved instead of falling back to localhost.
+const API_URL = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3001';
 
 interface ApiOptions {
   method?: string;

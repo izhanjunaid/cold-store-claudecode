@@ -8,6 +8,17 @@ const ADMIN_PASSWORD_HASH = '$2a$10$qeCjtZftGtPYgSz2HgOfVekOtcMvmclxPNJH04C9spvc
 const prisma = new PrismaClient();
 
 async function main() {
+  // SAFETY GUARD — this script loads DEVELOPMENT/DEMO data only (sample facility, users
+  // sharing the password "admin123", sample parties/commodities/rate plans). It must NEVER
+  // run against a client or production database. Real onboarding uses the clean db:provision flow.
+  if (process.env['NODE_ENV'] === 'production' && process.env['ALLOW_DEMO_SEED'] !== '1') {
+    console.error(
+      'Refusing to load demo seed data: NODE_ENV=production.\n' +
+        'Use the clean provisioning flow instead:  pnpm --filter @coldchain/db db:provision',
+    );
+    process.exit(1);
+  }
+
   console.log('Seeding database...');
 
   // Create default facility

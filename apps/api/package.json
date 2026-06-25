@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-templates.mjs",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "lint": "eslint src/",

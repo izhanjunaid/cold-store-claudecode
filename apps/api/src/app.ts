@@ -37,6 +37,10 @@ import { testRoutes } from './modules/_test/test.controller';
 
 export async function buildApp() {
   const app = Fastify({
+    // Behind Caddy (single-origin reverse proxy) the real client IP arrives in
+    // X-Forwarded-For. Trust it so rate-limiting and logs are per-client rather than
+    // per-proxy. Safe here: the API is never published to the LAN — only Caddy reaches it.
+    trustProxy: true,
     logger: {
       level: process.env['LOG_LEVEL'] || 'info',
     },

@@ -1,0 +1,18 @@
+{
+  "_comment": "Copy this to client-config.json (gitignored) and fill in the CLIENT's real details. Roles: OWNER, MANAGER, ACCOUNTANT, OPERATOR, SECURITY, VIEWER. nameUrdu is optional and used on printed receipts. Temporary passwords are generated automatically and printed once.",
+  "facility": {
+    "name": "ACME Cold Storage (Pvt) Ltd",
+    "address": "Plot 7, Industrial Estate, Sahiwal",
+    "city": "Sahiwal",
+    "phone": "040-1234567",
+    "gstRegistered": false,
+    "gstNumber": null,
+    "numberFormat": "en-PK"
+  },
+  "loadChartOfAccounts": true,
+  "users": [
+    { "name": "Owner Full Name", "nameUrdu": "", "email": "owner@client.example", "role": "OWNER" },
+    { "name": "Accountant Full Name", "email": "accounts@client.example", "role": "ACCOUNTANT" },
+    { "name": "Manager Full Name", "email": "manager@client.example", "role": "MANAGER" }
+  ]
+}

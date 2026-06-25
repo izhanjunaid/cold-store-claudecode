@@ -1,0 +1,30 @@
+# ColdChain reverse proxy — single origin for the whole app.
+#
+# Phase A (pilot): plain HTTP on :80 so staff can reach the box by IP immediately,
+# with no certificate-trust step. The app runs on the trusted facility LAN.
+#
+# Phase C (hardening): switch to HTTPS with Caddy's INTERNAL CA. Replace `:80` with a
+# hostname block and enable port 443 in docker-compose.yml:
+#
+#   coldchain.local {
+#       tls internal
+#       ... (same handle blocks as below) ...
+#   }
+#
+# Then install Caddy's local root CA on staff devices (it lives in the caddy_data volume
+# at /data/caddy/pki/authorities/local/root.crt) so browsers trust the cert.
+
+:80 {
+	encode gzip
+
+	# API, OpenAPI docs, and health check -> Fastify backend.
+	@api path /v1/* /docs* /health
+	handle @api {
+		reverse_proxy api:3001
+	}
+
+	# Everything else -> Next.js web app.
+	handle {
+		reverse_proxy web:3000
+	}
+}

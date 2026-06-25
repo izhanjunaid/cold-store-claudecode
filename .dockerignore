@@ -1,0 +1,37 @@
+# Keep the Docker build context small AND avoid copying host build artifacts over the
+# ones installed/built inside the image (especially node_modules — pnpm symlinks would
+# break). Source, manifests, lockfile, tsconfig, next.config, and packages/db/prisma
+# are intentionally NOT ignored.
+
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+.turbo
+
+.git
+.github
+.gitignore
+.claude
+.vscode
+
+# Tests / reports / local tooling
+test-results
+playwright-report
+.playwright-cli
+**/coverage
+
+# Secrets / client PII must never be baked into images
+.env
+.env.*
+client-config*.json
+
+# Docs aren't needed at build time
+docs
+phases
+*.md
+
+# Logs and OS cruft
+**/*.log
+.DS_Store
+Thumbs.db
