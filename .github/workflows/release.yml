@@ -42,6 +42,7 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @coldchain/db run db:generate
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test
