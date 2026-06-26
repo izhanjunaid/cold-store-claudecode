@@ -27,12 +27,12 @@ export function FormSection({
   columns = 2,
 }: FormSectionProps) {
   return (
-    <section className={cn('rounded-lg border bg-card p-5', className)}>
-      <div className="mb-4">
+    <section className={cn('rounded-lg border bg-card p-4', className)}>
+      <div className="mb-3">
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
       </div>
-      <div className={cn('grid gap-4', GRID_COLS[columns])}>{children}</div>
+      <div className={cn('grid gap-x-4 gap-y-3', GRID_COLS[columns])}>{children}</div>
     </section>
   );
 }

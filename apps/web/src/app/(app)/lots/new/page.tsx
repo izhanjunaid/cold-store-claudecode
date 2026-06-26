@@ -200,8 +200,8 @@ export default function LotCreatePage() {
       <PageHeader title="New Inbound Lot" description="Record produce intake and create a storage lot" />
 
       <Form {...form}>
-        <form onSubmit={handleSubmit(onSubmit)} className="grid gap-5 lg:grid-cols-[1fr_300px]">
-          <div className="space-y-5">
+        <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 lg:grid-cols-[1fr_300px] lg:gap-6">
+          <div className="space-y-4">
             {rootError && (
               <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {rootError}
@@ -233,7 +233,7 @@ export default function LotCreatePage() {
                   options={partyOptions}
                   placeholder="Select billing party…"
                   searchPlaceholder="Search parties…"
-                  className="sm:col-span-2"
+                  className="col-span-full"
                 />
               )}
             </FormSection>
@@ -279,9 +279,8 @@ export default function LotCreatePage() {
               />
             </FormSection>
 
-            <FormSection title="Weights" description="Declared vs accepted weight at intake">
+            <FormSection title="Weights" description="Declared vs accepted weight at intake" columns={3}>
               <NumberField control={control} name="quantity_bags" label="Quantity" required min={1} suffix="bags" />
-              <div className="hidden sm:block" aria-hidden />
               <NumberField
                 control={control}
                 name="declared_weight_kg"
@@ -308,12 +307,12 @@ export default function LotCreatePage() {
                   rows={2}
                   placeholder="Explain the weight variance…"
                   description={`Variance exceeds the facility threshold (${pctThreshold}% or ${kgThreshold} kg) — a note is required.`}
-                  className="sm:col-span-2"
+                  className="col-span-full"
                 />
               )}
             </FormSection>
 
-            <FormSection title="Storage & Billing" description="Where it's stored and how it's charged">
+            <FormSection title="Storage & Billing" description="Where it's stored and how it's charged" columns={3}>
               <SelectField
                 control={control}
                 name="chamber_id"

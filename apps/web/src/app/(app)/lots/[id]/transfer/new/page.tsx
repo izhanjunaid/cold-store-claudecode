@@ -141,7 +141,7 @@ export default function TransferNewPage() {
 
       <Card>
         <CardContent className="pt-6">
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}
@@ -229,7 +229,7 @@ export default function TransferNewPage() {
               <Textarea
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                rows={3}
+                rows={2}
                 placeholder="Optional"
               />
             </div>
