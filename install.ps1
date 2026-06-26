@@ -30,7 +30,10 @@ param(
   [switch]$NonInteractive
 )
 
-$ErrorActionPreference = "Stop"
+# Continue (not Stop): `docker compose` prints normal progress to STDERR, which under "Stop"
+# PowerShell can promote to a terminating error when output is redirected (piped / logged).
+# We check $LASTEXITCODE after each docker call and wrap fallible cmdlets in try/catch instead.
+$ErrorActionPreference = "Continue"
 Set-Location -Path $PSScriptRoot
 $EnvFile = ".env.production"
 
@@ -121,7 +124,11 @@ if (-not $ready) { Fail "ColdChain did not come up in time. Open Docker Desktop 
 Say "   OK - ColdChain is running." Green
 
 # ---------------------------------------------------------------- 6) Set up the facility (only if empty)
-$count = (docker compose --env-file $EnvFile exec -T postgres sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -tAc "SELECT count(*) FROM facilities"' 2>$null | Out-String).Trim()
+# Has this box already been set up? We call psql DIRECTLY (not via `sh -c "...$VAR..."`) because
+# PowerShell mangles double-quotes nested inside a single-quoted arg, which silently produced an
+# empty result. The installer always provisions the DB as user/db "coldchain" (see settings above).
+$raw   = docker compose --env-file $EnvFile exec -T postgres psql -U coldchain -d coldchain -tAc "SELECT count(*) FROM facilities"
+$count = "$raw".Trim()
 
 if ($count -ne "0" -and $count -ne "") {
   Say ""
@@ -167,12 +174,23 @@ else {
 }
 
 # ---------------------------------------------------------------- 7) Done - show how to open it
+# Real LAN IP = the adapter that has a default gateway (the Wi-Fi / Ethernet NIC).
+# This deliberately skips Docker/WSL virtual adapters (e.g. 172.17.x on "vEthernet (WSL)")
+# and link-local 169.254.x - none of which a phone on the facility Wi-Fi can reach.
 $ip = $null
 try {
-  $ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
-         Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
-         Select-Object -First 1).IPAddress
+  $ip = (Get-NetIPConfiguration -ErrorAction Stop |
+         Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq 'Up' } |
+         Select-Object -First 1).IPv4Address.IPAddress
 } catch { }
+if (-not $ip) {
+  try {
+    $ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+           Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" -and
+                          $_.InterfaceAlias -notmatch "vEthernet|WSL|Docker|Loopback" } |
+           Select-Object -First 1).IPAddress
+  } catch { }
+}
 
 Write-Host ""
 Say "==========================================================" Green
