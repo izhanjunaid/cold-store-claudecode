@@ -10,6 +10,7 @@ import {
   ReceiptText,
   Settings,
   ShieldCheck,
+  Sprout,
   Tags,
   TrendingUp,
   Users,
@@ -48,6 +49,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Lots', href: '/lots', icon: Boxes },
       { label: 'Chambers', href: '/chambers', icon: Warehouse },
+      { label: 'Commodities', href: '/commodities', icon: Sprout, minRole: 'MANAGER' },
       { label: 'Gate Pass', href: '/gate', icon: DoorOpen, minRole: 'SECURITY' },
       { label: 'Quality', href: '/quality', icon: ShieldCheck, minRole: 'OPERATOR' },
     ],
