@@ -134,7 +134,7 @@ The client unzips the folder and double‑clicks `install.bat`. Nothing else is 
 
 ### How the installer works
 - Generates `.env.production` with strong random secrets on first run (never overwrites an existing one).
-- `docker compose pull` of `ghcr.io/izhanjunaid/coldchain-{api,web}:<tag>` (default `v0.1.0`, public).
+- `docker compose pull` of `ghcr.io/izhanjunaid/coldchain-{api,web}:<tag>` (default `latest` = newest release; public). The installer syncs `COLDCHAIN_TAG` in `.env.production` to the requested `-Tag` on every run, so `install.bat -Tag vX.Y.Z` updates an existing box too.
 - `docker compose up -d` → the one‑shot `migrate` service applies the Prisma baseline, then `api`/`web`/`caddy` start.
 - Provisions a **clean** facility at the fixed id the web login expects, the owner (+ any staff you add),
   and the 83‑account standard chart of accounts — **no demo/sample data**. The clean‑DB guard refuses

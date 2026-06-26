@@ -24,7 +24,7 @@ param(
   [string]$City = "Lahore",
   [string]$OwnerName,
   [string]$OwnerEmail,
-  [string]$Tag = "v0.1.0",
+  [string]$Tag = "latest",
   [string]$Registry = "ghcr.io/izhanjunaid",
   [switch]$SkipPull,
   [switch]$NonInteractive
@@ -91,6 +91,17 @@ if (-not (Test-Path $EnvFile)) {
 } else {
   Say "   OK - using existing settings ($EnvFile)." Green
 }
+
+# Make the requested version the one the stack actually runs, even on an EXISTING box — so
+# `install.bat -Tag vX.Y.Z` truly updates it (the .env above is only written on first install).
+$envText = Get-Content $EnvFile -Raw
+if ($envText -match '(?m)^COLDCHAIN_TAG=') {
+  $envText = [regex]::Replace($envText, '(?m)^COLDCHAIN_TAG=.*$', "COLDCHAIN_TAG=$Tag")
+} else {
+  $envText = $envText.TrimEnd() + "`nCOLDCHAIN_TAG=$Tag`n"
+}
+[System.IO.File]::WriteAllText((Join-Path (Get-Location) $EnvFile), $envText, (New-Object System.Text.ASCIIEncoding))
+Say "   Version: $Tag" Green
 
 # ---------------------------------------------------------------- 3) Download images
 if (-not $SkipPull) {
