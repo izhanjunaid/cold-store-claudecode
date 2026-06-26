@@ -22,6 +22,18 @@ export async function commodityRoutes(app: FastifyInstance) {
     },
   });
 
+  // GET /v1/varieties — flat list of all varieties (each with commodity_id), for the lot form
+  // and other reference dropdowns. The web's useVarieties() hook calls this.
+  app.route({
+    method: 'GET',
+    url: '/v1/varieties',
+    preHandler: [app.authenticate],
+    handler: async (_request, reply) => {
+      const result = await service.listAllVarieties();
+      return sendSuccess(reply, result);
+    },
+  });
+
   // POST /v1/commodities
   app.route({
     method: 'POST',

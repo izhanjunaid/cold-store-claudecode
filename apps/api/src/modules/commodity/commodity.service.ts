@@ -76,6 +76,12 @@ export class CommodityService {
     return (varieties as VarietyRecord[]).map(toVarietyResponse);
   }
 
+  /** Flat list of every variety (with commodity_id) — powers reference dropdowns like the lot form. */
+  async listAllVarieties() {
+    const varieties = await this.repo.findAllVarieties();
+    return (varieties as VarietyRecord[]).map(toVarietyResponse);
+  }
+
   async createVariety(commodityId: string, name: string) {
     const commodity = await this.repo.findById(commodityId);
     if (!commodity) throw Errors.VALIDATION_ERROR('Commodity not found');

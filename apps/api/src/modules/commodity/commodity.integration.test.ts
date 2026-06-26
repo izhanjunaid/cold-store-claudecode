@@ -98,4 +98,20 @@ describe('Commodity CRUD', () => {
     const body = JSON.parse(res.body);
     expect(body.data.length).toBeGreaterThan(0);
   });
+
+  it('GET /v1/varieties — flat list of ALL varieties, each with commodity_id', async () => {
+    // Regression guard: this endpoint was missing, so the lot form's useVarieties() (which reads
+    // /v1/varieties and filters by commodity_id) always got 404 -> the Variety dropdown was empty.
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/varieties',
+      headers: authHeaders(ownerToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(Array.isArray(body.data)).toBe(true);
+    const mine = body.data.find((v: { name: string }) => v.name === 'Sindhri');
+    expect(mine).toBeDefined();
+    expect(mine.commodity_id).toBe(createdCommodityId);
+  });
 });

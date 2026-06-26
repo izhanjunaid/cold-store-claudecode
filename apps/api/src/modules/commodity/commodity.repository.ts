@@ -39,6 +39,10 @@ export class CommodityRepository {
     });
   }
 
+  async findAllVarieties() {
+    return this.prisma.variety.findMany({ orderBy: { name: 'asc' } });
+  }
+
   async createVariety(data: Prisma.VarietyUncheckedCreateInput) {
     return this.prisma.variety.create({ data });
   }
