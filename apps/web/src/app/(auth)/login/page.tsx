@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Snowflake } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
@@ -22,8 +22,20 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [nextPath, setNextPath] = useState<string | null>(null);
   const router = useRouter();
   const setUser = useAuthStore((s) => s.setUser);
+
+  // Read query params via window.location: useSearchParams() would force a
+  // Suspense boundary around this statically-rendered page in Next 14.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setSessionExpired(params.get('expired') === '1');
+    const next = params.get('next');
+    // Same-origin paths only — never follow an absolute/protocol-relative URL.
+    if (next && next.startsWith('/') && !next.startsWith('//')) setNextPath(next);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,11 +48,11 @@ export default function LoginPage() {
         headers: { 'X-Facility-ID': '00000000-0000-0000-0000-000000000001' },
       });
       setUser(result.user, result.access_token, result.refresh_token);
+      const mustChange = (result.user as { must_change_password?: boolean })
+        .must_change_password;
+      // Return to where the user was headed, unless a password change is forced.
       router.push(
-        defaultRouteForRole(
-          result.user.role,
-          (result.user as { must_change_password?: boolean }).must_change_password,
-        ),
+        !mustChange && nextPath ? nextPath : defaultRouteForRole(result.user.role, mustChange),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -65,6 +77,11 @@ export default function LoginPage() {
         <Card>
           <CardContent className="pt-6">
             <form onSubmit={handleSubmit} className="space-y-4">
+              {sessionExpired && !error && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  You were signed out. Please sign in again.
+                </div>
+              )}
               {error && (
                 <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                   {error}

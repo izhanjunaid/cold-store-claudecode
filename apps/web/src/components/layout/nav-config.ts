@@ -9,7 +9,6 @@ import {
   LayoutDashboard,
   ReceiptText,
   Settings,
-  ShieldCheck,
   Sprout,
   Tags,
   TrendingUp,
@@ -51,7 +50,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Chambers', href: '/chambers', icon: Warehouse },
       { label: 'Commodities', href: '/commodities', icon: Sprout, minRole: 'MANAGER' },
       { label: 'Gate Pass', href: '/gate', icon: DoorOpen, minRole: 'SECURITY' },
-      { label: 'Quality', href: '/quality', icon: ShieldCheck, minRole: 'OPERATOR' },
+      // Quality (M6) has no UI yet — do not add a nav item until its page exists,
+      // a link that 404s is worse than no link.
     ],
   },
   {

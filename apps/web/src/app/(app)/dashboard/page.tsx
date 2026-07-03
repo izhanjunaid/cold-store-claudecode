@@ -15,6 +15,10 @@ import { PageHeader } from '@/components/layout/page-header';
 const fmt = (n: number) => n.toLocaleString('en-PK', { maximumFractionDigits: 0 });
 const fmtPkr = (n: number) => `Rs ${fmt(n)}`;
 
+/** Most chambers the occupancy chart can show while keeping labels readable. */
+const CHART_MAX_CHAMBERS = 12;
+const tickLabel = (name: string) => (name.length > 12 ? `${name.slice(0, 11)}…` : name);
+
 function KpiCard({ label, value, subline }: { label: string; value: string; subline?: string }) {
   return (
     <Card>
@@ -84,13 +88,31 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Chamber Occupancy</CardTitle>
+            {(data?.chambers.length ?? 0) > CHART_MAX_CHAMBERS && (
+              <p className="text-xs text-muted-foreground">
+                Top {CHART_MAX_CHAMBERS} of {data?.chambers.length} chambers by fill
+              </p>
+            )}
           </CardHeader>
           <CardContent>
             {data?.chambers.length ? (
-              <div style={{ width: '100%', height: 240 }}>
+              <div style={{ width: '100%', height: 260 }}>
                 <ResponsiveContainer>
-                  <BarChart data={data.chambers}>
-                    <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                  <BarChart
+                    data={[...data.chambers]
+                      .sort((a, b) => b.occupancy_pct - a.occupancy_pct)
+                      .slice(0, CHART_MAX_CHAMBERS)}
+                    margin={{ bottom: 24 }}
+                  >
+                    <XAxis
+                      dataKey="name"
+                      tick={{ fontSize: 11 }}
+                      stroke="hsl(var(--muted-foreground))"
+                      interval={0}
+                      angle={-30}
+                      textAnchor="end"
+                      tickFormatter={tickLabel}
+                    />
                     <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" stroke="hsl(var(--muted-foreground))" />
                     <Tooltip
                       contentStyle={{ borderRadius: 8, border: '1px solid hsl(var(--border))', fontSize: 12 }}
@@ -154,13 +176,6 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <div className="mt-6 rounded-lg border border-dashed bg-muted/30 p-5">
-        <div className="text-sm font-semibold text-foreground">Spoilage Queue</div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Spoilage review and inspections are part of the Quality module. Once shipped, pending
-          inspections and confirmed spoilage events appear here.
-        </p>
-      </div>
     </div>
   );
 }

@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
 import { Breadcrumbs } from '@/components/layout/breadcrumbs';
 import { useAuthStore } from '@/stores/auth.store';
-import { apiClient } from '@/lib/api-client';
+import { ApiError, apiClient } from '@/lib/api-client';
 import { Providers } from './providers';
 
 interface MeResponse {
@@ -23,6 +23,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated, user, setUser, loadFromStorage, logout } = useAuthStore();
+  const [meRetry, setMeRetry] = useState(0);
 
   useEffect(() => {
     loadFromStorage();
@@ -32,7 +33,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated) {
       const token = localStorage.getItem('access_token');
       if (!token) {
-        router.push('/login');
+        // Never signed in (or signed out): go to login, remembering the destination.
+        const next = pathname && pathname !== '/' ? `?next=${encodeURIComponent(pathname)}` : '';
+        router.push(`/login${next}`);
         return;
       }
     }
@@ -44,12 +47,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           const refreshToken = localStorage.getItem('refresh_token') || '';
           setUser(me, accessToken, refreshToken);
         })
-        .catch(() => {
-          logout();
-          router.push('/login');
+        .catch((err) => {
+          // Only end the session when the API says the token is bad. A network
+          // hiccup or an API restart must not wipe a valid session — the next
+          // render retries /me instead.
+          if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+            logout();
+            router.push(`/login?expired=1&next=${encodeURIComponent(pathname ?? '/')}`);
+          } else {
+            // Transient failure (API restarting, network blip): retry shortly.
+            setTimeout(() => setMeRetry((n) => n + 1), 2000);
+          }
         });
     }
-  }, [isAuthenticated, user, router, setUser, logout]);
+  }, [isAuthenticated, user, pathname, router, setUser, logout, meRetry]);
 
   // Force users with must_change_password to the change-password page.
   useEffect(() => {

@@ -14,6 +14,12 @@ describe('navGroupsForRole', () => {
     expect(items).toContain('/gate');
   });
 
+  it('never links to /quality — the Quality module has no page yet', () => {
+    for (const role of ['OWNER', 'MANAGER', 'ACCOUNTANT', 'OPERATOR', 'SECURITY']) {
+      expect(hrefs(role)).not.toContain('/quality');
+    }
+  });
+
   it('hides admin and finance from OPERATOR', () => {
     const items = hrefs('OPERATOR');
     expect(items).toContain('/lots');
