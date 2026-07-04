@@ -121,14 +121,15 @@ export default function CommoditiesPage() {
               <Input value={unit} onChange={(e) => setUnit(e.target.value)} required maxLength={20} placeholder="bags" />
             </div>
             <div className="space-y-1.5">
-              <Label>Alert (days)</Label>
+              <Label>Storage alert (days)</Label>
               <Input
                 type="number"
                 min={1}
                 value={alertDays}
                 onChange={(e) => setAlertDays(e.target.value)}
                 className="tabular-nums"
-                placeholder="—"
+                placeholder="e.g. 120"
+                title="Lot Aging flags lots stored longer than this"
               />
             </div>
             <div className="sm:col-span-4">

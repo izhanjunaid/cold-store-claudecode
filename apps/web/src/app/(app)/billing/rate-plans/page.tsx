@@ -58,10 +58,10 @@ export default function RatePlanListPage() {
     if (!(await confirm({ title: 'Deactivate rate plan?', confirmText: 'Deactivate', destructive: true }))) return;
     try {
       await apiClient(`/v1/rate-plans/${id}`, { method: 'DELETE' });
-      toast.success('Deactivated');
+      toast.success('Rate plan deactivated');
       fetchPlans();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed');
+      toast.error(err instanceof Error ? err.message : 'Could not deactivate the rate plan');
     }
   };
 

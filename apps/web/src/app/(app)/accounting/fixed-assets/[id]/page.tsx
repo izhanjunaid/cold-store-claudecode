@@ -100,7 +100,7 @@ export default function FixedAssetDetailPage() {
     try {
       await apiClient(`/v1/fixed-assets/${id}/dispose`, { method: 'POST', body: { disposal_date: disposalDate, disposal_proceeds_pkr: Number(disposalProceeds) } });
       setShowDispose(false);
-      toast.success('Asset disposed · JE-14 posted');
+      toast.success('Asset disposed', { description: 'Journal entry JE-14 posted.' });
       fetchAsset();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');

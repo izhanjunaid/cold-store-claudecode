@@ -77,7 +77,9 @@ export default function UserDetailPage() {
       setUser(updated);
       setShowReset(false);
       setNewPassword('');
-      toast.success('Password reset; sessions revoked');
+      toast.success('Password reset', {
+        description: "The user's other sessions were signed out.",
+      });
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Reset failed');
     } finally {

@@ -78,10 +78,10 @@ export default function ServiceChargeListPage() {
     if (!(await confirm({ title: 'Deactivate service charge?', confirmText: 'Deactivate', destructive: true }))) return;
     try {
       await apiClient(`/v1/service-charges/${id}`, { method: 'DELETE' });
-      toast.success('Deactivated');
+      toast.success('Service charge deactivated');
       fetchCharges();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed');
+      toast.error(err instanceof Error ? err.message : 'Could not deactivate the service charge');
     }
   };
 
