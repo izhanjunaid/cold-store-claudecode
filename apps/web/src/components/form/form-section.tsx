@@ -12,7 +12,9 @@ interface FormSectionProps {
 const GRID_COLS: Record<number, string> = {
   1: 'grid-cols-1',
   2: 'grid-cols-1 sm:grid-cols-2',
-  3: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
+  // 3-up only when the form is genuinely wide: beside the summary rail the
+  // form is ~600px at lg, where three columns wrap labels and clip selects.
+  3: 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3',
 };
 
 /**

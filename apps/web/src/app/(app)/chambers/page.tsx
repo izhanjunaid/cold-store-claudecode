@@ -73,12 +73,13 @@ export default function ChamberListPage() {
           {chambers.map((chamber) => (
             <Card key={chamber.id} className="cursor-pointer transition-shadow hover:shadow-md" onClick={() => router.push(`/chambers/${chamber.id}`)}>
               <CardContent className="pt-6">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="font-semibold text-foreground">{chamber.name}</h3>
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <h3 className="min-w-0 font-semibold text-foreground">{chamber.name}</h3>
                   <StatusBadge
                     status={chamber.commodity_restriction_name || 'Multi'}
                     tone={chamber.commodity_restriction_name ? 'info' : 'neutral'}
                     raw
+                    className="shrink-0"
                   />
                 </div>
                 <div className="mb-3">
@@ -94,12 +95,14 @@ export default function ChamberListPage() {
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">
-                    Range: {chamber.temperature_min_c ?? '?'}°C – {chamber.temperature_max_c ?? '?'}°C
+                    {chamber.temperature_min_c == null && chamber.temperature_max_c == null
+                      ? 'Temp range not set'
+                      : `Range: ${chamber.temperature_min_c ?? '—'}°C – ${chamber.temperature_max_c ?? '—'}°C`}
                   </span>
                   {chamber.last_temperature ? (
                     <span className="font-medium tabular-nums">{chamber.last_temperature.temperature_c}°C</span>
                   ) : (
-                    <span className="text-xs text-muted-foreground">No readings</span>
+                    <span className="text-xs text-muted-foreground">No temperature readings yet</span>
                   )}
                 </div>
               </CardContent>

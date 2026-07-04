@@ -58,6 +58,23 @@
   }
 }
 
+/* Sidebar scroll: a thin dark scrollbar instead of the default light
+   OS one, which reads as a rendering glitch over the dark-green rail. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--sidebar-accent)) transparent;
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--sidebar-accent));
+  border-radius: 3px;
+}
+
 /* ============================================================
    Print — financial statements
    Reveal only the .print-area (statement + frame); hide all app

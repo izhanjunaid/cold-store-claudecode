@@ -178,6 +178,7 @@ export default function SettingsPage() {
             <div>
               <Label className="mb-1 block">Storage Alert Thresholds (days)</Label>
               <p className="mb-2 text-xs text-muted-foreground">Per-commodity day count; Lot Aging flags lots older than this.</p>
+              <div className="max-h-80 overflow-y-auto rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -215,6 +216,7 @@ export default function SettingsPage() {
                   )}
                 </TableBody>
               </Table>
+              </div>
             </div>
           </CardContent>
         </Card>

@@ -40,7 +40,7 @@ export function Sidebar() {
         )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-2" aria-label="Main navigation">
+      <nav className="sidebar-scroll flex-1 overflow-y-auto py-2" aria-label="Main navigation">
         {groups.map((group) => (
           <div key={group.label} className="mb-1 px-2">
             {!sidebarCollapsed && (

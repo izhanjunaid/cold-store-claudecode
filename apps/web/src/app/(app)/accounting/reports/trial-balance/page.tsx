@@ -134,6 +134,13 @@ export default function TrialBalancePage() {
                   </tr>
                 </thead>
                 <tbody>
+                  {data.groups.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-2 py-6 text-center text-muted-foreground">
+                        No journal entries in this period.
+                      </td>
+                    </tr>
+                  )}
                   {data.groups.map((g) => (
                     <Fragment key={g.account_class}>
                       <tr>
