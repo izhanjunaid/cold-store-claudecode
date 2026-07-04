@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { CheckCircle2, TriangleAlert } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { PageHeader } from '@/components/layout/page-header';
-import { StatementFrame } from '@/components/accounting/statement-frame';
+import { StatementFrame, StatementSkeleton } from '@/components/accounting/statement-frame';
 import { StatementToolbar } from '@/components/accounting/statement-toolbar';
 import { useStatementPeriod } from '@/components/accounting/use-statement-period';
 import { describePeriod } from '@/lib/fiscal-period';
@@ -110,7 +110,7 @@ export default function TrialBalancePage() {
       />
 
       {loading && !data ? (
-        <p className="text-muted-foreground">Loading…</p>
+        <StatementSkeleton />
       ) : !data ? null : (
         <div className="print-area">
           <StatementFrame title="Trial Balance" periodLabel={describePeriod({ date_from: range.date_from, date_to: range.date_to }, 'period')} bookType={bookType}>

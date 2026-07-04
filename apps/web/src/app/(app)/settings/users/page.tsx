@@ -12,6 +12,7 @@ import { DataTable, useTableState, type DataTableColumn } from '@/components/dat
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
 
+import { formatDateTime } from '@/lib/format';
 const ROLE_TONE: Record<string, 'neutral' | 'info' | 'success' | 'warning'> = {
   OWNER: 'neutral',
   MANAGER: 'info',
@@ -35,7 +36,7 @@ const columns: DataTableColumn<UserResponseType>[] = [
     ),
     csv: (u) => (u.is_active ? 'Active' : 'Disabled'),
   },
-  { id: 'last_login', header: 'Last Login', cell: (u) => (u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '—'), csv: (u) => u.last_login_at ?? '' },
+  { id: 'last_login', header: 'Last Login', cell: (u) => (u.last_login_at ? formatDateTime(u.last_login_at) : '—'), csv: (u) => u.last_login_at ?? '' },
 ];
 
 export default function UsersListPage() {

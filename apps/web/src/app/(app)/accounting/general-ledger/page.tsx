@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
-import { StatementFrame } from '@/components/accounting/statement-frame';
+import { StatementFrame, StatementSkeleton } from '@/components/accounting/statement-frame';
 import { describePeriod } from '@/lib/fiscal-period';
 import { fmtAcct } from '@/lib/accounting-format';
 import { buildCsv, downloadCsv } from '@/components/data-table/export-csv';
@@ -155,7 +155,7 @@ export default function GeneralLedgerPage() {
       </div>
 
       {loading && !data ? (
-        <p className="text-muted-foreground">Loading…</p>
+        <StatementSkeleton />
       ) : !data ? (
         <p className="text-muted-foreground">Select an account.</p>
       ) : (

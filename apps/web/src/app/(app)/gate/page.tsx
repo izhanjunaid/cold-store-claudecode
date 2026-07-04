@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { FileText, RefreshCw } from 'lucide-react';
+import { FileText, RefreshCw, Truck } from 'lucide-react';
 import { apiClient, apiClientList, ApiError } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/empty-state';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -199,7 +201,7 @@ export default function GatePassConsolePage() {
           <CardContent>
             <form onSubmit={submitInward} className="space-y-4">
               <div className="space-y-1.5">
-                <Label>Vehicle Number <span className="text-destructive">*</span></Label>
+                <Label>Vehicle number <span className="text-destructive">*</span></Label>
                 <Input
                   type="text"
                   value={vehicle}
@@ -211,15 +213,15 @@ export default function GatePassConsolePage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Driver Name</Label>
+                <Label>Driver name</Label>
                 <Input type="text" value={driver} onChange={(e) => setDriver(e.target.value)} placeholder="Ali Khan" />
               </div>
               <div className="space-y-1.5">
-                <Label>Driver Phone</Label>
+                <Label>Driver phone</Label>
                 <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0300-1234567" />
               </div>
               <div className="space-y-1.5">
-                <Label>Bilty Number</Label>
+                <Label>Bilty number</Label>
                 <Input type="text" value={bilty} onChange={(e) => setBilty(e.target.value)} placeholder="Optional transporter receipt" />
               </div>
               <Button type="submit" disabled={submitting || !vehicle.trim()} className="h-12 w-full text-base">
@@ -240,11 +242,19 @@ export default function GatePassConsolePage() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
+              <div className="space-y-3">
+                {Array.from({ length: 3 }, (_, i) => (
+                  <Skeleton key={i} className="h-16 w-full rounded-lg" />
+                ))}
+              </div>
             ) : passes.length === 0 ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">No vehicles currently inside.</p>
+              <EmptyState
+                icon={Truck}
+                title="No vehicles inside"
+                hint="Vehicles appear here after you log their arrival."
+              />
             ) : (
-              <ul className="space-y-3">
+              <ul className="max-h-[26rem] space-y-3 overflow-y-auto pr-1">
                 {passes.map((p) => (
                   <li key={p.id} className="flex items-center gap-3 rounded-lg border p-3">
                     <div className="flex-1">
@@ -319,7 +329,7 @@ export default function GatePassConsolePage() {
                 {outwardModal.related_dispatch_note_number ? ` • Dispatch ${outwardModal.related_dispatch_note_number}` : ''}
               </p>
               <div className="space-y-1.5">
-                <Label>Outbound Event ID (optional)</Label>
+                <Label>Outbound event ID (optional)</Label>
                 <Input
                   value={outwardOutboundId}
                   onChange={(e) => setOutwardOutboundId(e.target.value)}

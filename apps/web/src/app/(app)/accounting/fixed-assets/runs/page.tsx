@@ -14,6 +14,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { formatMoney } from '@/lib/format';
+import { DataTableSkeleton } from '@/components/data-table';
 interface RunSummary {
   period_year: number;
   period_month: number;
@@ -54,7 +56,7 @@ export default function DepreciationRunsPage() {
         body: { period_year: runYear, period_month: runMonth },
       });
       setShowRunModal(false);
-      toast.success(`Posted ${result.run_count} asset(s) · Rs. ${result.total_depreciation_pkr.toLocaleString()}`);
+      toast.success(`Posted ${result.run_count} asset(s) · ${formatMoney(result.total_depreciation_pkr)}`);
       fetchRuns();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Run failed');
@@ -82,7 +84,7 @@ export default function DepreciationRunsPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={3} className="h-24 text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              <DataTableSkeleton columns={3} rows={5} />
             ) : runs.length === 0 ? (
               <TableRow><TableCell colSpan={3} className="h-24 text-center text-muted-foreground">No depreciation runs yet</TableCell></TableRow>
             ) : (

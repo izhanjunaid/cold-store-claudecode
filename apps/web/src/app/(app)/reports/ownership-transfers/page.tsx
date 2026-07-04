@@ -12,8 +12,9 @@ import { DataTable, useTableState, type DataTableColumn } from '@/components/dat
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
 
+import { formatDate } from '@/lib/format';
 const columns: DataTableColumn<OwnershipTransferRowType>[] = [
-  { id: 'date', header: 'Date', cell: (t) => t.transfer_date, csv: (t) => t.transfer_date },
+  { id: 'date', header: 'Date', cell: (t) => formatDate(t.transfer_date), csv: (t) => t.transfer_date },
   {
     id: 'type',
     header: 'Type',

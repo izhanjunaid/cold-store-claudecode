@@ -14,6 +14,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 
+import { formatMoney } from '@/lib/format';
+import { DataTableSkeleton } from '@/components/data-table';
 interface ServiceCharge {
   id: string;
   name: string;
@@ -104,7 +106,7 @@ export default function ServiceChargeListPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              <DataTableSkeleton columns={5} rows={5} />
             ) : charges.length === 0 ? (
               <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">No service charges found</TableCell></TableRow>
             ) : (
@@ -112,7 +114,7 @@ export default function ServiceChargeListPage() {
                 <TableRow key={sc.id}>
                   <TableCell className="font-medium">{sc.name}</TableCell>
                   <TableCell>{UNIT_TYPE_LABELS[sc.unit_type] || sc.unit_type}</TableCell>
-                  <TableCell className="text-right tabular-nums font-medium">Rs. {sc.unit_price_pkr.toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums font-medium">{formatMoney(sc.unit_price_pkr)}</TableCell>
                   <TableCell><StatusBadge status={sc.is_active ? 'ACTIVE' : 'INACTIVE'} /></TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">

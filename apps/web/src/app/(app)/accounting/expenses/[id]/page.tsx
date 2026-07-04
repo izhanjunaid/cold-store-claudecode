@@ -15,6 +15,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 
+import { formatDate, formatMoney } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 interface ExpenseVoucher {
@@ -87,7 +89,7 @@ export default function ExpenseVoucherDetailPage() {
     }
   }
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!v) return <p className="text-destructive">Voucher not found</p>;
 
   return (
@@ -95,7 +97,7 @@ export default function ExpenseVoucherDetailPage() {
       <PageHeader
         title={v.description}
         crumb={v.voucher_number}
-        description={`${v.voucher_date} · Account ${v.expense_account_code}${v.vendor_name ? ` · ${v.vendor_name}` : ''}${v.reference_number ? ` · Ref ${v.reference_number}` : ''}`}
+        description={`${formatDate(v.voucher_date)} · Account ${v.expense_account_code}${v.vendor_name ? ` · ${v.vendor_name}` : ''}${v.reference_number ? ` · Ref ${v.reference_number}` : ''}`}
         actions={
           <>
             {isManager && v.status === 'DRAFT' && <Button onClick={() => action('approve', {}, 'Approved')}>Approve</Button>}
@@ -117,8 +119,8 @@ export default function ExpenseVoucherDetailPage() {
             <StatusBadge status={v.status} />
           </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Amount</div><div className="text-lg font-semibold tabular-nums">Rs. {v.amount_pkr.toLocaleString()}</div></div>
-            {v.payment_date && <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Paid On</div><div>{v.payment_date} ({v.payment_method})</div></div>}
+            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Amount</div><div className="text-lg font-semibold tabular-nums">{formatMoney(v.amount_pkr)}</div></div>
+            {v.payment_date && <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Paid On</div><div>{formatDate(v.payment_date)} ({v.payment_method})</div></div>}
             <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Type</div><div>{v.is_accrual ? 'Accrual' : 'Direct'}</div></div>
           </div>
           <div className="mt-4 space-y-1 text-sm text-muted-foreground">

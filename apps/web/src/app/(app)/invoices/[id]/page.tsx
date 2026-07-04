@@ -24,6 +24,8 @@ import {
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 
+import { formatDate, formatDateTime, formatMoney } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
 interface InvoiceLine {
@@ -188,7 +190,7 @@ export default function InvoiceDetailPage() {
     if (!invoice) return;
     const ok = await confirm({
       title: 'Finalize Invoice',
-      description: `This assigns an invoice number and locks the invoice for editing. Total: PKR ${invoice.total_pkr.toLocaleString()}.`,
+      description: `This assigns an invoice number and locks the invoice for editing. Total: ${formatMoney(invoice.total_pkr)}.`,
       confirmText: 'Confirm',
     });
     if (!ok) return;
@@ -218,7 +220,7 @@ export default function InvoiceDetailPage() {
     }
   }
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (error) return <p className="text-destructive">{error}</p>;
   if (!invoice) return null;
 
@@ -263,10 +265,10 @@ export default function InvoiceDetailPage() {
               </Button>
             }
           />
-          <Info label="Invoice Date" value={invoice.invoice_date} />
-          <Info label="Period Start" value={invoice.period_start} />
-          <Info label="Period End" value={invoice.period_end} />
-          {invoice.finalized_at && <Info label="Finalized At" value={new Date(invoice.finalized_at).toLocaleString()} />}
+          <Info label="Invoice Date" value={formatDate(invoice.invoice_date)} />
+          <Info label="Period Start" value={formatDate(invoice.period_start)} />
+          <Info label="Period End" value={formatDate(invoice.period_end)} />
+          {invoice.finalized_at && <Info label="Finalized At" value={formatDateTime(invoice.finalized_at)} />}
         </CardContent>
       </Card>
 
@@ -332,29 +334,29 @@ export default function InvoiceDetailPage() {
             )}
             <div className="flex justify-between">
               <span className="text-muted-foreground">Subtotal</span>
-              <span className="font-medium tabular-nums">PKR {invoice.sub_total_pkr.toLocaleString()}</span>
+              <span className="font-medium tabular-nums">{formatMoney(invoice.sub_total_pkr)}</span>
             </div>
             {invoice.discount_amount_pkr > 0 && (
               <div className="flex justify-between text-amber-700">
                 <span>Discount{invoice.discount_type === 'PERCENT' ? ` (${invoice.discount_value}%)` : ''}</span>
-                <span className="tabular-nums">− PKR {invoice.discount_amount_pkr.toLocaleString()}</span>
+                <span className="tabular-nums">− {formatMoney(invoice.discount_amount_pkr)}</span>
               </div>
             )}
             <div className="flex justify-between">
               <span className="text-muted-foreground">GST ({invoice.gst_rate}%)</span>
-              <span className="tabular-nums">PKR {invoice.gst_amount_pkr.toLocaleString()}</span>
+              <span className="tabular-nums">{formatMoney(invoice.gst_amount_pkr)}</span>
             </div>
             <div className="flex justify-between border-t pt-1 text-base font-bold">
               <span>Total</span>
-              <span className="tabular-nums">PKR {invoice.total_pkr.toLocaleString()}</span>
+              <span className="tabular-nums">{formatMoney(invoice.total_pkr)}</span>
             </div>
             <div className="flex justify-between text-green-700">
               <span>Amount Paid</span>
-              <span className="tabular-nums">PKR {invoice.amount_paid_pkr.toLocaleString()}</span>
+              <span className="tabular-nums">{formatMoney(invoice.amount_paid_pkr)}</span>
             </div>
             <div className="flex justify-between font-bold text-destructive">
               <span>Balance Due</span>
-              <span className="tabular-nums">PKR {invoice.balance_due_pkr.toLocaleString()}</span>
+              <span className="tabular-nums">{formatMoney(invoice.balance_due_pkr)}</span>
             </div>
           </div>
         </div>

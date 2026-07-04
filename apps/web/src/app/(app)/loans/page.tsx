@@ -7,9 +7,10 @@ import { Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
+import { StatTile } from '@/components/stat-tile';
+import { formatCount, formatDate, formatMoney } from '@/lib/format';
 import { DataTable, useTableState, type DataTableColumn } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
@@ -27,9 +28,9 @@ interface LoanSummary {
 const columns: DataTableColumn<LoanSummary>[] = [
   { id: 'loan_number', header: 'Loan No.', enableHiding: false, cell: (l) => <span className="font-mono text-primary-700">{l.loan_number}</span>, csv: (l) => l.loan_number },
   { id: 'party', header: 'Party', cell: (l) => l.party_name ?? '—', csv: (l) => l.party_name ?? '' },
-  { id: 'issued', header: 'Issued', cell: (l) => l.issue_date, csv: (l) => l.issue_date },
-  { id: 'principal', header: 'Principal', numeric: true, cell: (l) => Number(l.principal_pkr).toLocaleString(), csv: (l) => l.principal_pkr },
-  { id: 'balance', header: 'Balance', numeric: true, cell: (l) => <span className="font-medium">{Number(l.balance_outstanding_pkr).toLocaleString()}</span>, csv: (l) => l.balance_outstanding_pkr },
+  { id: 'issued', header: 'Issued', cell: (l) => formatDate(l.issue_date), csv: (l) => l.issue_date },
+  { id: 'principal', header: 'Principal', numeric: true, cell: (l) => formatCount(Number(l.principal_pkr)), csv: (l) => l.principal_pkr },
+  { id: 'balance', header: 'Balance', numeric: true, cell: (l) => <span className="font-medium">{formatCount(Number(l.balance_outstanding_pkr))}</span>, csv: (l) => l.balance_outstanding_pkr },
   { id: 'status', header: 'Status', cell: (l) => <StatusBadge status={l.status} />, csv: (l) => l.status },
 ];
 
@@ -80,10 +81,19 @@ export default function LoansDashboardPage() {
       />
 
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Card><CardContent className="pt-5"><div className="text-xs uppercase tracking-wide text-muted-foreground">Active Loans</div><div className="mt-1 text-2xl font-bold tabular-nums">{active.length}</div></CardContent></Card>
-        <Card><CardContent className="pt-5"><div className="text-xs uppercase tracking-wide text-muted-foreground">Outstanding (Active)</div><div className="mt-1 text-2xl font-bold tabular-nums text-green-700">PKR {outstanding.toLocaleString()}</div></CardContent></Card>
-        <Card><CardContent className="pt-5"><div className="text-xs uppercase tracking-wide text-muted-foreground">Recovered</div><div className="mt-1 text-2xl font-bold tabular-nums">{rows.filter((l) => l.status === 'RECOVERED').length}</div></CardContent></Card>
-        <Card><CardContent className="pt-5"><div className="text-xs uppercase tracking-wide text-muted-foreground">Written Off</div><div className="mt-1 text-2xl font-bold tabular-nums text-destructive">{rows.filter((l) => l.status === 'WRITTEN_OFF').length}</div></CardContent></Card>
+        <StatTile size="compact" label="Active Loans" value={formatCount(active.length)} />
+        <StatTile size="compact" label="Outstanding (Active)" value={formatMoney(outstanding)} />
+        <StatTile
+          size="compact"
+          label="Recovered"
+          value={formatCount(rows.filter((l) => l.status === 'RECOVERED').length)}
+        />
+        <StatTile
+          size="compact"
+          label="Written Off"
+          value={formatCount(rows.filter((l) => l.status === 'WRITTEN_OFF').length)}
+          tone={rows.some((l) => l.status === 'WRITTEN_OFF') ? 'warning' : 'default'}
+        />
       </div>
 
       <DataTable

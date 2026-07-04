@@ -13,6 +13,7 @@ import { DataTable, useTableState, type DataTableColumn } from '@/components/dat
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
 
+import { formatDate } from '@/lib/format';
 interface FixedAssetSummary {
   id: string;
   asset_number: string;
@@ -30,7 +31,7 @@ const columns: DataTableColumn<FixedAssetSummary>[] = [
   { id: 'asset_number', header: 'Asset #', enableHiding: false, cell: (a) => <span className="font-mono text-primary-700">{a.asset_number}</span>, csv: (a) => a.asset_number },
   { id: 'name', header: 'Name', cell: (a) => a.asset_name, csv: (a) => a.asset_name },
   { id: 'category', header: 'Category', cell: (a) => a.asset_category, csv: (a) => a.asset_category },
-  { id: 'purchase_date', header: 'Purchase Date', cell: (a) => a.purchase_date, csv: (a) => a.purchase_date },
+  { id: 'purchase_date', header: 'Purchase Date', cell: (a) => formatDate(a.purchase_date), csv: (a) => a.purchase_date },
   { id: 'cost', header: 'Cost (PKR)', numeric: true, cell: (a) => a.purchase_cost_pkr.toLocaleString(), csv: (a) => a.purchase_cost_pkr },
   { id: 'depr', header: 'Accum. Depr.', numeric: true, cell: (a) => <span className="text-amber-700">{a.accumulated_depreciation_pkr.toLocaleString()}</span>, csv: (a) => a.accumulated_depreciation_pkr },
   { id: 'nbv', header: 'NBV (PKR)', numeric: true, cell: (a) => <span className="font-medium">{a.net_book_value_pkr.toLocaleString()}</span>, csv: (a) => a.net_book_value_pkr },

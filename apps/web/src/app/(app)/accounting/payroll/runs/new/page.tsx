@@ -73,7 +73,7 @@ export default function NewPayrollRunPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <p className="text-sm text-muted-foreground">
               A DRAFT run snapshots all active employees of the selected type at current pay rates, with EOBI auto-calculated for
-              registered employees (Rs. 375 employee + Rs. 1,875 employer). You can review each line before finalizing.
+              registered employees (Rs 375 employee + Rs 1,875 employer). You can review each line before finalizing.
             </p>
 
             <div className="space-y-1.5">

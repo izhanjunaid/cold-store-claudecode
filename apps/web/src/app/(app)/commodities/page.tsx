@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/layout/page-header';
@@ -142,7 +143,11 @@ export default function CommoditiesPage() {
 
       {/* List with inline variety management */}
       {loading ? (
-        <p className="text-muted-foreground">Loading…</p>
+        <div className="space-y-4">
+          {Array.from({ length: 3 }, (_, i) => (
+            <Skeleton key={i} className="h-28 w-full rounded-lg" />
+          ))}
+        </div>
       ) : commodities.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">

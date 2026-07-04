@@ -121,7 +121,7 @@ export default function NewEmployeePage() {
 
             <label className="flex items-center gap-2.5 text-sm">
               <Checkbox checked={eobiRegistered} onCheckedChange={(c) => setEobiRegistered(!!c)} />
-              EOBI registered (Rs. 375 employee + Rs. 1,875 employer per month)
+              EOBI registered (Rs 375 employee + Rs 1,875 employer per month)
             </label>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

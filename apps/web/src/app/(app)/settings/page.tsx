@@ -12,6 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { PageSkeleton } from '@/components/page-skeleton';
 interface Commodity {
   id: string;
   name: string;
@@ -118,7 +119,7 @@ export default function SettingsPage() {
     }
   }
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!facility) return <p className="text-destructive">{error ?? 'Failed to load facility'}</p>;
 
   return (

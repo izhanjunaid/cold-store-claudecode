@@ -17,6 +17,8 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 
+import { formatMoney } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 interface PaymentAllocation {
   id: string;
   invoice_id: string;
@@ -181,7 +183,7 @@ export default function PaymentDetailPage() {
     }
   };
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!payment) return <p className="text-destructive">Payment not found</p>;
 
   const totalAllocated = payment.allocations.reduce((s, a) => s + a.allocated_amount_pkr, 0);
@@ -227,16 +229,16 @@ export default function PaymentDetailPage() {
         <CardContent className="space-y-2 text-sm">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Payment Amount</span>
-            <span className="font-semibold tabular-nums">PKR {payment.amount_pkr.toLocaleString()}</span>
+            <span className="font-semibold tabular-nums">{formatMoney(payment.amount_pkr)}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Allocated</span>
-            <span className="tabular-nums text-green-700">PKR {totalAllocated.toLocaleString()}</span>
+            <span className="tabular-nums text-green-700">{formatMoney(totalAllocated)}</span>
           </div>
           {unallocated > 0.001 && (
             <div className="flex justify-between border-t pt-2">
               <span className="text-muted-foreground">Unallocated</span>
-              <span className="font-medium tabular-nums text-amber-600">PKR {unallocated.toLocaleString()}</span>
+              <span className="font-medium tabular-nums text-amber-600">{formatMoney(unallocated)}</span>
             </div>
           )}
         </CardContent>
@@ -300,7 +302,7 @@ export default function PaymentDetailPage() {
                         <option value="">Select invoice…</option>
                         {invoices.map((inv) => (
                           <option key={inv.id} value={inv.id}>
-                            {inv.invoice_number ?? inv.id.slice(0, 8)} — Balance: PKR {inv.balance_due_pkr.toLocaleString()}
+                            {inv.invoice_number ?? inv.id.slice(0, 8)} — Balance: {formatMoney(inv.balance_due_pkr)}
                           </option>
                         ))}
                       </select>
@@ -348,7 +350,7 @@ export default function PaymentDetailPage() {
                   </Button>
                   <span className="text-sm text-muted-foreground">
                     To apply:{' '}
-                    <span className="font-medium tabular-nums">PKR {totalToApply.toLocaleString()}</span> / PKR{' '}
+                    <span className="font-medium tabular-nums">{formatMoney(totalToApply)}</span> / PKR{' '}
                     {payment.amount_pkr.toLocaleString()}
                   </span>
                 </div>

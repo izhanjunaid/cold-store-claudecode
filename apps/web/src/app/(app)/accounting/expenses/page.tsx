@@ -14,6 +14,7 @@ import { DataTable, useTableState, type DataTableColumn } from '@/components/dat
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
 
+import { formatDate } from '@/lib/format';
 interface ExpenseVoucher {
   id: string;
   voucher_number: string;
@@ -27,7 +28,7 @@ interface ExpenseVoucher {
 
 const columns: DataTableColumn<ExpenseVoucher>[] = [
   { id: 'voucher_number', header: 'Voucher #', enableHiding: false, cell: (v) => <span className="font-mono text-primary-700">{v.voucher_number}</span>, csv: (v) => v.voucher_number },
-  { id: 'date', header: 'Date', cell: (v) => v.voucher_date, csv: (v) => v.voucher_date },
+  { id: 'date', header: 'Date', cell: (v) => formatDate(v.voucher_date), csv: (v) => v.voucher_date },
   { id: 'account', header: 'Account', cell: (v) => <span className="font-mono">{v.expense_account_code}</span>, csv: (v) => v.expense_account_code },
   { id: 'description', header: 'Description', cell: (v) => v.description, csv: (v) => v.description },
   { id: 'vendor', header: 'Vendor', cell: (v) => v.vendor_name ?? '—', csv: (v) => v.vendor_name ?? '' },

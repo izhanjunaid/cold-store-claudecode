@@ -8,23 +8,25 @@ import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
-import { cn } from '@/lib/utils';
+import { StatTile } from '@/components/stat-tile';
+import { formatMoney } from '@/lib/format';
 
+import { DataTableSkeleton } from '@/components/data-table';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 const fmtPkr = (n: number) => n.toLocaleString('en-PK', { maximumFractionDigits: 2 });
 
 function Kpi({ label, value, primary }: { label: string; value: number; primary?: boolean }) {
   return (
-    <Card className={cn(primary && 'border-primary bg-primary text-primary-foreground')}>
-      <CardContent className="pt-5">
-        <div className={cn('text-xs uppercase tracking-wide', primary ? 'opacity-80' : 'text-muted-foreground')}>{label}</div>
-        <div className="mt-1 text-lg font-bold tabular-nums">Rs {fmtPkr(value)}</div>
-      </CardContent>
-    </Card>
+    <StatTile
+      size="compact"
+      label={label}
+      value={formatMoney(value)}
+      className={primary ? 'border-primary/40' : undefined}
+    />
   );
 }
 
@@ -122,9 +124,7 @@ export default function PartyStatementDetailPage() {
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">Loading…</TableCell>
-              </TableRow>
+              <DataTableSkeleton columns={7} rows={5} />
             ) : data?.entries.length ? (
               data.entries.map((e) => (
                 <TableRow key={e.id}>

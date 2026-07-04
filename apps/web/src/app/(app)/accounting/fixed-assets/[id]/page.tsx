@@ -15,6 +15,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { formatDate, formatMoney } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 interface ScheduleRow {
   period_year: number;
   period_month: number;
@@ -105,7 +107,7 @@ export default function FixedAssetDetailPage() {
     }
   }
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!asset) return <p className="text-destructive">Asset not found</p>;
 
   return (
@@ -113,7 +115,7 @@ export default function FixedAssetDetailPage() {
       <PageHeader
         title={asset.asset_name}
         crumb={asset.asset_number}
-        description={`${asset.asset_category} · Purchased ${asset.purchase_date}${asset.depreciation_start_date ? ` · In service since ${asset.depreciation_start_date}` : ''}`}
+        description={`${asset.asset_category} · Purchased ${formatDate(asset.purchase_date)}${asset.depreciation_start_date ? ` · In service since ${formatDate(asset.depreciation_start_date)}` : ''}`}
         actions={
           <>
             {isOwner && asset.status === 'PURCHASED' && <Button onClick={() => setShowCommission(true)}>Commission</Button>}
@@ -131,9 +133,9 @@ export default function FixedAssetDetailPage() {
             <StatusBadge status={asset.status} />
           </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Kpi label="Purchase Cost" value={`Rs. ${asset.purchase_cost_pkr.toLocaleString()}`} />
-            <Kpi label="Accum. Depreciation" value={`Rs. ${asset.accumulated_depreciation_pkr.toLocaleString()}`} tone="text-amber-700" />
-            <Kpi label="Net Book Value" value={`Rs. ${asset.net_book_value_pkr.toLocaleString()}`} tone="text-green-700" />
+            <Kpi label="Purchase Cost" value={`${formatMoney(asset.purchase_cost_pkr)}`} />
+            <Kpi label="Accum. Depreciation" value={`${formatMoney(asset.accumulated_depreciation_pkr)}`} tone="text-amber-700" />
+            <Kpi label="Net Book Value" value={`${formatMoney(asset.net_book_value_pkr)}`} tone="text-green-700" />
             <Kpi label="Depreciation" value={`${asset.depreciation_method} ${asset.wdv_rate_percent ? `${asset.wdv_rate_percent}%` : `${asset.useful_life_years}yr`}`} />
           </div>
           <div className="mt-4 space-y-1 text-sm text-muted-foreground">
@@ -203,7 +205,7 @@ export default function FixedAssetDetailPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Dispose Asset</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Current NBV: Rs. {asset.net_book_value_pkr.toLocaleString()}. Posts JE-14 with gain (4230) or loss (6110) vs proceeds.
+            Current NBV: {formatMoney(asset.net_book_value_pkr)}. Posts JE-14 with gain (4230) or loss (6110) vs proceeds.
           </p>
           <div className="space-y-1.5">
             <Label>Disposal Date</Label>

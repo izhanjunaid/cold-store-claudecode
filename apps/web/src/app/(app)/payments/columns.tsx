@@ -1,6 +1,7 @@
 import { StatusBadge } from '@/components/ui/status-badge';
 import type { DataTableColumn } from '@/components/data-table';
 
+import { formatDate } from '@/lib/format';
 export interface PaymentRow {
   id: string;
   party_name: string;
@@ -27,7 +28,7 @@ const STATUS_TONE: Record<string, 'info' | 'success' | 'warning' | 'danger'> = {
 };
 
 export const paymentColumns: DataTableColumn<PaymentRow>[] = [
-  { id: 'date', header: 'Date', cell: (p) => p.payment_date, csv: (p) => p.payment_date },
+  { id: 'date', header: 'Date', cell: (p) => formatDate(p.payment_date), csv: (p) => p.payment_date },
   {
     id: 'party',
     header: 'Party',

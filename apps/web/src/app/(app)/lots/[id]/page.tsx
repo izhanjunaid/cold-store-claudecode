@@ -13,6 +13,8 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { UrduText } from '@/components/ui/urdu-text';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { formatDate, formatDateTime } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
 interface Lot {
@@ -150,7 +152,7 @@ export default function LotDetailPage() {
     }
   };
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!lot)
     return (
       <div>
@@ -184,7 +186,7 @@ export default function LotDetailPage() {
             )}
             <Button variant="outline" onClick={handlePrintReceipt} disabled={receiptLoading}>
               <FileText className="h-4 w-4" aria-hidden />
-              {receiptLoading ? 'Loading…' : 'Print Receipt'}
+              {receiptLoading ? 'Preparing…' : 'Print Receipt'}
             </Button>
           </>
         }
@@ -261,7 +263,7 @@ export default function LotDetailPage() {
                 </>
               }
             />
-            <Field label="Inbound Date" value={lot.inbound_date} />
+            <Field label="Inbound Date" value={formatDate(lot.inbound_date)} />
             <Field label="Days in Storage" value={lot.days_in_storage} />
             {lot.vehicle_number && <Field label="Vehicle" value={lot.vehicle_number} />}
             {lot.marka && <Field label="Marka" value={<UrduText className="text-sm font-semibold">{lot.marka}</UrduText>} urdu />}
@@ -302,8 +304,8 @@ export default function LotDetailPage() {
           <div className="p-4">
             <TabsContent value="overview" className="mt-0">
               <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-3">
-                <Field label="Entry Date" value={lot.entry_date} />
-                <Field label="Created" value={new Date(lot.created_at).toLocaleString()} />
+                <Field label="Entry Date" value={formatDate(lot.entry_date)} />
+                <Field label="Created" value={formatDateTime(lot.created_at)} />
                 <Field label="Book Type" value={lot.book_type === 'PACCI' ? 'Pacci (Official)' : 'Katchi (Informal)'} />
               </div>
             </TabsContent>
@@ -340,7 +342,7 @@ export default function LotDetailPage() {
                         <TableCell>{ev.to_party_name ?? '—'}</TableCell>
                         <TableCell className="text-right tabular-nums">{ev.quantity_bags.toLocaleString()}</TableCell>
                         <TableCell className="text-right tabular-nums">{ev.transfer_price_pkr != null ? ev.transfer_price_pkr.toLocaleString() : '—'}</TableCell>
-                        <TableCell>{ev.effective_date}</TableCell>
+                        <TableCell>{formatDate(ev.effective_date)}</TableCell>
                         <TableCell className="text-muted-foreground">{ev.operator_name ?? '—'}</TableCell>
                         <TableCell className="text-right">
                           {(ev.event_type === 'TRANSFER_OUT' || ev.event_type === 'TRANSFER_IN') && (
@@ -388,7 +390,7 @@ export default function LotDetailPage() {
                         <TableCell>{ev.withdrawal_type}</TableCell>
                         <TableCell className="text-right tabular-nums">{ev.quantity_withdrawn_bags.toLocaleString()}</TableCell>
                         <TableCell><StatusBadge status={ev.status} /></TableCell>
-                        <TableCell>{ev.outbound_date}</TableCell>
+                        <TableCell>{formatDate(ev.outbound_date)}</TableCell>
                         <TableCell className="text-right">
                           <Button variant="link" className="h-auto p-0 text-xs">View</Button>
                         </TableCell>
@@ -419,7 +421,7 @@ export default function LotDetailPage() {
                     {invoices.map((inv) => (
                       <TableRow key={inv.id} className="cursor-pointer" onClick={() => router.push(`/invoices/${inv.id}`)}>
                         <TableCell className="font-mono">{inv.invoice_number ?? <span className="italic text-muted-foreground">Draft</span>}</TableCell>
-                        <TableCell>{inv.invoice_date}</TableCell>
+                        <TableCell>{formatDate(inv.invoice_date)}</TableCell>
                         <TableCell className="text-right tabular-nums font-medium">{inv.total_pkr.toLocaleString()}</TableCell>
                         <TableCell><StatusBadge status={inv.status} /></TableCell>
                         <TableCell className="text-right">

@@ -4,7 +4,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { CheckCircle2, TriangleAlert } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { PageHeader } from '@/components/layout/page-header';
-import { StatementFrame } from '@/components/accounting/statement-frame';
+import { StatementFrame, StatementSkeleton } from '@/components/accounting/statement-frame';
 import { StatementToolbar } from '@/components/accounting/statement-toolbar';
 import { StatementTable, SectionHeading, StatementRow, SpacerRow } from '@/components/accounting/statement';
 import { RatiosStrip } from '@/components/accounting/ratios-strip';
@@ -130,7 +130,7 @@ export default function BalanceSheetPage() {
   const ratios = data
     ? [
         { label: 'Current Ratio', value: fmtRatio(ca, cl), hint: 'Current assets ÷ current liabilities' },
-        { label: 'Working Capital', value: `Rs. ${fmtAcct(ca - cl)}` },
+        { label: 'Working Capital', value: `Rs ${fmtAcct(ca - cl)}` },
         { label: 'Debt-to-Equity', value: fmtRatio(data.total_liabilities_pkr, data.total_equity_pkr) },
         { label: 'Equity Ratio', value: fmtRatio(data.total_equity_pkr, data.total_assets_pkr) },
       ]
@@ -155,7 +155,7 @@ export default function BalanceSheetPage() {
       />
 
       {loading && !data ? (
-        <p className="text-muted-foreground">Loading…</p>
+        <StatementSkeleton />
       ) : !data ? null : (
         <div className="print-area space-y-4">
           <StatementFrame title="Statement of Financial Position" periodLabel={describePeriod(range, 'as_of')} bookType={bookType}>

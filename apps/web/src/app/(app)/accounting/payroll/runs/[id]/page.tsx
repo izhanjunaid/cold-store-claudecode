@@ -15,6 +15,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { formatMoney } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 interface LineItem {
   id: string;
   employee_id: string;
@@ -131,7 +133,7 @@ export default function PayrollRunDetailPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Slip download failed'); }
   }
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!run) return <p className="text-destructive">Run not found</p>;
 
   return (
@@ -160,10 +162,10 @@ export default function PayrollRunDetailPage() {
             <StatusBadge status={run.status} />
           </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Total Gross</div><div className="text-lg font-semibold tabular-nums">Rs. {run.total_gross_pkr.toLocaleString()}</div></div>
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Deductions</div><div className="text-lg font-semibold tabular-nums text-amber-600">Rs. {run.total_deductions_pkr.toLocaleString()}</div></div>
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Employer EOBI</div><div className="text-lg font-semibold tabular-nums">Rs. {run.total_employer_eobi_pkr.toLocaleString()}</div></div>
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Net Payable</div><div className="text-lg font-semibold tabular-nums text-green-700">Rs. {run.total_net_payable_pkr.toLocaleString()}</div></div>
+            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Total Gross</div><div className="text-lg font-semibold tabular-nums">{formatMoney(run.total_gross_pkr)}</div></div>
+            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Deductions</div><div className="text-lg font-semibold tabular-nums text-amber-600">{formatMoney(run.total_deductions_pkr)}</div></div>
+            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Employer EOBI</div><div className="text-lg font-semibold tabular-nums">{formatMoney(run.total_employer_eobi_pkr)}</div></div>
+            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Net Payable</div><div className="text-lg font-semibold tabular-nums text-green-700">{formatMoney(run.total_net_payable_pkr)}</div></div>
           </div>
           <div className="mt-4 space-y-1 text-sm text-muted-foreground">
             {run.payroll_journal_entry_id && <div>Payroll JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${run.payroll_journal_entry_id}`)}>{run.payroll_journal_entry_id.slice(0, 8)}…</Button></div>}
@@ -212,7 +214,7 @@ export default function PayrollRunDetailPage() {
       <Dialog open={showPay} onOpenChange={setShowPay}>
         <DialogContent>
           <DialogHeader><DialogTitle>Pay Salaries</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Posts JE-16: DR 2030 Rs. {run.total_net_payable_pkr.toLocaleString()} / CR 1020.</p>
+          <p className="text-sm text-muted-foreground">Posts JE-16: DR 2030 {formatMoney(run.total_net_payable_pkr)} / CR 1020.</p>
           <div className="space-y-1.5">
             <Label>Payment Date</Label>
             <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="tabular-nums" />

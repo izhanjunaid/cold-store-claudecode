@@ -12,23 +12,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
+import { StatTile } from '@/components/stat-tile';
+import { formatMoney } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
-const fmtPkr = (n: number) => `Rs ${n.toLocaleString('en-PK', { maximumFractionDigits: 0 })}`;
+const fmtPkr = formatMoney;
 
 // Aging buckets: slate / amber / orange / red (token-aligned).
 const BUCKET_COLORS = ['hsl(var(--chart-2))', 'hsl(var(--chart-3))', '#fb923c', 'hsl(var(--chart-5))'];
-
-function KpiCard({ label, value, accent }: { label: string; value: string; accent?: string }) {
-  return (
-    <Card>
-      <CardContent className="pt-5">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-        <div className={cn('mt-1.5 text-3xl font-bold tabular-nums', accent ?? 'text-foreground')}>{value}</div>
-      </CardContent>
-    </Card>
-  );
-}
 
 export default function FinancialDashboardPage() {
   const user = useAuthStore((s) => s.user);
@@ -90,9 +81,23 @@ export default function FinancialDashboardPage() {
       />
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-        <KpiCard label="AR Outstanding" value={fmtPkr(financial?.ar_total_pkr ?? 0)} />
-        <KpiCard label="Collected Today" value={fmtPkr(financial?.collected_today_pkr ?? 0)} accent="text-green-700" />
-        <KpiCard label="Overdue 90+" value={fmtPkr(financial?.overdue_90_plus_pkr ?? 0)} accent="text-destructive" />
+        <StatTile
+          label="AR Outstanding"
+          value={fmtPkr(financial?.ar_total_pkr ?? 0)}
+          caption="unpaid finalized invoices"
+        />
+        <StatTile
+          label="Collected Today"
+          value={fmtPkr(financial?.collected_today_pkr ?? 0)}
+          caption="payments received today"
+          tone={(financial?.collected_today_pkr ?? 0) > 0 ? 'positive' : 'default'}
+        />
+        <StatTile
+          label="Overdue 90+"
+          value={fmtPkr(financial?.overdue_90_plus_pkr ?? 0)}
+          caption="invoices 90+ days past due"
+          tone={(financial?.overdue_90_plus_pkr ?? 0) > 0 ? 'negative' : 'default'}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

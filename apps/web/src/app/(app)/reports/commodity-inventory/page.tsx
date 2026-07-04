@@ -9,6 +9,7 @@ import { hasMinRole } from '@/lib/rbac';
 import { apiClient } from '@/lib/api-client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
 
@@ -63,7 +64,11 @@ export default function CommodityInventoryPage() {
 
       <Card>
         {isLoading ? (
-          <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
+          <div className="space-y-2.5 p-6">
+            {Array.from({ length: 6 }, (_, i) => (
+              <Skeleton key={i} className="h-4 w-full" />
+            ))}
+          </div>
         ) : !data || data.length === 0 ? (
           <p className="py-10 text-center text-sm text-muted-foreground">No active inventory.</p>
         ) : (

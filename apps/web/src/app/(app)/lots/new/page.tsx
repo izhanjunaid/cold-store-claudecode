@@ -19,6 +19,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { apiClient } from '@/lib/api-client';
 import { useApiMutation } from '@/hooks/use-api-mutation';
 import { applyApiErrorToForm } from '@/lib/form-errors';
+import { formatMoney } from '@/lib/format';
 import { qk } from '@/lib/query-keys';
 import {
   useParties,
@@ -332,7 +333,7 @@ export default function LotCreatePage() {
                 placeholder="Select rate plan…"
                 options={filteredPlans.map((p) => ({
                   value: p.id,
-                  label: `${p.name} (Rs. ${p.rate_amount_pkr})`,
+                  label: `${p.name} (${formatMoney(p.rate_amount_pkr)})`,
                 }))}
               />
               <SelectField

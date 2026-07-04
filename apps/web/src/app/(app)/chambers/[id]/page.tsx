@@ -11,6 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
 
+import { formatDateTime } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 interface TemperatureLog {
   id: string;
   temperature_c: number;
@@ -64,7 +66,7 @@ export default function ChamberDetailPage() {
     }
   };
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!chamber) return <p className="text-destructive">Chamber not found</p>;
 
   const pct = Math.round((chamber.current_occupancy_bags / chamber.max_capacity_bags) * 100);
@@ -137,7 +139,7 @@ export default function ChamberDetailPage() {
                       : true;
                   return (
                     <TableRow key={log.id}>
-                      <TableCell>{new Date(log.recorded_at).toLocaleString()}</TableCell>
+                      <TableCell>{formatDateTime(log.recorded_at)}</TableCell>
                       <TableCell className={cn('font-medium tabular-nums', inRange ? 'text-green-700' : 'text-destructive')}>{log.temperature_c}°C</TableCell>
                       <TableCell>{log.recorded_by_name || '—'}</TableCell>
                       <TableCell className="text-muted-foreground">{log.source}</TableCell>

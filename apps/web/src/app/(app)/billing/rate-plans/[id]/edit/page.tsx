@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { PageSkeleton } from '@/components/page-skeleton';
 interface RatePlan {
   id: string;
   name: string;
@@ -100,7 +101,7 @@ export default function RatePlanEditPage() {
     }
   };
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!form) return <p className="text-destructive">Rate plan not found</p>;
 
   return (

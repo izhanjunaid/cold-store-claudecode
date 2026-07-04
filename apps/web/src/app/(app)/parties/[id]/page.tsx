@@ -16,6 +16,8 @@ import { useConfirm } from '@/components/form';
 import { useApiMutation } from '@/hooks/use-api-mutation';
 import { qk } from '@/lib/query-keys';
 
+import { formatDate, formatMoney } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 interface Party {
   id: string;
   name: string;
@@ -161,7 +163,7 @@ export default function PartyDetailPage() {
     if (ok) deactivate.mutate();
   };
 
-  if (loading) return <p className="p-2 text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!party) return <p className="p-2 text-destructive">Party not found</p>;
 
   return (
@@ -205,7 +207,7 @@ export default function PartyDetailPage() {
               {party.cnic && <Row label="CNIC" value={party.cnic} />}
               {party.address && <Row label="Address" value={party.address} />}
               {party.parent_arhti_name && <Row label="Linked Arhti" value={party.parent_arhti_name} />}
-              <Row label="Created" value={new Date(party.created_at).toLocaleDateString()} />
+              <Row label="Created" value={formatDate(party.created_at)} />
             </dl>
           </CardContent>
         </Card>
@@ -218,7 +220,7 @@ export default function PartyDetailPage() {
             <dl className="divide-y">
               <Row
                 label="Credit Limit"
-                value={party.credit_limit_pkr ? `PKR ${party.credit_limit_pkr.toLocaleString()}` : 'No limit set'}
+                value={party.credit_limit_pkr ? `${formatMoney(party.credit_limit_pkr)}` : 'No limit set'}
               />
               <Row label="Credit Terms" value={`${party.credit_terms_days} days`} />
             </dl>
@@ -268,7 +270,7 @@ export default function PartyDetailPage() {
                         <TableCell className="font-mono text-primary-700">{lot.lot_number}</TableCell>
                         <TableCell>{lot.commodity_name ?? '—'}</TableCell>
                         <TableCell className="text-right tabular-nums">{lot.current_balance_bags.toLocaleString()}</TableCell>
-                        <TableCell>{lot.inbound_date}</TableCell>
+                        <TableCell>{formatDate(lot.inbound_date)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -296,7 +298,7 @@ export default function PartyDetailPage() {
                       <TableRow key={inv.id} className="cursor-pointer" onClick={() => router.push(`/invoices/${inv.id}`)}>
                         <TableCell className="font-mono text-primary-700">{inv.invoice_number ?? 'Draft'}</TableCell>
                         <TableCell className="font-mono text-muted-foreground">{inv.lot_number}</TableCell>
-                        <TableCell>{inv.invoice_date}</TableCell>
+                        <TableCell>{formatDate(inv.invoice_date)}</TableCell>
                         <TableCell className="text-right tabular-nums">{inv.total_pkr.toLocaleString()}</TableCell>
                         <TableCell className="text-right tabular-nums font-medium">{inv.balance_due_pkr.toLocaleString()}</TableCell>
                         <TableCell><StatusBadge status={inv.status} /></TableCell>
@@ -330,7 +332,7 @@ export default function PartyDetailPage() {
                   <TableBody>
                     {payments.map((pay) => (
                       <TableRow key={pay.id} className="cursor-pointer" onClick={() => router.push(`/payments/${pay.id}`)}>
-                        <TableCell>{pay.payment_date}</TableCell>
+                        <TableCell>{formatDate(pay.payment_date)}</TableCell>
                         <TableCell>{pay.payment_method}</TableCell>
                         <TableCell className="font-mono text-muted-foreground">{pay.reference_number ?? '—'}</TableCell>
                         <TableCell className="text-right tabular-nums font-medium">{pay.amount_pkr.toLocaleString()}</TableCell>
@@ -374,10 +376,10 @@ export default function PartyDetailPage() {
                     </TableBody>
                   </Table>
                   <div className="mt-3 flex flex-wrap justify-between gap-3 border-t pt-3 text-sm">
-                    <span className="text-muted-foreground">Total Invoiced: <strong className="text-foreground">PKR {ledger.total_debit_pkr.toLocaleString()}</strong></span>
-                    <span className="text-muted-foreground">Total Paid: <strong className="text-foreground">PKR {ledger.total_credit_pkr.toLocaleString()}</strong></span>
+                    <span className="text-muted-foreground">Total Invoiced: <strong className="text-foreground">{formatMoney(ledger.total_debit_pkr)}</strong></span>
+                    <span className="text-muted-foreground">Total Paid: <strong className="text-foreground">{formatMoney(ledger.total_credit_pkr)}</strong></span>
                     <span className={ledger.closing_balance_pkr > 0 ? 'font-semibold text-destructive' : 'font-semibold text-green-600'}>
-                      Outstanding: PKR {ledger.closing_balance_pkr.toLocaleString()}
+                      Outstanding: {formatMoney(ledger.closing_balance_pkr)}
                     </span>
                   </div>
                 </>
@@ -413,7 +415,7 @@ export default function PartyDetailPage() {
                     {loans.map((l) => (
                       <TableRow key={l.id} className="cursor-pointer" onClick={() => router.push(`/loans/${l.id}`)}>
                         <TableCell className="font-mono">{l.loan_number}</TableCell>
-                        <TableCell>{l.issue_date}</TableCell>
+                        <TableCell>{formatDate(l.issue_date)}</TableCell>
                         <TableCell className="text-right tabular-nums">{Number(l.principal_pkr).toLocaleString()}</TableCell>
                         <TableCell className="text-right tabular-nums font-medium">{Number(l.balance_outstanding_pkr).toLocaleString()}</TableCell>
                         <TableCell><StatusBadge status={l.status} /></TableCell>

@@ -3,6 +3,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { UrduText } from '@/components/ui/urdu-text';
 import type { DataTableColumn } from '@/components/data-table';
 
+import { formatDate } from '@/lib/format';
 export interface LotRow {
   id: string;
   lot_number: string;
@@ -84,7 +85,7 @@ export const lotColumns: DataTableColumn<LotRow>[] = [
     id: 'inbound_date',
     header: 'Inbound',
     sortId: 'inbound_date',
-    cell: (lot) => lot.inbound_date,
+    cell: (lot) => formatDate(lot.inbound_date),
     csv: (lot) => lot.inbound_date,
   },
   {

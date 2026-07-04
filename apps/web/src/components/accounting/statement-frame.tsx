@@ -2,6 +2,7 @@
 
 import { useFacility } from '@/hooks/use-reference-data';
 import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 interface StatementFrameProps {
@@ -61,6 +62,24 @@ export function StatementFrame({ title, periodLabel, bookType, children, classNa
         <span>Generated {generated}</span>
         <span>ColdChain</span>
       </footer>
+    </Card>
+  );
+}
+
+/** Letterhead-shaped placeholder shown while a statement loads. */
+export function StatementSkeleton() {
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-b px-6 py-5">
+        <Skeleton className="mx-auto h-6 w-56" />
+        <Skeleton className="mx-auto mt-2 h-4 w-40" />
+        <Skeleton className="mx-auto mt-3 h-4 w-64" />
+      </div>
+      <div className="space-y-2.5 px-6 py-5">
+        {Array.from({ length: 8 }, (_, i) => (
+          <Skeleton key={i} className="h-4 w-full" />
+        ))}
+      </div>
     </Card>
   );
 }

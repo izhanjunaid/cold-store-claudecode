@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { PageHeader } from '@/components/layout/page-header';
-import { StatementFrame } from '@/components/accounting/statement-frame';
+import { StatementFrame, StatementSkeleton } from '@/components/accounting/statement-frame';
 import { StatementToolbar } from '@/components/accounting/statement-toolbar';
 import { StatementTable, SectionHeading, StatementRow, SpacerRow } from '@/components/accounting/statement';
 import { RatiosStrip } from '@/components/accounting/ratios-strip';
@@ -129,7 +129,7 @@ export default function ProfitLossPage() {
       />
 
       {loading && !data ? (
-        <p className="text-muted-foreground">Loading…</p>
+        <StatementSkeleton />
       ) : !data ? null : (
         <div className="print-area space-y-4">
           <StatementFrame title="Statement of Profit or Loss" periodLabel={describePeriod(range, 'period')} bookType={bookType}>
@@ -181,7 +181,7 @@ export default function ProfitLossPage() {
               { label: 'Gross Margin', value: fmtPct(data.gross_profit_pct) },
               { label: 'Operating Margin', value: fmtPct(data.operating_profit_pct) },
               { label: 'Net Margin', value: fmtPct(data.net_profit_pct) },
-              { label: 'EBITDA', value: `Rs. ${fmtAcct(data.ebitda_pkr)}`, hint: `${fmtPct(data.ebitda_pct)} margin` },
+              { label: 'EBITDA', value: `Rs ${fmtAcct(data.ebitda_pkr)}`, hint: `${fmtPct(data.ebitda_pct)} margin` },
             ]}
           />
         </div>

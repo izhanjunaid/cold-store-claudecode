@@ -12,6 +12,7 @@ import { DataTable, useTableState, type DataTableColumn } from '@/components/dat
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
 
+import { formatDate } from '@/lib/format';
 interface JournalEntry {
   id: string;
   entry_number: string;
@@ -31,7 +32,7 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger'> = {
 
 const columns: DataTableColumn<JournalEntry>[] = [
   { id: 'entry_number', header: 'Number', enableHiding: false, cell: (e) => <span className="font-mono text-primary-700">{e.entry_number}</span>, csv: (e) => e.entry_number },
-  { id: 'date', header: 'Date', cell: (e) => e.entry_date, csv: (e) => e.entry_date },
+  { id: 'date', header: 'Date', cell: (e) => formatDate(e.entry_date), csv: (e) => e.entry_date },
   { id: 'type', header: 'Type', cell: (e) => <StatusBadge status={e.entry_type} tone="info" />, csv: (e) => e.entry_type },
   { id: 'book', header: 'Book', cell: (e) => e.book_type, csv: (e) => e.book_type },
   { id: 'description', header: 'Description', cell: (e) => <span className="block max-w-md truncate">{e.description}</span>, csv: (e) => e.description },

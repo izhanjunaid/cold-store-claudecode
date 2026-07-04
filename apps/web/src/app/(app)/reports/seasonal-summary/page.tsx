@@ -6,27 +6,19 @@ import type { SeasonalSummaryResponseType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
 import { hasMinRole } from '@/lib/rbac';
 import { apiClient } from '@/lib/api-client';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
+import { PageSkeleton } from '@/components/page-skeleton';
+import { StatTile } from '@/components/stat-tile';
+import { formatCount, formatMoney } from '@/lib/format';
 
 function defaultPeriod() {
   const today = new Date();
   const start = new Date(today);
   start.setMonth(start.getMonth() - 6);
   return { from: start.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10) };
-}
-
-function Kpi({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <Card>
-      <CardContent className="pt-5">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-        <div className={`mt-1 text-2xl font-semibold tabular-nums ${tone ?? ''}`}>{value}</div>
-      </CardContent>
-    </Card>
-  );
 }
 
 export default function SeasonalSummaryPage() {
@@ -70,14 +62,23 @@ export default function SeasonalSummaryPage() {
       />
 
       {isLoading ? (
-        <p className="text-muted-foreground">Loading…</p>
+        <PageSkeleton />
       ) : data ? (
         <>
           <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi label="Inbound (bags)" value={data.total_inbound_bags.toLocaleString()} />
-            <Kpi label="Outbound (bags)" value={data.total_outbound_bags.toLocaleString()} />
-            <Kpi label="Revenue (PKR)" value={data.total_revenue_pkr.toLocaleString()} tone="text-green-700" />
-            <Kpi label="Avg Storage Days" value={data.avg_storage_days !== null ? data.avg_storage_days.toFixed(1) : '—'} />
+            <StatTile size="compact" label="Inbound (bags)" value={formatCount(data.total_inbound_bags)} />
+            <StatTile size="compact" label="Outbound (bags)" value={formatCount(data.total_outbound_bags)} />
+            <StatTile
+              size="compact"
+              label="Revenue"
+              value={formatMoney(data.total_revenue_pkr)}
+              tone={data.total_revenue_pkr > 0 ? 'positive' : 'default'}
+            />
+            <StatTile
+              size="compact"
+              label="Avg Storage Days"
+              value={data.avg_storage_days !== null ? data.avg_storage_days.toFixed(1) : '—'}
+            />
           </div>
 
           <Card>

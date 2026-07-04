@@ -7,6 +7,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { DataTableSkeleton } from '@/components/data-table';
 interface Account {
   id: string;
   account_code: string;
@@ -86,9 +87,7 @@ export default function ChartOfAccountsPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">Loading…</TableCell>
-              </TableRow>
+              <DataTableSkeleton columns={6} rows={5} />
             ) : accounts.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">No accounts</TableCell>

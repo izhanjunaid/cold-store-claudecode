@@ -18,6 +18,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
 
+import { formatDate, formatMoney } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 interface Repayment {
   id: string;
   repayment_date: string;
@@ -92,7 +94,7 @@ export default function LoanDetailPage() {
       </div>
     );
   }
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (error) return <p className="text-destructive">{error}</p>;
   if (!loan) return <p className="text-muted-foreground">Loan not found</p>;
 
@@ -152,7 +154,7 @@ export default function LoanDetailPage() {
       <PageHeader
         title={loan.loan_number}
         crumb={loan.loan_number}
-        description={`${loan.party_name ?? '—'} · Issued ${loan.issue_date}`}
+        description={`${loan.party_name ?? '—'} · Issued ${formatDate(loan.issue_date)}`}
         actions={
           <>
             <Button variant="outline" onClick={downloadAck}>
@@ -182,12 +184,12 @@ export default function LoanDetailPage() {
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Principal</div>
-            <div className="text-xl font-bold tabular-nums">PKR {Number(loan.principal_pkr).toLocaleString()}</div>
+            <div className="text-xl font-bold tabular-nums">{formatMoney(Number(loan.principal_pkr))}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Balance Outstanding</div>
             <div className={cn('text-xl font-bold tabular-nums', loan.balance_outstanding_pkr > 0 ? 'text-green-700' : 'text-muted-foreground')}>
-              PKR {Number(loan.balance_outstanding_pkr).toLocaleString()}
+              {formatMoney(Number(loan.balance_outstanding_pkr))}
             </div>
           </div>
           <div>
@@ -199,7 +201,7 @@ export default function LoanDetailPage() {
           <CardContent className="pt-0">
             <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               <strong>Write-off reason:</strong> {loan.write_off_reason}
-              {loan.write_off_at && <span className="ml-2">on {new Date(loan.write_off_at).toLocaleDateString()}</span>}
+              {loan.write_off_at && <span className="ml-2">on {formatDate(loan.write_off_at)}</span>}
             </div>
           </CardContent>
         )}
@@ -222,7 +224,7 @@ export default function LoanDetailPage() {
               <TableBody>
                 {loan.repayments.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell>{r.repayment_date}</TableCell>
+                    <TableCell>{formatDate(r.repayment_date)}</TableCell>
                     <TableCell className="text-right tabular-nums font-medium">{Number(r.amount_pkr).toLocaleString()}</TableCell>
                     <TableCell>{r.payment_method.replace(/_/g, ' ')}</TableCell>
                     <TableCell className="font-mono">{r.asset_account_code ?? '—'}</TableCell>
@@ -248,7 +250,7 @@ export default function LoanDetailPage() {
             <div className="space-y-1.5">
               <Label>Amount (PKR)</Label>
               <Input type="number" step={0.01} value={repayAmount} onChange={(e) => setRepayAmount(e.target.value)} className="tabular-nums" />
-              <p className="text-xs text-muted-foreground">Outstanding: PKR {Number(loan.balance_outstanding_pkr).toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">Outstanding: {formatMoney(Number(loan.balance_outstanding_pkr))}</p>
             </div>
             <div className="space-y-1.5">
               <Label>Method</Label>

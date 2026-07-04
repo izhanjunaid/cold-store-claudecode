@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Combobox } from '@/components/ui/combobox';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { PageSkeleton } from '@/components/page-skeleton';
 interface Lot {
   id: string;
   lot_number: string;
@@ -102,7 +103,7 @@ export default function TransferNewPage() {
     }
   };
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!lot) return <p className="text-destructive">Lot not found.</p>;
   if (lot.status !== 'ACTIVE')
     return (

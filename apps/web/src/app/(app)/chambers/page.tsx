@@ -6,6 +6,7 @@ import { Map, Plus } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
@@ -58,7 +59,11 @@ export default function ChamberListPage() {
       />
 
       {loading ? (
-        <p className="text-muted-foreground">Loading…</p>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }, (_, i) => (
+            <Skeleton key={i} className="h-36 w-full rounded-lg" />
+          ))}
+        </div>
       ) : chambers.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">No chambers found</CardContent>

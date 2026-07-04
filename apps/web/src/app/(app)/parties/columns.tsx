@@ -3,6 +3,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { UrduText } from '@/components/ui/urdu-text';
 import type { DataTableColumn } from '@/components/data-table';
 
+import { formatMoney } from '@/lib/format';
 export interface PartyRow {
   id: string;
   name: string;
@@ -56,7 +57,7 @@ export const partyColumns: DataTableColumn<PartyRow>[] = [
     id: 'credit',
     header: 'Credit Limit',
     numeric: true,
-    cell: (p) => (p.credit_limit_pkr ? `PKR ${p.credit_limit_pkr.toLocaleString()}` : '—'),
+    cell: (p) => (p.credit_limit_pkr ? `${formatMoney(p.credit_limit_pkr)}` : '—'),
     csv: (p) => p.credit_limit_pkr ?? '',
   },
   {

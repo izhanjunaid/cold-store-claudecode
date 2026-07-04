@@ -9,6 +9,8 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { formatDate, formatDateTime } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 interface JournalEntryLine {
   id: string;
   line_number: number;
@@ -52,7 +54,7 @@ export default function JournalEntryDetailPage() {
     apiClient<JournalEntry>(`/v1/accounting/journal-entries/${params.id}`).then(setEntry).finally(() => setLoading(false));
   }, [params.id]);
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!entry) return <p className="text-muted-foreground">Entry not found</p>;
 
   const balanced = Math.abs(entry.total_debit_pkr - entry.total_credit_pkr) < 0.01;
@@ -65,11 +67,11 @@ export default function JournalEntryDetailPage() {
         <CardContent className="pt-6">
           <div className="mb-4"><StatusBadge status={entry.posting_status} tone={STATUS_TONE[entry.posting_status]} /></div>
           <dl className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
-            <div><dt className="text-muted-foreground">Entry Date</dt><dd className="font-medium">{entry.entry_date}</dd></div>
+            <div><dt className="text-muted-foreground">Entry Date</dt><dd className="font-medium">{formatDate(entry.entry_date)}</dd></div>
             <div><dt className="text-muted-foreground">Type</dt><dd className="font-medium">{entry.entry_type}</dd></div>
             <div><dt className="text-muted-foreground">Book</dt><dd className="font-medium">{entry.book_type}</dd></div>
             <div><dt className="text-muted-foreground">Source</dt><dd className="font-mono text-xs">{entry.source_table}</dd></div>
-            <div><dt className="text-muted-foreground">Created</dt><dd className="font-medium">{new Date(entry.created_at).toLocaleString()}</dd></div>
+            <div><dt className="text-muted-foreground">Created</dt><dd className="font-medium">{formatDateTime(entry.created_at)}</dd></div>
             <div><dt className="text-muted-foreground">Created By</dt><dd className="font-medium">{entry.created_by_name}</dd></div>
             {entry.reversed_by_entry_number && (
               <div><dt className="text-muted-foreground">Reversed By</dt><dd className="font-mono text-xs">{entry.reversed_by_entry_number}</dd></div>

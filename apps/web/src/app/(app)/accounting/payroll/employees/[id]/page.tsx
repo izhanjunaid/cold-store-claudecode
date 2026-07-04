@@ -14,7 +14,9 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layout/page-header';
 import { UrduText } from '@/components/ui/urdu-text';
+import { formatDate, formatMoney } from '@/lib/format';
 
+import { PageSkeleton } from '@/components/page-skeleton';
 interface Employee {
   id: string;
   name: string;
@@ -69,19 +71,19 @@ export default function EmployeeDetailPage() {
     }
   }
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!emp) return <p className="text-destructive">Employee not found</p>;
 
   const pay = emp.employee_type === 'SALARIED'
-    ? `Rs. ${emp.basic_salary_pkr?.toLocaleString() ?? '—'}/mo`
-    : `Rs. ${emp.daily_wage_pkr?.toLocaleString() ?? '—'}/day`;
+    ? `${formatMoney(emp.basic_salary_pkr)}/mo`
+    : `${formatMoney(emp.daily_wage_pkr)}/day`;
 
   return (
     <div className="max-w-3xl">
       <PageHeader
         title={emp.name}
         crumb={emp.name}
-        description={`${emp.designation ?? 'No designation'} · ${emp.employee_type === 'SALARIED' ? 'Salaried' : 'Daily Wage'} · Joined ${emp.join_date}`}
+        description={`${emp.designation ?? 'No designation'} · ${emp.employee_type === 'SALARIED' ? 'Salaried' : 'Daily Wage'} · Joined ${formatDate(emp.join_date)}`}
         actions={
           isOwner && emp.is_active && (
             <Button variant="outline" className="text-destructive" onClick={() => setShowTerminate(true)}>Terminate</Button>
@@ -117,7 +119,7 @@ export default function EmployeeDetailPage() {
             {emp.termination_date && (
               <div>
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Terminated</div>
-                <div className="text-destructive">{emp.termination_date}</div>
+                <div className="text-destructive">{formatDate(emp.termination_date)}</div>
               </div>
             )}
           </div>

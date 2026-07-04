@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { formatMoney } from '@/lib/format';
 interface PartyOption {
   id: string;
   name: string;
@@ -114,7 +115,7 @@ export default function IssuePeshgiPage() {
             <dl className="space-y-1 rounded-md border bg-muted/30 p-4 text-sm">
               <div className="flex justify-between"><dt className="text-muted-foreground">Loan No.</dt><dd className="font-mono">{created.loan_number}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Party</dt><dd>{created.party_name ?? partyName}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted-foreground">Principal</dt><dd className="tabular-nums">PKR {Number(created.principal_pkr).toLocaleString()}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted-foreground">Principal</dt><dd className="tabular-nums">{formatMoney(Number(created.principal_pkr))}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Journal Entry</dt><dd className="font-mono text-xs">{created.issue_journal_entry_id ?? '—'}</dd></div>
             </dl>
             <div className="flex gap-2">

@@ -13,6 +13,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layout/page-header';
 
+import { formatDateTime } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 const ROLES = ['OWNER', 'MANAGER', 'ACCOUNTANT', 'OPERATOR', 'SECURITY'];
 const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
@@ -83,7 +85,7 @@ export default function UserDetailPage() {
     }
   }
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (error || !user) return <p className="text-destructive">{error ?? 'User not found'}</p>;
 
   return (
@@ -131,9 +133,9 @@ export default function UserDetailPage() {
         <CardContent>
           <dl className="grid grid-cols-2 gap-2 text-sm">
             <dt className="text-muted-foreground">Created</dt>
-            <dd>{new Date(user.created_at).toLocaleString()}</dd>
+            <dd>{formatDateTime(user.created_at)}</dd>
             <dt className="text-muted-foreground">Last Login</dt>
-            <dd>{user.last_login_at ? new Date(user.last_login_at).toLocaleString() : '—'}</dd>
+            <dd>{user.last_login_at ? formatDateTime(user.last_login_at) : '—'}</dd>
             <dt className="text-muted-foreground">Must Change Password</dt>
             <dd>{user.must_change_password ? 'Yes' : 'No'}</dd>
           </dl>

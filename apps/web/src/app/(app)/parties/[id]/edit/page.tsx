@@ -6,6 +6,7 @@ import { apiClient } from '@/lib/api-client';
 import { PageHeader } from '@/components/layout/page-header';
 import { PartyForm } from '@/components/party/party-form';
 
+import { PageSkeleton } from '@/components/page-skeleton';
 interface PartyData {
   id: string;
   name: string;
@@ -34,7 +35,7 @@ export default function PartyEditPage() {
       .finally(() => setLoading(false));
   }, [partyId]);
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
   if (!party) return <p className="text-destructive">Party not found</p>;
 
   return (

@@ -1,6 +1,7 @@
 import { StatusBadge } from '@/components/ui/status-badge';
 import type { DataTableColumn } from '@/components/data-table';
 
+import { formatDate } from '@/lib/format';
 export interface InvoiceRow {
   id: string;
   invoice_number: string | null;
@@ -41,7 +42,7 @@ export const invoiceColumns: DataTableColumn<InvoiceRow>[] = [
   {
     id: 'invoice_date',
     header: 'Date',
-    cell: (inv) => inv.invoice_date,
+    cell: (inv) => formatDate(inv.invoice_date),
     csv: (inv) => inv.invoice_date,
   },
   {

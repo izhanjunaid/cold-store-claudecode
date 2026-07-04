@@ -12,6 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 
+import { formatDate, formatMoney } from '@/lib/format';
+import { DataTableSkeleton } from '@/components/data-table';
 interface RatePlan {
   id: string;
   name: string;
@@ -100,7 +102,7 @@ export default function RatePlanListPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">Loading…</TableCell></TableRow>
+              <DataTableSkeleton columns={7} rows={5} />
             ) : plans.length === 0 ? (
               <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">No rate plans found</TableCell></TableRow>
             ) : (
@@ -109,9 +111,9 @@ export default function RatePlanListPage() {
                   <TableCell className="font-medium">{plan.name}</TableCell>
                   <TableCell>{plan.commodity_name || 'All'}</TableCell>
                   <TableCell>{RATE_TYPE_LABELS[plan.rate_type] || plan.rate_type}</TableCell>
-                  <TableCell className="text-right tabular-nums font-medium">Rs. {plan.rate_amount_pkr.toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums font-medium">{formatMoney(plan.rate_amount_pkr)}</TableCell>
                   <TableCell className="text-muted-foreground">
-                    {plan.season_start_date && plan.season_end_date ? `${plan.season_start_date} – ${plan.season_end_date}` : '—'}
+                    {plan.season_start_date && plan.season_end_date ? `${formatDate(plan.season_start_date)} – ${formatDate(plan.season_end_date)}` : '—'}
                   </TableCell>
                   <TableCell><StatusBadge status={plan.is_active ? 'ACTIVE' : 'INACTIVE'} /></TableCell>
                   <TableCell className="text-right">

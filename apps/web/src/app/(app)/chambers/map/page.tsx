@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
@@ -97,7 +98,11 @@ export default function ChamberMapPage() {
       </Card>
 
       {loading ? (
-        <p className="text-muted-foreground">Loading…</p>
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {Array.from({ length: 8 }, (_, i) => (
+            <Skeleton key={i} className="aspect-square w-full rounded-lg" />
+          ))}
+        </div>
       ) : chambers.length === 0 ? (
         <Card><CardContent className="py-12 text-center text-muted-foreground">No chambers configured.</CardContent></Card>
       ) : (

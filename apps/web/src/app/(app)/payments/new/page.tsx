@@ -15,6 +15,8 @@ import { Combobox } from '@/components/ui/combobox';
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
 
+import { formatMoney } from '@/lib/format';
+import { PageSkeleton } from '@/components/page-skeleton';
 interface Party {
   id: string;
   name: string;
@@ -133,7 +135,7 @@ export default function NewPaymentPage() {
     }
   };
 
-  if (loading) return <p className="text-muted-foreground">Loading…</p>;
+  if (loading) return <PageSkeleton />;
 
   return (
     <div className="max-w-2xl">
@@ -165,7 +167,7 @@ export default function NewPaymentPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label>Payment Date <span className="text-destructive">*</span></Label>
+                <Label>Payment date <span className="text-destructive">*</span></Label>
                 <Input type="date" name="payment_date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="tabular-nums" required />
               </div>
               <div className="space-y-1.5">
@@ -176,7 +178,7 @@ export default function NewPaymentPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label>Payment Method <span className="text-destructive">*</span></Label>
+                <Label>Payment method <span className="text-destructive">*</span></Label>
                 <select name="payment_method" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className={SELECT_CLASS}>
                   <option value="CASH">Cash</option>
                   <option value="CHEQUE">Cheque</option>
@@ -185,14 +187,14 @@ export default function NewPaymentPage() {
                 </select>
               </div>
               <div className="space-y-1.5">
-                <Label>Reference Number</Label>
+                <Label>Reference number</Label>
                 <Input name="reference_number" value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} placeholder="Cheque #, transfer ref…" />
               </div>
             </div>
 
             {paymentMethod === 'CHEQUE' && (
               <div className="space-y-1.5">
-                <Label>Cheque Date</Label>
+                <Label>Cheque date</Label>
                 <Input type="date" name="cheque_date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} className="tabular-nums" />
               </div>
             )}
@@ -245,7 +247,7 @@ export default function NewPaymentPage() {
                       <option value="">Select invoice…</option>
                       {invoices.map((inv) => (
                         <option key={inv.id} value={inv.id}>
-                          {inv.invoice_number ?? 'Draft'} — Balance: PKR {inv.balance_due_pkr.toLocaleString()}
+                          {inv.invoice_number ?? 'Draft'} — Balance: {formatMoney(inv.balance_due_pkr)}
                         </option>
                       ))}
                     </select>
@@ -283,10 +285,10 @@ export default function NewPaymentPage() {
 
               {allocations.length > 0 && (
                 <div className="mt-2 text-right text-sm text-muted-foreground">
-                  Total allocated: <span className="font-medium tabular-nums">PKR {totalAllocated.toLocaleString()}</span>
+                  Total allocated: <span className="font-medium tabular-nums">{formatMoney(totalAllocated)}</span>
                   {amountPkr && (
                     <span className={cn('ml-2', totalAllocated > parseFloat(amountPkr) ? 'text-destructive' : 'text-green-600')}>
-                      / PKR {parseFloat(amountPkr).toLocaleString()}
+                      / {formatMoney(parseFloat(amountPkr))}
                     </span>
                   )}
                 </div>
