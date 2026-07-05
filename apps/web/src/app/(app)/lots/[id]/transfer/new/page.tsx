@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Combobox } from '@/components/ui/combobox';
 import { PageHeader } from '@/components/layout/page-header';
+import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 
 import { PageSkeleton } from '@/components/page-skeleton';
 interface Lot {
@@ -116,7 +117,7 @@ export default function TransferNewPage() {
     );
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-4xl">
       <PageHeader title="Transfer Ownership" crumb="Transfer" />
 
       <Card className="mb-5 bg-muted/30">
@@ -140,17 +141,17 @@ export default function TransferNewPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="pt-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </div>
-            )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
 
-            <div>
-              <Label className="mb-2 block">Transfer Type</Label>
+        <EntrySheet autoFocus={false}>
+          <EntryGroup title="Transfer" columns={4}>
+            <div className="col-span-full">
+              <Label className="mb-2 block">Transfer type</Label>
               <div className="flex gap-2">
                 {(['FULL', 'PARTIAL'] as const).map((t) => (
                   <Button
@@ -171,7 +172,7 @@ export default function TransferNewPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>New Owner <span className="text-destructive">*</span></Label>
+              <Label>New owner <span className="text-destructive">*</span></Label>
               <Combobox
                 options={partyOptions}
                 value={form.to_party_id}
@@ -185,7 +186,7 @@ export default function TransferNewPage() {
             {form.transfer_type === 'PARTIAL' && (
               <div className="space-y-1.5">
                 <Label>
-                  Bags to Transfer <span className="text-destructive">*</span>{' '}
+                  Bags to transfer <span className="text-destructive">*</span>{' '}
                   <span className="font-normal text-muted-foreground">(max {lot.current_balance_bags - 1})</span>
                 </Label>
                 <Input
@@ -200,52 +201,49 @@ export default function TransferNewPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Effective Date <span className="text-destructive">*</span></Label>
-                <Input
-                  type="date"
-                  value={form.effective_date}
-                  onChange={(e) => setForm({ ...form, effective_date: e.target.value })}
-                  className="tabular-nums"
-                  required
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Transfer Price (PKR)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  value={form.transfer_price_pkr}
-                  onChange={(e) => setForm({ ...form, transfer_price_pkr: e.target.value })}
-                  className="tabular-nums"
-                  placeholder="Optional"
-                />
-              </div>
+            <div className="space-y-1.5">
+              <Label>Effective date <span className="text-destructive">*</span></Label>
+              <Input
+                type="date"
+                value={form.effective_date}
+                onChange={(e) => setForm({ ...form, effective_date: e.target.value })}
+                className="tabular-nums"
+                required
+              />
             </div>
-
+            <div className="space-y-1.5">
+              <Label>Transfer price (PKR)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={0.01}
+                value={form.transfer_price_pkr}
+                onChange={(e) => setForm({ ...form, transfer_price_pkr: e.target.value })}
+                className="tabular-nums"
+                placeholder="Optional"
+              />
+            </div>
             <div className="space-y-1.5">
               <Label>Notes</Label>
               <Textarea
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                rows={2}
+                rows={1}
                 placeholder="Optional"
               />
             </div>
+          </EntryGroup>
+        </EntrySheet>
 
-            <div className="flex gap-3">
-              <Button type="submit" disabled={submitting}>
-                {submitting ? 'Transferring…' : 'Execute Transfer'}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => router.push(`/lots/${lotId}`)}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+        <FormActions>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? 'Transferring…' : 'Execute Transfer'}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => router.push(`/lots/${lotId}`)}>
+            Cancel
+          </Button>
+        </FormActions>
+      </form>
     </div>
   );
 }

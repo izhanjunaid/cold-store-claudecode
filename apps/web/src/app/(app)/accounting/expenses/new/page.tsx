@@ -7,7 +7,7 @@ import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -91,29 +91,27 @@ export default function NewExpenseVoucherPage() {
   return (
     <div className="max-w-3xl">
       <PageHeader title="New Expense Voucher" crumb="New" />
-      <Card>
-        <CardContent className="pt-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <p className="text-sm text-muted-foreground">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <EntrySheet>
+          <EntryGroup title="Voucher" columns={2}>
+            <p className="text-sm text-muted-foreground sm:col-span-2">
               Voucher starts as DRAFT. After creation: Approve (MANAGER+) → Pay (JE-17A) or Accrue (JE-17B) then Pay later.
             </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>Voucher Date <span className="text-destructive">*</span></Label>
-                <Input type="date" required value={voucherDate} onChange={(e) => setVoucherDate(e.target.value)} className="tabular-nums" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Expense Account <span className="text-destructive">*</span></Label>
-                <select value={accountCode} onChange={(e) => setAccountCode(e.target.value)} className={SELECT_CLASS}>
-                  {EXPENSE_ACCOUNTS.map((a) => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
-                </select>
-              </div>
+            <div className="space-y-1.5">
+              <Label>Voucher date <span className="text-destructive">*</span></Label>
+              <Input type="date" required value={voucherDate} onChange={(e) => setVoucherDate(e.target.value)} className="tabular-nums" />
             </div>
             <div className="space-y-1.5">
+              <Label>Expense account <span className="text-destructive">*</span></Label>
+              <select value={accountCode} onChange={(e) => setAccountCode(e.target.value)} className={SELECT_CLASS}>
+                {EXPENSE_ACCOUNTS.map((a) => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
               <Label>Description <span className="text-destructive">*</span></Label>
               <Input required value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. LESCO refrigeration bill — April 2026" />
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:col-span-2 sm:grid-cols-3">
               <div className="space-y-1.5">
                 <Label>Vendor</Label>
                 <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="e.g. LESCO" />
@@ -122,12 +120,12 @@ export default function NewExpenseVoucherPage() {
                 <Label>Reference / Bill #</Label>
                 <Input value={refNumber} onChange={(e) => setRefNumber(e.target.value)} />
               </div>
+              <div className="space-y-1.5">
+                <Label>Amount (PKR) <span className="text-destructive">*</span></Label>
+                <Input type="number" required min={0.01} step={0.01} value={amount} onChange={(e) => setAmount(e.target.value)} className="tabular-nums" />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Amount (PKR) <span className="text-destructive">*</span></Label>
-              <Input type="number" required min={0.01} step={0.01} value={amount} onChange={(e) => setAmount(e.target.value)} className="tabular-nums" />
-            </div>
-            <div className="rounded-md border p-3">
+            <div className="rounded-md border p-3 sm:col-span-2">
               <label className="flex items-center gap-2.5 text-sm">
                 <Checkbox checked={isAccrual} onCheckedChange={(c) => setIsAccrual(!!c)} />
                 This is an accrual (bill received, payment scheduled later)
@@ -136,14 +134,16 @@ export default function NewExpenseVoucherPage() {
                 If checked, after approval you accrue (JE-17B), then pay later (JE-17B-PAY).
               </p>
             </div>
-            {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
-            <div className="flex gap-3">
-              <Button type="submit" disabled={submitting}>{submitting ? 'Creating…' : 'Create Draft'}</Button>
-              <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+          </EntryGroup>
+        </EntrySheet>
+
+        {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+
+        <FormActions>
+          <Button type="submit" disabled={submitting}>{submitting ? 'Creating…' : 'Create Draft'}</Button>
+          <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
+        </FormActions>
+      </form>
     </div>
   );
 }

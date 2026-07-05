@@ -58,6 +58,30 @@
   }
 }
 
+/* ============================================================
+   Entry Sheet — compact control scale for data-entry forms.
+   Scoped here so the shadcn primitives stay untouched; only forms
+   wrapped in <EntrySheet> get expert-density controls.
+   ============================================================ */
+.entry-sheet input:not([type='checkbox']):not([type='radio']),
+.entry-sheet select,
+.entry-sheet button[role='combobox'] {
+  height: 2rem;
+  min-height: 2rem;
+  font-size: 0.8125rem;
+}
+.entry-sheet textarea {
+  min-height: 2rem;
+  font-size: 0.8125rem;
+}
+.entry-sheet label {
+  font-size: 0.75rem;
+}
+/* Tighten the label→control gap inside field items (space-y-1.5 → 1). */
+.entry-sheet .space-y-1\.5 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.25rem;
+}
+
 /* Sidebar scroll: a thin dark scrollbar instead of the default light
    OS one, which reads as a rendering glitch over the dark-green rail. */
 .sidebar-scroll {

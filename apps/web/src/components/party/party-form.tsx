@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
-import { Form, FormSection } from '@/components/form';
+import { Form, FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { TextField } from '@/components/form/text-field';
 import { SelectField } from '@/components/form/select-field';
 import { NumberField } from '@/components/form/number-field';
@@ -118,47 +118,49 @@ export function PartyForm({ initialData, partyId, mode }: PartyFormProps) {
 
   return (
     <Form {...form}>
-      <form onSubmit={handleSubmit(onSubmit)} className="max-w-3xl space-y-5">
+      <form onSubmit={handleSubmit(onSubmit)} className="max-w-5xl space-y-3">
         {rootError && (
           <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {rootError}
           </div>
         )}
 
-        <FormSection title="Identity" description="Party name and classification">
-          <TextField control={control} name="name" label="Name" required />
-          <TextField control={control} name="name_urdu" label="Name (Urdu)" dir="rtl" />
-          <SelectField control={control} name="party_type" label="Party type" options={PARTY_TYPES} />
-          <SelectField
-            control={control}
-            name="parent_arhti_id"
-            label="Parent arhti"
-            placeholder="None"
-            options={arhtiOptions}
-          />
-        </FormSection>
+        <EntrySheet>
+          <EntryGroup title="Identity" columns={4}>
+            <TextField control={control} name="name" label="Name" required />
+            <TextField control={control} name="name_urdu" label="Name (Urdu)" dir="rtl" />
+            <SelectField control={control} name="party_type" label="Party type" options={PARTY_TYPES} />
+            <SelectField
+              control={control}
+              name="parent_arhti_id"
+              label="Parent arhti"
+              placeholder="None"
+              options={arhtiOptions}
+            />
+          </EntryGroup>
 
-        <FormSection title="Contact" description="Phone numbers, CNIC and address">
-          <MaskedField control={control} name="phone_primary" label="Primary phone" mask="phone" required />
-          <MaskedField control={control} name="phone_secondary" label="Secondary phone" mask="phone" />
-          <MaskedField control={control} name="cnic" label="CNIC" mask="cnic" />
-          <TextField control={control} name="address" label="Address" className="sm:col-span-2" />
-        </FormSection>
+          <EntryGroup title="Contact" columns={4}>
+            <MaskedField control={control} name="phone_primary" label="Primary phone" mask="phone" required />
+            <MaskedField control={control} name="phone_secondary" label="Secondary phone" mask="phone" />
+            <MaskedField control={control} name="cnic" label="CNIC" mask="cnic" />
+            <TextField control={control} name="address" label="Address" />
+          </EntryGroup>
 
-        <FormSection title="Credit" description="Credit limit and payment terms">
-          <NumberField control={control} name="credit_limit_pkr" label="Credit limit" min={0} suffix="PKR" />
-          <NumberField control={control} name="credit_terms_days" label="Credit terms" min={0} suffix="days" />
-          <TextareaField control={control} name="notes" label="Notes" rows={2} className="sm:col-span-2" />
-        </FormSection>
+          <EntryGroup title="Credit" columns={4}>
+            <NumberField control={control} name="credit_limit_pkr" label="Credit limit" min={0} suffix="PKR" />
+            <NumberField control={control} name="credit_terms_days" label="Credit terms" min={0} suffix="days" />
+            <TextareaField control={control} name="notes" label="Notes" rows={1} className="sm:col-span-2" />
+          </EntryGroup>
+        </EntrySheet>
 
-        <div className="flex gap-3">
+        <FormActions>
           <Button type="submit" disabled={save.isPending}>
             {save.isPending ? 'Saving…' : mode === 'create' ? 'Create Party' : 'Save Changes'}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()}>
             Cancel
           </Button>
-        </div>
+        </FormActions>
       </form>
     </Form>
   );

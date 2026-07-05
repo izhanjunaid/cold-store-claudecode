@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/layout/page-header';
+import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 
 import { PageSkeleton } from '@/components/page-skeleton';
 interface Lot {
@@ -110,7 +111,7 @@ export default function WithdrawPage() {
     );
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-4xl">
       <PageHeader title="New Withdrawal" crumb="Withdraw" />
 
       <Card className="mb-5 bg-muted/30">
@@ -134,17 +135,17 @@ export default function WithdrawPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="pt-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </div>
-            )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
 
-            <div>
-              <Label className="mb-2 block">Withdrawal Type</Label>
+        <EntrySheet autoFocus={false}>
+          <EntryGroup title="Withdrawal" columns={4}>
+            <div className="col-span-full">
+              <Label className="mb-2 block">Withdrawal type</Label>
               <div className="flex gap-2">
                 {(['FULL', 'PARTIAL'] as const).map((t) => (
                   <Button
@@ -167,7 +168,7 @@ export default function WithdrawPage() {
             {form.withdrawal_type === 'PARTIAL' && (
               <div className="space-y-1.5">
                 <Label>
-                  Bags to Withdraw <span className="text-destructive">*</span>{' '}
+                  Bags to withdraw <span className="text-destructive">*</span>{' '}
                   <span className="font-normal text-muted-foreground">(max {lot.current_balance_bags - 1})</span>
                 </Label>
                 <Input
@@ -182,36 +183,33 @@ export default function WithdrawPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Outbound Date <span className="text-destructive">*</span></Label>
-                <Input
-                  type="date"
-                  value={form.outbound_date}
-                  onChange={(e) => setForm({ ...form, outbound_date: e.target.value })}
-                  className="tabular-nums"
-                  required
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Vehicle Number</Label>
-                <Input
-                  type="text"
-                  maxLength={20}
-                  value={form.vehicle_number}
-                  onChange={(e) => setForm({ ...form, vehicle_number: e.target.value })}
-                  placeholder="Optional"
-                />
-              </div>
-            </div>
-
             <div className="space-y-1.5">
-              <Label>Receiving Party</Label>
+              <Label>Outbound date <span className="text-destructive">*</span></Label>
+              <Input
+                type="date"
+                value={form.outbound_date}
+                onChange={(e) => setForm({ ...form, outbound_date: e.target.value })}
+                className="tabular-nums"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Vehicle number</Label>
+              <Input
+                type="text"
+                maxLength={20}
+                value={form.vehicle_number}
+                onChange={(e) => setForm({ ...form, vehicle_number: e.target.value })}
+                placeholder="Optional"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Receiving party</Label>
               <select
                 value={form.receiving_party_id}
                 onChange={(e) => setForm({ ...form, receiving_party_id: e.target.value })}
                 className={cn(
-                  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                  'flex w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                 )}
               >
                 <option value="">— Optional —</option>
@@ -222,28 +220,27 @@ export default function WithdrawPage() {
                 ))}
               </select>
             </div>
-
             <div className="space-y-1.5">
               <Label>Notes</Label>
               <Textarea
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                rows={2}
+                rows={1}
                 placeholder="Optional"
               />
             </div>
+          </EntryGroup>
+        </EntrySheet>
 
-            <div className="flex gap-3">
-              <Button type="submit" disabled={submitting}>
-                {submitting ? 'Creating…' : 'Create Withdrawal'}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => router.push(`/lots/${lotId}`)}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+        <FormActions>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? 'Creating…' : 'Create Withdrawal'}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => router.push(`/lots/${lotId}`)}>
+            Cancel
+          </Button>
+        </FormActions>
+      </form>
     </div>
   );
 }

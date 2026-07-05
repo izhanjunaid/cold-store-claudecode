@@ -7,6 +7,7 @@ import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -131,14 +132,14 @@ export default function IssuePeshgiPage() {
   return (
     <div className="max-w-xl">
       <PageHeader title="Issue Peshgi" crumb="Issue" description="Informal cash advance to a farmer or arhti" />
-      <Card>
-        <CardContent className="pt-6">
-          <form onSubmit={submit} className="space-y-4">
-            {error && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>
-            )}
+      <form onSubmit={submit} className="space-y-4">
+        {error && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>
+        )}
 
-            <div className="space-y-1.5">
+        <EntrySheet>
+          <EntryGroup title="Peshgi" columns={2}>
+            <div className="space-y-1.5 sm:col-span-2">
               <Label>Party <span className="text-destructive">*</span></Label>
               {partyId ? (
                 <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2">
@@ -166,9 +167,13 @@ export default function IssuePeshgiPage() {
               <Label>Principal (PKR) <span className="text-destructive">*</span></Label>
               <Input type="number" step={0.01} min={0.01} value={principal} onChange={(e) => setPrincipal(e.target.value)} required className="tabular-nums" />
             </div>
+            <div className="space-y-1.5">
+              <Label>Issue date <span className="text-destructive">*</span></Label>
+              <Input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} required className="tabular-nums" />
+            </div>
 
             <div className="space-y-1.5">
-              <Label>Payment Method <span className="text-destructive">*</span></Label>
+              <Label>Payment method <span className="text-destructive">*</span></Label>
               <div className="flex gap-2">
                 {(['CASH', 'BANK_TRANSFER'] as const).map((m) => (
                   <Button key={m} type="button" variant={paymentMethod === m ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod(m)}>
@@ -177,24 +182,18 @@ export default function IssuePeshgiPage() {
                 ))}
               </div>
             </div>
-
-            <div className="space-y-1.5">
-              <Label>Issue Date <span className="text-destructive">*</span></Label>
-              <Input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} required className="tabular-nums" />
-            </div>
-
             <div className="space-y-1.5">
               <Label>Notes</Label>
-              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={1} />
             </div>
+          </EntryGroup>
+        </EntrySheet>
 
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
-              <Button type="submit" disabled={submitting || !partyId}>{submitting ? 'Issuing…' : 'Issue Peshgi'}</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+        <FormActions>
+          <Button type="submit" disabled={submitting || !partyId}>{submitting ? 'Issuing…' : 'Issue Peshgi'}</Button>
+          <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
+        </FormActions>
+      </form>
     </div>
   );
 }

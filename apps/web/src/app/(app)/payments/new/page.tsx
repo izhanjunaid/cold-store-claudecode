@@ -6,14 +6,13 @@ import { toast } from 'sonner';
 import { Plus, X } from 'lucide-react';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Combobox } from '@/components/ui/combobox';
 import { PageHeader } from '@/components/layout/page-header';
-import { cn } from '@/lib/utils';
+import { FormActions, EntrySheet, EntryGroup, EntryChip } from '@/components/form';
 
 import { formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -138,19 +137,19 @@ export default function NewPaymentPage() {
   if (loading) return <PageSkeleton />;
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-5xl">
       <PageHeader title="Record Payment" crumb="New" />
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
           </div>
         )}
 
-        <Card>
-          <CardContent className="space-y-4 pt-6">
-            <div className="space-y-1.5">
+        <EntrySheet>
+          <EntryGroup title="Payment" columns={6}>
+            <div className="space-y-1.5 xl:col-span-2">
               <Label>Party <span className="text-destructive">*</span></Label>
               <Combobox
                 options={partyOptions}
@@ -164,58 +163,47 @@ export default function NewPaymentPage() {
                 testId="combobox-party_id"
               />
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Payment date <span className="text-destructive">*</span></Label>
-                <Input type="date" name="payment_date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="tabular-nums" required />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Amount (PKR) <span className="text-destructive">*</span></Label>
-                <Input type="number" name="amount_pkr" min={0.01} step={0.01} value={amountPkr} onChange={(e) => setAmountPkr(e.target.value)} placeholder="0.00" className="tabular-nums" required />
-              </div>
+            <div className="space-y-1.5">
+              <Label>Payment date <span className="text-destructive">*</span></Label>
+              <Input type="date" name="payment_date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="tabular-nums" required />
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Payment method <span className="text-destructive">*</span></Label>
-                <select name="payment_method" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className={SELECT_CLASS}>
-                  <option value="CASH">Cash</option>
-                  <option value="CHEQUE">Cheque</option>
-                  <option value="BANK_TRANSFER">Bank Transfer</option>
-                  <option value="MOBILE_WALLET">Mobile Wallet</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Reference number</Label>
-                <Input name="reference_number" value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} placeholder="Cheque #, transfer ref…" />
-              </div>
+            <div className="space-y-1.5">
+              <Label>Amount (PKR) <span className="text-destructive">*</span></Label>
+              <Input type="number" name="amount_pkr" min={0.01} step={0.01} value={amountPkr} onChange={(e) => setAmountPkr(e.target.value)} placeholder="0.00" className="tabular-nums" required />
             </div>
-
+            <div className="space-y-1.5">
+              <Label>Payment method <span className="text-destructive">*</span></Label>
+              <select name="payment_method" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className={SELECT_CLASS}>
+                <option value="CASH">Cash</option>
+                <option value="CHEQUE">Cheque</option>
+                <option value="BANK_TRANSFER">Bank Transfer</option>
+                <option value="MOBILE_WALLET">Mobile Wallet</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Reference number</Label>
+              <Input name="reference_number" value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} placeholder="Cheque #, transfer ref…" />
+            </div>
             {paymentMethod === 'CHEQUE' && (
               <div className="space-y-1.5">
                 <Label>Cheque date</Label>
                 <Input type="date" name="cheque_date" value={chequeDate} onChange={(e) => setChequeDate(e.target.value)} className="tabular-nums" />
               </div>
             )}
-
-            <label className="flex items-center gap-2.5 text-sm">
+            <label className="flex items-center gap-2.5 self-end pb-2 text-sm xl:col-span-2">
               <Checkbox checked={isAdvance} onCheckedChange={(c) => { setIsAdvance(!!c); setAllocations([]); }} />
               Advance payment (no invoice allocation)
             </label>
-
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 xl:col-span-3">
               <Label>Notes</Label>
-              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={1} />
             </div>
-          </CardContent>
-        </Card>
+          </EntryGroup>
 
         {!isAdvance && (
-          <Card>
-            <CardContent className="pt-6">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-sm font-semibold">Invoice Allocations</h2>
+          <EntryGroup title="Invoice allocations" columns={2}>
+            <div className="col-span-full">
+              <div className="mb-3 flex items-center justify-end">
                 <Button
                   type="button"
                   variant="outline"
@@ -283,28 +271,29 @@ export default function NewPaymentPage() {
                 </div>
               ))}
 
-              {allocations.length > 0 && (
-                <div className="mt-2 text-right text-sm text-muted-foreground">
-                  Total allocated: <span className="font-medium tabular-nums">{formatMoney(totalAllocated)}</span>
-                  {amountPkr && (
-                    <span className={cn('ml-2', totalAllocated > parseFloat(amountPkr) ? 'text-destructive' : 'text-green-600')}>
-                      / {formatMoney(parseFloat(amountPkr))}
-                    </span>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            </div>
+          </EntryGroup>
         )}
+        </EntrySheet>
 
-        <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={() => router.back()}>
-            Cancel
-          </Button>
+        <FormActions
+          meta={
+            allocations.length > 0 ? (
+              <EntryChip
+                label="Allocated"
+                value={`${formatMoney(totalAllocated)}${amountPkr ? ` / ${formatMoney(parseFloat(amountPkr))}` : ''}`}
+                tone={amountPkr && totalAllocated > parseFloat(amountPkr) ? 'destructive' : 'default'}
+              />
+            ) : undefined
+          }
+        >
           <Button type="submit" disabled={submitting}>
             {submitting ? 'Recording…' : 'Record Payment'}
           </Button>
-        </div>
+          <Button type="button" variant="outline" onClick={() => router.back()}>
+            Cancel
+          </Button>
+        </FormActions>
       </form>
     </div>
   );

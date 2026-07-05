@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/layout/page-header';
@@ -65,15 +65,15 @@ export default function ChamberCreatePage() {
   return (
     <div className="max-w-2xl">
       <PageHeader title="Create Chamber" crumb="New" />
-      <Card>
-        <CardContent className="pt-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-            <div className="space-y-1.5">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+        <EntrySheet>
+          <EntryGroup title="Chamber" columns={2}>
+            <div className="space-y-1.5 sm:col-span-2">
               <Label>
                 Name <span className="text-destructive">*</span>
               </Label>
@@ -85,7 +85,6 @@ export default function ChamberCreatePage() {
                 placeholder="e.g. Chamber A1"
               />
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>
                   Capacity (bags) <span className="text-destructive">*</span>
@@ -142,8 +141,7 @@ export default function ChamberCreatePage() {
                   placeholder="e.g. 5"
                 />
               </div>
-            </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 sm:col-span-2">
               <Label>Notes</Label>
               <Input
                 value={form.notes}
@@ -151,17 +149,18 @@ export default function ChamberCreatePage() {
                 placeholder="Optional"
               />
             </div>
-            <div className="flex gap-3">
-              <Button type="submit" disabled={submitting}>
-                {submitting ? 'Creating…' : 'Create Chamber'}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => router.back()}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+          </EntryGroup>
+        </EntrySheet>
+
+        <FormActions>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? 'Creating…' : 'Create Chamber'}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => router.back()}>
+            Cancel
+          </Button>
+        </FormActions>
+      </form>
     </div>
   );
 }

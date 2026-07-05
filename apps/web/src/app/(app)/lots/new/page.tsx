@@ -6,7 +6,7 @@ import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
-import { Form, FormSection, SummaryRail, SummaryItem } from '@/components/form';
+import { Form, FormActions, EntrySheet, EntryGroup, EntryChip } from '@/components/form';
 import { ComboboxField } from '@/components/form/combobox-field';
 import { SelectField } from '@/components/form/select-field';
 import { NumberField } from '@/components/form/number-field';
@@ -201,15 +201,15 @@ export default function LotCreatePage() {
       <PageHeader title="New Inbound Lot" description="Record produce intake and create a storage lot" />
 
       <Form {...form}>
-        <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 lg:grid-cols-[1fr_300px] lg:gap-6">
-          <div className="space-y-4">
-            {rootError && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                {rootError}
-              </div>
-            )}
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {rootError && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {rootError}
+            </div>
+          )}
 
-            <FormSection title="Parties" description="Who owns the produce and who is billed">
+          <EntrySheet>
+            <EntryGroup title="Consignment" columns={6}>
               <ComboboxField
                 control={control}
                 name="owner_party_id"
@@ -218,12 +218,14 @@ export default function LotCreatePage() {
                 options={partyOptions}
                 placeholder="Select party…"
                 searchPlaceholder="Search parties…"
+                className="xl:col-span-2"
               />
               <CheckboxField
                 control={control}
                 name="billing_override"
                 label="Bill a different party"
                 description="By default the owner is billed"
+                className="xl:col-span-2"
               />
               {billingOverride && (
                 <ComboboxField
@@ -234,12 +236,12 @@ export default function LotCreatePage() {
                   options={partyOptions}
                   placeholder="Select billing party…"
                   searchPlaceholder="Search parties…"
-                  className="col-span-full"
+                  className="xl:col-span-2"
                 />
               )}
-            </FormSection>
+            </EntryGroup>
 
-            <FormSection title="Goods" description="Commodity, variety and grade">
+            <EntryGroup title="Goods" columns={4}>
               <SelectField
                 control={control}
                 name="commodity_id"
@@ -278,10 +280,18 @@ export default function LotCreatePage() {
                 placeholder="e.g. ABC Farms"
                 maxLength={100}
               />
-            </FormSection>
+            </EntryGroup>
 
-            <FormSection title="Weights" description="Declared vs accepted weight at intake" columns={3}>
-              <NumberField control={control} name="quantity_bags" label="Quantity" required min={1} suffix="bags" />
+            <EntryGroup title="Weights" columns={6}>
+              <NumberField
+                control={control}
+                name="quantity_bags"
+                label="Quantity"
+                required
+                min={1}
+                suffix="bags"
+                className="xl:col-span-2"
+              />
               <NumberField
                 control={control}
                 name="declared_weight_kg"
@@ -289,6 +299,7 @@ export default function LotCreatePage() {
                 min={0}
                 step="0.01"
                 suffix="kg"
+                className="xl:col-span-2"
               />
               <NumberField
                 control={control}
@@ -298,6 +309,7 @@ export default function LotCreatePage() {
                 min={0.01}
                 step="0.01"
                 suffix="kg"
+                className="xl:col-span-2"
               />
               {hasDispute && (
                 <TextareaField
@@ -311,9 +323,9 @@ export default function LotCreatePage() {
                   className="col-span-full"
                 />
               )}
-            </FormSection>
+            </EntryGroup>
 
-            <FormSection title="Storage & Billing" description="Where it's stored and how it's charged" columns={3}>
+            <EntryGroup title="Storage & Logistics" columns={6}>
               <SelectField
                 control={control}
                 name="chamber_id"
@@ -324,6 +336,7 @@ export default function LotCreatePage() {
                   value: c.id,
                   label: `${c.name} (${c.available_capacity_bags.toLocaleString()} avail / ${c.max_capacity_bags.toLocaleString()})`,
                 }))}
+                className="xl:col-span-2"
               />
               <SelectField
                 control={control}
@@ -335,6 +348,7 @@ export default function LotCreatePage() {
                   value: p.id,
                   label: `${p.name} (${formatMoney(p.rate_amount_pkr)})`,
                 }))}
+                className="xl:col-span-2"
               />
               <SelectField
                 control={control}
@@ -344,43 +358,49 @@ export default function LotCreatePage() {
                   { value: 'PACCI', label: 'Pacci (Official)' },
                   { value: 'KATCHI', label: 'Katchi (Informal)' },
                 ]}
+                className="xl:col-span-2"
               />
-            </FormSection>
-
-            <FormSection title="Logistics" description="Vehicle and inbound date">
-              <MaskedField control={control} name="vehicle_number" label="Vehicle number" mask="vehicle" />
-              <DateField control={control} name="inbound_date" label="Inbound date" />
-              <TextareaField control={control} name="notes" label="Notes" rows={2} className="sm:col-span-2" />
-            </FormSection>
-
-            <div className="flex gap-3">
-              <Button type="submit" disabled={createLot.isPending}>
-                {createLot.isPending ? 'Creating…' : 'Create Inbound Lot'}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => router.back()}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-
-          <SummaryRail title="Intake summary">
-            <SummaryItem label="Quantity" value={qty > 0 ? `${qty.toLocaleString()} bags` : '—'} />
-            <SummaryItem label="Accepted weight" value={accepted > 0 ? `${accepted.toLocaleString()} kg` : '—'} />
-            <SummaryItem
-              label="Weight variance"
-              value={declared > 0 ? `${variancePct.toFixed(1)}% · ${varianceKg.toLocaleString()} kg` : '—'}
-              tone={hasDispute ? 'danger' : 'default'}
-              hint={hasDispute ? 'Dispute note required' : undefined}
-            />
-            {selectedChamber && (
-              <SummaryItem
-                label="Chamber fill"
-                value={`${capacityPct.toFixed(0)}%`}
-                tone={capacityPct > capacityWarnPct ? 'warning' : 'default'}
-                hint={capacityPct > 100 ? 'Over capacity' : undefined}
+              <MaskedField
+                control={control}
+                name="vehicle_number"
+                label="Vehicle number"
+                mask="vehicle"
+                className="xl:col-span-2"
               />
-            )}
-          </SummaryRail>
+              <DateField control={control} name="inbound_date" label="Inbound date" className="xl:col-span-2" />
+              <TextareaField control={control} name="notes" label="Notes" rows={1} className="xl:col-span-2" />
+            </EntryGroup>
+          </EntrySheet>
+
+          <FormActions
+            meta={
+              <>
+                {qty > 0 && <EntryChip label="Bags" value={qty.toLocaleString()} />}
+                {accepted > 0 && <EntryChip label="Accepted" value={`${accepted.toLocaleString()} kg`} />}
+                {declared > 0 && (
+                  <EntryChip
+                    label={hasDispute ? 'Variance — note required' : 'Variance'}
+                    value={`${variancePct.toFixed(1)}% · ${varianceKg.toLocaleString()} kg`}
+                    tone={hasDispute ? 'destructive' : 'default'}
+                  />
+                )}
+                {selectedChamber && (
+                  <EntryChip
+                    label={capacityPct > 100 ? 'Chamber fill — over capacity' : 'Chamber fill'}
+                    value={`${capacityPct.toFixed(0)}%`}
+                    tone={capacityPct > capacityWarnPct ? 'warning' : 'default'}
+                  />
+                )}
+              </>
+            }
+          >
+            <Button type="submit" disabled={createLot.isPending}>
+              {createLot.isPending ? 'Creating…' : 'Create Inbound Lot'}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => router.back()}>
+              Cancel
+            </Button>
+          </FormActions>
         </form>
       </Form>
     </div>

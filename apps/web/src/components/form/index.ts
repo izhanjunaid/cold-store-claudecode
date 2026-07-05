@@ -1,4 +1,5 @@
-export { FormSection } from './form-section';
+export { FormSection, FormActions } from './form-section';
+export { EntrySheet, EntryGroup, EntryChip } from './entry-sheet';
 export { TextField } from './text-field';
 export { NumberField } from './number-field';
 export { SelectField, type SelectOption } from './select-field';
