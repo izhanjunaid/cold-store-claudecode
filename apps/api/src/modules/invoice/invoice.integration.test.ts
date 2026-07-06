@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { withGuardsDisabled } from '../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
 import type { FastifyInstance } from 'fastify';
@@ -160,11 +161,13 @@ async function finalizeOutbound(opts: {
 beforeAll(async () => {
   app = await getTestApp();
 
-  await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
-  await prisma.invoice.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
-  await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
-  await prisma.ownershipHistory.deleteMany({ where: { lot: { facilityId: TEST_FACILITY_ID } } });
-  await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+  await withGuardsDisabled(prisma, async () => {
+    await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
+    await prisma.invoice.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    await prisma.ownershipHistory.deleteMany({ where: { lot: { facilityId: TEST_FACILITY_ID } } });
+    await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+  });
 
   await seedRatePlans();
 
@@ -183,11 +186,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
-  await prisma.invoice.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
-  await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
-  await prisma.ownershipHistory.deleteMany({ where: { lot: { facilityId: TEST_FACILITY_ID } } });
-  await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+  await withGuardsDisabled(prisma, async () => {
+    await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
+    await prisma.invoice.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    await prisma.ownershipHistory.deleteMany({ where: { lot: { facilityId: TEST_FACILITY_ID } } });
+    await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+  });
   await prisma.$disconnect();
   await closeTestApp();
 });

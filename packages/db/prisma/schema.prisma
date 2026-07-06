@@ -27,6 +27,7 @@ enum UserRole {
 enum AuditAction {
   INSERT
   UPDATE
+  DELETE
 }
 
 // ============================================================
@@ -403,7 +404,7 @@ model AuditLog {
   changedBy  String      @map("changed_by") @db.Uuid
   changedAt  DateTime    @default(now()) @map("changed_at") @db.Timestamptz()
   oldValues  Json?       @map("old_values")
-  newValues  Json        @map("new_values")
+  newValues  Json?       @map("new_values")
   reason     String?     @db.Text
 
   facility Facility @relation(fields: [facilityId], references: [id])
@@ -887,7 +888,7 @@ model JournalEntryLine {
   description    String? @db.VarChar(300)
 
   journalEntry JournalEntry    @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
-  account      ChartOfAccounts @relation(fields: [facilityId, accountCode], references: [facilityId, accountCode])
+  account      ChartOfAccounts @relation(fields: [facilityId, accountCode], references: [facilityId, accountCode], onDelete: Restrict, onUpdate: Restrict)
   party        Party?          @relation(fields: [partyId], references: [id])
   lot          Lot?            @relation(fields: [lotId], references: [id])
 

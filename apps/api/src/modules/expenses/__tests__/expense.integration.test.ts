@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { withGuardsDisabled } from '../../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
 import type { FastifyInstance } from 'fastify';
@@ -12,6 +13,10 @@ let accountantToken: string;
 let operatorToken: string;
 
 async function cleanup() {
+  await withGuardsDisabled(prisma, cleanupInner);
+}
+
+async function cleanupInner() {
   await prisma.expenseVoucher.updateMany({
     where: { facilityId: TEST_FACILITY_ID },
     data: { accrualJournalEntryId: null, paymentJournalEntryId: null },

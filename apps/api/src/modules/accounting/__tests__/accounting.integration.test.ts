@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { withGuardsDisabled } from '../../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
 import type { FastifyInstance } from 'fastify';
@@ -100,6 +101,10 @@ async function createInvoiceAndFinalize(): Promise<{ invoiceId: string; invoiceN
 }
 
 async function cleanup() {
+  await withGuardsDisabled(prisma, cleanupInner);
+}
+
+async function cleanupInner() {
   await prisma.creditNoteLineItem.deleteMany({ where: { creditNote: { facilityId: TEST_FACILITY_ID } } });
   await prisma.creditNote.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.journalEntryLine.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });

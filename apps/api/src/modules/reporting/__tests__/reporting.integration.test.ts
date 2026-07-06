@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { withGuardsDisabled } from '../../../test/financial-guards';
 import {
   getTestApp,
   closeTestApp,
@@ -131,6 +132,10 @@ async function fullWithdrawAndFinalize(
 }
 
 async function cleanup() {
+  await withGuardsDisabled(prisma, cleanupInner);
+}
+
+async function cleanupInner() {
   await prisma.creditNoteLineItem.deleteMany({
     where: { creditNote: { facilityId: TEST_FACILITY_ID } },
   });

@@ -94,6 +94,36 @@ beforeAll(async () => {
     },
   });
 
+  // Accounting-suite fixtures — referenced by fixed id from
+  // accounting.integration.test.ts; a freshly provisioned database has
+  // neither, so seed them here rather than relying on leftover rows.
+  await prisma.chamber.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000300' },
+    update: { isActive: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000300',
+      facilityId: TEST_FACILITY_ID,
+      name: 'Chamber A',
+      maxCapacityBags: 10000,
+      isActive: true,
+    },
+  });
+  await prisma.ratePlan.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000550' },
+    update: { isActive: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000550',
+      facilityId: TEST_FACILITY_ID,
+      name: 'Accounting Seasonal Rate',
+      rateType: 'SEASONAL_PER_BAG',
+      rateAmountPkr: 50,
+      minBillingDays: 1,
+      seasonStartDate: new Date('2026-01-01'),
+      seasonEndDate: new Date('2026-12-31'),
+      isActive: true,
+    },
+  });
+
   // Test rate plan (MONTHLY_PER_BAG, no commodity restriction)
   await prisma.ratePlan.upsert({
     where: { id: '00000000-0000-0000-0000-000000000500' },

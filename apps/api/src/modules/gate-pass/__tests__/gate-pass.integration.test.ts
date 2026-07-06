@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { withGuardsDisabled } from '../../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
 import type { FastifyInstance } from 'fastify';
@@ -29,6 +30,10 @@ let accountantToken: string;
 let testPartyId: string;
 
 async function cleanup() {
+  await withGuardsDisabled(prisma, cleanupInner);
+}
+
+async function cleanupInner() {
   await prisma.gatePass.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.paymentAllocation.deleteMany({
     where: { payment: { facilityId: TEST_FACILITY_ID } },
