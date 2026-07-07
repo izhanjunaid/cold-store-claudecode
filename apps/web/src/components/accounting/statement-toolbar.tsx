@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PRESETS, type PresetKey, type PeriodRange } from '@/lib/fiscal-period';
+import { useAuthStore } from '@/stores/auth.store';
+import { hasMinRole } from '@/lib/rbac';
 
 const SELECT_CLASS =
   'flex h-9 w-auto rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
@@ -40,6 +42,10 @@ export function StatementToolbar({
   onExportCsv,
 }: StatementToolbarProps) {
   const isCustom = preset === 'custom';
+  // Reports default to the official PACCI book; the KATCHI book is
+  // MANAGER+ only (mirrors the backend gate in book-gate.ts).
+  const { user } = useAuthStore();
+  const canSeeKatchi = hasMinRole(user?.role, 'MANAGER');
   return (
     <div className="print-hide mb-4 flex flex-wrap items-end gap-3 rounded-lg border bg-card p-3">
       <div className="space-y-1">
@@ -75,9 +81,8 @@ export function StatementToolbar({
       <div className="space-y-1">
         <Label className="text-xs text-muted-foreground">Book</Label>
         <select value={bookType} onChange={(e) => onBookTypeChange(e.target.value)} className={SELECT_CLASS}>
-          <option value="">PACCI + KATCHI</option>
-          <option value="PACCI">PACCI</option>
-          <option value="KATCHI">KATCHI</option>
+          <option value="">PACCI (Official)</option>
+          {canSeeKatchi && <option value="KATCHI">KATCHI (Internal)</option>}
         </select>
       </div>
 

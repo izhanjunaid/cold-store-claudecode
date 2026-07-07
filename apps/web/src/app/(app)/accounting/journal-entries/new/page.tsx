@@ -37,7 +37,7 @@ export default function NewJournalEntryPage() {
   const [entryDate, setEntryDate] = useState(today());
   const [description, setDescription] = useState('');
   const [bookType, setBookType] = useState<'PACCI' | 'KATCHI'>('PACCI');
-  const [postingStatus, setPostingStatus] = useState<'AUTO_DRAFT' | 'POSTED'>('AUTO_DRAFT');
+  const [postingStatus, setPostingStatus] = useState<'AUTO_DRAFT' | 'POSTED'>('POSTED');
   const [lines, setLines] = useState<Line[]>([emptyLine(), emptyLine()]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +86,9 @@ export default function NewJournalEntryPage() {
   };
 
   const isOwner = user?.role === 'OWNER';
+  const periodLabel = /^\d{4}-\d{2}-\d{2}$/.test(entryDate)
+    ? new Date(`${entryDate}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    : null;
 
   return (
     <div className="max-w-4xl">
@@ -97,6 +100,9 @@ export default function NewJournalEntryPage() {
             <div className="space-y-1.5">
               <Label>Entry Date</Label>
               <Input type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} className="tabular-nums" />
+              {periodLabel && (
+                <p className="text-xs text-muted-foreground">Posts to period {periodLabel}</p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>Book Type</Label>
@@ -108,9 +114,14 @@ export default function NewJournalEntryPage() {
             <div className="space-y-1.5">
               <Label>Status</Label>
               <select value={postingStatus} onChange={(e) => setPostingStatus(e.target.value as 'AUTO_DRAFT' | 'POSTED')} className={SELECT_CLASS + ' h-9'}>
-                <option value="AUTO_DRAFT">Save as Draft</option>
-                <option value="POSTED">Post immediately</option>
+                <option value="POSTED">Post to ledger</option>
+                <option value="AUTO_DRAFT">Save as draft</option>
               </select>
+              {postingStatus === 'AUTO_DRAFT' && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Drafts are not in any report until posted from the entry page.
+                </p>
+              )}
             </div>
           </div>
           <div className="space-y-1.5">

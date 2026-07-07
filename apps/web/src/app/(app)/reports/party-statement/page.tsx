@@ -143,10 +143,12 @@ export default function PartyStatementPickerPage() {
                   <input type="radio" checked={bookType === 'PACCI'} onChange={() => setBookType('PACCI')} />
                   PACCI (official)
                 </label>
-                <label className="flex items-center gap-2">
-                  <input type="radio" checked={bookType === 'KATCHI'} onChange={() => setBookType('KATCHI')} />
-                  KATCHI (informal)
-                </label>
+                {hasMinRole(user?.role, 'MANAGER') && (
+                  <label className="flex items-center gap-2">
+                    <input type="radio" checked={bookType === 'KATCHI'} onChange={() => setBookType('KATCHI')} />
+                    KATCHI (informal)
+                  </label>
+                )}
               </div>
             </div>
 

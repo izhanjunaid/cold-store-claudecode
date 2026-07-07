@@ -2,8 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { toast } from 'sonner';
 import { CheckCircle2, TriangleAlert } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { useAuthStore } from '@/stores/auth.store';
+import { hasMinRole } from '@/lib/rbac';
+import { useConfirm } from '@/components/form/confirm-dialog';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -47,8 +52,11 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger'> = {
 
 export default function JournalEntryDetailPage() {
   const params = useParams<{ id: string }>();
+  const { user } = useAuthStore();
+  const confirm = useConfirm();
   const [entry, setEntry] = useState<JournalEntry | null>(null);
   const [loading, setLoading] = useState(true);
+  const [posting, setPosting] = useState(false);
 
   useEffect(() => {
     apiClient<JournalEntry>(`/v1/accounting/journal-entries/${params.id}`).then(setEntry).finally(() => setLoading(false));
@@ -58,6 +66,33 @@ export default function JournalEntryDetailPage() {
   if (!entry) return <p className="text-muted-foreground">Entry not found</p>;
 
   const balanced = Math.abs(entry.total_debit_pkr - entry.total_credit_pkr) < 0.01;
+  // KATCHI drafts are OWNER-only to post; PACCI drafts need MANAGER+.
+  const canPostDraft =
+    entry.posting_status === 'AUTO_DRAFT' &&
+    (entry.book_type === 'KATCHI' ? user?.role === 'OWNER' : hasMinRole(user?.role, 'MANAGER'));
+
+  const postDraft = async () => {
+    const period = new Date(`${entry.entry_date}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    const ok = await confirm({
+      title: `Post ${entry.entry_number} to the ledger?`,
+      description: `This adds the entry to the ${entry.book_type} book in ${period}. Once posted it appears in every report and cannot be edited — corrections need a reversal entry.`,
+      confirmText: 'Post entry',
+    });
+    if (!ok) return;
+    setPosting(true);
+    try {
+      const updated = await apiClient<JournalEntry>(`/v1/accounting/journal-entries/${entry.id}/post`, {
+        method: 'POST',
+        body: {},
+      });
+      setEntry(updated);
+      toast.success('Entry posted to the ledger');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setPosting(false);
+    }
+  };
 
   return (
     <div>
@@ -65,7 +100,19 @@ export default function JournalEntryDetailPage() {
 
       <Card className="mb-4">
         <CardContent className="pt-6">
-          <div className="mb-4"><StatusBadge status={entry.posting_status} tone={STATUS_TONE[entry.posting_status]} /></div>
+          <div className="mb-4 flex items-center justify-between">
+            <StatusBadge status={entry.posting_status} tone={STATUS_TONE[entry.posting_status]} />
+            {canPostDraft && (
+              <Button size="sm" onClick={postDraft} disabled={posting}>
+                {posting ? 'Posting…' : 'Post to ledger'}
+              </Button>
+            )}
+          </div>
+          {entry.posting_status === 'AUTO_DRAFT' && (
+            <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+              This is a draft — it is not included in the general ledger or any financial report until posted.
+            </p>
+          )}
           <dl className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
             <div><dt className="text-muted-foreground">Entry Date</dt><dd className="font-medium">{formatDate(entry.entry_date)}</dd></div>
             <div><dt className="text-muted-foreground">Type</dt><dd className="font-medium">{entry.entry_type}</dd></div>

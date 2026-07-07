@@ -84,7 +84,12 @@ export default function ExpenseVoucherDetailPage() {
   }
 
   async function cancel() {
-    if (await confirm({ title: 'Cancel this voucher?', confirmText: 'Cancel Voucher', destructive: true })) {
+    if (await confirm({
+      title: 'Cancel this voucher?',
+      description: 'The voucher is closed and cannot be approved or paid afterwards. No ledger entry is affected — accrued or paid vouchers cannot be cancelled.',
+      confirmText: 'Cancel Voucher',
+      destructive: true,
+    })) {
       action('cancel', { reason: 'Cancelled from UI' }, 'Voucher cancelled');
     }
   }

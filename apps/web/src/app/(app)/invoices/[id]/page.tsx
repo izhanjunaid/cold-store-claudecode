@@ -142,7 +142,12 @@ export default function InvoiceDetailPage() {
   }
 
   async function handleDeleteLine(lineId: string) {
-    const ok = await confirm({ title: 'Remove this line item?', confirmText: 'Remove', destructive: true });
+    const ok = await confirm({
+      title: 'Remove this line item?',
+      description: 'The invoice total and GST recalculate without it. Nothing has been posted to the books yet — that happens at finalize.',
+      confirmText: 'Remove',
+      destructive: true,
+    });
     if (!ok) return;
     try {
       await apiClient(`/v1/invoices/${id}/lines/${lineId}`, { method: 'DELETE' });

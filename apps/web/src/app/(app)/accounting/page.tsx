@@ -9,6 +9,7 @@ import {
   Coins,
   FileBarChart,
   Layers,
+  LockKeyhole,
   ReceiptText,
   Scale,
   Users,
@@ -26,9 +27,10 @@ interface AcctCard {
 }
 
 const cards: AcctCard[] = [
-  { title: 'Chart of Accounts', href: '/accounting/chart-of-accounts', icon: Layers, description: 'View and manage the 81-account chart of accounts.' },
+  { title: 'Chart of Accounts', href: '/accounting/chart-of-accounts', icon: Layers, description: 'View the standard chart of accounts.' },
   { title: 'Journal Entries', href: '/accounting/journal-entries', icon: BookOpenText, description: 'Browse all journal entries — auto-posted and manual.' },
   { title: 'General Ledger', href: '/accounting/general-ledger', icon: ClipboardList, description: 'Drill into a single account to see every line that hit it.' },
+  { title: 'Period Locks', href: '/accounting/period-locks', icon: LockKeyhole, description: 'Close finished months so nothing can be posted into them.' },
   { title: 'Trial Balance', href: '/accounting/reports/trial-balance', icon: Scale, description: 'Verify debits = credits across all accounts.' },
   { title: 'Profit & Loss', href: '/accounting/reports/profit-loss', icon: FileBarChart, description: 'Revenue, cost of service, and net profit for any period.' },
   { title: 'Balance Sheet', href: '/accounting/reports/balance-sheet', icon: FileBarChart, description: 'Assets = Liabilities + Equity, as of any date.' },

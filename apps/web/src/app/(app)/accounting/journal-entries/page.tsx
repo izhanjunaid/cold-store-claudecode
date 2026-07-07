@@ -11,6 +11,8 @@ import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState, type DataTableColumn } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
+import { useAuthStore } from '@/stores/auth.store';
+import { hasMinRole } from '@/lib/rbac';
 
 import { formatDate } from '@/lib/format';
 interface JournalEntry {
@@ -44,6 +46,10 @@ const FILTER_KEYS = ['entry_type', 'book_type', 'posting_status', 'date_from', '
 
 export default function JournalEntryListPage() {
   const router = useRouter();
+  const { user } = useAuthStore();
+  // The list defaults to the PACCI book server-side; the KATCHI filter is
+  // only offered to roles that may see the informal book.
+  const canSeeKatchi = hasMinRole(user?.role, 'MANAGER');
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(FILTER_KEYS, {
     defaultPerPage: 25,
   });
@@ -95,7 +101,7 @@ export default function JournalEntryListPage() {
               label: 'Type',
               options: ['INVOICE', 'PAYMENT', 'ADVANCE', 'ADVANCE_APPLIED', 'CREDIT_NOTE', 'REVERSAL', 'BAD_DEBT', 'ADJUSTMENT'].map((v) => ({ label: v.replace(/_/g, ' '), value: v })),
             },
-            { key: 'book_type', label: 'Book', options: [{ label: 'PACCI', value: 'PACCI' }, { label: 'KATCHI', value: 'KATCHI' }] },
+            { key: 'book_type', label: 'Book', options: canSeeKatchi ? [{ label: 'PACCI', value: 'PACCI' }, { label: 'KATCHI', value: 'KATCHI' }] : [{ label: 'PACCI', value: 'PACCI' }] },
             { key: 'posting_status', label: 'Status', options: [{ label: 'Posted', value: 'POSTED' }, { label: 'Draft', value: 'AUTO_DRAFT' }, { label: 'Reversed', value: 'REVERSED' }] },
           ],
           extra: (

@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { Printer, Download } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { useAuthStore } from '@/stores/auth.store';
+import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -52,6 +54,8 @@ function Summary({ label, value, bold }: { label: string; value: string; bold?: 
 }
 
 export default function GeneralLedgerPage() {
+  const { user } = useAuthStore();
+  const canSeeKatchi = hasMinRole(user?.role, 'MANAGER');
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountCode, setAccountCode] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -136,9 +140,8 @@ export default function GeneralLedgerPage() {
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">Book</Label>
             <select value={bookType} onChange={(e) => setBookType(e.target.value)} className={SELECT_CLASS}>
-              <option value="">PACCI + KATCHI</option>
-              <option value="PACCI">PACCI</option>
-              <option value="KATCHI">KATCHI</option>
+              <option value="">PACCI (Official)</option>
+              {canSeeKatchi && <option value="KATCHI">KATCHI (Internal)</option>}
             </select>
           </div>
           <div className="flex items-end gap-2">

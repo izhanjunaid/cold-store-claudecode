@@ -24,14 +24,10 @@ interface StatementFrameProps {
 export function StatementFrame({ title, periodLabel, bookType, children, className }: StatementFrameProps) {
   const { data: facility } = useFacility();
 
-  const basis =
-    bookType === 'PACCI'
-      ? 'PACCI — Official'
-      : bookType === 'KATCHI'
-        ? 'KATCHI — Informal'
-        : 'PACCI + KATCHI (Combined)';
-  // Anything that includes KATCHI is management-only / unaudited.
-  const unaudited = bookType !== 'PACCI';
+  // An unspecified book means PACCI — the server defaults every report to
+  // the official book; KATCHI must be requested explicitly (MANAGER+).
+  const basis = bookType === 'KATCHI' ? 'KATCHI — Informal' : 'PACCI — Official';
+  const unaudited = bookType === 'KATCHI';
   const generated = new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
   const locationLine = [facility?.address, facility?.city].filter(Boolean).join(', ');
 

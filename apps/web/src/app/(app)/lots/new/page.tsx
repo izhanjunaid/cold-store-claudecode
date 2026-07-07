@@ -29,6 +29,7 @@ import {
   useRatePlans,
   useFacility,
 } from '@/hooks/use-reference-data';
+import { useAuthStore } from '@/stores/auth.store';
 
 const lotSchema = z
   .object({
@@ -85,6 +86,7 @@ interface CreatedLot {
 
 export default function LotCreatePage() {
   const router = useRouter();
+  const isOwner = useAuthStore((s) => s.user?.role === 'OWNER');
   const { data: parties = [] } = useParties();
   const { data: commodities = [] } = useCommodities();
   const { data: varieties = [] } = useVarieties();
@@ -356,7 +358,9 @@ export default function LotCreatePage() {
                 label="Book type"
                 options={[
                   { value: 'PACCI', label: 'Pacci (Official)' },
-                  { value: 'KATCHI', label: 'Katchi (Informal)' },
+                  // Putting a lot on the informal book is the owner's call
+                  // (its invoice and ledger postings inherit the book).
+                  ...(isOwner ? [{ value: 'KATCHI', label: 'Katchi (Informal)' }] : []),
                 ]}
                 className="xl:col-span-2"
               />
