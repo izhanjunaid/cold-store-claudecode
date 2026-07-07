@@ -42,6 +42,10 @@ export const Errors = {
     new AppError('SYSTEM_ACCOUNT_PROTECTED', 'System accounts cannot be deleted or recoded', 409),
   CREDIT_NOTE_EXCEEDS_INVOICE: () =>
     new AppError('CREDIT_NOTE_EXCEEDS_INVOICE', 'Credit note total exceeds original invoice', 422),
+  INVALID_PARENT_ACCOUNT: (msg: string) =>
+    new AppError('INVALID_PARENT_ACCOUNT', msg, 422),
+  JOURNAL_ENTRY_NOT_DRAFT: () =>
+    new AppError('JOURNAL_ENTRY_NOT_DRAFT', 'Only AUTO_DRAFT journal entries can be posted', 409),
   VALIDATION_ERROR: (msg: string, field?: string) =>
     new AppError('VALIDATION_ERROR', msg, 400, field),
   INTERNAL_ERROR: (msg = 'Unexpected server error') =>

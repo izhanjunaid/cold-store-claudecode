@@ -12,6 +12,7 @@ import {
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { requireMinRole } from '../../plugins/auth';
+import { resolveBookTypeForRead } from '../accounting/book-gate';
 import { PaymentService } from '../payment/payment.service';
 import { PaymentRepository } from '../payment/payment.repository';
 import { renderPartyStatement } from '../pdf/pdf.service';
@@ -174,6 +175,7 @@ export async function reportingRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { partyId } = request.params as z.infer<typeof PartyIdParam>;
       const query = request.query as z.infer<typeof PartyStatementQuery>;
+      resolveBookTypeForRead(request.user!.role, query.book_type);
       const ledger = await getPartyStatement(
         paymentService,
         request.user!.facilityId,

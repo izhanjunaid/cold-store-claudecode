@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
+import { derivePeriod } from './period';
 
 type Tx = Prisma.TransactionClient;
 type Db = PrismaClient | Tx;
@@ -8,8 +9,7 @@ export class PeriodLockService {
   constructor(private prisma: PrismaClient) {}
 
   async assertOpen(db: Db, facilityId: string, entryDate: Date): Promise<void> {
-    const year = entryDate.getFullYear();
-    const month = entryDate.getMonth() + 1;
+    const { month, year } = derivePeriod(entryDate);
     const lock = await db.periodLock.findFirst({
       where: {
         facilityId,
@@ -78,19 +78,22 @@ export class PeriodLockService {
   }
 
   async unlock(facilityId: string, userId: string, year: number, month: number, reason: string) {
-    const existing = await this.prisma.periodLock.findUnique({
-      where: { facilityId_periodYear_periodMonth: { facilityId, periodYear: year, periodMonth: month } },
-    });
-    if (!existing || existing.unlockedAt !== null) {
-      throw Errors.PERIOD_NOT_LOCKED();
-    }
-    return this.prisma.periodLock.update({
-      where: { id: existing.id },
-      data: {
-        unlockedAt: new Date(),
-        unlockedBy: userId,
-        reason: reason,
-      },
+    // Transaction so the audit trigger sees the acting user (F-2b).
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.periodLock.findUnique({
+        where: { facilityId_periodYear_periodMonth: { facilityId, periodYear: year, periodMonth: month } },
+      });
+      if (!existing || existing.unlockedAt !== null) {
+        throw Errors.PERIOD_NOT_LOCKED();
+      }
+      return tx.periodLock.update({
+        where: { id: existing.id },
+        data: {
+          unlockedAt: new Date(),
+          unlockedBy: userId,
+          reason: reason,
+        },
+      });
     });
   }
 }

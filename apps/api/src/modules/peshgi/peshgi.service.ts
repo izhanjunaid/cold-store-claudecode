@@ -229,7 +229,8 @@ export class PeshgiService {
       where: { facilityId, id },
       include: {
         party: { select: { name: true } },
-        repayments: { orderBy: { repaymentDate: 'asc' } },
+        // Voided rows (dishonoured cheques) are audit history, not repayments.
+        repayments: { where: { voidedAt: null }, orderBy: { repaymentDate: 'asc' } },
       },
     });
     if (!loan) throw Errors.PESHGI_NOT_FOUND();

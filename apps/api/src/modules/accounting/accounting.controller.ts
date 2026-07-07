@@ -18,6 +18,7 @@ import {
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { requireMinRole } from '../../plugins/auth';
+import { assertKatchiWriteAllowed, resolveBookTypeForRead } from './book-gate';
 import { CoaService } from './coa.service';
 import { JournalEntryService } from './journal-entry.service';
 import { GlService } from './gl.service';
@@ -106,7 +107,7 @@ export async function accountingRoutes(app: FastifyInstance) {
       const q = request.query as z.infer<typeof JournalEntryListQuery>;
       const data = await journalEntry.list(request.user!.facilityId, {
         entryType: q.entry_type,
-        bookType: q.book_type,
+        bookType: resolveBookTypeForRead(request.user!.role, q.book_type),
         sourceTable: q.source_table,
         sourceId: q.source_id,
         dateFrom: q.date_from,
@@ -127,6 +128,9 @@ export async function accountingRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const data = await journalEntry.getById(request.user!.facilityId, id);
+      if (data.book_type === 'KATCHI') {
+        resolveBookTypeForRead(request.user!.role, 'KATCHI');
+      }
       return sendSuccess(reply, data);
     },
   });
@@ -138,10 +142,7 @@ export async function accountingRoutes(app: FastifyInstance) {
     schema: { body: CreateManualJournalEntryRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateManualJournalEntryRequest>;
-      // Only OWNER may post KATCHI entries
-      if (body.book_type === 'KATCHI' && request.user!.role !== 'OWNER') {
-        throw Errors.FORBIDDEN('Only OWNER can post KATCHI entries');
-      }
+      assertKatchiWriteAllowed(request.user!.role, body.book_type);
       const draft = {
         entryType: 'ADJUSTMENT' as const,
         bookType: body.book_type,
@@ -169,6 +170,22 @@ export async function accountingRoutes(app: FastifyInstance) {
     },
   });
 
+  // Promote an AUTO_DRAFT entry into the books (F-7).
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/journal-entries/:id/post',
+    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    schema: { params: IdParam },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const existing = await journalEntry.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
+      await journalEntry.postDraft(request.user!.facilityId, id);
+      const full = await journalEntry.getById(request.user!.facilityId, id);
+      return sendSuccess(reply, full);
+    },
+  });
+
   // ==========================================================
   // GENERAL LEDGER — S-37
   // ==========================================================
@@ -180,7 +197,8 @@ export async function accountingRoutes(app: FastifyInstance) {
     schema: { querystring: GeneralLedgerQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof GeneralLedgerQuery>;
-      const data = await gl.getAccountLedger(request.user!.facilityId, q);
+      const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
+      const data = await gl.getAccountLedger(request.user!.facilityId, { ...q, book_type: bookType });
       return sendSuccess(reply, data);
     },
   });
@@ -192,7 +210,8 @@ export async function accountingRoutes(app: FastifyInstance) {
     schema: { querystring: TrialBalanceQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof TrialBalanceQuery>;
-      const data = await gl.getTrialBalance(request.user!.facilityId, q);
+      const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
+      const data = await gl.getTrialBalance(request.user!.facilityId, { ...q, book_type: bookType });
       return sendSuccess(reply, data);
     },
   });
@@ -208,7 +227,8 @@ export async function accountingRoutes(app: FastifyInstance) {
     schema: { querystring: ProfitLossQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof ProfitLossQuery>;
-      const data = await financials.getProfitLoss(request.user!.facilityId, q);
+      const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
+      const data = await financials.getProfitLoss(request.user!.facilityId, { ...q, book_type: bookType });
       return sendSuccess(reply, data);
     },
   });
@@ -220,7 +240,8 @@ export async function accountingRoutes(app: FastifyInstance) {
     schema: { querystring: BalanceSheetQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof BalanceSheetQuery>;
-      const data = await financials.getBalanceSheet(request.user!.facilityId, q);
+      const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
+      const data = await financials.getBalanceSheet(request.user!.facilityId, { ...q, book_type: bookType });
       return sendSuccess(reply, data);
     },
   });
@@ -293,6 +314,7 @@ export async function accountingRoutes(app: FastifyInstance) {
     schema: { body: CreateCreditNoteRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateCreditNoteRequest>;
+      assertKatchiWriteAllowed(request.user!.role, body.book_type);
       const data = await creditNote.create(request.user!.facilityId, request.user!.userId, body);
       return sendSuccess(reply.status(201), data);
     },

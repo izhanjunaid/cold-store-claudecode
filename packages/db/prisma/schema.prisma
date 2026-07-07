@@ -788,11 +788,13 @@ model Payment {
 }
 
 model PaymentAllocation {
-  id                 String  @id @default(uuid()) @db.Uuid
-  paymentId          String  @map("payment_id") @db.Uuid
-  invoiceId          String? @map("invoice_id") @db.Uuid
-  loanId             String? @map("loan_id") @db.Uuid
-  allocatedAmountPkr Decimal @map("allocated_amount_pkr") @db.Decimal(12, 2)
+  id                 String    @id @default(uuid()) @db.Uuid
+  paymentId          String    @map("payment_id") @db.Uuid
+  invoiceId          String?   @map("invoice_id") @db.Uuid
+  loanId             String?   @map("loan_id") @db.Uuid
+  allocatedAmountPkr Decimal   @map("allocated_amount_pkr") @db.Decimal(12, 2)
+  voidedAt           DateTime? @map("voided_at") @db.Timestamptz()
+  voidedBy           String?   @map("voided_by") @db.Uuid
 
   payment Payment    @relation(fields: [paymentId], references: [id])
   invoice Invoice?   @relation(fields: [invoiceId], references: [id])
@@ -1190,6 +1192,8 @@ model PartyLoanRepayment {
   paymentId        String?         @map("payment_id") @db.Uuid
   journalEntryId   String?         @unique @map("journal_entry_id") @db.Uuid
   notes            String?         @db.Text
+  voidedAt         DateTime?       @map("voided_at") @db.Timestamptz()
+  voidedBy         String?         @map("voided_by") @db.Uuid
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz()
   createdBy        String          @map("created_by") @db.Uuid
 

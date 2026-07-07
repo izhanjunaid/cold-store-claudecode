@@ -61,7 +61,10 @@ export class CreditNoteService {
 
       const total = body.line_items.reduce((s, l) => s + l.amount_pkr, 0);
       const balanceDue = Number(invoice.totalPkr) - Number(invoice.amountPaidPkr);
-      if (total > balanceDue + 0.001 && total > Number(invoice.totalPkr) + 0.001) {
+      // A credit note reduces what is still owed — it must never exceed the
+      // balance due, or amount_paid overtakes the total and AR goes negative.
+      // Refunding an already-settled invoice is a different workflow.
+      if (total > balanceDue + 0.001) {
         throw Errors.CREDIT_NOTE_EXCEEDS_INVOICE();
       }
 

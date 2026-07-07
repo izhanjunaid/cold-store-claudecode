@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
 import { verifyAccessToken, type JwtPayload } from '../common/jwt';
 import { Errors } from '../common/errors';
+import { requestContext } from '../common/request-context';
 
 async function authPlugin(app: FastifyInstance) {
   app.decorateRequest('user', null);
@@ -17,10 +18,15 @@ async function authPlugin(app: FastifyInstance) {
       const payload = verifyAccessToken(token);
       request.user = payload;
 
-      // Set user_id in PG session for audit triggers
-      await app.prisma.$executeRawUnsafe(
-        `SET LOCAL app.user_id = '${payload.userId}'`,
-      );
+      // Record the acting user in the request audit context; the patched
+      // prisma.$transaction stamps it into a transaction-local GUC for the
+      // DB audit triggers. (The old standalone `SET LOCAL` here was a
+      // silent no-op outside a transaction block.)
+      const store = requestContext.getStore();
+      if (store) {
+        store.userId = payload.userId;
+        store.facilityId = payload.facilityId;
+      }
     } catch {
       throw Errors.AUTH_INVALID();
     }

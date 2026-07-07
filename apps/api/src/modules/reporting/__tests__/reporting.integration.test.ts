@@ -483,23 +483,31 @@ describe('GET /v1/reports/party-statement/:partyId', () => {
     expect(body.data.entries.length).toBe(0);
   });
 
-  it('PACCI vs KATCHI filter narrows the entry set', async () => {
+  it('PACCI vs KATCHI filter narrows the entry set; KATCHI view is MANAGER-gated (F-9)', async () => {
     const pacciRes = await app.inject({
       method: 'GET',
       url: `/v1/reports/party-statement/${partyA}?book_type=PACCI`,
       headers: authHeaders(accountantToken),
     });
-    const katchiRes = await app.inject({
+    expect(pacciRes.statusCode).toBe(200);
+    const pacci = JSON.parse(pacciRes.body).data;
+    expect(pacci.entries.length).toBeGreaterThan(0);
+
+    // The informal book is not visible below MANAGER.
+    const katchiAsAccountant = await app.inject({
       method: 'GET',
       url: `/v1/reports/party-statement/${partyA}?book_type=KATCHI`,
       headers: authHeaders(accountantToken),
     });
-    expect(pacciRes.statusCode).toBe(200);
-    expect(katchiRes.statusCode).toBe(200);
-    const pacci = JSON.parse(pacciRes.body).data;
-    const katchi = JSON.parse(katchiRes.body).data;
-    expect(pacci.entries.length).toBeGreaterThan(0);
-    expect(katchi.entries.length).toBe(0); // no KATCHI fixtures
+    expect(katchiAsAccountant.statusCode).toBe(403);
+
+    const katchiAsManager = await app.inject({
+      method: 'GET',
+      url: `/v1/reports/party-statement/${partyA}?book_type=KATCHI`,
+      headers: authHeaders(managerToken),
+    });
+    expect(katchiAsManager.statusCode).toBe(200);
+    expect(JSON.parse(katchiAsManager.body).data.entries.length).toBe(0); // no KATCHI fixtures
   });
 
   it('format=pdf returns application/pdf with a buffer body', async () => {

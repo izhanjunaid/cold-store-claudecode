@@ -311,20 +311,23 @@ describe('JE template balance enforcement', () => {
 });
 
 describe('Account-mapping helpers', () => {
-  it('maps party types to AR accounts', () => {
+  it('maps party types to AR accounts and fails loudly on unknown types (F-10)', () => {
     expect(arAccountForParty('FARMER')).toBe('1110');
     expect(arAccountForParty('TRADER')).toBe('1120');
     expect(arAccountForParty('ARHTI')).toBe('1130');
     expect(arAccountForParty('BUYER')).toBe('1150');
     expect(arAccountForParty('OTHER')).toBe('1150');
-    expect(arAccountForParty('UNKNOWN')).toBe('1150');
+    // Party types are a closed enum — an unmapped value is a programming
+    // error and must not silently misclassify AR into Buyers'.
+    expect(() => arAccountForParty('UNKNOWN')).toThrow(/no ar account mapping/i);
   });
 
-  it('maps payment methods to asset accounts', () => {
+  it('maps payment methods to asset accounts and fails loudly on unknown methods (F-10)', () => {
     expect(assetAccountForPaymentMethod('CASH')).toBe('1010');
     expect(assetAccountForPaymentMethod('CHEQUE')).toBe('1020');
     expect(assetAccountForPaymentMethod('BANK_TRANSFER')).toBe('1020');
     expect(assetAccountForPaymentMethod('MOBILE_WALLET')).toBe('1030');
+    expect(() => assetAccountForPaymentMethod('CRYPTO')).toThrow(/no asset account mapping/i);
   });
 
   it('maps commodities to revenue accounts and falls back to 4050', () => {

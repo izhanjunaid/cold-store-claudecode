@@ -46,14 +46,25 @@ export const ACCOUNT_ADVANCE_RECEIPTS = '2010';
 export const ACCOUNT_BAD_DEBT = '6080';
 export const ACCOUNT_DISCOUNTS_ALLOWED = '4910';
 
+// Party types and payment methods are closed enums: an unmapped value is a
+// programming error, and a silent fallback would misclassify the posting
+// (audit finding F-10). Fail loudly instead.
 export function arAccountForParty(partyType: string): string {
-  return PARTY_AR_ACCOUNT[partyType] ?? '1150';
+  const account = PARTY_AR_ACCOUNT[partyType];
+  if (!account) throw new Error(`No AR account mapping for party type '${partyType}'`);
+  return account;
 }
 
 export function assetAccountForPaymentMethod(method: string): string {
-  return PAYMENT_METHOD_ASSET_ACCOUNT[method] ?? '1010';
+  const account = PAYMENT_METHOD_ASSET_ACCOUNT[method];
+  if (!account) throw new Error(`No asset account mapping for payment method '${method}'`);
+  return account;
 }
 
+// Commodities are an open, facility-configurable set — an unmapped commodity
+// deliberately books to 4050 "Storage Revenue — Other" rather than blocking
+// intake of a new commodity. (Rate plans/service charges can override via
+// their stored revenue_account_code.)
 export function revenueAccountForCommodity(commodityName: string | null | undefined): string {
   if (!commodityName) return '4050';
   return COMMODITY_REVENUE_ACCOUNT[commodityName.toUpperCase()] ?? '4050';

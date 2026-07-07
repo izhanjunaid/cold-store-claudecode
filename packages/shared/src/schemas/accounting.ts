@@ -272,6 +272,12 @@ export const ProfitLossResponse = z.object({
   net_profit_pkr: z.number(),
   net_profit_pct: z.number(),
 
+  // Activity in accounts the header rollups could not place (F-6b);
+  // amounts are signed as their contribution to net profit.
+  unclassified_lines: z.array(StatementLine),
+  total_unclassified_pkr: z.number(),
+  has_unclassified: z.boolean(),
+
   // Back-compat flat fields
   revenue_lines: z.array(StatementLine),
   total_revenue_pkr: z.number(),
@@ -306,6 +312,11 @@ export const BalanceSheetResponse = z.object({
   current_year_pl_pkr: z.number(),
   total_equity_pkr: z.number(),
   total_liabilities_and_equity_pkr: z.number(),
+
+  // Balances the header rollups could not place (F-6b).
+  unclassified_asset_lines: z.array(StatementLine),
+  unclassified_liability_lines: z.array(StatementLine),
+  has_unclassified: z.boolean(),
 
   is_balanced: z.boolean(),
 

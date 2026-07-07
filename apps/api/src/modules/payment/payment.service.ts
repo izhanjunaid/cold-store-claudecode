@@ -260,7 +260,7 @@ export class PaymentService {
       if (paymentRow.status === 'DISHONOURED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
 
       const existing = await tx.paymentAllocation.findMany({
-        where: { paymentId: id },
+        where: { paymentId: id, voidedAt: null },
         select: { allocatedAmountPkr: true },
       });
       const existingTotal = existing.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0);
@@ -364,7 +364,7 @@ export class PaymentService {
       );
 
       const allocations = await tx.paymentAllocation.findMany({
-        where: { paymentId: id },
+        where: { paymentId: id, voidedAt: null },
       });
 
       // Track per-loan reversal state so we can post REVERSAL JEs for JE-19 entries
@@ -405,10 +405,10 @@ export class PaymentService {
               status: 'ACTIVE',
             },
           });
-          // Capture the JE-19 ids before deleting the repayment rows so we can
+          // Capture the JE-19 ids before voiding the repayment rows so we can
           // mark them as reversed once the reversal JEs are posted.
           const repayments = await tx.partyLoanRepayment.findMany({
-            where: { loanId: alloc.loanId, paymentId: id },
+            where: { loanId: alloc.loanId, paymentId: id, voidedAt: null },
             select: { journalEntryId: true },
           });
           loanReversals.push({
@@ -422,13 +422,19 @@ export class PaymentService {
               .filter((v): v is string => Boolean(v)),
           });
           loanReversalTotal += Number(alloc.allocatedAmountPkr);
-          await tx.partyLoanRepayment.deleteMany({
-            where: { loanId: alloc.loanId, paymentId: id },
+          // Void, don't delete (F-11): the subledger keeps the story of what
+          // this cheque had funded; readers filter on voided_at IS NULL.
+          await tx.partyLoanRepayment.updateMany({
+            where: { loanId: alloc.loanId, paymentId: id, voidedAt: null },
+            data: { voidedAt: new Date(), voidedBy: userId ?? fullPayment.createdBy },
           });
         }
       }
 
-      await tx.paymentAllocation.deleteMany({ where: { paymentId: id } });
+      await tx.paymentAllocation.updateMany({
+        where: { paymentId: id, voidedAt: null },
+        data: { voidedAt: new Date(), voidedBy: userId ?? fullPayment.createdBy },
+      });
 
       const updated = await this.repo.update(tx, id, {
         status: 'DISHONOURED',

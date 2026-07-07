@@ -13,6 +13,7 @@ import {
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { requireMinRole } from '../../plugins/auth';
+import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
@@ -123,9 +124,7 @@ export async function payrollRoutes(app: FastifyInstance) {
     schema: { body: CreatePayrollRunRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreatePayrollRunRequest>;
-      if (body.book_type === 'KATCHI' && request.user!.role !== 'OWNER') {
-        throw Errors.FORBIDDEN('Only OWNER can post KATCHI entries');
-      }
+      assertKatchiWriteAllowed(request.user!.role, body.book_type);
       const data = await runs.createDraft(request.user!.facilityId, request.user!.userId, body);
       return sendSuccess(reply.status(201), data);
     },

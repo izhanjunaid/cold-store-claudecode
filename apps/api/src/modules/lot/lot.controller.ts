@@ -6,6 +6,7 @@ import { OutboundService } from '../outbound/outbound.service';
 import { OutboundRepository } from '../outbound/outbound.repository';
 import { sendSuccess } from '../../common/response';
 import { requireMinRole } from '../../plugins/auth';
+import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { z } from 'zod';
 
 const IdParam = z.object({ id: z.string().uuid() });
@@ -35,6 +36,9 @@ export async function lotRoutes(app: FastifyInstance) {
     schema: { body: CreateLotRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateLotRequest>;
+      // The lot's book flows into its invoice and JE-01 (invoice.builder),
+      // so the KATCHI decision is gated here at the source (F-9).
+      assertKatchiWriteAllowed(request.user!.role, body.book_type);
       const result = await service.create({
         facilityId: request.user!.facilityId,
         createdBy: request.user!.userId,

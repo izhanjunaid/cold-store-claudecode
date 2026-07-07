@@ -1,6 +1,7 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { generateJournalEntryNumber } from './journal-entry-number';
+import { derivePeriod } from './period';
 import type { JournalEntryDraft } from './templates/types';
 import { PeriodLockService } from './period-lock.service';
 
@@ -65,18 +66,7 @@ export class JournalEntryService {
 
     await this.periodLock.assertOpen(tx, facilityId, draft.entryDate);
 
-    const codes = Array.from(new Set(draft.lines.map((l) => l.accountCode)));
-    const accounts = await tx.chartOfAccounts.findMany({
-      where: { facilityId, accountCode: { in: codes } },
-    });
-    const found = new Set(accounts.map((a) => a.accountCode));
-    for (const code of codes) {
-      if (!found.has(code)) throw Errors.ACCOUNT_NOT_FOUND();
-    }
-    for (const a of accounts) {
-      if (!a.isActive) throw Errors.ACCOUNT_INACTIVE();
-      if (a.accountType === 'HEADER') throw Errors.HEADER_ACCOUNT_NOT_POSTABLE();
-    }
+    await validatePostableAccounts(tx, facilityId, draft.lines.map((l) => l.accountCode));
 
     const entryNumber = await generateJournalEntryNumber(tx, facilityId, draft.entryDate);
 
@@ -91,8 +81,8 @@ export class JournalEntryService {
         sourceId: draft.sourceId,
         description: draft.description,
         postingStatus: options?.postingStatus ?? 'POSTED',
-        periodMonth: draft.entryDate.getMonth() + 1,
-        periodYear: draft.entryDate.getFullYear(),
+        periodMonth: derivePeriod(draft.entryDate).month,
+        periodYear: derivePeriod(draft.entryDate).year,
         reversedById: options?.reversedById ?? null,
         createdBy,
         lines: {
@@ -133,6 +123,30 @@ export class JournalEntryService {
     return this.prisma.$transaction((tx) =>
       this.postInTransaction(tx, facilityId, createdBy, draft, options),
     );
+  }
+
+  /**
+   * Promote an AUTO_DRAFT entry to POSTED (audit finding F-7 — drafts
+   * previously had no path into the books). Re-runs the period-lock and
+   * account checks: both may have changed since the draft was saved.
+   */
+  async postDraft(facilityId: string, id: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const entry = await tx.journalEntry.findFirst({
+        where: { id, facilityId },
+        include: { lines: { select: { accountCode: true } } },
+      });
+      if (!entry) throw Errors.VALIDATION_ERROR('Journal entry not found', 'id');
+      if (entry.postingStatus !== 'AUTO_DRAFT') throw Errors.JOURNAL_ENTRY_NOT_DRAFT();
+
+      await this.periodLock.assertOpen(tx, facilityId, entry.entryDate);
+      await validatePostableAccounts(tx, facilityId, entry.lines.map((l) => l.accountCode));
+
+      await tx.journalEntry.update({
+        where: { id: entry.id },
+        data: { postingStatus: 'POSTED' },
+      });
+    });
   }
 
   /**
@@ -278,4 +292,20 @@ function formatEntry(e: EntryWithRelations) {
 
 function roundCents(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** Every referenced account must exist, be active, and not be a HEADER. */
+async function validatePostableAccounts(tx: Tx, facilityId: string, accountCodes: string[]): Promise<void> {
+  const codes = Array.from(new Set(accountCodes));
+  const accounts = await tx.chartOfAccounts.findMany({
+    where: { facilityId, accountCode: { in: codes } },
+  });
+  const found = new Set(accounts.map((a) => a.accountCode));
+  for (const code of codes) {
+    if (!found.has(code)) throw Errors.ACCOUNT_NOT_FOUND();
+  }
+  for (const a of accounts) {
+    if (!a.isActive) throw Errors.ACCOUNT_INACTIVE();
+    if (a.accountType === 'HEADER') throw Errors.HEADER_ACCOUNT_NOT_POSTABLE();
+  }
 }

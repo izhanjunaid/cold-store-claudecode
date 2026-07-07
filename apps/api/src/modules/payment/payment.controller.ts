@@ -10,6 +10,7 @@ import { PaymentService } from './payment.service';
 import { PaymentRepository } from './payment.repository';
 import { sendSuccess } from '../../common/response';
 import { requireMinRole } from '../../plugins/auth';
+import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 
@@ -29,6 +30,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     schema: { body: CreatePaymentRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreatePaymentRequest>;
+      assertKatchiWriteAllowed(request.user!.role, body.book_type);
       const result = await service.record({
         facilityId: request.user!.facilityId,
         createdBy: request.user!.userId,

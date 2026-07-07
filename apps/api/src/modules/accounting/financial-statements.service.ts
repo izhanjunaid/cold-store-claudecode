@@ -65,7 +65,30 @@ export class FinancialStatementsService {
     const other_income_lines = buildLines(accounts, sums, ['4200'], credit);
     const total_other_income_pkr = sumLines(other_income_lines);
 
-    const net_profit_pkr = round2(operating_profit_pkr + total_other_income_pkr);
+    // Completeness (F-6b): any P&L-class DETAIL account with activity that
+    // the hardcoded header rollups above did not place would silently drop
+    // out of the statement (while remaining in the trial balance). Surface
+    // it instead, signed as its contribution to net profit.
+    const placed = new Set<string>();
+    for (const g of revenue_groups) for (const l of g.lines) placed.add(l.account_code);
+    for (const l of contra_revenue_lines) placed.add(l.account_code);
+    for (const l of cost_of_service_lines) placed.add(l.account_code);
+    for (const l of operating_expense_lines) placed.add(l.account_code);
+    for (const l of other_income_lines) placed.add(l.account_code);
+
+    const unclassified_lines: StatementLine[] = [];
+    for (const a of accounts) {
+      if (a.accountType !== 'DETAIL' || placed.has(a.accountCode)) continue;
+      if (a.accountClass !== 'REVENUE' && a.accountClass !== 'COST_OF_SERVICE' && a.accountClass !== 'EXPENSE') continue;
+      const s = sums.get(a.accountCode);
+      if (!s) continue;
+      const signed = round2(a.accountClass === 'REVENUE' ? credit(s) : -debit(s));
+      if (signed === 0) continue;
+      unclassified_lines.push({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: signed });
+    }
+    const total_unclassified_pkr = round2(unclassified_lines.reduce((s, l) => s + l.amount_pkr, 0));
+
+    const net_profit_pkr = round2(operating_profit_pkr + total_other_income_pkr + total_unclassified_pkr);
 
     // Depreciation & amortisation add-back for EBITDA
     let da = 0;
@@ -113,6 +136,10 @@ export class FinancialStatementsService {
       net_profit_pkr,
       net_profit_pct: pct(net_profit_pkr),
 
+      unclassified_lines,
+      total_unclassified_pkr,
+      has_unclassified: unclassified_lines.length > 0,
+
       // Back-compat flat fields (older clients / existing tests)
       revenue_lines,
       total_revenue_pkr: net_revenue_pkr,
@@ -141,14 +168,41 @@ export class FinancialStatementsService {
     const total_current_assets_pkr = round2(sumGroups(current_asset_groups));
     const non_current_asset_groups = buildGroups(accounts, sums, ['1300'], assetAmt);
     const total_non_current_assets_pkr = round2(sumGroups(non_current_asset_groups));
-    const total_assets_pkr = round2(total_current_assets_pkr + total_non_current_assets_pkr);
 
     // Liabilities
     const current_liability_groups = buildGroups(accounts, sums, ['2000'], crAmt);
     const total_current_liabilities_pkr = round2(sumGroups(current_liability_groups));
     const non_current_liability_groups = buildGroups(accounts, sums, ['2100'], crAmt);
     const total_non_current_liabilities_pkr = round2(sumGroups(non_current_liability_groups));
-    const total_liabilities_pkr = round2(total_current_liabilities_pkr + total_non_current_liabilities_pkr);
+
+    // Completeness (F-6b): asset/liability DETAIL accounts the hardcoded
+    // header rollups did not place. The equity side already aggregates by
+    // class, so surfacing these keeps the sheet complete AND balanced.
+    const placedBs = new Set<string>();
+    for (const g of [...current_asset_groups, ...non_current_asset_groups]) for (const l of g.lines) placedBs.add(l.account_code);
+    for (const g of [...current_liability_groups, ...non_current_liability_groups]) for (const l of g.lines) placedBs.add(l.account_code);
+
+    const unclassified_asset_lines: StatementLine[] = [];
+    const unclassified_liability_lines: StatementLine[] = [];
+    for (const a of accounts) {
+      if (a.accountType !== 'DETAIL' || placedBs.has(a.accountCode)) continue;
+      const s = sums.get(a.accountCode);
+      if (!s) continue;
+      if (a.accountClass === 'ASSET') {
+        const amt = round2(assetAmt(s));
+        if (amt !== 0) unclassified_asset_lines.push({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: amt });
+      } else if (a.accountClass === 'LIABILITY') {
+        const amt = round2(crAmt(s));
+        if (amt !== 0) unclassified_liability_lines.push({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: amt });
+      }
+    }
+
+    const total_assets_pkr = round2(
+      total_current_assets_pkr + total_non_current_assets_pkr + sumLines(unclassified_asset_lines),
+    );
+    const total_liabilities_pkr = round2(
+      total_current_liabilities_pkr + total_non_current_liabilities_pkr + sumLines(unclassified_liability_lines),
+    );
 
     // Equity — Capital (3010) + Retained Earnings (3020); exclude 3030 (computed below)
     const equity_lines = accounts
@@ -190,6 +244,10 @@ export class FinancialStatementsService {
       current_year_pl_pkr,
       total_equity_pkr,
       total_liabilities_and_equity_pkr,
+
+      unclassified_asset_lines,
+      unclassified_liability_lines,
+      has_unclassified: unclassified_asset_lines.length > 0 || unclassified_liability_lines.length > 0,
 
       is_balanced: Math.abs(total_assets_pkr - total_liabilities_and_equity_pkr) < 0.01,
 

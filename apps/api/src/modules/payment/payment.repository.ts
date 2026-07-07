@@ -4,6 +4,9 @@ const paymentInclude = {
   party: { select: { name: true } },
   createdByUser: { select: { name: true } },
   allocations: {
+    // Voided rows (dishonoured cheques) stay in the table for the audit
+    // trail but are not part of the payment's active state.
+    where: { voidedAt: null },
     include: {
       invoice: { select: { invoiceNumber: true } },
       loan: { select: { loanNumber: true } },

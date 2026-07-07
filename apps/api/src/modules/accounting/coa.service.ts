@@ -46,42 +46,66 @@ export class CoaService {
   }
 
   async create(facilityId: string, body: CreateAccountRequestType) {
-    const exists = await this.prisma.chartOfAccounts.findUnique({
-      where: { facilityId_accountCode: { facilityId, accountCode: body.account_code } },
+    // Transaction so the audit trigger sees the acting user (F-2b).
+    return this.prisma.$transaction(async (tx) => {
+      const exists = await tx.chartOfAccounts.findUnique({
+        where: { facilityId_accountCode: { facilityId, accountCode: body.account_code } },
+      });
+      if (exists) {
+        throw Errors.VALIDATION_ERROR('Account code already exists', 'account_code');
+      }
+      // Statements roll detail accounts up through their parent; an invalid
+      // parent silently drops the account from the P&L / balance sheet (F-6a).
+      if (body.parent_account_code) {
+        const parent = await tx.chartOfAccounts.findUnique({
+          where: {
+            facilityId_accountCode: { facilityId, accountCode: body.parent_account_code },
+          },
+        });
+        if (!parent) {
+          throw Errors.INVALID_PARENT_ACCOUNT('Parent account does not exist');
+        }
+        if (parent.accountType !== 'HEADER') {
+          throw Errors.INVALID_PARENT_ACCOUNT('Parent must be a HEADER account');
+        }
+        if (parent.accountClass !== body.account_class) {
+          throw Errors.INVALID_PARENT_ACCOUNT('Parent must belong to the same account class');
+        }
+      }
+      const created = await tx.chartOfAccounts.create({
+        data: {
+          facilityId,
+          accountCode: body.account_code,
+          accountName: body.account_name,
+          accountClass: body.account_class,
+          accountType: body.account_type,
+          parentAccountCode: body.parent_account_code ?? null,
+          normalBalance: body.normal_balance,
+          isSystemAccount: false,
+        },
+      });
+      return format(created);
     });
-    if (exists) {
-      throw Errors.VALIDATION_ERROR('Account code already exists', 'account_code');
-    }
-    const created = await this.prisma.chartOfAccounts.create({
-      data: {
-        facilityId,
-        accountCode: body.account_code,
-        accountName: body.account_name,
-        accountClass: body.account_class,
-        accountType: body.account_type,
-        parentAccountCode: body.parent_account_code ?? null,
-        normalBalance: body.normal_balance,
-        isSystemAccount: false,
-      },
-    });
-    return format(created);
   }
 
   async update(facilityId: string, code: string, body: UpdateAccountRequestType) {
-    const a = await this.prisma.chartOfAccounts.findUnique({
-      where: { facilityId_accountCode: { facilityId, accountCode: code } },
+    // Transaction so the audit trigger sees the acting user (F-2b).
+    return this.prisma.$transaction(async (tx) => {
+      const a = await tx.chartOfAccounts.findUnique({
+        where: { facilityId_accountCode: { facilityId, accountCode: code } },
+      });
+      if (!a) throw Errors.ACCOUNT_NOT_FOUND();
+      if (a.isSystemAccount && body.is_active === false) {
+        throw Errors.SYSTEM_ACCOUNT_PROTECTED();
+      }
+      const updated = await tx.chartOfAccounts.update({
+        where: { id: a.id },
+        data: {
+          ...(body.account_name !== undefined ? { accountName: body.account_name } : {}),
+          ...(body.is_active !== undefined ? { isActive: body.is_active } : {}),
+        },
+      });
+      return format(updated);
     });
-    if (!a) throw Errors.ACCOUNT_NOT_FOUND();
-    if (a.isSystemAccount && body.is_active === false) {
-      throw Errors.SYSTEM_ACCOUNT_PROTECTED();
-    }
-    const updated = await this.prisma.chartOfAccounts.update({
-      where: { id: a.id },
-      data: {
-        ...(body.account_name !== undefined ? { accountName: body.account_name } : {}),
-        ...(body.is_active !== undefined ? { isActive: body.is_active } : {}),
-      },
-    });
-    return format(updated);
   }
 }
