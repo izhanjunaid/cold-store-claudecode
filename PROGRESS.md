@@ -1,11 +1,20 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 11 (Admin & Polish & Pre-Launch) COMPLETE — all 9 buckets shipped on `phase/11-admin-polish`. Post-phase enhancements 11.10 (Gate Pass verification) and 11.11 (Marka goods-identification) shipped on the same branch.
-- **Active Task**: Ready for pre-launch (Phase 12 / final QA) or merge to integration branch.
+- **Active Phase**: Accounting audit remediation COMPLETE on `phase/13-production-financials` (2026-07-07). Post-implementation accounting audit (docs/16) delivered; priority-1/2/3 fixes shipped in commits `ac24d34`, `01517d2`, `917b7ad`. Suite: 129 unit + 324 integration (api) + 79 unit (web) pass.
+- **Active Task**: Owner decisions pending from the audit appendix — closed-through watermark model (F-4), generic JE reversal endpoint (Gap 2), opening-balance flow (Gap 1), month-end revenue accrual on/off (Gap 4).
 - **Blockers**: None
-- **Last Updated**: 2026-06-11
-- **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision.
+- **Last Updated**: 2026-07-07
+- **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision. Ops hardening from audit F-2a: run the app under a non-owner DB role and REVOKE UPDATE/DELETE on audit_log + EXECUTE on financial_guards_set (deployment concern, see docs/16 §F-2).
+
+## Accounting Audit & Hardening (2026-07-06 → 2026-07-07)
+
+| Commit | Scope |
+|--------|-------|
+| `a9cbce3` | docs/16 — post-implementation accounting audit (14 findings, 3 critical) |
+| `ac24d34` | Migration 0002: audit triggers on all financial tables, DELETE audit action, append-only audit_log, JE immutability + deferred balance triggers, line CHECKs, CoA structure lock, `financial_guards_set()` test toggle |
+| `01517d2` | Backend: working audit attribution (request-context + $transaction GUCs), credit-note bound, CoA parent validation, statement unclassified sections, draft promotion endpoint, centralised KATCHI gates (write OWNER / read MANAGER+, PACCI default), 55 system-flagged accounts + loud mapping failures, dishonour soft-void (migration 0003), UTC period derivation |
+| `917b7ad` | Web: Period Locks screen, honest JE draft/post affordances + promote button, consequence-stating confirms, PACCI-default book selectors |
 
 ## Phase Completion
 

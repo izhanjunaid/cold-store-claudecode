@@ -10,6 +10,16 @@
 - **CORROBORATED** — reported identically by two independent exploration passes with quoted code, not re-read line-by-line by the auditor.
 - **INFERRED** — a conclusion that follows from verified facts but was not itself directly observed.
 
+> **Remediation status (2026-07-07).** The appendix's priority 1–3 fixes shipped
+> on this branch: `ac24d34` (migration 0002 — audit triggers, append-only
+> audit_log, JE immutability + balance constraints, CoA structure lock),
+> `01517d2` (backend — F-2b, F-5, F-6, F-7, F-9, F-10, F-11, F-13), and
+> `917b7ad` (web — UX-1..5, including the Period Locks screen). Line numbers
+> cited below refer to commit `851d90e` and may have shifted. Still open:
+> the priority-4 owner decisions (closed-through watermark, generic reversal
+> endpoint, opening-balance flow, month-end accrual) and the F-2a ops step
+> (non-owner runtime DB role with REVOKEs).
+
 ---
 
 ## 1. Executive Summary
