@@ -73,6 +73,15 @@ export default function PeriodLocksPage() {
 
   const lockFor = (m: number) => locks.find((l) => l.period_year === year && l.period_month === m);
 
+  // Closed-through watermark: the latest actively-locked month closes every
+  // month before it too, unless a month was explicitly reopened.
+  const watermark = locks.reduce(
+    (acc, l) => (l.is_locked ? Math.max(acc, l.period_year * 100 + l.period_month) : acc),
+    0,
+  );
+  const watermarkLabel =
+    watermark > 0 ? `${MONTHS[(watermark % 100) - 1]} ${Math.floor(watermark / 100)}` : null;
+
   const submit = async () => {
     if (!pending) return;
     if (pending.kind === 'unlock' && !reason.trim()) {
@@ -120,11 +129,21 @@ export default function PeriodLocksPage() {
       <div className="mb-4 flex items-start gap-2 rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
         <p>
-          Locking a month blocks every posting dated inside it. Reopening requires the owner and a
-          reason, and both actions are kept on the permanent audit record. Close each month once its
-          billing is done.
+          Closing a month blocks every posting dated inside it — and closes every earlier month
+          with it. Reopening a single month requires the owner and a reason, and both actions are
+          kept on the permanent audit record. Close each month once its billing is done.
         </p>
       </div>
+
+      {watermarkLabel && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-900 dark:border-green-900 dark:bg-green-950 dark:text-green-200">
+          <LockKeyhole className="h-4 w-4 shrink-0" aria-hidden />
+          <p>
+            <span className="font-medium">Books are closed through {watermarkLabel}.</span>{' '}
+            Nothing can be posted on or before that month unless the owner reopens it.
+          </p>
+        </div>
+      )}
 
       <div className="mb-4 flex items-end gap-3">
         <div className="space-y-1">
@@ -151,11 +170,13 @@ export default function PeriodLocksPage() {
             {MONTHS.map((name, i) => {
               const m = i + 1;
               const lock = lockFor(m);
-              const state: 'locked' | 'reopened' | 'open' = lock?.is_locked
+              const state: 'locked' | 'reopened' | 'open' | 'implied' = lock?.is_locked
                 ? 'locked'
                 : lock
                   ? 'reopened'
-                  : 'open';
+                  : year * 100 + m <= watermark
+                    ? 'implied'
+                    : 'open';
               return (
                 <TableRow key={m} className={!isCurrentOrPast(m) ? 'opacity-50' : undefined}>
                   <TableCell className="font-medium">{name} {year}</TableCell>
@@ -170,6 +191,11 @@ export default function PeriodLocksPage() {
                         <LockOpen className="h-3 w-3" aria-hidden /> Reopened
                       </span>
                     )}
+                    {state === 'implied' && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-950 dark:text-green-300">
+                        <LockKeyhole className="h-3 w-3" aria-hidden /> Closed
+                      </span>
+                    )}
                     {state === 'open' && <span className="text-xs text-muted-foreground">Open</span>}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
@@ -179,9 +205,10 @@ export default function PeriodLocksPage() {
                     {state === 'reopened' && lock && (
                       <>Reopened by {lock.unlocked_by_name} on {lock.unlocked_at ? fmt(lock.unlocked_at) : ''}{lock.reason ? ` — ${lock.reason}` : ''}</>
                     )}
+                    {state === 'implied' && <>Covered by the {watermarkLabel} close</>}
                   </TableCell>
                   <TableCell className="text-right">
-                    {state === 'locked' ? (
+                    {state === 'locked' || state === 'implied' ? (
                       canUnlock && (
                         <Button variant="outline" size="sm" onClick={() => { setPending({ kind: 'unlock', year, month: m }); setReason(''); }}>
                           Reopen…
@@ -213,7 +240,7 @@ export default function PeriodLocksPage() {
             </DialogTitle>
             <DialogDescription>
               {pending?.kind === 'lock'
-                ? 'No invoice, payment, expense, or journal entry can be posted into a closed month. The owner can reopen it later with a reason.'
+                ? 'No invoice, payment, expense, or journal entry can be posted into a closed month — and every earlier month closes with it. The owner can reopen a specific month later with a reason.'
                 : 'Reopening allows backdated postings into this month again. The reopening is recorded permanently on the audit log.'}
             </DialogDescription>
           </DialogHeader>

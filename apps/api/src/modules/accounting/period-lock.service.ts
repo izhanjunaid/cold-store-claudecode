@@ -8,17 +8,36 @@ type Db = PrismaClient | Tx;
 export class PeriodLockService {
   constructor(private prisma: PrismaClient) {}
 
+  /**
+   * Closed-through watermark (audit F-4): the maximum actively-locked period
+   * closes every period at or below it — months nobody ever locked included.
+   * A month below the watermark is only open while it carries an explicit
+   * unlock row (reopen exception, OWNER-created via unlock()).
+   */
   async assertOpen(db: Db, facilityId: string, entryDate: Date): Promise<void> {
     const { month, year } = derivePeriod(entryDate);
+    const explicit = await db.periodLock.findUnique({
+      where: { facilityId_periodYear_periodMonth: { facilityId, periodYear: year, periodMonth: month } },
+    });
+    if (explicit) {
+      if (explicit.unlockedAt === null) throw Errors.PERIOD_LOCKED();
+      return; // explicit reopen exception
+    }
+    if (await this.hasActiveLockAtOrAbove(db, facilityId, year, month)) {
+      throw Errors.PERIOD_LOCKED();
+    }
+  }
+
+  /** True when some period >= (year, month) is actively locked — i.e. the watermark covers this period. */
+  private async hasActiveLockAtOrAbove(db: Db, facilityId: string, year: number, month: number): Promise<boolean> {
     const lock = await db.periodLock.findFirst({
       where: {
         facilityId,
-        periodYear: year,
-        periodMonth: month,
         unlockedAt: null,
+        OR: [{ periodYear: { gt: year } }, { periodYear: year, periodMonth: { gte: month } }],
       },
     });
-    if (lock) throw Errors.PERIOD_LOCKED();
+    return lock !== null;
   }
 
   async list(facilityId: string) {
@@ -83,7 +102,27 @@ export class PeriodLockService {
       const existing = await tx.periodLock.findUnique({
         where: { facilityId_periodYear_periodMonth: { facilityId, periodYear: year, periodMonth: month } },
       });
-      if (!existing || existing.unlockedAt !== null) {
+      if (!existing) {
+        // No row of its own — the month may still be closed by the watermark
+        // (F-4). Reopening it materializes an explicit unlock-exception row.
+        if (!(await this.hasActiveLockAtOrAbove(tx, facilityId, year, month))) {
+          throw Errors.PERIOD_NOT_LOCKED();
+        }
+        const now = new Date();
+        return tx.periodLock.create({
+          data: {
+            facilityId,
+            periodYear: year,
+            periodMonth: month,
+            lockedAt: now,
+            lockedBy: userId,
+            unlockedAt: now,
+            unlockedBy: userId,
+            reason,
+          },
+        });
+      }
+      if (existing.unlockedAt !== null) {
         throw Errors.PERIOD_NOT_LOCKED();
       }
       return tx.periodLock.update({
