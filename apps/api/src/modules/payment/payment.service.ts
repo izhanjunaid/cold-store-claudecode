@@ -580,9 +580,30 @@ export class PaymentService {
       orderBy: [{ creditDate: 'asc' }, { createdAt: 'asc' }],
     });
 
+    // Opening balances (audit Gap 1) live as journal-entry lines with party
+    // attribution, not as documents — surface them so the statement matches
+    // the GL from day one.
+    const openingLines = await this.prisma.journalEntryLine.findMany({
+      where: {
+        facilityId,
+        partyId,
+        journalEntry: {
+          facilityId,
+          sourceTable: 'opening_balances',
+          postingStatus: 'POSTED',
+          ...bookFilter,
+        },
+      },
+      select: {
+        debitAmount: true,
+        creditAmount: true,
+        journalEntry: { select: { id: true, entryNumber: true, entryDate: true, createdAt: true } },
+      },
+    });
+
     type RawEntry = {
       date: string;
-      type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
+      type: 'OPENING_BALANCE' | 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
       reference: string | null;
       description: string;
       debit_pkr: number;
@@ -592,6 +613,16 @@ export class PaymentService {
     };
 
     const allEntries: RawEntry[] = [
+      ...openingLines.map((line) => ({
+        date: line.journalEntry.entryDate.toISOString().slice(0, 10),
+        type: 'OPENING_BALANCE' as const,
+        reference: line.journalEntry.entryNumber,
+        description: 'Opening balance brought forward',
+        debit_pkr: Number(line.debitAmount),
+        credit_pkr: Number(line.creditAmount),
+        id: line.journalEntry.id,
+        sortKey: `${line.journalEntry.entryDate.toISOString().slice(0, 10)}_0_${line.journalEntry.createdAt.toISOString()}`,
+      })),
       ...invoices.map((inv) => ({
         date: inv.invoiceDate.toISOString().slice(0, 10),
         type: 'INVOICE' as const,

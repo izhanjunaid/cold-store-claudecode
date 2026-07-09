@@ -53,7 +53,13 @@ export const Errors = {
   JOURNAL_ENTRY_NOT_REVERSIBLE: () =>
     new AppError(
       'JOURNAL_ENTRY_NOT_REVERSIBLE',
-      'Only manual journal entries can be reversed here; system entries are corrected through their source document (credit note, dishonour, write-off)',
+      'Only manual and opening-balance journal entries can be reversed here; system entries are corrected through their source document (credit note, dishonour, write-off)',
+      409,
+    ),
+  OPENING_BALANCES_ALREADY_ENTERED: () =>
+    new AppError(
+      'OPENING_BALANCES_ALREADY_ENTERED',
+      'Opening balances have already been entered; reverse the existing opening entry to redo them',
       409,
     ),
   VALIDATION_ERROR: (msg: string, field?: string) =>

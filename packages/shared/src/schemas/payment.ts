@@ -1,7 +1,7 @@
-import { z } from 'zod';
+﻿import { z } from 'zod';
 import { PaymentMethod, PaymentStatus, ClearanceStatus } from './enums';
 
-// Discriminated allocation union — accepts either an invoice or a loan target.
+// Discriminated allocation union â€” accepts either an invoice or a loan target.
 // Legacy payloads `{invoice_id, allocated_amount_pkr}` are still accepted; the
 // loan variant must explicitly set target='LOAN'.
 const InvoiceAllocationLine = z.object({
@@ -34,7 +34,7 @@ export const CreatePaymentRequest = z.object({
 });
 export type CreatePaymentRequestType = z.infer<typeof CreatePaymentRequest>;
 
-// AllocatePaymentRequest — add allocations to an existing payment
+// AllocatePaymentRequest â€” add allocations to an existing payment
 export const AllocatePaymentRequest = z.object({
   allocations: z.array(AllocationLine).min(1),
 });
@@ -96,7 +96,7 @@ export type PaymentResponseType = z.infer<typeof PaymentResponse>;
 // PartyLedgerEntry
 export const PartyLedgerEntry = z.object({
   date: z.string(),
-  type: z.enum(['INVOICE', 'PAYMENT', 'CREDIT_NOTE']),
+  type: z.enum(['OPENING_BALANCE', 'INVOICE', 'PAYMENT', 'CREDIT_NOTE']),
   reference: z.string().nullable(),
   description: z.string(),
   debit_pkr: z.number(),

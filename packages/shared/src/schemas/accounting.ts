@@ -135,6 +135,45 @@ export const ReverseJournalEntryRequest = z.object({
 export type ReverseJournalEntryRequestType = z.infer<typeof ReverseJournalEntryRequest>;
 
 // ============================================================
+// Opening Balances (Gap 1)
+// ============================================================
+
+export const EnterOpeningBalancesRequest = z.object({
+  as_of_date: dateOnly,
+  party_receivables: z
+    .array(
+      z.object({
+        party_id: z.string().uuid(),
+        amount_pkr: z.number().positive(),
+      }),
+    )
+    .optional()
+    .default([]),
+  cash_pkr: z.number().min(0).optional().default(0),
+  bank_pkr: z.number().min(0).optional().default(0),
+  other_lines: z
+    .array(
+      z.object({
+        account_code: z.string(),
+        debit_pkr: z.number().min(0).optional().default(0),
+        credit_pkr: z.number().min(0).optional().default(0),
+        description: z.string().max(300).optional(),
+      }),
+    )
+    .optional()
+    .default([]),
+});
+export type EnterOpeningBalancesRequestType = z.infer<typeof EnterOpeningBalancesRequest>;
+
+export const OpeningBalanceStatusResponse = z.object({
+  entered: z.boolean(),
+  journal_entry_id: z.string().uuid().nullable(),
+  entry_number: z.string().nullable(),
+  as_of_date: z.string().nullable(),
+});
+export type OpeningBalanceStatusResponseType = z.infer<typeof OpeningBalanceStatusResponse>;
+
+// ============================================================
 // General Ledger
 // ============================================================
 

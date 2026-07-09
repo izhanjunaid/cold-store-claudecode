@@ -16,6 +16,7 @@ import {
   CreateCreditNoteRequest,
   CreditNoteListQuery,
   BadDebtWriteOffRequest,
+  EnterOpeningBalancesRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { requireMinRole } from '../../plugins/auth';
@@ -27,6 +28,7 @@ import { FinancialStatementsService } from './financial-statements.service';
 import { PeriodLockService } from './period-lock.service';
 import { CreditNoteService } from './credit-note.service';
 import { BadDebtService } from './bad-debt.service';
+import { OpeningBalanceService } from './opening-balance.service';
 import { Errors } from '../../common/errors';
 
 const CodeParam = z.object({ code: z.string().regex(/^[0-9]+$/) });
@@ -41,6 +43,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   const financials = new FinancialStatementsService(app.prisma);
   const creditNote = new CreditNoteService(app.prisma, journalEntry);
   const badDebt = new BadDebtService(app.prisma, journalEntry);
+  const openingBalance = new OpeningBalanceService(app.prisma, journalEntry);
 
   // ==========================================================
   // CHART OF ACCOUNTS — S-35
@@ -267,6 +270,37 @@ export async function accountingRoutes(app: FastifyInstance) {
       const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
       const data = await financials.getBalanceSheet(request.user!.facilityId, { ...q, book_type: bookType });
       return sendSuccess(reply, data);
+    },
+  });
+
+  // ==========================================================
+  // OPENING BALANCES (Gap 1)
+  // ==========================================================
+
+  app.route({
+    method: 'GET',
+    url: '/v1/accounting/opening-balances',
+    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    handler: async (request, reply) => {
+      const data = await openingBalance.getStatus(request.user!.facilityId);
+      return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/opening-balances',
+    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    schema: { body: EnterOpeningBalancesRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof EnterOpeningBalancesRequest>;
+      const entryId = await openingBalance.enter(
+        request.user!.facilityId,
+        request.user!.userId,
+        body,
+      );
+      const full = await journalEntry.getById(request.user!.facilityId, entryId);
+      return sendSuccess(reply.status(201), full);
     },
   });
 

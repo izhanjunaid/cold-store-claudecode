@@ -169,7 +169,9 @@ export class JournalEntryService {
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
       if (!entry) throw Errors.VALIDATION_ERROR('Journal entry not found', 'id');
-      if (entry.sourceTable !== 'manual') throw Errors.JOURNAL_ENTRY_NOT_REVERSIBLE();
+      if (entry.sourceTable !== 'manual' && entry.sourceTable !== 'opening_balances') {
+        throw Errors.JOURNAL_ENTRY_NOT_REVERSIBLE();
+      }
       if (entry.postingStatus === 'REVERSED') throw Errors.JOURNAL_ENTRY_ALREADY_REVERSED();
       if (entry.postingStatus !== 'POSTED') throw Errors.JOURNAL_ENTRY_NOT_POSTED();
 

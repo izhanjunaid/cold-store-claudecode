@@ -86,10 +86,13 @@ export default function JournalEntryDetailPage() {
   const canWriteBook =
     entry.book_type === 'KATCHI' ? user?.role === 'OWNER' : hasMinRole(user?.role, 'MANAGER');
   const canPostDraft = entry.posting_status === 'AUTO_DRAFT' && canWriteBook;
-  // Only manual entries are reversible here — system entries are corrected
-  // through their source document (credit note, dishonour, write-off).
+  // Only manual and opening-balance entries are reversible here — system
+  // entries are corrected through their source document (credit note,
+  // dishonour, write-off).
   const canReverse =
-    entry.posting_status === 'POSTED' && entry.source_table === 'manual' && canWriteBook;
+    entry.posting_status === 'POSTED' &&
+    (entry.source_table === 'manual' || entry.source_table === 'opening_balances') &&
+    canWriteBook;
 
   const postDraft = async () => {
     const period = new Date(`${entry.entry_date}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });

@@ -1,9 +1,9 @@
-import { z } from 'zod';
+﻿import { z } from 'zod';
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 
 // =====================================================================
-// Phase 10 — Reporting (M9) query schemas
+// Phase 10 â€” Reporting (M9) query schemas
 // =====================================================================
 
 export const DashboardReportQuery = z.object({});
@@ -222,7 +222,7 @@ export type OwnershipTransferRowType = z.infer<typeof OwnershipTransferRow>;
 export const PartyStatementEntry = z.object({
   id: z.string().uuid(),
   date: z.string(),
-  type: z.enum(['INVOICE', 'PAYMENT', 'CREDIT_NOTE']),
+  type: z.enum(['OPENING_BALANCE', 'INVOICE', 'PAYMENT', 'CREDIT_NOTE']),
   reference: z.string().nullable(),
   description: z.string(),
   debit_pkr: z.number(),

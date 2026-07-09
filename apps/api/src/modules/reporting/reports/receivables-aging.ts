@@ -48,8 +48,95 @@ export async function getReceivablesAging(
     },
   });
 
+  // Opening balances (audit Gap 1): per-party opening AR from the opening
+  // journal entry, settled FIFO by the unallocated (on-account) portion of
+  // payments — the same treatment JE-02 gives them in the GL, so aging
+  // stays reconciled with the receivable accounts.
+  const openingLines = await prisma.journalEntryLine.findMany({
+    where: {
+      facilityId,
+      partyId: filters.party_id ?? { not: null },
+      journalEntry: {
+        facilityId,
+        sourceTable: 'opening_balances',
+        postingStatus: 'POSTED',
+        entryDate: { lte: asOfDate },
+      },
+    },
+    select: {
+      debitAmount: true,
+      creditAmount: true,
+      party: { select: { id: true, name: true, partyType: true } },
+      journalEntry: { select: { entryDate: true } },
+    },
+  });
+
+  const onAccountPayments = openingLines.length
+    ? await prisma.payment.findMany({
+        where: {
+          facilityId,
+          ...(filters.party_id ? { partyId: filters.party_id } : {}),
+          isAdvance: false,
+          status: { not: 'DISHONOURED' },
+          paymentDate: { lte: asOfDate },
+        },
+        select: {
+          partyId: true,
+          amountPkr: true,
+          allocations: { where: { voidedAt: null }, select: { allocatedAmountPkr: true } },
+        },
+      })
+    : [];
+
+  const onAccountByParty = new Map<string, number>();
+  for (const pay of onAccountPayments) {
+    const allocated = pay.allocations.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0);
+    const unallocated = Math.max(0, Number(pay.amountPkr) - allocated);
+    if (unallocated > 0) {
+      onAccountByParty.set(pay.partyId, (onAccountByParty.get(pay.partyId) ?? 0) + unallocated);
+    }
+  }
+
+  const openingByParty = new Map<
+    string,
+    { net: number; date: Date; party: { id: string; name: string; partyType: string } }
+  >();
+  for (const line of openingLines) {
+    if (!line.party) continue;
+    const cur = openingByParty.get(line.party.id);
+    const delta = Number(line.debitAmount) - Number(line.creditAmount);
+    if (cur) {
+      cur.net += delta;
+      if (line.journalEntry.entryDate < cur.date) cur.date = line.journalEntry.entryDate;
+    } else {
+      openingByParty.set(line.party.id, { net: delta, date: line.journalEntry.entryDate, party: line.party });
+    }
+  }
+
   const buckets = emptyBuckets();
   const byParty = new Map<string, PartyRow>();
+
+  for (const [pid, opening] of openingByParty) {
+    const due = round2(Math.max(0, opening.net - (onAccountByParty.get(pid) ?? 0)));
+    if (due <= 0.005) continue;
+
+    const key = bucketFor(asOfDate, opening.date);
+    buckets[key] += due;
+    buckets.total_pkr += due;
+
+    byParty.set(pid, {
+      party_id: opening.party.id,
+      party_name: opening.party.name,
+      party_type: opening.party.partyType,
+      total_due_pkr: due,
+      b_0_30: 0,
+      b_31_60: 0,
+      b_61_90: 0,
+      b_90_plus: 0,
+      oldest_invoice_days: ageInDays(asOfDate, opening.date),
+      [key]: due,
+    } as PartyRow);
+  }
 
   for (const inv of invoices) {
     const due = Number(inv.totalPkr) - Number(inv.amountPaidPkr);

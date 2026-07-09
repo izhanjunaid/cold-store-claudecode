@@ -63,7 +63,7 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   { code: '2120', name: 'Loan from Director / Owner', cls: 'LIABILITY', type: 'DETAIL', parent: '2100', normal: 'CREDIT' },
 
   // CLASS 3: EQUITY
-  { code: '3010', name: "Owner's Capital", cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT' },
+  { code: '3010', name: "Owner's Capital", cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true },
   { code: '3020', name: 'Retained Earnings', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT' },
   { code: '3030', name: 'Current Year Profit / (Loss)', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true },
 
