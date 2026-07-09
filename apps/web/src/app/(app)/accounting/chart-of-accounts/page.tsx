@@ -95,6 +95,9 @@ export default function ChartOfAccountsPage() {
     () => accounts.filter((a) => a.account_type === 'HEADER' && a.account_class === draft.cls),
     [accounts, draft.cls],
   );
+  // Equity accounts sit at the root (built by class on the balance sheet);
+  // every other class needs a header for the statements to place it.
+  const parentRequired = draft.cls !== 'EQUITY';
 
   const createAccount = async () => {
     setSaving(true);
@@ -265,9 +268,9 @@ export default function ChartOfAccountsPage() {
           <DialogHeader>
             <DialogTitle>Add account</DialogTitle>
             <DialogDescription>
-              New accounts are DETAIL accounts — they must sit under a header of the same class to
-              appear on the statements. Code, class, and parent are permanent once the account has
-              postings.
+              Accounts under a standard header appear in that statement section; anything else
+              shows under &ldquo;Unclassified&rdquo;. Code, class, and parent are permanent once the
+              account has postings.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -321,7 +324,11 @@ export default function ChartOfAccountsPage() {
                   onChange={(e) => setDraft((d) => ({ ...d, parent: e.target.value }))}
                   className={SELECT_CLASS}
                 >
-                  <option value="">— none —</option>
+                  {parentRequired ? (
+                    <option value="" disabled>Select header…</option>
+                  ) : (
+                    <option value="">— none —</option>
+                  )}
                   {headerOptions.map((h) => (
                     <option key={h.account_code} value={h.account_code}>
                       {h.account_code} — {h.account_name}
@@ -345,7 +352,7 @@ export default function ChartOfAccountsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-            <Button onClick={createAccount} disabled={saving || draft.code.length < 2 || !draft.name.trim()}>
+            <Button onClick={createAccount} disabled={saving || draft.code.length < 2 || !draft.name.trim() || (parentRequired && !draft.parent)}>
               {saving ? 'Creating…' : 'Create account'}
             </Button>
           </DialogFooter>

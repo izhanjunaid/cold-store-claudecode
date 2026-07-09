@@ -201,6 +201,7 @@ describe('Phase 8 — Chart of Accounts', () => {
         account_name: 'Test Misc',
         account_class: 'EXPENSE',
         account_type: 'DETAIL',
+        parent_account_code: '6000',
         normal_balance: 'DEBIT',
       },
     });

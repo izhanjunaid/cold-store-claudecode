@@ -154,7 +154,7 @@ async function cleanup() {
     await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.periodLock.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.chartOfAccounts.deleteMany({
-      where: { facilityId: TEST_FACILITY_ID, accountCode: { in: ['7000', '7010', '9902', '9903', '9904'] } },
+      where: { facilityId: TEST_FACILITY_ID, accountCode: { in: ['7000', '7010', '9902', '9903', '9904', '9905', '3910'] } },
     });
     await prisma.chartOfAccounts.updateMany({
       where: { facilityId: TEST_FACILITY_ID, accountCode: { in: ['1010', '6080'] } },
@@ -646,6 +646,33 @@ describe('account creation validates the parent (F-6a)', () => {
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: { ...base, account_code: '9902', parent_account_code: '6000' },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it('rejects a parentless DETAIL account outside equity — it could never reach the statements', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: { ...base, account_code: '9905' },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error.code).toBe('INVALID_PARENT_ACCOUNT');
+  });
+
+  it('accepts a parentless EQUITY DETAIL account — equity sits at the root by design', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '3910',
+        account_name: 'Owner Drawings (custom)',
+        account_class: 'EQUITY',
+        account_type: 'DETAIL',
+        normal_balance: 'DEBIT',
+      },
     });
     expect(res.statusCode).toBe(201);
   });

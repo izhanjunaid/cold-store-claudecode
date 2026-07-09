@@ -46,6 +46,9 @@ interface PL {
   ebitda_pct: number;
   net_profit_pkr: number;
   net_profit_pct: number;
+  unclassified_lines: Line[];
+  total_unclassified_pkr: number;
+  has_unclassified: boolean;
 }
 
 function lineMap(pl: PL | null): Map<string, number> {
@@ -57,6 +60,7 @@ function lineMap(pl: PL | null): Map<string, number> {
     ...pl.cost_of_service_lines,
     ...pl.operating_expense_lines,
     ...pl.other_income_lines,
+    ...pl.unclassified_lines,
   ]) {
     m.set(l.account_code, l.amount_pkr);
   }
@@ -101,6 +105,7 @@ export default function ProfitLossPage() {
     for (const l of data.cost_of_service_lines) rows.push({ section: 'Cost of Service', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     for (const l of data.operating_expense_lines) rows.push({ section: 'Operating Expenses', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     for (const l of data.other_income_lines) rows.push({ section: 'Other Income', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
+    for (const l of data.unclassified_lines) rows.push({ section: 'Unclassified', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     const csv = buildCsv(rows, [
       { header: 'Section', value: (r) => r.section },
       { header: 'Code', value: (r) => r.code },
@@ -177,8 +182,27 @@ export default function ProfitLossPage() {
                 </>
               )}
 
+              {data.has_unclassified && (
+                <>
+                  <SpacerRow />
+                  <SectionHeading>Unclassified — not under a standard header</SectionHeading>
+                  {data.unclassified_lines.map((l) => (
+                    <StatementRow key={l.account_code} depth={1} code={l.account_code} label={l.account_name} amount={l.amount_pkr} prior={pl(l.account_code)} href={glHref(l.account_code)} />
+                  ))}
+                  <StatementRow depth={1} emphasis="subtotal" label="Total Unclassified" amount={data.total_unclassified_pkr} prior={cmp?.total_unclassified_pkr} />
+                </>
+              )}
+
               <StatementRow emphasis="grand" label={data.net_profit_pkr >= 0 ? 'Net Profit' : 'Net Loss'} amount={data.net_profit_pkr} prior={cmp?.net_profit_pkr} />
             </StatementTable>
+
+            {data.has_unclassified && (
+              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                Unclassified amounts are included in net profit, shown as their contribution to it.
+                Move these accounts under a standard header (Chart of Accounts) to place them in a
+                named section.
+              </p>
+            )}
           </StatementFrame>
 
           <RatiosStrip

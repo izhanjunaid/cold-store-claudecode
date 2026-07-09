@@ -56,6 +56,11 @@ export class CoaService {
       }
       // Statements roll detail accounts up through their parent; an invalid
       // parent silently drops the account from the P&L / balance sheet (F-6a).
+      // Equity is the one class built by class rather than by header (the
+      // seed's 3010/3020/3030 sit at the root) — everything else needs one.
+      if (body.account_type === 'DETAIL' && body.account_class !== 'EQUITY' && !body.parent_account_code) {
+        throw Errors.INVALID_PARENT_ACCOUNT('Detail accounts must sit under a header account (equity excepted)');
+      }
       if (body.parent_account_code) {
         const parent = await tx.chartOfAccounts.findUnique({
           where: {

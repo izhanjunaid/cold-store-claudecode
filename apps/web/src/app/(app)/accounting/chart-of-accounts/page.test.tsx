@@ -154,6 +154,22 @@ describe('ChartOfAccountsPage — owner management', () => {
     );
   });
 
+  it('requires a parent before a non-equity account can be created', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '6096' } });
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Watchman Chai' } });
+    fireEvent.change(screen.getByLabelText(/class/i), { target: { value: 'EXPENSE' } });
+
+    // No parent chosen yet — non-equity accounts must sit under a header.
+    expect(screen.getByRole('button', { name: /create account/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/parent/i), { target: { value: '6000' } });
+    expect(screen.getByRole('button', { name: /create account/i })).not.toBeDisabled();
+  });
+
   it('offers no rename/deactivate on system accounts', async () => {
     render(<ChartOfAccountsPage />);
     await waitFor(() => expect(screen.getByText(/Cash on Hand/)).toBeTruthy());
