@@ -127,6 +127,13 @@ export const CreateManualJournalEntryRequest = z.object({
 });
 export type CreateManualJournalEntryRequestType = z.infer<typeof CreateManualJournalEntryRequest>;
 
+export const ReverseJournalEntryRequest = z.object({
+  reason: z.string().min(1).max(400),
+  // Defaults to today; must land in an open period either way.
+  entry_date: dateOnly.optional(),
+});
+export type ReverseJournalEntryRequestType = z.infer<typeof ReverseJournalEntryRequest>;
+
 // ============================================================
 // General Ledger
 // ============================================================

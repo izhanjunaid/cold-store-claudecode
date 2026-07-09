@@ -1,15 +1,25 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { CheckCircle2, TriangleAlert } from 'lucide-react';
+import { CheckCircle2, TriangleAlert, Undo2 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { hasMinRole } from '@/lib/rbac';
 import { useConfirm } from '@/components/form/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
@@ -34,8 +44,10 @@ interface JournalEntry {
   entry_type: string;
   book_type: 'PACCI' | 'KATCHI';
   source_table: string;
+  source_id: string;
   description: string;
   posting_status: 'AUTO_DRAFT' | 'POSTED' | 'REVERSED';
+  reversed_by_id: string | null;
   reversed_by_entry_number: string | null;
   total_debit_pkr: number;
   total_credit_pkr: number;
@@ -52,11 +64,15 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger'> = {
 
 export default function JournalEntryDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const { user } = useAuthStore();
   const confirm = useConfirm();
   const [entry, setEntry] = useState<JournalEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
+  const [showReverse, setShowReverse] = useState(false);
+  const [reverseReason, setReverseReason] = useState('');
+  const [reversing, setReversing] = useState(false);
 
   useEffect(() => {
     apiClient<JournalEntry>(`/v1/accounting/journal-entries/${params.id}`).then(setEntry).finally(() => setLoading(false));
@@ -66,10 +82,14 @@ export default function JournalEntryDetailPage() {
   if (!entry) return <p className="text-muted-foreground">Entry not found</p>;
 
   const balanced = Math.abs(entry.total_debit_pkr - entry.total_credit_pkr) < 0.01;
-  // KATCHI drafts are OWNER-only to post; PACCI drafts need MANAGER+.
-  const canPostDraft =
-    entry.posting_status === 'AUTO_DRAFT' &&
-    (entry.book_type === 'KATCHI' ? user?.role === 'OWNER' : hasMinRole(user?.role, 'MANAGER'));
+  // KATCHI writes are OWNER-only; PACCI needs MANAGER+.
+  const canWriteBook =
+    entry.book_type === 'KATCHI' ? user?.role === 'OWNER' : hasMinRole(user?.role, 'MANAGER');
+  const canPostDraft = entry.posting_status === 'AUTO_DRAFT' && canWriteBook;
+  // Only manual entries are reversible here — system entries are corrected
+  // through their source document (credit note, dishonour, write-off).
+  const canReverse =
+    entry.posting_status === 'POSTED' && entry.source_table === 'manual' && canWriteBook;
 
   const postDraft = async () => {
     const period = new Date(`${entry.entry_date}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -94,6 +114,24 @@ export default function JournalEntryDetailPage() {
     }
   };
 
+  const reverseEntry = async () => {
+    if (!reverseReason.trim()) return;
+    setReversing(true);
+    try {
+      const reversal = await apiClient<JournalEntry>(`/v1/accounting/journal-entries/${entry.id}/reverse`, {
+        method: 'POST',
+        body: { reason: reverseReason.trim() },
+      });
+      toast.success(`${entry.entry_number} reversed by ${reversal.entry_number}`);
+      setShowReverse(false);
+      router.push(`/accounting/journal-entries/${reversal.id}`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setReversing(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader title={entry.entry_number} crumb={entry.entry_number} description={entry.description} />
@@ -102,11 +140,18 @@ export default function JournalEntryDetailPage() {
         <CardContent className="pt-6">
           <div className="mb-4 flex items-center justify-between">
             <StatusBadge status={entry.posting_status} tone={STATUS_TONE[entry.posting_status]} />
-            {canPostDraft && (
-              <Button size="sm" onClick={postDraft} disabled={posting}>
-                {posting ? 'Posting…' : 'Post to ledger'}
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {canPostDraft && (
+                <Button size="sm" onClick={postDraft} disabled={posting}>
+                  {posting ? 'Posting…' : 'Post to ledger'}
+                </Button>
+              )}
+              {canReverse && (
+                <Button size="sm" variant="outline" onClick={() => { setReverseReason(''); setShowReverse(true); }}>
+                  <Undo2 className="mr-1.5 h-4 w-4" aria-hidden /> Reverse entry…
+                </Button>
+              )}
+            </div>
           </div>
           {entry.posting_status === 'AUTO_DRAFT' && (
             <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
@@ -121,7 +166,28 @@ export default function JournalEntryDetailPage() {
             <div><dt className="text-muted-foreground">Created</dt><dd className="font-medium">{formatDateTime(entry.created_at)}</dd></div>
             <div><dt className="text-muted-foreground">Created By</dt><dd className="font-medium">{entry.created_by_name}</dd></div>
             {entry.reversed_by_entry_number && (
-              <div><dt className="text-muted-foreground">Reversed By</dt><dd className="font-mono text-xs">{entry.reversed_by_entry_number}</dd></div>
+              <div>
+                <dt className="text-muted-foreground">Reversed By</dt>
+                <dd>
+                  {entry.reversed_by_id ? (
+                    <Button variant="link" className="h-auto p-0 font-mono text-xs" onClick={() => router.push(`/accounting/journal-entries/${entry.reversed_by_id}`)}>
+                      {entry.reversed_by_entry_number}
+                    </Button>
+                  ) : (
+                    <span className="font-mono text-xs">{entry.reversed_by_entry_number}</span>
+                  )}
+                </dd>
+              </div>
+            )}
+            {entry.entry_type === 'REVERSAL' && entry.source_table === 'journal_entries' && (
+              <div>
+                <dt className="text-muted-foreground">Reverses</dt>
+                <dd>
+                  <Button variant="link" className="h-auto p-0 font-mono text-xs" onClick={() => router.push(`/accounting/journal-entries/${entry.source_id}`)}>
+                    View original entry
+                  </Button>
+                </dd>
+              </div>
             )}
           </dl>
         </CardContent>
@@ -171,6 +237,33 @@ export default function JournalEntryDetailPage() {
           </TableFooter>
         </Table>
       </Card>
+
+      <Dialog open={showReverse} onOpenChange={(o) => !o && setShowReverse(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reverse {entry.entry_number}?</DialogTitle>
+            <DialogDescription>
+              This posts a new entry dated today with every debit and credit swapped, and marks{' '}
+              {entry.entry_number} as reversed. Both entries stay on the {entry.book_type} book
+              permanently — nothing is deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Reason (required)</Label>
+            <Input
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+              placeholder="e.g. Amount entered against the wrong account"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReverse(false)}>Cancel</Button>
+            <Button onClick={reverseEntry} disabled={reversing || !reverseReason.trim()}>
+              {reversing ? 'Reversing…' : 'Reverse entry'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

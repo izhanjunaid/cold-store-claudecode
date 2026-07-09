@@ -150,6 +150,52 @@ export class JournalEntryService {
   }
 
   /**
+   * Reverse a posted manual journal entry (audit Gap 2): builds the
+   * mirror-image entry, links both ways, and flips the original to REVERSED.
+   * System-generated entries are rejected — reversing them behind their
+   * source document's back would split the GL from the subledgers; they are
+   * corrected through their own flows (credit note, dishonour, write-off).
+   */
+  async reverse(
+    facilityId: string,
+    userId: string,
+    id: string,
+    reason: string,
+    entryDate?: Date,
+  ): Promise<PostedJournalEntry> {
+    return this.prisma.$transaction(async (tx) => {
+      const entry = await tx.journalEntry.findFirst({
+        where: { id, facilityId },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!entry) throw Errors.VALIDATION_ERROR('Journal entry not found', 'id');
+      if (entry.sourceTable !== 'manual') throw Errors.JOURNAL_ENTRY_NOT_REVERSIBLE();
+      if (entry.postingStatus === 'REVERSED') throw Errors.JOURNAL_ENTRY_ALREADY_REVERSED();
+      if (entry.postingStatus !== 'POSTED') throw Errors.JOURNAL_ENTRY_NOT_POSTED();
+
+      const reversal = await this.postInTransaction(tx, facilityId, userId, {
+        entryType: 'REVERSAL',
+        bookType: entry.bookType,
+        sourceTable: 'journal_entries',
+        sourceId: entry.id,
+        entryDate: entryDate ?? new Date(),
+        description: `Reversal of ${entry.entryNumber} — ${reason}`,
+        lines: entry.lines.map((l) => ({
+          accountCode: l.accountCode,
+          debitAmount: Number(l.creditAmount),
+          creditAmount: Number(l.debitAmount),
+          partyId: l.partyId,
+          lotId: l.lotId,
+          description: l.description,
+        })),
+      });
+
+      await this.markReversed(tx, entry.id, reversal.id);
+      return reversal;
+    });
+  }
+
+  /**
    * Mark an existing journal entry as REVERSED and link it to the reversing entry.
    * Used by the dishonour flow (JE-06 reverses JE-02).
    */

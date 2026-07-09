@@ -46,6 +46,16 @@ export const Errors = {
     new AppError('INVALID_PARENT_ACCOUNT', msg, 422),
   JOURNAL_ENTRY_NOT_DRAFT: () =>
     new AppError('JOURNAL_ENTRY_NOT_DRAFT', 'Only AUTO_DRAFT journal entries can be posted', 409),
+  JOURNAL_ENTRY_NOT_POSTED: () =>
+    new AppError('JOURNAL_ENTRY_NOT_POSTED', 'Only POSTED journal entries can be reversed', 409),
+  JOURNAL_ENTRY_ALREADY_REVERSED: () =>
+    new AppError('JOURNAL_ENTRY_ALREADY_REVERSED', 'Journal entry has already been reversed', 409),
+  JOURNAL_ENTRY_NOT_REVERSIBLE: () =>
+    new AppError(
+      'JOURNAL_ENTRY_NOT_REVERSIBLE',
+      'Only manual journal entries can be reversed here; system entries are corrected through their source document (credit note, dishonour, write-off)',
+      409,
+    ),
   VALIDATION_ERROR: (msg: string, field?: string) =>
     new AppError('VALIDATION_ERROR', msg, 400, field),
   INTERNAL_ERROR: (msg = 'Unexpected server error') =>

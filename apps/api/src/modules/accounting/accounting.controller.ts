@@ -6,6 +6,7 @@ import {
   ChartOfAccountsListQuery,
   JournalEntryListQuery,
   CreateManualJournalEntryRequest,
+  ReverseJournalEntryRequest,
   GeneralLedgerQuery,
   TrialBalanceQuery,
   ProfitLossQuery,
@@ -183,6 +184,29 @@ export async function accountingRoutes(app: FastifyInstance) {
       await journalEntry.postDraft(request.user!.facilityId, id);
       const full = await journalEntry.getById(request.user!.facilityId, id);
       return sendSuccess(reply, full);
+    },
+  });
+
+  // Reverse a posted manual entry (audit Gap 2).
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/journal-entries/:id/reverse',
+    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    schema: { params: IdParam, body: ReverseJournalEntryRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof ReverseJournalEntryRequest>;
+      const existing = await journalEntry.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
+      const reversal = await journalEntry.reverse(
+        request.user!.facilityId,
+        request.user!.userId,
+        id,
+        body.reason,
+        body.entry_date ? new Date(body.entry_date) : undefined,
+      );
+      const full = await journalEntry.getById(request.user!.facilityId, reversal.id);
+      return sendSuccess(reply.status(201), full);
     },
   });
 
