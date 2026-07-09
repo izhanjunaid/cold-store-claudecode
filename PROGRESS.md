@@ -1,13 +1,13 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Accounting audit remediation + all priority-4 owner decisions COMPLETE on `phase/13-production-financials` (2026-07-09). Audit (docs/16) delivered; P1–P3 fixes in `ac24d34`/`01517d2`/`917b7ad`; P4 decisions implemented in `56f4b73`/`14d0614`/`6c065b9`/`19dd1f4`. Suite: 127 unit + 349 integration (api) + 79 unit (web) pass.
-- **Active Task**: None — next candidates: F-2a ops hardening in the installer, Phase 6 (Quality & Spoilage), E2E suite green.
+- **Active Phase**: Accounting audit remediation + all priority-4 owner decisions COMPLETE on `phase/13-production-financials` (2026-07-09). Audit (docs/16) delivered; P1–P3 fixes in `ac24d34`/`01517d2`/`917b7ad`; P4 decisions implemented in `56f4b73`/`14d0614`/`6c065b9`/`19dd1f4`. Post-remediation CoA follow-ups `266f076`/`6573c6a` (2026-07-10). Suite: 127 unit + 351 integration (api) + 90 unit (web) pass.
+- **Active Task**: None — next candidates: F-2a ops hardening in the installer, Phase 6 (Quality & Spoilage), E2E suite green. Deferred decision: whether to keep/soft-disable the KATCHI book (owner to decide later).
 - **Blockers**: None
-- **Last Updated**: 2026-07-09
+- **Last Updated**: 2026-07-10
 - **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision. Ops hardening from audit F-2a: run the app under a non-owner DB role and REVOKE UPDATE/DELETE on audit_log + EXECUTE on financial_guards_set (deployment concern, see docs/16 §F-2).
 
-## Accounting Audit & Hardening (2026-07-06 → 2026-07-09)
+## Accounting Audit & Hardening (2026-07-06 → 2026-07-10)
 
 | Commit | Scope |
 |--------|-------|
@@ -19,6 +19,8 @@
 | `14d0614` | Gap 2: `POST /journal-entries/:id/reverse` (MANAGER+, reason, mirror entry, both-way links; manual + opening-balance entries only) + Reverse button/dialog and cross-links on the JE detail page |
 | `6c065b9` | Gap 1: guided opening balances — one PACCI entry (per-party AR + cash/bank + other BS lines + equity plug to 3010), one-shot with reversal re-arm; party statement + AR aging read paths extended (on-account payments settle opening dues FIFO); migration 0004 (3010 system flag); Opening Balances screen |
 | `19dd1f4` | Gap 4 decided OFF: JE-11/JE-11R accrual templates deleted, decision recorded in docs/09 §JE-11, basis-of-preparation note on monthly P&L |
+| `266f076` | Web: owner-gated CoA management — Add Account dialog (same-class header picker, normal balance auto-default), Rename + Deactivate/Activate row actions; system accounts excluded; read-only for non-owners |
+| `6573c6a` | Statement completeness: P&L + balance sheet render the unclassified sections (drill-through, comparatives, CSV) with basis notes; coa.service requires a header parent for non-equity DETAIL accounts; Add Account dialog requires a header |
 
 ## Phase Completion
 
