@@ -12,6 +12,8 @@ interface StatementFrameProps {
   periodLabel: string;
   /** '', 'PACCI', or 'KATCHI'. */
   bookType?: string;
+  /** Basis-of-preparation footnote printed under the statement body. */
+  note?: string;
   children: React.ReactNode;
   className?: string;
 }
@@ -21,7 +23,7 @@ interface StatementFrameProps {
  * currency, basis, and an unaudited tag. Wrap this in a `.print-area`
  * container on the page so only the statement prints.
  */
-export function StatementFrame({ title, periodLabel, bookType, children, className }: StatementFrameProps) {
+export function StatementFrame({ title, periodLabel, bookType, note, children, className }: StatementFrameProps) {
   const { data: facility } = useFacility();
 
   // An unspecified book means PACCI — the server defaults every report to
@@ -53,6 +55,12 @@ export function StatementFrame({ title, periodLabel, bookType, children, classNa
       </header>
 
       <div className="px-6 py-5">{children}</div>
+
+      {note && (
+        <p className="border-t px-6 py-3 text-[11px] leading-relaxed text-muted-foreground">
+          <span className="font-medium">Basis of preparation:</span> {note}
+        </p>
+      )}
 
       <footer className="flex items-center justify-between border-t px-6 py-2 text-[10px] text-muted-foreground">
         <span>Generated {generated}</span>

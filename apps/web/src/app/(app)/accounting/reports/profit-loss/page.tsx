@@ -132,7 +132,12 @@ export default function ProfitLossPage() {
         <StatementSkeleton />
       ) : !data ? null : (
         <div className="print-area space-y-4">
-          <StatementFrame title="Statement of Profit or Loss" periodLabel={describePeriod(range, 'period')} bookType={bookType}>
+          <StatementFrame
+            title="Statement of Profit or Loss"
+            periodLabel={describePeriod(range, 'period')}
+            bookType={bookType}
+            note="Storage revenue is recognized when invoiced (typically at withdrawal); no month-end accrual is made. During the storage season a month can show low revenue against full running costs — the revenue arrives in the months lots are dispatched."
+          >
             <StatementTable compare={compare} currentLabel={range.label} priorLabel={prior.label}>
               <SectionHeading>Revenue</SectionHeading>
               {data.revenue_groups.map((g) => (

@@ -433,6 +433,16 @@ DEBIT   2080  Damage / Spoilage Liability Payable       settlement_amount
 
 ### JE-11: Accrued Revenue (Month-End, Ongoing Storage)
 
+> **DECISION (2026-07-09, docs/16 Gap 4): NOT IMPLEMENTED — deliberately.**
+> Revenue is recognized on an invoice basis (JE-01 at invoice finalization,
+> typically at withdrawal); no month-end accrual is posted. The JE-11/JE-11R
+> template code was removed. Rationale: for a single owner-run facility, every
+> revenue number tracing 1:1 to an invoice is worth more than monthly P&L
+> smoothness, and an automatic accrue-and-reverse cycle doubles journal volume
+> for users who don't read accrual books. The monthly P&L screen carries a
+> basis-of-preparation note stating this. Revisit if the facility ever needs
+> bank-grade monthly statements during storage season.
+
 **Operational trigger**: Month-end close procedure for lots under `MONTHLY_PER_BAG` or `MONTHLY_PER_KG` rate plans that are still active (not yet dispatched).  
 **Effect**: Revenue is earned by passage of time; it should not wait for outbound to be recognised.
 

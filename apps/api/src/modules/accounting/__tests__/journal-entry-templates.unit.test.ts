@@ -8,8 +8,6 @@ import { buildJE06ChequeDishonoured } from '../templates/je-06-cheque-dishonoure
 import { buildJE07Overpayment } from '../templates/je-07-overpayment';
 import { buildJE08BadDebtWriteOff } from '../templates/je-08-bad-debt-writeoff';
 import { buildJE10OwnershipTransferBilling } from '../templates/je-10-ownership-transfer-billing';
-import { buildJE11AccruedRevenue } from '../templates/je-11-accrued-revenue';
-import { buildJE11RAccrualReversal } from '../templates/je-11r-accrued-reversal';
 import { arAccountForParty, assetAccountForPaymentMethod, revenueAccountForCommodity } from '../templates/types';
 
 function totals(lines: { debitAmount: number; creditAmount: number }[]) {
@@ -271,43 +269,8 @@ describe('JE template balance enforcement', () => {
     expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1110'); // farmer
   });
 
-  it('JE-11 accrual: each lot adds DR AR + CR Revenue', () => {
-    const draft = buildJE11AccruedRevenue({
-      facilityPeriodId: 'period-202601',
-      accrualDate: new Date('2026-01-31'),
-      bookType: 'PACCI',
-      lines: [
-        { lot, billingParty: farmerParty, accruedAmountPkr: 1000 },
-        { lot: { id: 'l4', lotNumber: 'LOT-4', commodityName: 'APPLE' }, billingParty: traderParty, accruedAmountPkr: 2000 },
-      ],
-    });
-    const t = totals(draft.lines);
-    expect(t.d).toBeCloseTo(3000);
-    expect(t.c).toBeCloseTo(3000);
-    expect(draft.lines.length).toBe(4);
-  });
-
-  it('JE-11R reverses the original lines exactly', () => {
-    const original = {
-      id: 'je-orig',
-      entryNumber: 'JE-202601-0099',
-      lines: [
-        { accountCode: '1110', debitAmount: 1000, creditAmount: 0, partyId: 'p1', lotId: 'l1', description: 'accrual line' },
-        { accountCode: '4010', debitAmount: 0, creditAmount: 1000, partyId: 'p1', lotId: 'l1', description: 'rev line' },
-      ],
-    };
-    const reversal = buildJE11RAccrualReversal({
-      originalEntry: original,
-      reversalDate: new Date(),
-      bookType: 'PACCI',
-    });
-    const t = totals(reversal.lines);
-    expect(t.d).toBeCloseTo(t.c);
-    expect(reversal.entryType).toBe('REVERSAL');
-    expect(reversal.lines[0]!.debitAmount).toBe(0);
-    expect(reversal.lines[0]!.creditAmount).toBe(1000);
-    expect(reversal.lines[1]!.debitAmount).toBe(1000);
-  });
+  // JE-11 / JE-11R (month-end revenue accrual) were removed deliberately:
+  // revenue is invoice-basis by decision (docs/09 §JE-11, docs/16 Gap 4).
 });
 
 describe('Account-mapping helpers', () => {
