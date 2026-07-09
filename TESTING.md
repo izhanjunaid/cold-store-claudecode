@@ -63,8 +63,11 @@
 | 11.6 | — | — | 6+1 fixme | 7 | E2E suite scaffolded; 6 specs run, WF-05 fixme (Phase 6 deferred) |
 | 11.10 | 4 | 12 | — | 16 | ALL PASS (gate-pass verification: qty/commodity, depositor, owner-auth) |
 | 11.11 | 7 | 5 | — | 12 | ALL PASS (marka: parchi/dispatch/gate-pass PDFs, lot store/filter/PATCH, child-lot inheritance) |
+| 12 | 11 | 31 | 2 | 44 | ALL PASS (facility settings enforcement, invoice discount, GST prefill, surcharge JE-21) |
+| Audit P1–P3 | 2 | 44 | — | 46 | ALL PASS (financial guard triggers 19, hardening 25, period derivation 2 unit; −2 mapping tests rewritten) |
+| Audit P4 | −2 | 25 | — | 25 | ALL PASS (watermark 6, reversal 8, opening balances 11; JE-11 unit tests removed with dead templates) |
 
-> Live suite after 11.11: **124 unit + 252 integration green**.
+> Live suite after audit P4 (2026-07-09): **127 unit + 349 integration (api) + 79 unit (web) green**.
 
 ### Phase 10 Tests
 

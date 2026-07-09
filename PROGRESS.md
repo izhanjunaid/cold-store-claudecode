@@ -1,13 +1,13 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Accounting audit remediation COMPLETE on `phase/13-production-financials` (2026-07-07). Post-implementation accounting audit (docs/16) delivered; priority-1/2/3 fixes shipped in commits `ac24d34`, `01517d2`, `917b7ad`. Suite: 129 unit + 324 integration (api) + 79 unit (web) pass.
-- **Active Task**: Owner decisions pending from the audit appendix — closed-through watermark model (F-4), generic JE reversal endpoint (Gap 2), opening-balance flow (Gap 1), month-end revenue accrual on/off (Gap 4).
+- **Active Phase**: Accounting audit remediation + all priority-4 owner decisions COMPLETE on `phase/13-production-financials` (2026-07-09). Audit (docs/16) delivered; P1–P3 fixes in `ac24d34`/`01517d2`/`917b7ad`; P4 decisions implemented in `56f4b73`/`14d0614`/`6c065b9`/`19dd1f4`. Suite: 127 unit + 349 integration (api) + 79 unit (web) pass.
+- **Active Task**: None — next candidates: F-2a ops hardening in the installer, Phase 6 (Quality & Spoilage), E2E suite green.
 - **Blockers**: None
-- **Last Updated**: 2026-07-07
+- **Last Updated**: 2026-07-09
 - **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision. Ops hardening from audit F-2a: run the app under a non-owner DB role and REVOKE UPDATE/DELETE on audit_log + EXECUTE on financial_guards_set (deployment concern, see docs/16 §F-2).
 
-## Accounting Audit & Hardening (2026-07-06 → 2026-07-07)
+## Accounting Audit & Hardening (2026-07-06 → 2026-07-09)
 
 | Commit | Scope |
 |--------|-------|
@@ -15,6 +15,10 @@
 | `ac24d34` | Migration 0002: audit triggers on all financial tables, DELETE audit action, append-only audit_log, JE immutability + deferred balance triggers, line CHECKs, CoA structure lock, `financial_guards_set()` test toggle |
 | `01517d2` | Backend: working audit attribution (request-context + $transaction GUCs), credit-note bound, CoA parent validation, statement unclassified sections, draft promotion endpoint, centralised KATCHI gates (write OWNER / read MANAGER+, PACCI default), 55 system-flagged accounts + loud mapping failures, dishonour soft-void (migration 0003), UTC period derivation |
 | `917b7ad` | Web: Period Locks screen, honest JE draft/post affordances + promote button, consequence-stating confirms, PACCI-default book selectors |
+| `56f4b73` | F-4 watermark: max actively-locked period closes every earlier month; OWNER unlock materializes explicit reopen exceptions; "books closed through" banner + implied-closed months on the Period Locks screen |
+| `14d0614` | Gap 2: `POST /journal-entries/:id/reverse` (MANAGER+, reason, mirror entry, both-way links; manual + opening-balance entries only) + Reverse button/dialog and cross-links on the JE detail page |
+| `6c065b9` | Gap 1: guided opening balances — one PACCI entry (per-party AR + cash/bank + other BS lines + equity plug to 3010), one-shot with reversal re-arm; party statement + AR aging read paths extended (on-account payments settle opening dues FIFO); migration 0004 (3010 system flag); Opening Balances screen |
+| `19dd1f4` | Gap 4 decided OFF: JE-11/JE-11R accrual templates deleted, decision recorded in docs/09 §JE-11, basis-of-preparation note on monthly P&L |
 
 ## Phase Completion
 

@@ -15,10 +15,19 @@
 > audit_log, JE immutability + balance constraints, CoA structure lock),
 > `01517d2` (backend — F-2b, F-5, F-6, F-7, F-9, F-10, F-11, F-13), and
 > `917b7ad` (web — UX-1..5, including the Period Locks screen). Line numbers
-> cited below refer to commit `851d90e` and may have shifted. Still open:
-> the priority-4 owner decisions (closed-through watermark, generic reversal
-> endpoint, opening-balance flow, month-end accrual) and the F-2a ops step
-> (non-owner runtime DB role with REVOKEs).
+> cited below refer to commit `851d90e` and may have shifted.
+>
+> **Priority-4 decisions resolved (2026-07-09):** `56f4b73` — closed-through
+> watermark for period locks (F-4: max actively-locked period closes all
+> earlier months; explicit OWNER unlock exceptions). `14d0614` — generic
+> reversal endpoint + UI (Gap 2/UX-6: manual + opening-balance entries only;
+> system entries keep their own correction flows). `6c065b9` — guided
+> opening-balance flow (Gap 1: per-party AR + cash/bank + equity plug to 3010,
+> one-shot, visible in party statements and AR aging, on-account payments
+> settle it FIFO; migration 0004). `19dd1f4` — month-end revenue accrual
+> decided OFF (Gap 4: JE-11/JE-11R deleted, decision recorded in docs/09,
+> basis-of-preparation note on the monthly P&L). Still open: only the F-2a
+> ops step (non-owner runtime DB role with REVOKEs) — a deployment concern.
 
 ---
 
