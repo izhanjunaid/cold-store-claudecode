@@ -107,11 +107,21 @@ When your provider releases a new version, they will either send you a new insta
 example:
 
 ```
-install.bat -Tag v0.1.1
+install.bat -Tag v0.2.0
 ```
 
 (Double‑clicking always uses the version it shipped with; the line above is only needed to jump to a
 newer one. Your data and settings are kept.)
+
+Boxes with Git Bash/WSL can instead run `./scripts/update.sh v0.2.0` — it takes a database backup
+first, health‑checks the new version, and automatically rolls back to the previous one if anything
+fails. Either way, the first start after an update can take a minute longer than usual — that's the
+database upgrading itself; don't close Docker while it runs.
+
+**What's new in v0.2.0** (for the person who keeps the books): month close ("books closed through"),
+guided opening balances for go‑live, one‑click journal‑entry reversal, owner‑managed chart of
+accounts, a tamper‑evident audit trail on every financial record, and complete financial statements
+(nothing can silently drop off the P&L or balance sheet anymore).
 
 ---
 

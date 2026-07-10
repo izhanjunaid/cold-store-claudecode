@@ -46,6 +46,17 @@ api_healthy() {
 }
 
 log "updating to '$NEW_TAG' (previous: '$PREV_TAG')"
+
+# Safety net: dump the DB before anything changes. Migrations are transactional,
+# but a pre-update backup makes "restore to before the update" a one-liner
+# (scripts/restore.sh) instead of an incident.
+if bash scripts/backup.sh; then
+  log "pre-update backup written."
+else
+  log "WARNING: pre-update backup failed (stack down or disk full?). Continuing — migrations are transactional, but consider aborting (Ctrl+C within 10s) if this box has irreplaceable data."
+  sleep 10
+fi
+
 set_tag "$NEW_TAG"
 
 if ! compose pull; then
