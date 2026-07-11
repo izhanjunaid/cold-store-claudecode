@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rack Labels — {{roomName}}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      color: #111;
+      background: #fff;
+    }
+
+    /* 4 large labels per A4 page (2 × 2), cut along the borders. */
+    .sheet {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .label {
+      border: 1px dashed #999;
+      height: 128mm;
+      padding: 8mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      text-align: center;
+      page-break-inside: avoid;
+    }
+
+    .label .facility {
+      font-size: 12px;
+      font-weight: 600;
+      color: #555;
+      letter-spacing: 0.5px;
+    }
+
+    .label .room {
+      font-size: 26px;
+      font-weight: 700;
+      color: #1a5276;
+      margin-top: 4mm;
+    }
+
+    .label .rack {
+      font-size: 64px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: #111;
+    }
+
+    .label .capacity {
+      font-size: 14px;
+      color: #555;
+    }
+    .label .capacity strong {
+      font-size: 20px;
+      color: #111;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="sheet">
+    {{#each racks}}
+    <div class="label">
+      <div>
+        <div class="facility">{{../facilityName}}</div>
+        <div class="room">{{../roomName}}</div>
+      </div>
+      <div class="rack">{{name}}</div>
+      <div class="capacity">Capacity / گنجائش<br/><strong>{{maxCapacityBags}}</strong> bags</div>
+    </div>
+    {{/each}}
+  </div>
+
+</body>
+</html>

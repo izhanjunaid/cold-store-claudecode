@@ -1,6 +1,7 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { OwnershipTransferRepository, LOT_INCLUDE_SHAPE_TRANSFER } from './ownership-transfer.repository';
+import { mirrorTransferPlacements } from '../lot/placement.service';
 import { renderTransferAcknowledgment } from '../pdf/pdf.service';
 import type { TransferAcknowledgmentData } from '../pdf/pdf.service';
 
@@ -170,6 +171,15 @@ export class OwnershipTransferService {
           notes: `Created from partial transfer of ${parentLot.lotNumber}`,
           createdBy: input.operatorId,
         },
+      });
+
+      // The bags never move on an ownership split: re-attribute the parent's
+      // rack placements (largest-first) onto the child on the same racks.
+      await mirrorTransferPlacements(tx, {
+        facilityId: parentLot.facilityId,
+        parentLotId: parent.id,
+        childLotId: childLot.id,
+        parentNewBalanceBags: updatedParent.currentBalanceBags,
       });
 
       // TRANSFER_OUT on parent

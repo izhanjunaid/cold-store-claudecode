@@ -72,6 +72,8 @@ export const GatePassResponse = z.object({
   related_commodity_name: z.string().nullable().optional(),
   related_unit_label: z.string().nullable().optional(),
   related_marka: z.string().nullable().optional(),
+  // Human-readable "Room → R-1 ×300, R-2 ×200" for the linked lot's stock.
+  related_location: z.string().nullable().optional(),
   party_id: z.string().uuid().nullable().optional(),
   party_name: z.string().nullable().optional(),
   owner_party_name: z.string().nullable().optional(),

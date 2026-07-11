@@ -1,5 +1,14 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 
+// Room + rack placements of the linked lot, so security can verify the
+// physical marka against where the system says the stock sits.
+const lotLocationSelect = {
+  chamber: { select: { name: true } },
+  rackPlacements: {
+    select: { bags: true, rack: { select: { name: true } } },
+  },
+} as const;
+
 const gatePassInclude = {
   relatedLot: {
     select: {
@@ -7,6 +16,7 @@ const gatePassInclude = {
       lotNumber: true,
       marka: true,
       commodity: { select: { name: true, unitLabel: true } },
+      ...lotLocationSelect,
     },
   },
   relatedOutbound: {
@@ -15,7 +25,13 @@ const gatePassInclude = {
       dispatchNoteNumber: true,
       quantityWithdrawnBags: true,
       invoice: { select: { id: true, totalPkr: true, amountPaidPkr: true, status: true } },
-      lot: { select: { marka: true, commodity: { select: { name: true, unitLabel: true } } } },
+      lot: {
+        select: {
+          marka: true,
+          commodity: { select: { name: true, unitLabel: true } },
+          ...lotLocationSelect,
+        },
+      },
       ownerPartySnapshot: { select: { name: true } },
     },
   },
@@ -23,8 +39,14 @@ const gatePassInclude = {
 } satisfies Prisma.GatePassInclude;
 
 const gatePassListInclude = {
-  relatedLot: { select: { lotNumber: true } },
-  relatedOutbound: { select: { dispatchNoteNumber: true, quantityWithdrawnBags: true } },
+  relatedLot: { select: { lotNumber: true, ...lotLocationSelect } },
+  relatedOutbound: {
+    select: {
+      dispatchNoteNumber: true,
+      quantityWithdrawnBags: true,
+      lot: { select: lotLocationSelect },
+    },
+  },
   party: { select: { id: true, name: true } },
 } satisfies Prisma.GatePassInclude;
 

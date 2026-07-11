@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Placement Slip — {{lotNumber}}</title>
+  <style>
+    /* Urdu font is bundled in the container and mapped via fontconfig (offline; no web fonts). */
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 11px;
+      color: #111;
+      background: #fff;
+      padding: 6mm;
+    }
+
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #1a5276;
+      padding-bottom: 4mm;
+      margin-bottom: 4mm;
+    }
+    .header h1 {
+      font-size: 16px;
+      color: #1a5276;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .header .subtitle {
+      font-size: 10px;
+      color: #555;
+      margin-top: 1mm;
+    }
+    .header .lot-number {
+      font-size: 14px;
+      font-weight: 700;
+      color: #c0392b;
+      margin-top: 2mm;
+      letter-spacing: 1px;
+    }
+
+    .marka-banner {
+      text-align: center;
+      background: #f4f6f7;
+      border: 2px solid #1a5276;
+      border-radius: 3px;
+      padding: 3mm;
+      margin-bottom: 4mm;
+    }
+    .marka-banner .caption {
+      font-size: 9px;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .marka-banner .marka {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: #111;
+    }
+
+    .section-title {
+      font-size: 9px;
+      font-weight: 700;
+      color: #1a5276;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2mm;
+      border-bottom: 1px solid #d5d8dc;
+      padding-bottom: 1mm;
+    }
+
+    table.fields {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 4mm;
+    }
+    table.fields td {
+      padding: 1.5mm 0;
+      vertical-align: top;
+    }
+    table.fields td.label {
+      font-weight: 600;
+      color: #444;
+      width: 40%;
+      padding-right: 2mm;
+    }
+
+    table.racks {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 4mm;
+    }
+    table.racks th {
+      text-align: left;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #1a5276;
+      border-bottom: 1px solid #1a5276;
+      padding: 1.5mm 2mm;
+    }
+    table.racks td {
+      padding: 2mm;
+      border-bottom: 1px solid #e5e8ea;
+    }
+    table.racks td.rack-name {
+      font-weight: 700;
+      font-size: 13px;
+    }
+    table.racks td.bags {
+      text-align: right;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    table.racks tr.unplaced td {
+      color: #92400e;
+      background: #fef9c3;
+      font-weight: 700;
+    }
+    table.racks tr.total td {
+      border-top: 2px solid #1a5276;
+      border-bottom: none;
+      font-weight: 700;
+    }
+
+    .footer {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8mm;
+      margin-top: 6mm;
+      padding-top: 4mm;
+      border-top: 1px solid #aaa;
+    }
+    .signature-box {
+      border: 1px solid #999;
+      height: 18mm;
+      padding: 2mm;
+      font-size: 9px;
+      color: #555;
+    }
+
+    .barcode-area {
+      text-align: center;
+      margin-top: 3mm;
+      font-size: 9px;
+      color: #888;
+      font-family: monospace;
+      letter-spacing: 2px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <h1>{{facilityName}}</h1>
+    <div class="subtitle">Cold Storage — {{facilityCity}} | Placement Slip (جگہ کی پرچی)</div>
+    <div class="lot-number">{{lotNumber}}</div>
+  </div>
+
+  {{#if marka}}
+  <div class="marka-banner">
+    <div class="caption">Marka / مارکہ</div>
+    <div class="marka">{{marka}}</div>
+  </div>
+  {{/if}}
+
+  <div class="section-title">Lot</div>
+  <table class="fields">
+    <tr>
+      <td class="label">Owner</td>
+      <td>{{ownerName}}</td>
+    </tr>
+    <tr>
+      <td class="label">Commodity</td>
+      <td>{{commodityName}}{{#if varietyName}} / {{varietyName}}{{/if}}</td>
+    </tr>
+    <tr>
+      <td class="label">Room / کمرہ</td>
+      <td style="font-weight:700">{{roomName}}</td>
+    </tr>
+  </table>
+
+  <div class="section-title">Rack Placement / ریک کی جگہ</div>
+  <table class="racks">
+    <tr>
+      <th>Rack / ریک</th>
+      <th style="text-align:right">Bags / بوری</th>
+    </tr>
+    {{#each placements}}
+    <tr>
+      <td class="rack-name">{{rackName}}</td>
+      <td class="bags">{{bags}}</td>
+    </tr>
+    {{/each}}
+    {{#if unplacedBags}}
+    <tr class="unplaced">
+      <td>Unplaced / بغیر جگہ</td>
+      <td style="text-align:right">{{unplacedBags}}</td>
+    </tr>
+    {{/if}}
+    <tr class="total">
+      <td>Total / کل</td>
+      <td style="text-align:right">{{totalBags}}</td>
+    </tr>
+  </table>
+
+  <!-- FOOTER: SIGNATURES -->
+  <div class="footer">
+    <div class="signature-box">
+      Operator Signature<br/>
+      <strong>{{operatorName}}</strong>
+    </div>
+    <div class="signature-box" style="direction:rtl; font-family:'Noto Nastaliq Urdu',serif">
+      اسٹیکر کے دستخط
+    </div>
+  </div>
+
+  <div class="barcode-area">
+    {{lotNumber}} | Generated: {{generatedAt}}
+  </div>
+
+</body>
+</html>

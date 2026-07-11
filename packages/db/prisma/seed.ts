@@ -178,6 +178,34 @@ async function main() {
     console.log(`  Chamber: ${ch.name} (max ${ch.maxCapacityBags} bags)`);
   }
 
+  // Racks — sub-locations within each chamber ("Room" in the UI).
+  // Rack capacities sum to the room capacity for the seed layout.
+  const rackLayout = [
+    { chamberId: chambers[0]!.id, count: 5, capacity: 2000, idBase: 310 },
+    { chamberId: chambers[1]!.id, count: 4, capacity: 2000, idBase: 320 },
+    { chamberId: chambers[2]!.id, count: 4, capacity: 1250, idBase: 330 },
+    { chamberId: chambers[3]!.id, count: 3, capacity: 1000, idBase: 340 },
+  ];
+
+  for (const layout of rackLayout) {
+    for (let i = 0; i < layout.count; i++) {
+      const rackId = `00000000-0000-0000-0000-000000000${layout.idBase + i}`;
+      await prisma.rack.upsert({
+        where: { id: rackId },
+        update: {},
+        create: {
+          id: rackId,
+          facilityId: facility.id,
+          chamberId: layout.chamberId,
+          name: `R-${i + 1}`,
+          maxCapacityBags: layout.capacity,
+          position: i,
+        },
+      });
+    }
+    console.log(`  Racks: ${layout.count} x ${layout.capacity} bags for chamber ${layout.chamberId.slice(-3)}`);
+  }
+
   // Parties — create Arhti first so farmers can reference it
   const arhtiId = '00000000-0000-0000-0000-000000000401';
   await prisma.party.upsert({

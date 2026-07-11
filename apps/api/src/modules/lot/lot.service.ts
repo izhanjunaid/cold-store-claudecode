@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { LotRepository, LOT_INCLUDE_SHAPE } from './lot.repository';
+import { applyPlacements, type PlacementInput } from './placement.service';
 import { Errors } from '../../common/errors';
 import { roleAtLeast } from '../../plugins/auth';
 import { resolveFacilitySettings } from '../facility/facility.service';
@@ -122,6 +123,7 @@ export interface CreateLotInput {
   marka?: string;
   notes?: string;
   bookType?: 'PACCI' | 'KATCHI';
+  placements?: PlacementInput[];
 }
 
 export class LotService {
@@ -339,6 +341,18 @@ export class LotService {
               operatorId: input.createdBy,
             },
           });
+
+          if (input.placements && input.placements.length > 0) {
+            const placementWarnings = await applyPlacements(tx, {
+              facilityId: input.facilityId,
+              lotId: created.id,
+              chamberId: input.chamberId,
+              currentBalanceBags: input.quantityBags,
+              placements: input.placements,
+              movedBy: input.createdBy,
+            });
+            warnings.push(...placementWarnings);
+          }
 
           return created;
         });

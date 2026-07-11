@@ -94,6 +94,22 @@ beforeAll(async () => {
     },
   });
 
+  // Racks for placement/movement tests: two in Chamber A, one in Chamber B
+  // (cross-room placement must be rejected), one inactive in Chamber A.
+  const testRacks = [
+    { id: '00000000-0000-0000-0000-000000000210', chamberId: '00000000-0000-0000-0000-000000000200', name: 'R-1', maxCapacityBags: 400, position: 0, isActive: true },
+    { id: '00000000-0000-0000-0000-000000000211', chamberId: '00000000-0000-0000-0000-000000000200', name: 'R-2', maxCapacityBags: 400, position: 1, isActive: true },
+    { id: '00000000-0000-0000-0000-000000000212', chamberId: '00000000-0000-0000-0000-000000000201', name: 'R-1', maxCapacityBags: 250, position: 0, isActive: true },
+    { id: '00000000-0000-0000-0000-000000000213', chamberId: '00000000-0000-0000-0000-000000000200', name: 'R-X (inactive)', maxCapacityBags: 400, position: 2, isActive: false },
+  ];
+  for (const r of testRacks) {
+    await prisma.rack.upsert({
+      where: { id: r.id },
+      update: { isActive: r.isActive },
+      create: { ...r, facilityId: TEST_FACILITY_ID },
+    });
+  }
+
   // Accounting-suite fixtures — referenced by fixed id from
   // accounting.integration.test.ts; a freshly provisioned database has
   // neither, so seed them here rather than relying on leftover rows.

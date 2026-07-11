@@ -80,7 +80,13 @@ export async function outboundRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof FinalizeOutboundRequest>;
-      const result = await service.finalize(request.user!.facilityId, id, body.notes);
+      const result = await service.finalize(
+        request.user!.facilityId,
+        id,
+        body.notes,
+        body.picked_from?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
+        request.user!.userId,
+      );
       return sendSuccess(reply, result);
     },
   });

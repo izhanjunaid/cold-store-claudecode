@@ -1,4 +1,5 @@
 import { ChamberRepository } from './chamber.repository';
+import { renderRackLabels } from '../pdf/pdf.service';
 import { Errors } from '../../common/errors';
 interface ChamberRecord {
   id: string;
@@ -50,6 +51,29 @@ function toChamberResponse(
   };
 }
 
+interface RackRecord {
+  id: string;
+  chamberId: string;
+  name: string;
+  maxCapacityBags: number;
+  position: number;
+  isActive: boolean;
+  notes: string | null;
+}
+
+function toRackResponse(rack: RackRecord, occupancyBags: number = 0) {
+  return {
+    id: rack.id,
+    chamber_id: rack.chamberId,
+    name: rack.name,
+    max_capacity_bags: rack.maxCapacityBags,
+    current_occupancy_bags: occupancyBags,
+    position: rack.position,
+    is_active: rack.isActive,
+    notes: rack.notes ?? null,
+  };
+}
+
 function toTempLogResponse(log: TempLogRecord) {
   return {
     id: log.id,
@@ -67,17 +91,20 @@ export class ChamberService {
 
   async list(facilityId: string, isActive?: boolean) {
     const chambers = await this.repo.findMany(facilityId, isActive);
-    const occupancy = await this.repo.getOccupancyByChamberIds(
-      chambers.map((c) => c.id),
-    );
+    const chamberIds = chambers.map((c) => c.id);
+    const occupancy = await this.repo.getOccupancyByChamberIds(chamberIds);
+    const rackCounts = await this.repo.countRacksByChamberIds(chamberIds);
     const results = [];
     for (const chamber of chambers) {
       const lastTemp = await this.repo.getLastTemperature(chamber.id);
-      results.push(toChamberResponse(
-        chamber as ChamberRecord,
-        lastTemp as TempLogRecord | null,
-        occupancy.get(chamber.id) ?? 0,
-      ));
+      results.push({
+        ...toChamberResponse(
+          chamber as ChamberRecord,
+          lastTemp as TempLogRecord | null,
+          occupancy.get(chamber.id) ?? 0,
+        ),
+        rack_count: rackCounts.get(chamber.id) ?? 0,
+      });
     }
     return results;
   }
@@ -88,14 +115,121 @@ export class ChamberService {
     const lastTemp = await this.repo.getLastTemperature(id);
     const temperatureLogs = await this.repo.getTemperatureLogs(id);
     const occupancy = await this.repo.getOccupancyByChamberIds([id]);
+    const racks = (await this.repo.findRacksByChamber(id)) as RackRecord[];
+    const rackOccupancy = await this.repo.getRackOccupancy(racks.map((r) => r.id));
+    const placedTotal = await this.repo.getPlacedTotalByChamber(id);
+    const chamberOccupancy = occupancy.get(id) ?? 0;
     return {
       ...toChamberResponse(
         chamber as ChamberRecord,
         lastTemp as TempLogRecord | null,
-        occupancy.get(id) ?? 0,
+        chamberOccupancy,
       ),
+      rack_count: racks.length,
+      racks: racks.map((r) => toRackResponse(r, rackOccupancy.get(r.id) ?? 0)),
+      unplaced_bags: Math.max(0, chamberOccupancy - placedTotal),
       temperature_logs: (temperatureLogs as TempLogRecord[]).map(toTempLogResponse),
     };
+  }
+
+  // ── Racks ─────────────────────────────────────────────────────
+
+  async createRack(facilityId: string, chamberId: string, input: {
+    name: string;
+    maxCapacityBags: number;
+    position?: number;
+    notes?: string;
+  }) {
+    const chamber = await this.repo.findById(facilityId, chamberId);
+    if (!chamber) throw Errors.VALIDATION_ERROR('Chamber not found');
+    try {
+      const rack = await this.repo.createRack({
+        facilityId,
+        chamberId,
+        name: input.name,
+        maxCapacityBags: input.maxCapacityBags,
+        position: input.position ?? 0,
+        notes: input.notes,
+      });
+      return toRackResponse(rack as RackRecord);
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'P2002') {
+        throw Errors.VALIDATION_ERROR('A rack with this name already exists in this room', 'name');
+      }
+      throw err;
+    }
+  }
+
+  async updateRack(facilityId: string, rackId: string, input: {
+    name?: string;
+    maxCapacityBags?: number;
+    position?: number;
+    notes?: string;
+    isActive?: boolean;
+  }) {
+    const rack = await this.repo.findRackById(facilityId, rackId);
+    if (!rack) throw Errors.VALIDATION_ERROR('Rack not found');
+
+    if (input.isActive === false) {
+      const placements = await this.repo.countActivePlacements(rackId);
+      if (placements > 0) {
+        throw Errors.VALIDATION_ERROR(
+          'Rack holds placed stock and cannot be deactivated. Move the lots first.',
+          'is_active',
+        );
+      }
+    }
+
+    try {
+      const updated = await this.repo.updateRack(rackId, {
+        ...(input.name !== undefined && { name: input.name }),
+        ...(input.maxCapacityBags !== undefined && { maxCapacityBags: input.maxCapacityBags }),
+        ...(input.position !== undefined && { position: input.position }),
+        ...(input.notes !== undefined && { notes: input.notes }),
+        ...(input.isActive !== undefined && { isActive: input.isActive }),
+      });
+      const occupancy = await this.repo.getRackOccupancy([rackId]);
+      return toRackResponse(updated as RackRecord, occupancy.get(rackId) ?? 0);
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'P2002') {
+        throw Errors.VALIDATION_ERROR('A rack with this name already exists in this room', 'name');
+      }
+      throw err;
+    }
+  }
+
+  async getRackLabelsPdf(
+    facilityId: string,
+    chamberId: string,
+  ): Promise<{ filename: string; pdf: Buffer }> {
+    const chamber = await this.repo.findById(facilityId, chamberId);
+    if (!chamber) throw Errors.VALIDATION_ERROR('Chamber not found');
+    const racks = (await this.repo.findRacksByChamber(chamberId)) as RackRecord[];
+    const activeRacks = racks.filter((r) => r.isActive);
+    if (activeRacks.length === 0) {
+      throw Errors.VALIDATION_ERROR('This room has no active racks to print labels for');
+    }
+    const facilityName = await this.repo.getFacilityName(facilityId);
+    const pdf = await renderRackLabels({
+      facilityName: facilityName ?? 'ColdChain',
+      roomName: chamber.name,
+      racks: activeRacks.map((r) => ({ name: r.name, maxCapacityBags: r.maxCapacityBags })),
+    });
+    return { filename: `${chamber.name.replace(/\s+/g, '-')}-rack-labels.pdf`, pdf };
+  }
+
+  async getRackLots(facilityId: string, rackId: string) {
+    const rack = await this.repo.findRackById(facilityId, rackId);
+    if (!rack) throw Errors.VALIDATION_ERROR('Rack not found');
+    const placements = await this.repo.getRackLots(rackId);
+    return placements.map((p) => ({
+      lot_id: p.lot.id,
+      lot_number: p.lot.lotNumber,
+      owner_party_name: p.lot.ownerParty?.name ?? null,
+      commodity_name: p.lot.commodity?.name ?? null,
+      marka: p.lot.marka ?? null,
+      bags: p.bags,
+    }));
   }
 
   async create(facilityId: string, input: {

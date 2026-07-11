@@ -20,6 +20,12 @@ export type UpdateOutboundWeightRequest = z.infer<typeof UpdateOutboundWeightReq
 
 export const FinalizeOutboundRequest = z.object({
   notes: z.string().optional(),
+  // Which racks the withdrawn bags were physically picked from. Optional:
+  // any shortfall is auto-trimmed from the lot's largest placements. Applied
+  // here (not at create) so cancelled withdrawals never touch placements.
+  picked_from: z
+    .array(z.object({ rack_id: z.string().uuid(), bags: z.number().int().positive() }))
+    .optional(),
 });
 export type FinalizeOutboundRequest = z.infer<typeof FinalizeOutboundRequest>;
 

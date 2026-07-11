@@ -4,6 +4,7 @@ import { OutboundRepository, type OutboundWithRelations } from './outbound.repos
 import { generateDispatchNoteNumber } from './dispatch-note-number';
 import { renderDispatchNote } from '../pdf/pdf.service';
 import { buildInvoiceFromOutbound } from '../invoice/invoice.builder';
+import { reconcileWithdrawal, type PlacementInput } from '../lot/placement.service';
 import { roleAtLeast } from '../../plugins/auth';
 import { resolveFacilitySettings } from '../facility/facility.service';
 
@@ -199,7 +200,13 @@ export class OutboundService {
     });
   }
 
-  async finalize(facilityId: string, id: string, notes?: string) {
+  async finalize(
+    facilityId: string,
+    id: string,
+    notes?: string,
+    pickedFrom?: PlacementInput[],
+    finalizedBy?: string,
+  ) {
     return this.prisma.$transaction(async (tx) => {
       const ob = await tx.outboundEvent.findFirst({
         where: { id, facilityId },
@@ -227,6 +234,18 @@ export class OutboundService {
             ? { status: 'CLOSED', closedAt: ob.outboundDate }
             : {}),
         },
+      });
+
+      // Keep rack placements consistent with the reduced balance: explicit
+      // picks trim their racks; any remainder auto-trims largest-first.
+      await reconcileWithdrawal(tx, {
+        facilityId,
+        lotId: ob.lotId,
+        chamberId: ob.lot.chamberId,
+        newBalance,
+        withdrawnBags: ob.quantityWithdrawnBags,
+        pickedFrom,
+        movedBy: finalizedBy ?? ob.createdBy,
       });
 
       const updated = await this.repo.update(tx, id, {

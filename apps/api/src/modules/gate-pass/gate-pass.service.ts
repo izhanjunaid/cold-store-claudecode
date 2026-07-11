@@ -340,12 +340,25 @@ export class GatePassService {
   }
 }
 
+function formatLotLocation(
+  lot:
+    | { chamber?: { name: string } | null; rackPlacements?: { bags: number; rack: { name: string } }[] }
+    | null
+    | undefined,
+): string | null {
+  if (!lot?.chamber) return null;
+  const parts = (lot.rackPlacements ?? []).map((p) => `${p.rack.name} ×${p.bags}`);
+  return parts.length > 0 ? `${lot.chamber.name} → ${parts.join(', ')}` : lot.chamber.name;
+}
+
 function formatGatePass(row: any): GatePassResponseType {
   const created: Date = row.createdAt;
   const cleared: Date | null = row.clearedAt ?? null;
   const turnaround = cleared ? Math.round((cleared.getTime() - created.getTime()) / 1000) : null;
   const commodity = row.relatedLot?.commodity ?? row.relatedOutbound?.lot?.commodity ?? null;
   const marka = row.relatedLot?.marka ?? row.relatedOutbound?.lot?.marka ?? null;
+  const location =
+    formatLotLocation(row.relatedLot) ?? formatLotLocation(row.relatedOutbound?.lot);
   return {
     id: row.id,
     pass_number: row.passNumber,
@@ -362,6 +375,7 @@ function formatGatePass(row: any): GatePassResponseType {
     related_commodity_name: commodity?.name ?? null,
     related_unit_label: commodity?.unitLabel ?? null,
     related_marka: marka,
+    related_location: location,
     declared_quantity: row.declaredQuantity ?? null,
     authorized_quantity: row.relatedOutbound?.quantityWithdrawnBags ?? null,
     quantity_mismatch_flag: row.quantityMismatchFlag ?? false,

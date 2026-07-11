@@ -1,7 +1,14 @@
 import type { FastifyInstance } from 'fastify';
-import { CreateLotRequest, UpdateLotRequest, LotListQuery } from '@coldchain/shared';
+import {
+  CreateLotRequest,
+  UpdateLotRequest,
+  LotListQuery,
+  SetLotPlacementsRequest,
+  MoveLotRequest,
+} from '@coldchain/shared';
 import { LotService } from './lot.service';
 import { LotRepository } from './lot.repository';
+import { PlacementService } from './placement.service';
 import { OutboundService } from '../outbound/outbound.service';
 import { OutboundRepository } from '../outbound/outbound.repository';
 import { sendSuccess } from '../../common/response';
@@ -14,6 +21,7 @@ const IdParam = z.object({ id: z.string().uuid() });
 export async function lotRoutes(app: FastifyInstance) {
   const service = new LotService(app.prisma, new LotRepository(app.prisma));
   const outboundService = new OutboundService(app.prisma, new OutboundRepository(app.prisma));
+  const placementService = new PlacementService(app.prisma);
 
   // GET /v1/lots
   app.route({
@@ -59,8 +67,92 @@ export async function lotRoutes(app: FastifyInstance) {
         marka: body.marka,
         notes: body.notes,
         bookType: body.book_type,
+        placements: body.placements?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
       });
       return sendSuccess(reply.status(201), result);
+    },
+  });
+
+  // GET /v1/lots/:id/placements
+  app.route({
+    method: 'GET',
+    url: '/v1/lots/:id/placements',
+    preHandler: [app.authenticate],
+    schema: { params: IdParam },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const result = await placementService.getPlacements(request.user!.facilityId, id);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // PUT /v1/lots/:id/placements
+  app.route({
+    method: 'PUT',
+    url: '/v1/lots/:id/placements',
+    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    schema: { params: IdParam, body: SetLotPlacementsRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof SetLotPlacementsRequest>;
+      const result = await placementService.setPlacements(
+        request.user!.facilityId,
+        id,
+        request.user!.userId,
+        body.placements.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
+      );
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/lots/:id/move
+  app.route({
+    method: 'POST',
+    url: '/v1/lots/:id/move',
+    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    schema: { params: IdParam, body: MoveLotRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof MoveLotRequest>;
+      const result = await placementService.move(
+        request.user!.facilityId,
+        id,
+        request.user!.userId,
+        body,
+      );
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // GET /v1/lots/:id/movements
+  app.route({
+    method: 'GET',
+    url: '/v1/lots/:id/movements',
+    preHandler: [app.authenticate],
+    schema: { params: IdParam },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const result = await placementService.getMovements(request.user!.facilityId, id);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // GET /v1/lots/:id/placement-slip
+  app.route({
+    method: 'GET',
+    url: '/v1/lots/:id/placement-slip',
+    preHandler: [app.authenticate],
+    schema: { params: IdParam },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const { filename, pdf } = await placementService.getPlacementSlipPdf(
+        request.user!.facilityId,
+        id,
+      );
+      return reply
+        .header('Content-Type', 'application/pdf')
+        .header('Content-Disposition', `inline; filename="${filename}"`)
+        .send(pdf);
     },
   });
 

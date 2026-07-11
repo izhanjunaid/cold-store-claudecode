@@ -464,3 +464,85 @@ export function renderGatePassReceiptHtml(data: GatePassReceiptData): string {
 export async function renderGatePassReceipt(data: GatePassReceiptData): Promise<Buffer> {
   return htmlToA5Pdf(renderGatePassReceiptHtml(data));
 }
+
+// ============================================================================
+// Phase 14 — Rooms & Racks (placement slip, rack labels)
+// ============================================================================
+
+export interface PlacementSlipData {
+  facilityName: string;
+  facilityCity: string;
+  lotNumber: string;
+  ownerName: string;
+  commodityName: string;
+  varietyName: string | null;
+  marka: string | null;
+  roomName: string;
+  placements: { rackName: string; bags: number }[];
+  unplacedBags: number;
+  totalBags: number;
+  operatorName: string;
+  generatedAt: string;
+}
+
+let _placementSlipTemplate: HandlebarsTemplateDelegate | null = null;
+function getPlacementSlipTemplate(): HandlebarsTemplateDelegate {
+  if (!_placementSlipTemplate) {
+    const templatePath = join(__dirname, 'templates', 'placement-slip.html');
+    const source = readFileSync(templatePath, 'utf-8');
+    _placementSlipTemplate = Handlebars.compile(source);
+  }
+  return _placementSlipTemplate;
+}
+
+export function renderPlacementSlipHtml(data: PlacementSlipData): string {
+  return getPlacementSlipTemplate()(data);
+}
+
+export async function renderPlacementSlip(data: PlacementSlipData): Promise<Buffer> {
+  return htmlToA5Pdf(renderPlacementSlipHtml(data));
+}
+
+export interface RackLabelsData {
+  facilityName: string;
+  roomName: string;
+  racks: { name: string; maxCapacityBags: number }[];
+}
+
+let _rackLabelsTemplate: HandlebarsTemplateDelegate | null = null;
+function getRackLabelsTemplate(): HandlebarsTemplateDelegate {
+  if (!_rackLabelsTemplate) {
+    const templatePath = join(__dirname, 'templates', 'rack-labels.html');
+    const source = readFileSync(templatePath, 'utf-8');
+    _rackLabelsTemplate = Handlebars.compile(source);
+  }
+  return _rackLabelsTemplate;
+}
+
+export function renderRackLabelsHtml(data: RackLabelsData): string {
+  return getRackLabelsTemplate()(data);
+}
+
+/** Rack labels print on A4 — four large cut-out labels per sheet. */
+export async function renderRackLabels(data: RackLabelsData): Promise<Buffer> {
+  const html = renderRackLabelsHtml(data);
+
+  const puppeteer = await import('puppeteer');
+  const browser = await puppeteer.default.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdf = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+    });
+    return Buffer.from(pdf);
+  } finally {
+    await browser.close();
+  }
+}

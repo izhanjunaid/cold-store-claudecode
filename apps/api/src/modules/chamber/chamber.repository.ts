@@ -81,4 +81,96 @@ export class ChamberRepository {
       include: { recordedByUser: { select: { name: true } } },
     });
   }
+
+  async getFacilityName(facilityId: string): Promise<string | null> {
+    const facility = await this.prisma.facility.findUnique({
+      where: { id: facilityId },
+      select: { name: true },
+    });
+    return facility?.name ?? null;
+  }
+
+  // ── Racks ─────────────────────────────────────────────────────
+
+  async findRacksByChamber(chamberId: string) {
+    return this.prisma.rack.findMany({
+      where: { chamberId },
+      orderBy: [{ position: 'asc' }, { name: 'asc' }],
+    });
+  }
+
+  async findRackById(facilityId: string, id: string) {
+    return this.prisma.rack.findFirst({
+      where: { id, facilityId },
+      include: { chamber: { select: { id: true, name: true } } },
+    });
+  }
+
+  async createRack(data: Prisma.RackUncheckedCreateInput) {
+    return this.prisma.rack.create({ data });
+  }
+
+  async updateRack(id: string, data: Prisma.RackUncheckedUpdateInput) {
+    return this.prisma.rack.update({ where: { id }, data });
+  }
+
+  async countRacksByChamberIds(chamberIds: string[]): Promise<Map<string, number>> {
+    if (chamberIds.length === 0) return new Map();
+    const rows = await this.prisma.rack.groupBy({
+      by: ['chamberId'],
+      where: { chamberId: { in: chamberIds } },
+      _count: true,
+    });
+    const map = new Map<string, number>();
+    for (const id of chamberIds) map.set(id, 0);
+    for (const row of rows) map.set(row.chamberId, row._count);
+    return map;
+  }
+
+  /** Bags placed per rack, counting only ACTIVE lots. */
+  async getRackOccupancy(rackIds: string[]): Promise<Map<string, number>> {
+    if (rackIds.length === 0) return new Map();
+    const rows = await this.prisma.lotRackPlacement.groupBy({
+      by: ['rackId'],
+      where: { rackId: { in: rackIds }, lot: { status: 'ACTIVE' } },
+      _sum: { bags: true },
+    });
+    const map = new Map<string, number>();
+    for (const id of rackIds) map.set(id, 0);
+    for (const row of rows) map.set(row.rackId, Number(row._sum.bags ?? 0));
+    return map;
+  }
+
+  /** Total bags placed on any rack of the chamber (ACTIVE lots only). */
+  async getPlacedTotalByChamber(chamberId: string): Promise<number> {
+    const agg = await this.prisma.lotRackPlacement.aggregate({
+      where: { rack: { chamberId }, lot: { status: 'ACTIVE' } },
+      _sum: { bags: true },
+    });
+    return Number(agg._sum.bags ?? 0);
+  }
+
+  async countActivePlacements(rackId: string): Promise<number> {
+    return this.prisma.lotRackPlacement.count({
+      where: { rackId, lot: { status: 'ACTIVE' } },
+    });
+  }
+
+  async getRackLots(rackId: string) {
+    return this.prisma.lotRackPlacement.findMany({
+      where: { rackId, lot: { status: 'ACTIVE' } },
+      include: {
+        lot: {
+          select: {
+            id: true,
+            lotNumber: true,
+            marka: true,
+            ownerParty: { select: { name: true } },
+            commodity: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { bags: 'desc' },
+    });
+  }
 }

@@ -140,3 +140,6 @@ export type AuditAction = z.infer<typeof AuditAction>;
 
 export const TemperatureSource = z.enum(['MANUAL', 'SENSOR']);
 export type TemperatureSource = z.infer<typeof TemperatureSource>;
+
+export const LotMovementType = z.enum(['PLACEMENT', 'RACK_TRANSFER', 'ROOM_TRANSFER', 'WITHDRAWAL_PICK']);
+export type LotMovementType = z.infer<typeof LotMovementType>;

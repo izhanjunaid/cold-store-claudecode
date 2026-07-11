@@ -331,6 +331,10 @@ model Facility {
   partyLoans      PartyLoan[]
   gatePasses      GatePass[]
 
+  racks             Rack[]
+  lotRackPlacements LotRackPlacement[]
+  lotMovements      LotMovement[]
+
   @@map("facilities")
 }
 
@@ -373,6 +377,7 @@ model User {
   partyLoansCreated       PartyLoan[]          @relation("PartyLoanCreatedBy")
   loanRepaymentsCreated   PartyLoanRepayment[] @relation("PartyLoanRepaymentCreatedBy")
   gatePassesCreated       GatePass[]           @relation("GatePassCreatedBy")
+  lotMovements            LotMovement[]        @relation("LotMovementMovedBy")
 
   @@unique([facilityId, email])
   @@map("users")
@@ -501,6 +506,9 @@ model Chamber {
   commodityRestriction Commodity?       @relation("ChamberCommodityRestriction", fields: [commodityRestrictionId], references: [id])
   temperatureLogs      TemperatureLog[]
   lots                 Lot[]
+  racks                Rack[]
+  movementsFrom        LotMovement[]    @relation("MovementFromChamber")
+  movementsTo          LotMovement[]    @relation("MovementToChamber")
 
   @@map("chambers")
 }
@@ -608,6 +616,8 @@ model Lot {
   invoices          Invoice[]
   journalEntryLines JournalEntryLine[]
   gatePasses        GatePass[]
+  rackPlacements    LotRackPlacement[]
+  movements         LotMovement[]
 
   @@unique([facilityId, lotNumber])
   @@index([facilityId, status])
@@ -1244,4 +1254,83 @@ model GatePass {
   @@index([relatedOutboundId])
   @@index([partyId])
   @@map("gate_passes")
+}
+
+// ============================================================
+// PHASE 14: ROOMS & RACKS (Migration 0005)
+// UI calls a Chamber a "Room"; racks are sub-locations within it.
+// A lot's bags may be spread over several racks of its chamber
+// (lot_rack_placements); unallocated bags are implicitly "unplaced".
+// ============================================================
+
+enum LotMovementType {
+  PLACEMENT
+  RACK_TRANSFER
+  ROOM_TRANSFER
+  WITHDRAWAL_PICK
+}
+
+model Rack {
+  id              String  @id @default(uuid()) @db.Uuid
+  facilityId      String  @map("facility_id") @db.Uuid
+  chamberId       String  @map("chamber_id") @db.Uuid
+  name            String  @db.VarChar(50)
+  maxCapacityBags Int     @map("max_capacity_bags")
+  position        Int     @default(0)
+  isActive        Boolean @default(true) @map("is_active")
+  notes           String? @db.Text
+
+  facility      Facility           @relation(fields: [facilityId], references: [id])
+  chamber       Chamber            @relation(fields: [chamberId], references: [id])
+  placements    LotRackPlacement[]
+  movementsFrom LotMovement[]      @relation("MovementFromRack")
+  movementsTo   LotMovement[]      @relation("MovementToRack")
+
+  @@unique([chamberId, name])
+  @@index([chamberId, isActive])
+  @@map("racks")
+}
+
+model LotRackPlacement {
+  id         String   @id @default(uuid()) @db.Uuid
+  facilityId String   @map("facility_id") @db.Uuid
+  lotId      String   @map("lot_id") @db.Uuid
+  rackId     String   @map("rack_id") @db.Uuid
+  bags       Int
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  facility Facility @relation(fields: [facilityId], references: [id])
+  lot      Lot      @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  rack     Rack     @relation(fields: [rackId], references: [id])
+
+  @@unique([lotId, rackId])
+  @@index([rackId])
+  @@index([lotId])
+  @@map("lot_rack_placements")
+}
+
+model LotMovement {
+  id            String          @id @default(uuid()) @db.Uuid
+  facilityId    String          @map("facility_id") @db.Uuid
+  lotId         String          @map("lot_id") @db.Uuid
+  movementType  LotMovementType @map("movement_type")
+  fromChamberId String?         @map("from_chamber_id") @db.Uuid
+  toChamberId   String?         @map("to_chamber_id") @db.Uuid
+  fromRackId    String?         @map("from_rack_id") @db.Uuid
+  toRackId      String?         @map("to_rack_id") @db.Uuid
+  bags          Int
+  reason        String?         @db.Text
+  movedBy       String          @map("moved_by") @db.Uuid
+  movedAt       DateTime        @default(now()) @map("moved_at") @db.Timestamptz()
+
+  facility    Facility @relation(fields: [facilityId], references: [id])
+  lot         Lot      @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  fromChamber Chamber? @relation("MovementFromChamber", fields: [fromChamberId], references: [id])
+  toChamber   Chamber? @relation("MovementToChamber", fields: [toChamberId], references: [id])
+  fromRack    Rack?    @relation("MovementFromRack", fields: [fromRackId], references: [id])
+  toRack      Rack?    @relation("MovementToRack", fields: [toRackId], references: [id])
+  movedByUser User     @relation("LotMovementMovedBy", fields: [movedBy], references: [id])
+
+  @@index([lotId, movedAt])
+  @@map("lot_movements")
 }
