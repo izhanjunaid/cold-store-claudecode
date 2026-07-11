@@ -11,6 +11,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/layout/page-header';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
+import { useLotPlacements } from '@/components/lot-location';
+import { StatusBadge } from '@/components/ui/status-badge';
 
 import { PageSkeleton } from '@/components/page-skeleton';
 interface Lot {
@@ -34,6 +36,7 @@ export default function WithdrawPage() {
   const lotId = params['id'] as string;
 
   const [lot, setLot] = useState<Lot | null>(null);
+  const { data: location } = useLotPlacements(lotId);
   const [parties, setParties] = useState<Party[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -132,6 +135,34 @@ export default function WithdrawPage() {
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Current Balance</div>
             <div className="font-medium text-primary-700">{lot.current_balance_bags.toLocaleString()} bags</div>
           </div>
+          {location && (
+            <div className="col-span-full border-t pt-3">
+              <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Pick from</div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-sm font-medium">{location.chamber_name ?? 'Room'}</span>
+                {location.placements.map((p) => (
+                  <StatusBadge
+                    key={p.rack_id}
+                    status={`${p.rack_name} × ${p.bags.toLocaleString()}`}
+                    tone="neutral"
+                    raw
+                    className="tabular-nums"
+                  />
+                ))}
+                {location.unplaced_bags > 0 && (
+                  <StatusBadge
+                    status={`Unplaced × ${location.unplaced_bags.toLocaleString()}`}
+                    tone="warning"
+                    raw
+                    className="tabular-nums"
+                  />
+                )}
+                {location.placements.length === 0 && location.unplaced_bags === 0 && (
+                  <span className="text-sm text-muted-foreground">No placement recorded.</span>
+                )}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

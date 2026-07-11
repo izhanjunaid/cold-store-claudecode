@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -26,10 +26,17 @@ import {
   useCommodities,
   useVarieties,
   useChambers,
+  useRacks,
   useRatePlans,
   useFacility,
 } from '@/hooks/use-reference-data';
 import { useAuthStore } from '@/stores/auth.store';
+import {
+  RackAllocationEditor,
+  allocationTotal,
+  toPlacementsPayload,
+  type AllocationRow,
+} from '@/components/rack-allocation-editor';
 
 const lotSchema = z
   .object({
@@ -38,7 +45,7 @@ const lotSchema = z
     billing_party_id: z.string(),
     commodity_id: z.string().min(1, 'Select a commodity'),
     variety_id: z.string(),
-    chamber_id: z.string().min(1, 'Select a chamber'),
+    chamber_id: z.string().min(1, 'Select a room'),
     rate_plan_id: z.string().min(1, 'Select a rate plan'),
     quantity_bags: z.string().min(1, 'Required'),
     declared_weight_kg: z.string(),
@@ -101,6 +108,9 @@ export default function LotCreatePage() {
   });
   const { control, handleSubmit, setValue, setError } = form;
 
+  // Optional rack placement — assign now or later from the lot page.
+  const [allocationRows, setAllocationRows] = useState<AllocationRow[]>([]);
+
   // Watch the fields that drive the live summary + conditional sections.
   const [commodityId, declaredStr, acceptedStr, qtyStr, chamberId, billingOverride] = useWatch({
     control,
@@ -157,6 +167,10 @@ export default function LotCreatePage() {
     ? ((selectedChamber.current_occupancy_bags + qty) / selectedChamber.max_capacity_bags) * 100
     : 0;
 
+  const { data: racks = [] } = useRacks(chamberId || undefined);
+  const placedBags = allocationTotal(allocationRows);
+  const unplacedBags = Math.max(0, qty - placedBags);
+
   const createLot = useApiMutation<CreatedLot, Record<string, unknown>>({
     mutationFn: (payload) => apiClient<CreatedLot>('/v1/lots', { method: 'POST', body: payload }),
     invalidates: [qk.lots.all],
@@ -193,6 +207,8 @@ export default function LotCreatePage() {
     if (values.inbound_date) payload['inbound_date'] = values.inbound_date;
     if (values.book_type) payload['book_type'] = values.book_type;
     if (values.notes) payload['notes'] = values.notes;
+    const placements = toPlacementsPayload(allocationRows);
+    if (placements.length > 0) payload['placements'] = placements;
     createLot.mutate(payload);
   };
 
@@ -255,6 +271,7 @@ export default function LotCreatePage() {
                   setValue('variety_id', '');
                   setValue('chamber_id', '');
                   setValue('rate_plan_id', '');
+                  setAllocationRows([]);
                 }}
               />
               <SelectField
@@ -331,13 +348,14 @@ export default function LotCreatePage() {
               <SelectField
                 control={control}
                 name="chamber_id"
-                label="Chamber"
+                label="Room"
                 required
-                placeholder="Select chamber…"
+                placeholder="Select room…"
                 options={filteredChambers.map((c) => ({
                   value: c.id,
                   label: `${c.name} (${c.available_capacity_bags.toLocaleString()} avail / ${c.max_capacity_bags.toLocaleString()})`,
                 }))}
+                onValueChange={() => setAllocationRows([])}
                 className="xl:col-span-2"
               />
               <SelectField
@@ -374,6 +392,22 @@ export default function LotCreatePage() {
               <DateField control={control} name="inbound_date" label="Inbound date" className="xl:col-span-2" />
               <TextareaField control={control} name="notes" label="Notes" rows={1} className="xl:col-span-2" />
             </EntryGroup>
+
+            {chamberId && racks.length > 0 && (
+              <EntryGroup title="Rack Placement (optional)" columns={2}>
+                <div className="col-span-full space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Record which racks the bags are stacked on — or leave it and assign later from the lot page.
+                  </p>
+                  <RackAllocationEditor
+                    racks={racks}
+                    rows={allocationRows}
+                    onChange={setAllocationRows}
+                    totalBags={qty}
+                  />
+                </div>
+              </EntryGroup>
+            )}
           </EntrySheet>
 
           <FormActions
@@ -390,9 +424,16 @@ export default function LotCreatePage() {
                 )}
                 {selectedChamber && (
                   <EntryChip
-                    label={capacityPct > 100 ? 'Chamber fill — over capacity' : 'Chamber fill'}
+                    label={capacityPct > 100 ? 'Room fill — over capacity' : 'Room fill'}
                     value={`${capacityPct.toFixed(0)}%`}
                     tone={capacityPct > capacityWarnPct ? 'warning' : 'default'}
+                  />
+                )}
+                {placedBags > 0 && (
+                  <EntryChip
+                    label={placedBags > qty ? 'Placed — over quantity' : 'Placed on racks'}
+                    value={`${placedBags.toLocaleString()} bags${unplacedBags > 0 ? ` · ${unplacedBags.toLocaleString()} unplaced` : ''}`}
+                    tone={placedBags > qty ? 'destructive' : 'default'}
                   />
                 )}
               </>

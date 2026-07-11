@@ -7,15 +7,17 @@ import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
+import { useChambers } from '@/hooks/use-reference-data';
 import { qk } from '@/lib/query-keys';
 import { lotColumns, type LotRow } from './columns';
 
-const FILTER_KEYS = ['search', 'marka', 'status'] as const;
+const FILTER_KEYS = ['search', 'marka', 'status', 'chamber_id'] as const;
 
 export default function LotListPage() {
   const router = useRouter();
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters, queryParams } =
     useTableState(FILTER_KEYS);
+  const { data: chambers = [] } = useChambers();
 
   const { data, isLoading, isError } = useListQuery<LotRow>(
     qk.lots.list(queryParams),
@@ -67,6 +69,11 @@ export default function LotListPage() {
                 { label: 'Closed', value: 'CLOSED' },
                 { label: 'Suspended', value: 'SUSPENDED' },
               ],
+            },
+            {
+              key: 'chamber_id',
+              label: 'Room',
+              options: chambers.map((c) => ({ label: c.name, value: c.id })),
             },
           ],
         }}

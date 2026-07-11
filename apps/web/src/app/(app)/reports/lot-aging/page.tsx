@@ -15,7 +15,7 @@ const columns: DataTableColumn<LotAgingRowType>[] = [
   { id: 'lot_number', header: 'Lot #', enableHiding: false, cell: (r) => <span className="font-mono text-xs text-primary-700">{r.lot_number}</span>, csv: (r) => r.lot_number },
   { id: 'owner', header: 'Owner', cell: (r) => r.owner_name, csv: (r) => r.owner_name },
   { id: 'commodity', header: 'Commodity', cell: (r) => r.commodity_name, csv: (r) => r.commodity_name },
-  { id: 'chamber', header: 'Chamber', cell: (r) => r.chamber_name, csv: (r) => r.chamber_name },
+  { id: 'chamber', header: 'Room', cell: (r) => r.chamber_name, csv: (r) => r.chamber_name },
   { id: 'bags', header: 'Bags', numeric: true, cell: (r) => r.current_bags.toLocaleString(), csv: (r) => r.current_bags },
   { id: 'inbound', header: 'Inbound', cell: (r) => formatDate(r.inbound_date), csv: (r) => r.inbound_date },
   {

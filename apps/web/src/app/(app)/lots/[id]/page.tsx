@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { StatusBadge } from '@/components/ui/status-badge';
 import { UrduText } from '@/components/ui/urdu-text';
 import { PageHeader } from '@/components/layout/page-header';
+import { LotLocationCard, LotMovementsTimeline } from '@/components/lot-location';
 
 import { formatDate, formatDateTime } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -241,7 +242,7 @@ export default function LotDetailPage() {
                 </>
               }
             />
-            <Field label="Chamber" value={lot.chamber_name ?? '—'} />
+            <Field label="Room" value={lot.chamber_name ?? '—'} />
             <Field label="Rate Plan" value={lot.rate_plan_name ?? '—'} />
             <Field
               label="Bags (Balance / Original)"
@@ -279,6 +280,8 @@ export default function LotDetailPage() {
         </CardContent>
       </Card>
 
+      <LotLocationCard lotId={id} canOperate={canWithdraw && canAct} />
+
       <Card>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="border-b px-2">
@@ -286,6 +289,7 @@ export default function LotDetailPage() {
               {([
                 ['overview', 'Overview'],
                 ['ownership', 'Ownership History'],
+                ['movements', 'Movements'],
                 ['inspections', 'Inspections'],
                 ['withdrawals', 'Withdrawals'],
                 ['billing', 'Billing'],
@@ -360,6 +364,10 @@ export default function LotDetailPage() {
                   </TableBody>
                 </Table>
               )}
+            </TabsContent>
+
+            <TabsContent value="movements" className="mt-0">
+              <LotMovementsTimeline lotId={id} />
             </TabsContent>
 
             <TabsContent value="inspections" className="mt-0">

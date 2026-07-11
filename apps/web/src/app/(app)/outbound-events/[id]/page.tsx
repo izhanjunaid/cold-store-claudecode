@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
+import { useLotPlacements } from '@/components/lot-location';
 import { formatDate } from '@/lib/format';
 
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -56,6 +57,9 @@ export default function OutboundEventDetailPage() {
   const [weightInput, setWeightInput] = useState('');
   const [savingWeight, setSavingWeight] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  // Optional per-rack pick record, keyed by rack_id (empty = auto-trim).
+  const [picks, setPicks] = useState<Record<string, string>>({});
+  const { data: location } = useLotPlacements(event?.lot_id ?? '');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -93,6 +97,15 @@ export default function OutboundEventDetailPage() {
     }
   };
 
+  const pickedFrom = Object.entries(picks)
+    .map(([rack_id, bags]) => ({ rack_id, bags: parseInt(bags) || 0 }))
+    .filter((p) => p.bags > 0);
+  const pickedTotal = pickedFrom.reduce((s, p) => s + p.bags, 0);
+  const pickError =
+    event != null && pickedTotal > event.quantity_withdrawn_bags
+      ? `Picked bags (${pickedTotal}) exceed the withdrawn quantity (${event.quantity_withdrawn_bags})`
+      : null;
+
   const handleFinalize = async () => {
     const ok = await confirm({
       title: 'Finalize & dispatch?',
@@ -103,7 +116,12 @@ export default function OutboundEventDetailPage() {
     setFinalizing(true);
     setError(null);
     try {
-      setEvent(await apiClient<OutboundEvent>(`/v1/outbound-events/${eventId}/finalize`, { method: 'POST', body: {} }));
+      setEvent(
+        await apiClient<OutboundEvent>(`/v1/outbound-events/${eventId}/finalize`, {
+          method: 'POST',
+          body: pickedFrom.length > 0 ? { picked_from: pickedFrom } : {},
+        }),
+      );
       toast.success('Dispatch finalized. Lot balance updated.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Finalize failed');
@@ -226,9 +244,50 @@ export default function OutboundEventDetailPage() {
         </CardContent>
       </Card>
 
+      {isActionable && location && (location.placements.length > 0 || location.unplaced_bags > 0) && (
+        <Card className="mb-5">
+          <CardHeader>
+            <CardTitle className="text-sm">Pick Location — {location.chamber_name ?? 'Room'}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {location.placements.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                All {location.unplaced_bags.toLocaleString()} bags are unplaced in {location.chamber_name ?? 'the room'}.
+              </p>
+            ) : (
+              <>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Where the stock sits{event.status === 'WEIGHED' ? ' — optionally record which racks the bags were pulled from; left blank, the fullest racks are reduced automatically' : ''}.
+                </p>
+                <div className="space-y-2">
+                  {location.placements.map((p) => (
+                    <div key={p.rack_id} className="flex items-center gap-3 text-sm">
+                      <span className="w-24 font-medium">{p.rack_name}</span>
+                      <span className="w-28 text-muted-foreground tabular-nums">{p.bags.toLocaleString()} bags here</span>
+                      {event.status === 'WEIGHED' && (
+                        <Input
+                          type="number"
+                          min={0}
+                          max={p.bags}
+                          placeholder="Picked"
+                          value={picks[p.rack_id] ?? ''}
+                          onChange={(e) => setPicks((prev) => ({ ...prev, [p.rack_id]: e.target.value }))}
+                          className="h-8 w-28 tabular-nums"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {pickError && <p className="mt-2 text-xs font-medium text-destructive">{pickError}</p>}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex flex-wrap gap-3">
         {isActionable && event.status === 'WEIGHED' && (
-          <Button onClick={handleFinalize} disabled={finalizing}>
+          <Button onClick={handleFinalize} disabled={finalizing || pickError != null}>
             <Truck className="h-4 w-4" aria-hidden />
             {finalizing ? 'Finalizing…' : 'Finalize & Dispatch'}
           </Button>

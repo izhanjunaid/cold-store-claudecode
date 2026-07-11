@@ -31,6 +31,18 @@ export interface ChamberRef {
   max_capacity_bags: number;
   current_occupancy_bags: number;
   available_capacity_bags: number;
+  rack_count?: number;
+}
+
+export interface RackRef {
+  id: string;
+  chamber_id: string;
+  name: string;
+  max_capacity_bags: number;
+  current_occupancy_bags: number;
+  position: number;
+  is_active: boolean;
+  notes: string | null;
 }
 
 export interface RatePlanRef {
@@ -90,6 +102,19 @@ export function useChambers() {
     queryKey: qk.reference.chambers,
     queryFn: () => apiClient<ChamberRef[]>('/v1/chambers?is_active=true'),
     staleTime: REFERENCE_STALE_TIME,
+  });
+}
+
+/** Active racks of one room (chamber) — for placement/move pickers. */
+export function useRacks(chamberId: string | undefined) {
+  return useQuery({
+    queryKey: ['chambers', 'racks', chamberId ?? 'none'],
+    queryFn: () =>
+      apiClient<{ racks: RackRef[] }>(`/v1/chambers/${chamberId}`).then((c) =>
+        (c.racks ?? []).filter((r) => r.is_active),
+      ),
+    enabled: !!chamberId,
+    staleTime: 30_000,
   });
 }
 

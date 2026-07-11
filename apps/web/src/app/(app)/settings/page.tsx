@@ -149,7 +149,7 @@ export default function SettingsPage() {
               <Field label="Weight Dispute Threshold (kg)" hint="Flag lots whose accepted vs declared weight differs by ≥ this many kg.">
                 <Input type="number" min={0} value={weightThreshold} onChange={(e) => setWeightThreshold(e.target.value)} className="tabular-nums" />
               </Field>
-              <Field label="Chamber Capacity Warning (%)" hint="Warn when a chamber would exceed this occupancy after a new lot.">
+              <Field label="Room Capacity Warning (%)" hint="Warn when a room would exceed this occupancy after a new lot.">
                 <Input type="number" min={1} max={100} value={chamberWarningPct} onChange={(e) => setChamberWarningPct(e.target.value)} className="tabular-nums" />
               </Field>
               <Field label="Max Backdating (days)" hint="How far back operators may date entries. Empty = unlimited; managers+ exempt.">

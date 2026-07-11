@@ -9,6 +9,8 @@ export const qk = {
     all: ['lots'] as const,
     list: (filters: ListFilters) => ['lots', 'list', filters] as const,
     detail: (id: string) => ['lots', 'detail', id] as const,
+    placements: (id: string) => ['lots', 'placements', id] as const,
+    movements: (id: string) => ['lots', 'movements', id] as const,
   },
   parties: {
     all: ['parties'] as const,
@@ -35,6 +37,7 @@ export const qk = {
     all: ['chambers'] as const,
     list: (filters: ListFilters) => ['chambers', 'list', filters] as const,
     detail: (id: string) => ['chambers', 'detail', id] as const,
+    rackLots: (rackId: string) => ['chambers', 'rack-lots', rackId] as const,
   },
   gatePasses: {
     all: ['gate-passes'] as const,

@@ -32,6 +32,8 @@ interface GatePass {
   related_lot_number: string | null;
   related_outbound_id: string | null;
   related_dispatch_note_number: string | null;
+  related_marka?: string | null;
+  related_location?: string | null;
   created_at: string;
   turnaround_seconds: number | null;
 }
@@ -266,6 +268,18 @@ export default function GatePassConsolePage() {
                         {p.pass_number} • {p.driver_name ?? 'unknown driver'} • {relativeTime(p.created_at)}
                         {p.related_lot_number && <span className="ml-1">• Lot {p.related_lot_number}</span>}
                       </div>
+                      {(p.related_location || p.related_marka) && (
+                        <div className="mt-0.5 text-xs">
+                          {p.related_location && (
+                            <span className="font-medium text-foreground">{p.related_location}</span>
+                          )}
+                          {p.related_marka && (
+                            <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 font-semibold">
+                              Marka: {p.related_marka}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <Button variant="outline" size="sm" onClick={() => printGatePassReceipt(p.id)}>
                       Print

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { Plus, Trash2 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
@@ -13,6 +14,11 @@ import { PageHeader } from '@/components/layout/page-header';
 interface Commodity {
   id: string;
   name: string;
+}
+
+interface RackRow {
+  name: string;
+  capacity: string;
 }
 
 const EMPTY = {
@@ -26,9 +32,10 @@ const EMPTY = {
 const SELECT_CLASS =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
-export default function ChamberCreatePage() {
+export default function RoomCreatePage() {
   const router = useRouter();
   const [form, setForm] = useState(EMPTY);
+  const [racks, setRacks] = useState<RackRow[]>([]);
   const [commodities, setCommodities] = useState<Commodity[]>([]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -38,6 +45,11 @@ export default function ChamberCreatePage() {
   }, []);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const setRack = (idx: number, patch: Partial<RackRow>) =>
+    setRacks((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+
+  const addRack = () =>
+    setRacks((rows) => [...rows, { name: `R-${rows.length + 1}`, capacity: '' }]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,11 +64,20 @@ export default function ChamberCreatePage() {
       if (form.temperature_min_c !== '') payload['temperature_min_c'] = parseFloat(form.temperature_min_c);
       if (form.temperature_max_c !== '') payload['temperature_max_c'] = parseFloat(form.temperature_max_c);
       if (form.notes.trim()) payload['notes'] = form.notes.trim();
-      await apiClient('/v1/chambers', { method: 'POST', body: payload });
-      toast.success('Chamber created');
-      router.push('/chambers');
+      const chamber = await apiClient<{ id: string }>('/v1/chambers', { method: 'POST', body: payload });
+
+      const validRacks = racks.filter((r) => r.name.trim() && (parseInt(r.capacity) || 0) > 0);
+      for (const [idx, rack] of validRacks.entries()) {
+        await apiClient(`/v1/chambers/${chamber.id}/racks`, {
+          method: 'POST',
+          body: { name: rack.name.trim(), max_capacity_bags: parseInt(rack.capacity), position: idx },
+        });
+      }
+
+      toast.success(validRacks.length > 0 ? `Room created with ${validRacks.length} racks` : 'Room created');
+      router.push(`/chambers/${chamber.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create chamber');
+      setError(err instanceof Error ? err.message : 'Failed to create room');
     } finally {
       setSubmitting(false);
     }
@@ -64,7 +85,7 @@ export default function ChamberCreatePage() {
 
   return (
     <div className="max-w-2xl">
-      <PageHeader title="Create Chamber" crumb="New" />
+      <PageHeader title="Create Room" crumb="New" />
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -72,7 +93,7 @@ export default function ChamberCreatePage() {
           </div>
         )}
         <EntrySheet>
-          <EntryGroup title="Chamber" columns={2}>
+          <EntryGroup title="Room" columns={2}>
             <div className="space-y-1.5 sm:col-span-2">
               <Label>
                 Name <span className="text-destructive">*</span>
@@ -82,7 +103,7 @@ export default function ChamberCreatePage() {
                 onChange={(e) => set('name', e.target.value)}
                 required
                 maxLength={100}
-                placeholder="e.g. Chamber A1"
+                placeholder="e.g. Room A1"
               />
             </div>
               <div className="space-y-1.5">
@@ -150,11 +171,52 @@ export default function ChamberCreatePage() {
               />
             </div>
           </EntryGroup>
+
+          <EntryGroup title="Racks (optional)" columns={2}>
+            <div className="col-span-full space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Lay out the room&apos;s racks now — lots can then be placed rack-by-rack.
+              </p>
+              {racks.map((rack, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <Input
+                    value={rack.name}
+                    onChange={(e) => setRack(idx, { name: e.target.value })}
+                    placeholder="Rack name, e.g. R-1"
+                    maxLength={50}
+                    className="flex-1"
+                  />
+                  <Input
+                    type="number"
+                    min={1}
+                    value={rack.capacity}
+                    onChange={(e) => setRack(idx, { capacity: e.target.value })}
+                    placeholder="Capacity (bags)"
+                    className="w-40 tabular-nums"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => setRacks((rows) => rows.filter((_, i) => i !== idx))}
+                    aria-label="Remove rack"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                  </Button>
+                </div>
+              ))}
+              <Button type="button" variant="outline" size="sm" onClick={addRack}>
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                Add rack
+              </Button>
+            </div>
+          </EntryGroup>
         </EntrySheet>
 
         <FormActions>
           <Button type="submit" disabled={submitting}>
-            {submitting ? 'Creating…' : 'Create Chamber'}
+            {submitting ? 'Creating…' : 'Create Room'}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.back()}>
             Cancel

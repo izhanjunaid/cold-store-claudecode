@@ -45,7 +45,7 @@ export default function CommodityInventoryPage() {
 
   return (
     <div>
-      <PageHeader title="Commodity Inventory" description="Bags in storage by commodity, with per-chamber breakdown" />
+      <PageHeader title="Commodity Inventory" description="Bags in storage by commodity, with per-room breakdown" />
 
       <div className="mb-5 grid grid-cols-2 gap-3 sm:max-w-md">
         <Card>
@@ -85,7 +85,7 @@ export default function CommodityInventoryPage() {
                       <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform', isOpen && 'rotate-90')} aria-hidden />
                       <span className="font-medium">{row.commodity_name}</span>
                       <span className="text-xs text-muted-foreground">
-                        ({row.per_chamber.length} chamber{row.per_chamber.length === 1 ? '' : 's'})
+                        ({row.per_chamber.length} room{row.per_chamber.length === 1 ? '' : 's'})
                       </span>
                     </div>
                     <span className="text-sm font-medium tabular-nums">{row.total_bags.toLocaleString()} bags</span>
@@ -95,7 +95,7 @@ export default function CommodityInventoryPage() {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Chamber</TableHead>
+                            <TableHead>Room</TableHead>
                             <TableHead className="text-right">Bags</TableHead>
                             <TableHead className="text-right">Occupancy</TableHead>
                           </TableRow>

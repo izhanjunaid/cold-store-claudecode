@@ -63,7 +63,7 @@ export const lotColumns: DataTableColumn<LotRow>[] = [
   },
   {
     id: 'chamber',
-    header: 'Chamber',
+    header: 'Room',
     cell: (lot) => lot.chamber_name ?? '—',
     csv: (lot) => lot.chamber_name ?? '',
   },

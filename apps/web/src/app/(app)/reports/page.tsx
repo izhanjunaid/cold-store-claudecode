@@ -28,7 +28,7 @@ const cards: ReportCard[] = [
   { title: 'Lot Aging', href: '/reports/lot-aging', icon: Boxes, minRole: 'MANAGER', description: 'Active lots in storage sorted by age, with commodity-specific alert thresholds.' },
   { title: 'Receivables Aging', href: '/reports/receivables-aging', icon: Receipt, minRole: 'ACCOUNTANT', description: 'Outstanding invoices bucketed 0–30 / 31–60 / 61–90 / 90+ days.' },
   { title: 'Party Statement', href: '/reports/party-statement', icon: FileSpreadsheet, minRole: 'ACCOUNTANT', description: 'Generate a statement of account for any party, downloadable as PDF.' },
-  { title: 'Commodity Inventory', href: '/reports/commodity-inventory', icon: Warehouse, minRole: 'MANAGER', description: 'Bags by commodity, expandable per-chamber breakdown.' },
+  { title: 'Commodity Inventory', href: '/reports/commodity-inventory', icon: Warehouse, minRole: 'MANAGER', description: 'Bags by commodity, expandable per-room breakdown.' },
   { title: 'Weight Variance', href: '/reports/weight-variance', icon: Scale, minRole: 'MANAGER', description: 'Inbound vs. outbound weight per lot, flagged at ±2% variance.' },
   { title: 'Seasonal Summary', href: '/reports/seasonal-summary', icon: CalendarRange, minRole: 'OWNER', description: 'Total inbound, outbound, and revenue across a date range, per commodity.' },
   { title: 'Ownership Transfer Log', href: '/reports/ownership-transfers', icon: ArrowRightLeft, minRole: 'MANAGER', description: 'Timeline of all FULL and PARTIAL ownership transfers across the facility.' },

@@ -47,7 +47,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Operations',
     items: [
       { label: 'Lots', href: '/lots', icon: Boxes },
-      { label: 'Chambers', href: '/chambers', icon: Warehouse },
+      { label: 'Rooms', href: '/chambers', icon: Warehouse },
       { label: 'Commodities', href: '/commodities', icon: Sprout, minRole: 'MANAGER' },
       { label: 'Gate Pass', href: '/gate', icon: DoorOpen, minRole: 'SECURITY' },
       // Quality (M6) has no UI yet — do not add a nav item until its page exists,
