@@ -67,8 +67,21 @@
 | Audit P1–P3 | 2 | 44 | — | 46 | ALL PASS (financial guard triggers 19, hardening 25, period derivation 2 unit; −2 mapping tests rewritten) |
 | Audit P4 | −2 | 25 | — | 25 | ALL PASS (watermark 6, reversal 8, opening balances 11; JE-11 unit tests removed with dead templates) |
 | CoA follow-ups | — | 2 | — | 13 | ALL PASS (parent-required rule 2 integration; 11 web page tests: CoA management 7, P&L/BS unclassified rendering 4) |
+| 14 (Rooms & Racks) | 11 | 33 | — | 44 | ALL PASS (planTrim 6 unit + 5 template; rack CRUD 11 + placement/move/withdrawal/transfer 22 integration) |
 
-> Live suite after CoA follow-ups (2026-07-10): **127 unit + 351 integration (api) + 90 unit (web) green**.
+> Live suite after Phase 14 (2026-07-11): **138 unit + 384 integration (api) + 90 unit (web) green**.
+
+### Phase 14 Tests (Rooms & Racks)
+
+**Unit (11)**
+- `apps/api/src/modules/lot/placement.service.test.ts` — 6 tests (planTrim largest-first: single-rack cover, spill-over, exact clear, excess caps at placed total, zero/empty, input immutability)
+- `apps/api/src/modules/pdf/templates/placement-slip.test.ts` — 5 tests (slip renders lot/room/rack rows, marka banner shown/hidden, unplaced row conditional; rack-labels one label per rack)
+
+**Integration (33)**
+- `apps/api/src/modules/chamber/rack.integration.test.ts` — 11 tests (MANAGER creates rack, OPERATOR 403, duplicate name 400, PATCH updates, chamber detail includes racks+occupancy+unplaced, list rack_count, deactivation blocked while stock placed, rack lots drill-down with marka, occupancy reflects placement, missing chamber 400, fixture visibility)
+- `apps/api/src/modules/lot/placement.integration.test.ts` — 22 tests (create-lot split across racks + read-back; over-quantity / wrong-room rack / inactive rack rejected; overflow warns not blocks; unplaced default; PUT placements + PLACEMENT movement deltas + over-balance + duplicate-rack rejection; RACK move partial + insufficient-source + cross-room rejection; ROOM move whole-lot with placements cleared / land-on-racks / hard capacity 422 / commodity restriction / no-op rejection; withdrawal picked_from exact trim + auto-trim largest-first + over-pick rejection + FULL-close clears placements; partial transfer mirrors trimmed placements onto the child)
+
+**E2E**: no new spec; `wf-01-inbound.spec.ts` hardened to pick a mutually-compatible commodity/room/rate-plan trio instead of relying on list order (pre-existing flake exposed by alphabetical commodity sorting).
 
 ### Phase 10 Tests
 

@@ -4,32 +4,59 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**ColdChain** is a management platform for agricultural cold storage facilities integrated into Pakistan's mandi (wholesale market) supply chain. MVP targets a single facility in Lahore. The repository is currently in the **specification phase** — all 15 documents in `docs/` define the system to be built. No implementation code exists yet.
+**ColdChain** is an operational management platform for agricultural cold storage facilities integrated into Pakistan's mandi (wholesale market) supply chain. MVP targets a single facility in Lahore. The system is **fully implemented and in production-hardening**: 13 development phases have shipped (party/chamber, inbound/lots, ownership transfer, outbound/dispatch, billing, financial ledger, full accounting, gate pass/peshgi, reporting, admin/polish, configurability, production deployment + accounting audit remediation). `docs/01-15` are the original design spec and remain the reference for intent; `docs/16` is a post-implementation audit. **`PROGRESS.md` is the live source of truth for current phase, active task, and blockers — read it before assuming what is or isn't built. `TESTING.md` has test strategy and live pass counts.**
 
-## Planned Tech Stack
+## Tech Stack (as built)
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 14 (App Router) + React + shadcn/ui + Tailwind CSS |
-| State | Zustand (global) + React Query (server state) |
-| Backend | Node.js 20 LTS + Fastify + TypeScript |
-| Validation | Zod schemas on all request/response boundaries |
-| Database | PostgreSQL 15 (JSONB, Row-Level Security, audit triggers) |
-| Migrations | Flyway or Prisma Migrate (versioned) |
-| Cache/Jobs | Redis + BullMQ |
-| File Storage | Cloudflare R2 / AWS S3 (pre-signed URLs) |
-| PDF | Puppeteer + HTML/Handlebars templates (bilingual: English + Urdu) |
-| Auth | Supabase Auth or NextAuth.js (JWT, RBAC) |
-| Deployment | Railway / Render / Supabase |
+| Frontend | Next.js 14 (App Router) + React + shadcn/ui + Tailwind CSS, Zustand + TanStack Query |
+| Backend | Node.js 20 + Fastify 5 + TypeScript, Zod validation on all request/response boundaries (`fastify-type-provider-zod`) |
+| Database | PostgreSQL 15 + Prisma ORM, versioned migrations, DB-level audit/integrity triggers |
+| PDF | Puppeteer + Handlebars templates |
+| Auth | Custom JWT (access + refresh) + bcrypt, role-based guards |
+| Monorepo | Turborepo + pnpm workspaces |
+| Testing | Vitest (unit/integration), Playwright (E2E), React Testing Library |
+| Deployment | Docker Compose (postgres, migrate, api, web) behind Caddy — see `docker-compose.yml`, `Caddyfile`, `INSTALL.md` |
 
-## Architecture Patterns
+## Commands
 
-- **Layered**: Controllers → Services → Repositories → Database
-- **Multi-tenant ready**: All tables namespaced by `facility_id` from day 1
-- **Audit-first**: Every mutation logged to immutable `audit_log` table; no hard deletes on operational records
-- **Dual ledger**: `book_type` enum (`KATCHI` vs `PACCI`) — KATCHI is mutable informal records, PACCI is immutable official records
-- **REST API versioned**: All endpoints under `/v1/`, facility scoped via `X-Facility-ID` header
-- **Background jobs**: BullMQ workers for PDF generation, SMS dispatch, month-end billing runs
+```bash
+pnpm install                 # install all workspace deps
+pnpm dev                     # turbo dev — api on :3001, web on :3000
+pnpm build                   # turbo build
+pnpm typecheck               # turbo typecheck
+pnpm lint                    # turbo lint
+
+pnpm test                    # turbo test (unit + integration, all packages)
+pnpm test:unit
+pnpm test:integration
+pnpm e2e                     # Playwright; auto-spawns both dev servers with ALLOW_TEST_RESET=1
+pnpm e2e:ui                  # Playwright inspector
+
+pnpm --filter @coldchain/db db:migrate   # prisma migrate dev
+pnpm --filter @coldchain/db db:seed
+pnpm --filter @coldchain/db db:studio
+```
+
+## Architecture (as built)
+
+- **Monorepo layout**: `apps/api` (Fastify, port 3001), `apps/web` (Next.js, port 3000), `packages/db` (Prisma schema + migrations), `packages/shared` (Zod schemas/types shared by api+web), `packages/ui` (shared shadcn component library, ~126 components)
+- **Layered backend**: Controllers → Services → Repositories → Prisma, organized by domain under `apps/api/src/modules/<domain>/`
+- **Multi-tenant**: every table namespaced by `facility_id`; requests scoped via `X-Facility-ID` header
+- **Audit-first**: append-only `audit_log`; DB-level triggers additionally enforce immutability on posted journal entries and financial tables (see Gotchas)
+- **Dual ledger**: `book_type` enum (`KATCHI` vs `PACCI`) — KATCHI is mutable informal records (write: OWNER only, read: MANAGER+), PACCI is immutable official records and the default everywhere
+- **REST API versioned**: all endpoints under `/v1/`
+- **RBAC roles**: OWNER, MANAGER, ACCOUNTANT, OPERATOR, SECURITY (see `docs/07_user_roles_permissions.md`)
+
+## Gotchas
+
+- **"Room" in the UI = `chamber` in code/DB/API.** Phase 14 restructured chambers as Rooms containing Racks, but only user-facing labels changed — routes stay `/v1/chambers`, the Prisma model stays `Chamber`, and settings keys stay `chamber_capacity_warning_pct`. Racks live in `racks` / `lot_rack_placements` / `lot_movements` (migration 0005): a lot's bags may span several racks of its room, unallocated bags are "Unplaced", rack capacity only warns (hard capacity stays at room level), and inter-room moves are whole-lot only (single `Lot.chamberId` FK is authoritative).
+
+- **Financial guard triggers** (Prisma migration `0002_financial_audit_and_integrity_guards`) enforce ledger/JE immutability at the DB level. Integration test cleanup that deletes or updates posted financial rows must wrap with `withGuardsDisabled` or the trigger will reject it.
+- **Two migration-looking directories exist under `packages/db`**: `prisma/migrations/` is the real, active Prisma migration history — use it. `migrations/` contains a single legacy `0001_foundation.sql` from before Prisma Migrate was adopted; don't add new migrations there.
+- **E2E requires test-mode flags**: the API must run with `ALLOW_TEST_RESET=1` and non-production `NODE_ENV` for `POST /v1/_test/reset` to work. `pnpm e2e` sets this up automatically — no manual server launch needed.
+- **Branch model**: development proceeds on sequential `phase/NN-*` branches (see `PROGRESS.md` for the active one), plus longer-lived parallel lines for the UI re-platform (`redesign/ui-replatform`) and accounting rework (`feat/world-class-financials`) — both checked out as git worktrees under `.claude/worktrees/`. Confirm the current branch (`git branch --show-current`) before starting work; several lines of development coexist.
 
 ## Modules (11)
 
@@ -66,6 +93,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `13_screen_inventory.md` | UI/UX screens to build |
 | `14_state_machines.md` | Status transitions for lots, invoices, transfers |
 | `15_accounting_audit.md` | Audit trail and reconciliation rules |
+| `16_accounting_module_audit.md` | Post-implementation accounting audit (2026-07-06/07) — findings + remediation status |
 
 ## Domain Terminology
 

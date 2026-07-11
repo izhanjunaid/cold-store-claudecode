@@ -50,14 +50,28 @@ test.describe('WF-01 — Produce Inbound', () => {
     expect(chambers.length).toBeGreaterThan(0);
     expect(ratePlans.length).toBeGreaterThan(0);
 
+    // Pick a mutually-compatible commodity/room/rate-plan trio — list order is
+    // not a contract (commodities sort alphabetically; rooms may be restricted).
+    const commodity = commodities.find((c: { name: string }) => c.name === 'POTATO') ?? commodities[0];
+    const chamber =
+      chambers.find(
+        (ch: { commodity_restriction_id: string | null; is_active: boolean }) =>
+          ch.is_active && (!ch.commodity_restriction_id || ch.commodity_restriction_id === commodity.id),
+      ) ?? chambers[0];
+    const ratePlan =
+      ratePlans.find(
+        (r: { commodity_id: string | null; is_active: boolean }) =>
+          r.is_active && (!r.commodity_id || r.commodity_id === commodity.id),
+      ) ?? ratePlans[0];
+
     // Create lot via API (the form is exercised in unit/integration; the goal here
     // is the end-to-end PDF reachability check).
     const lotRes = await request.post(`${API_URL}/v1/lots`, {
       data: {
         owner_party_id: partyId,
-        commodity_id: commodities[0].id,
-        rate_plan_id: ratePlans[0].id,
-        chamber_id: chambers[0].id,
+        commodity_id: commodity.id,
+        rate_plan_id: ratePlan.id,
+        chamber_id: chamber.id,
         quantity_bags: 30,
         accepted_weight_kg: 600,
         inbound_date: new Date().toISOString().slice(0, 10),
@@ -71,8 +85,10 @@ test.describe('WF-01 — Produce Inbound', () => {
     const lot = (await lotRes.json()).data;
 
     // UI smoke: navigate to lot detail and assert the receipt download link works.
+    // (The lot number renders in both the breadcrumb and the page heading —
+    // target the heading to satisfy strict mode.)
     await page.goto(`/lots/${lot.id}`);
-    await expect(page.getByText(lot.lot_number)).toBeVisible();
+    await expect(page.getByRole('heading', { name: lot.lot_number })).toBeVisible();
 
     const receiptRes = await request.get(`${API_URL}/v1/lots/${lot.id}/receipt`, {
       headers: {

@@ -691,3 +691,48 @@ The following tables handle the cost-side operations and flow into the General L
 | `created_at` | TIMESTAMPTZ | NOT NULL | |
 | `created_by` | UUID | FK → users | |
 
+
+## Rooms & Racks (Phase 14, migration 0005)
+
+Terminology: the UI presents a chamber as a **Room**; the database and API keep `chamber`. Racks are sub-locations within a chamber. A lot's bags may spread across several racks of its room via `lot_rack_placements`; bags not covered by a placement are implicitly **Unplaced** (placement is optional at inbound). Rack capacity is a soft warning only — the hard capacity check remains at chamber level. Placements are restricted to racks of the lot's chamber; rack→rack moves may be partial, inter-room moves are whole-lot (the single `lots.chamber_id` FK stays authoritative for occupancy/reports/billing).
+
+### 32. `racks`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | UUID | PK | |
+| `facility_id` | UUID | FK → facilities | |
+| `chamber_id` | UUID | FK → chambers | |
+| `name` | VARCHAR(50) | NOT NULL, UNIQUE per chamber | e.g. "R-1" |
+| `max_capacity_bags` | INT | NOT NULL | soft limit — warn, never block |
+| `position` | INT | NOT NULL DEFAULT 0 | sort order for the visual rack grid |
+| `is_active` | BOOLEAN | DEFAULT TRUE | deactivation blocked while stock is placed |
+| `notes` | TEXT | NULLABLE | |
+
+### 33. `lot_rack_placements`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | UUID | PK | |
+| `facility_id` | UUID | FK → facilities | |
+| `lot_id` | UUID | FK → lots ON DELETE CASCADE, UNIQUE with rack_id | placements are children of the lot |
+| `rack_id` | UUID | FK → racks (RESTRICT) | must belong to the lot's chamber |
+| `bags` | INT | NOT NULL, CHECK > 0 | sum per lot ≤ `lots.current_balance_bags` (service-enforced) |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
+
+### 34. `lot_movements` (append-only)
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | UUID | PK | |
+| `facility_id` | UUID | FK → facilities | |
+| `lot_id` | UUID | FK → lots ON DELETE CASCADE | |
+| `movement_type` | ENUM | NOT NULL | PLACEMENT \| RACK_TRANSFER \| ROOM_TRANSFER \| WITHDRAWAL_PICK |
+| `from_chamber_id` / `to_chamber_id` | UUID | FK → chambers, NULLABLE | |
+| `from_rack_id` / `to_rack_id` | UUID | FK → racks, NULLABLE | |
+| `bags` | INT | NOT NULL | |
+| `reason` | TEXT | NULLABLE | |
+| `moved_by` | UUID | FK → users | |
+| `moved_at` | TIMESTAMPTZ | DEFAULT now() | index (lot_id, moved_at) |
+
+Reconciliation rules: withdrawal finalize applies explicit `picked_from` racks first, then auto-trims the largest placements until placed total ≤ new balance (each trim logs `WITHDRAWAL_PICK`; a full close clears all placements). Partial ownership transfers re-attribute trimmed placements onto the child lot on the same racks without movement rows — the bags never physically move.
