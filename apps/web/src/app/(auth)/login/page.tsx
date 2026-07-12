@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Snowflake } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
@@ -92,7 +93,12 @@ export default function LoginPage() {
                 <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="admin@coldchain.pk" autoComplete="username" />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  <Link href="/forgot-password" className="text-xs text-muted-foreground hover:text-primary hover:underline">
+                    Forgot password?
+                  </Link>
+                </div>
                 <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required placeholder="Enter your password" autoComplete="current-password" />
               </div>
               <Button type="submit" disabled={loading} className="w-full">

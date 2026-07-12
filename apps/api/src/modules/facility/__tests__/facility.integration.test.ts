@@ -230,7 +230,7 @@ describe('Phase 15 email settings', () => {
 
     // Stored encrypted, not plaintext
     const row = await prisma.facility.findUnique({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
-    const stored = (row!.settings as Record<string, any>).email;
+    const stored = (row!.settings as Record<string, any>)['email'];
     expect(stored.smtp_password).toBeUndefined();
     expect(stored.smtp_password_enc).toBeTruthy();
     expect(stored.smtp_password_enc).not.toContain('app-password-abc');
@@ -238,7 +238,7 @@ describe('Phase 15 email settings', () => {
 
   it('PATCH without smtp_password keeps the existing password', async () => {
     const before = await prisma.facility.findUnique({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
-    const encBefore = (before!.settings as Record<string, any>).email.smtp_password_enc;
+    const encBefore = (before!.settings as Record<string, any>)['email'].smtp_password_enc;
 
     const res = await app.inject({
       method: 'PATCH',
@@ -252,7 +252,7 @@ describe('Phase 15 email settings', () => {
     expect(email.smtp_password_set).toBe(true);
 
     const after = await prisma.facility.findUnique({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
-    expect((after!.settings as Record<string, any>).email.smtp_password_enc).toBe(encBefore);
+    expect((after!.settings as Record<string, any>)['email'].smtp_password_enc).toBe(encBefore);
   });
 
   it('POST test-email sends through the configured transport', async () => {

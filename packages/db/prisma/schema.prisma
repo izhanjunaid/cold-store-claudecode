@@ -30,6 +30,11 @@ enum AuditAction {
   DELETE
 }
 
+enum OtpPurpose {
+  PASSWORD_RESET
+  LOGIN_2FA
+}
+
 // ============================================================
 // ENUMS (Phase 1)
 // ============================================================
@@ -310,6 +315,7 @@ model Facility {
   users          User[]
   auditLogs      AuditLog[]
   refreshTokens  RefreshToken[]
+  otpCodes       OtpCode[]
   parties        Party[]
   chambers       Chamber[]
   ratePlans      RatePlan[]
@@ -356,6 +362,7 @@ model User {
 
   facility              Facility           @relation(fields: [facilityId], references: [id])
   refreshTokens         RefreshToken[]
+  otpCodes              OtpCode[]
   partiesCreated        Party[]            @relation("PartyCreatedBy")
   temperatureLogs       TemperatureLog[]
   lotsCreated           Lot[]              @relation("LotCreatedBy")
@@ -398,6 +405,27 @@ model RefreshToken {
   @@index([userId])
   @@index([tokenHash])
   @@map("refresh_tokens")
+}
+
+// Short-lived email verification codes (password reset, login 2FA).
+// codeHash = sha256 hex of the 6-digit code; single-use via consumedAt.
+model OtpCode {
+  id           String     @id @default(uuid()) @db.Uuid
+  facilityId   String     @map("facility_id") @db.Uuid
+  userId       String     @map("user_id") @db.Uuid
+  purpose      OtpPurpose
+  codeHash     String     @map("code_hash") @db.VarChar(64)
+  expiresAt    DateTime   @map("expires_at") @db.Timestamptz()
+  consumedAt   DateTime?  @map("consumed_at") @db.Timestamptz()
+  attemptCount Int        @default(0) @map("attempt_count")
+  requestedIp  String?    @map("requested_ip") @db.VarChar(45)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz()
+
+  user     User     @relation(fields: [userId], references: [id])
+  facility Facility @relation(fields: [facilityId], references: [id])
+
+  @@index([userId, purpose])
+  @@map("otp_codes")
 }
 
 model AuditLog {
