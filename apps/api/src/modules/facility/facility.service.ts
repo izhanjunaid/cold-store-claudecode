@@ -6,6 +6,15 @@ import {
   type FacilityResponseType,
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
+import { encryptSecret } from '../../common/crypto';
+
+// Top-level settings keys that are managed by dedicated endpoints and must never
+// appear in facility responses or be writable through PATCH /v1/facilities/me
+// (they live in the same JSON column so the facilities audit trigger covers them).
+const INTERNAL_SETTINGS_KEYS = ['permissions', 'notifications_state'];
+
+// Internal key inside settings.email holding the aes-256-gcm encrypted SMTP password.
+const SMTP_PASSWORD_ENC_KEY = 'smtp_password_enc';
 
 /**
  * Resolve a facility's raw JSON settings column into a fully-populated
@@ -41,6 +50,17 @@ function format(row: {
   gstNumber: string | null;
   settings: Prisma.JsonValue;
 }): FacilityResponseType {
+  const merged = mergeSettings(row.settings, undefined) as unknown as Record<string, unknown>;
+  for (const key of INTERNAL_SETTINGS_KEYS) delete merged[key];
+
+  // The stored email object may carry the encrypted password — strip it and
+  // expose only whether a password is set.
+  const emailStored = (merged['email'] as Record<string, unknown> | undefined) ?? {};
+  const emailRaw: Record<string, unknown> = { ...DEFAULT_FACILITY_SETTINGS.email, ...emailStored };
+  const passwordSet = Boolean(emailRaw[SMTP_PASSWORD_ENC_KEY]);
+  delete emailRaw[SMTP_PASSWORD_ENC_KEY];
+  merged['email'] = { ...emailRaw, smtp_password_set: passwordSet };
+
   return {
     id: row.id,
     name: row.name,
@@ -48,7 +68,7 @@ function format(row: {
     city: row.city,
     phone: row.phone,
     gst_number: row.gstNumber,
-    settings: mergeSettings(row.settings, undefined),
+    settings: merged as unknown as FacilityResponseType['settings'],
   };
 }
 
@@ -75,7 +95,29 @@ export class FacilityService {
     if (patch.phone !== undefined) data.phone = patch.phone;
     if (patch.gst_number !== undefined) data.gstNumber = patch.gst_number;
     if (patch.settings !== undefined) {
-      data.settings = mergeSettings(existing.settings, patch.settings) as unknown as Prisma.InputJsonValue;
+      const settingsPatch: Record<string, unknown> = { ...patch.settings };
+      // Never allow internal keys through the generic settings PATCH.
+      for (const key of INTERNAL_SETTINGS_KEYS) delete settingsPatch[key];
+
+      if (settingsPatch['email'] !== undefined) {
+        const { smtp_password, ...emailPublic } = settingsPatch['email'] as Record<string, unknown> & {
+          smtp_password?: string;
+        };
+        delete emailPublic[SMTP_PASSWORD_ENC_KEY];
+        const existingEmail =
+          existing.settings && typeof existing.settings === 'object' && !Array.isArray(existing.settings)
+            ? ((existing.settings as Record<string, unknown>)['email'] as Record<string, unknown> | undefined)
+            : undefined;
+        // smtp_password is write-only: provided → encrypt and replace; omitted → keep existing.
+        const passwordEnc =
+          smtp_password !== undefined ? encryptSecret(smtp_password) : existingEmail?.[SMTP_PASSWORD_ENC_KEY];
+        settingsPatch['email'] = passwordEnc ? { ...emailPublic, [SMTP_PASSWORD_ENC_KEY]: passwordEnc } : emailPublic;
+      }
+
+      data.settings = mergeSettings(
+        existing.settings,
+        settingsPatch as Partial<FacilitySettingsType>,
+      ) as unknown as Prisma.InputJsonValue;
     }
     const updated = await this.prisma.facility.update({ where: { id: facilityId }, data });
     return format(updated);

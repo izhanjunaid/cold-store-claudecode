@@ -7,12 +7,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const apiRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const src = join(apiRoot, 'src', 'modules', 'pdf', 'templates');
-const dest = join(apiRoot, 'dist', 'modules', 'pdf', 'templates');
 
-if (existsSync(src)) {
-  cpSync(src, dest, { recursive: true });
-  console.log(`[copy-templates] PDF templates -> ${dest}`);
-} else {
-  console.warn(`[copy-templates] no templates dir at ${src} (skipped)`);
+for (const module of ['pdf', 'mail']) {
+  const src = join(apiRoot, 'src', 'modules', module, 'templates');
+  const dest = join(apiRoot, 'dist', 'modules', module, 'templates');
+
+  if (existsSync(src)) {
+    cpSync(src, dest, { recursive: true });
+    console.log(`[copy-templates] ${module} templates -> ${dest}`);
+  } else {
+    console.warn(`[copy-templates] no templates dir at ${src} (skipped)`);
+  }
 }

@@ -13,6 +13,7 @@ import {
 import errorHandler from './plugins/error-handler';
 import facilityScope from './plugins/facility-scope';
 import authPlugin from './plugins/auth';
+import mailPlugin from './plugins/mail';
 import { authRoutes } from './modules/auth/auth.controller';
 import { partyRoutes } from './modules/party/party.controller';
 import { chamberRoutes } from './modules/chamber/chamber.controller';
@@ -63,6 +64,7 @@ export async function buildApp() {
   await app.register(errorHandler);
   await app.register(facilityScope);
   await app.register(authPlugin);
+  await app.register(mailPlugin);
 
   // OpenAPI / Swagger
   await app.register(swagger, {

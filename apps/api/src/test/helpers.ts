@@ -6,6 +6,8 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 import errorHandler from '../plugins/error-handler';
 import facilityScope from '../plugins/facility-scope';
 import authPlugin from '../plugins/auth';
+import mailPlugin from '../plugins/mail';
+import type { MailConfig } from '../modules/mail/mail.service';
 import { authRoutes } from '../modules/auth/auth.controller';
 import { partyRoutes } from '../modules/party/party.controller';
 import { chamberRoutes } from '../modules/chamber/chamber.controller';
@@ -30,6 +32,16 @@ import type { FastifyInstance } from 'fastify';
 
 export const TEST_FACILITY_ID = '00000000-0000-0000-0000-000000000001';
 
+// Every email "sent" by the test app lands here instead of going over SMTP.
+export interface CapturedMail {
+  config: MailConfig;
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+}
+export const sentMails: CapturedMail[] = [];
+
 let app: FastifyInstance | null = null;
 
 async function buildTestApp(): Promise<FastifyInstance> {
@@ -42,6 +54,14 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(errorHandler);
   await testApp.register(facilityScope);
   await testApp.register(authPlugin);
+  await testApp.register(mailPlugin, {
+    transportFactory: (config) => ({
+      sendMail: async (opts) => {
+        sentMails.push({ config, ...opts });
+        return {};
+      },
+    }),
+  });
   testApp.get('/health', async () => ({ success: true, data: { status: 'ok' } }));
   await testApp.register(authRoutes);
   await testApp.register(partyRoutes);

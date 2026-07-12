@@ -7,6 +7,7 @@ import {
   loginAsRole,
   authHeaders,
   TEST_FACILITY_ID,
+  sentMails,
 } from '../../../test/helpers';
 
 const prisma = new PrismaClient();
@@ -184,5 +185,143 @@ describe('Phase 12 facility settings', () => {
       },
     });
     expect(negativeGrace.statusCode).toBe(400);
+  });
+});
+
+describe('Phase 15 email settings', () => {
+  const emailPayload = {
+    enabled: true,
+    smtp_host: 'smtp.gmail.com',
+    smtp_port: 587,
+    smtp_secure: false,
+    smtp_user: 'owner@gmail.com',
+    from_name: 'Test Cold Store',
+    admin_email: 'owner@gmail.com',
+  };
+
+  it('GET returns email defaults with smtp_password_set=false for legacy rows', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/facilities/me',
+      headers: authHeaders(ownerToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const email = JSON.parse(res.body).data.settings.email;
+    expect(email.enabled).toBe(false);
+    expect(email.smtp_host).toBe('smtp.gmail.com');
+    expect(email.smtp_password_set).toBe(false);
+    expect(email.smtp_password).toBeUndefined();
+    expect(email.smtp_password_enc).toBeUndefined();
+  });
+
+  it('PATCH stores the SMTP password encrypted and never returns it', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/facilities/me',
+      headers: authHeaders(ownerToken),
+      payload: { settings: { email: { ...emailPayload, smtp_password: 'app-password-abc' } } },
+    });
+    expect(res.statusCode).toBe(200);
+    const email = JSON.parse(res.body).data.settings.email;
+    expect(email.smtp_password_set).toBe(true);
+    expect(email.smtp_password).toBeUndefined();
+    expect(email.smtp_password_enc).toBeUndefined();
+    expect(email.admin_email).toBe('owner@gmail.com');
+
+    // Stored encrypted, not plaintext
+    const row = await prisma.facility.findUnique({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    const stored = (row!.settings as Record<string, any>).email;
+    expect(stored.smtp_password).toBeUndefined();
+    expect(stored.smtp_password_enc).toBeTruthy();
+    expect(stored.smtp_password_enc).not.toContain('app-password-abc');
+  });
+
+  it('PATCH without smtp_password keeps the existing password', async () => {
+    const before = await prisma.facility.findUnique({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    const encBefore = (before!.settings as Record<string, any>).email.smtp_password_enc;
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/facilities/me',
+      headers: authHeaders(ownerToken),
+      payload: { settings: { email: { ...emailPayload, from_name: 'Renamed Store' } } },
+    });
+    expect(res.statusCode).toBe(200);
+    const email = JSON.parse(res.body).data.settings.email;
+    expect(email.from_name).toBe('Renamed Store');
+    expect(email.smtp_password_set).toBe(true);
+
+    const after = await prisma.facility.findUnique({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    expect((after!.settings as Record<string, any>).email.smtp_password_enc).toBe(encBefore);
+  });
+
+  it('POST test-email sends through the configured transport', async () => {
+    sentMails.length = 0;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/facilities/me/test-email',
+      headers: authHeaders(ownerToken),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data.sent).toBe(true);
+    expect(sentMails).toHaveLength(1);
+    expect(sentMails[0]!.to).toBe('owner@gmail.com');
+    expect(sentMails[0]!.config.password).toBe('app-password-abc');
+    expect(sentMails[0]!.subject).toContain('test email');
+  });
+
+  it('POST test-email respects an explicit recipient', async () => {
+    sentMails.length = 0;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/facilities/me/test-email',
+      headers: authHeaders(ownerToken),
+      payload: { to: 'other@example.com' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data.sent).toBe(true);
+    expect(sentMails[0]!.to).toBe('other@example.com');
+  });
+
+  it('POST test-email reports not-configured when email is disabled', async () => {
+    await app.inject({
+      method: 'PATCH',
+      url: '/v1/facilities/me',
+      headers: authHeaders(ownerToken),
+      payload: { settings: { email: { ...emailPayload, enabled: false } } },
+    });
+    sentMails.length = 0;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/facilities/me/test-email',
+      headers: authHeaders(ownerToken),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    const data = JSON.parse(res.body).data;
+    expect(data.sent).toBe(false);
+    expect(data.error).toMatch(/not configured/i);
+    expect(sentMails).toHaveLength(0);
+  });
+
+  it('POST test-email — MANAGER is denied (403)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/facilities/me/test-email',
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('PATCH rejects an invalid admin_email (400)', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/facilities/me',
+      headers: authHeaders(ownerToken),
+      payload: { settings: { email: { ...emailPayload, admin_email: 'not-an-email' } } },
+    });
+    expect(res.statusCode).toBe(400);
   });
 });

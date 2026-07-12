@@ -31,6 +31,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
   const nav = [
     { href: '/settings', label: 'General' },
+    { href: '/settings/email', label: 'Email' },
     { href: '/settings/users', label: 'Users' },
   ];
 

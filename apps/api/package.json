@@ -28,6 +28,7 @@
     "fastify-type-provider-zod": "^4.0.0",
     "handlebars": "^4.7.9",
     "jsonwebtoken": "^9.0.0",
+    "nodemailer": "^9.0.3",
     "puppeteer": "^24.40.0",
     "zod": "^3.24.0"
   },
@@ -35,6 +36,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/node": "^22.0.0",
+    "@types/nodemailer": "^8.0.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.1.0"
