@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { signAccessToken, verifyAccessToken, signRefreshToken, verifyRefreshToken } from './jwt';
+import {
+  signAccessToken,
+  verifyAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+  signPendingTwoFactorToken,
+  verifyPendingTwoFactorToken,
+} from './jwt';
 
 describe('JWT utilities', () => {
   const payload = { userId: 'user-1', facilityId: 'fac-1', role: 'OWNER' };
@@ -28,5 +35,22 @@ describe('JWT utilities', () => {
   it('rejects tampered refresh token', () => {
     const token = signRefreshToken({ userId: 'u1', tokenId: 't1' });
     expect(() => verifyRefreshToken(token + 'x')).toThrow();
+  });
+
+  it('signs and verifies a 2FA pending token', () => {
+    const token = signPendingTwoFactorToken({ userId: 'user-1', facilityId: 'fac-1' });
+    const decoded = verifyPendingTwoFactorToken(token);
+    expect(decoded.userId).toBe('user-1');
+    expect(decoded.facilityId).toBe('fac-1');
+  });
+
+  it('a 2FA pending token is NOT a valid access token', () => {
+    const token = signPendingTwoFactorToken({ userId: 'user-1', facilityId: 'fac-1' });
+    expect(() => verifyAccessToken(token)).toThrow('Not an access token');
+  });
+
+  it('an access token is NOT a valid 2FA pending token', () => {
+    const token = signAccessToken(payload);
+    expect(() => verifyPendingTwoFactorToken(token)).toThrow('Not a 2FA pending token');
   });
 });

@@ -9,6 +9,10 @@ export const LoginRequest = z.object({
 export const LoginResponse = z.object({
   access_token: z.string(),
   refresh_token: z.string(),
+  // Set when the account has 2FA enabled but email is unconfigured/unreachable:
+  // the login proceeds (an offline box must not lock out its owner) and the UI
+  // surfaces a warning.
+  two_factor_bypassed: z.boolean().optional(),
   user: z.object({
     id: z.string().uuid(),
     email: z.string().email(),
@@ -17,6 +21,30 @@ export const LoginResponse = z.object({
     facility_id: z.string().uuid(),
   }),
 });
+
+// Returned by POST /v1/auth/login instead of tokens when 2FA is required.
+export const TwoFactorPendingResponse = z.object({
+  requires_2fa: z.literal(true),
+  pending_token: z.string(),
+  message: z.string(),
+});
+export type TwoFactorPendingResponseType = z.infer<typeof TwoFactorPendingResponse>;
+
+export const Verify2faRequest = z.object({
+  pending_token: z.string(),
+  code: z.string().regex(/^\d{6}$/, 'Code must be 6 digits'),
+});
+export type Verify2faRequestType = z.infer<typeof Verify2faRequest>;
+
+export const Enable2faRequest = z.object({
+  code: z.string().regex(/^\d{6}$/, 'Code must be 6 digits'),
+});
+export type Enable2faRequestType = z.infer<typeof Enable2faRequest>;
+
+export const Disable2faRequest = z.object({
+  password: z.string().min(8),
+});
+export type Disable2faRequestType = z.infer<typeof Disable2faRequest>;
 
 export const RefreshRequest = z.object({
   refresh_token: z.string(),
@@ -34,6 +62,7 @@ export const MeResponse = z.object({
   name_urdu: z.string().nullable(),
   role: UserRole,
   facility_id: z.string().uuid(),
+  two_factor_enabled: z.boolean(),
 });
 
 export const ForgotPasswordRequest = z.object({

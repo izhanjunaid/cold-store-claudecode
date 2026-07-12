@@ -357,6 +357,7 @@ model User {
   failedLoginCount Int       @default(0) @map("failed_login_count")
   lockedUntil      DateTime? @map("locked_until") @db.Timestamptz()
   mustChangePassword Boolean @default(false) @map("must_change_password")
+  twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 

@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, KeyRound, LogOut, Search } from 'lucide-react';
+import { ChevronDown, KeyRound, LogOut, Search, UserCircle } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
@@ -82,6 +82,10 @@ export function Topbar() {
                 <div className="text-xs font-normal text-muted-foreground">{user.email}</div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => router.push('/account')}>
+                <UserCircle className="mr-2 h-4 w-4" aria-hidden />
+                My account
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => router.push('/change-password')}>
                 <KeyRound className="mr-2 h-4 w-4" aria-hidden />
                 Change password

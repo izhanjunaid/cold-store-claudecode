@@ -2,13 +2,33 @@ import bcrypt from 'bcryptjs';
 import type { PrismaClient } from '@coldchain/db';
 import { AuthRepository } from './auth.repository';
 import { OtpService, OTP_TTL_MINUTES } from './otp.service';
-import { MailService, mailConfigFromSettings } from '../mail/mail.service';
-import { signAccessToken, signRefreshToken } from '../../common/jwt';
+import { MailService, mailConfigFromSettings, type MailConfig } from '../mail/mail.service';
+import {
+  signAccessToken,
+  signRefreshToken,
+  signPendingTwoFactorToken,
+  verifyPendingTwoFactorToken,
+} from '../../common/jwt';
 import { Errors } from '../../common/errors';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 const BCRYPT_ROUNDS = 12;
+
+interface TokenUser {
+  id: string;
+  facilityId: string;
+  email: string;
+  name: string;
+  role: string;
+  mustChangePassword: boolean;
+}
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  if (!local || !domain) return email;
+  return `${local[0]}***@${domain}`;
+}
 
 export class AuthService {
   constructor(
@@ -40,10 +60,123 @@ export class AuthService {
       throw Errors.AUTH_INVALID('Invalid email or password');
     }
 
+    // Password verified. If 2FA is on and email works, park the login behind
+    // an emailed code; if email is unconfigured/unreachable (offline box),
+    // proceed but flag the bypass so the UI can warn.
+    if (user.twoFactorEnabled) {
+      const config = await this.resolveMailConfig(facilityId);
+      if (config) {
+        const sent = await this.sendLoginCode(user, facilityId, config.config, config.facilityName);
+        if (sent) {
+          return {
+            requires_2fa: true as const,
+            pending_token: signPendingTwoFactorToken({ userId: user.id, facilityId: user.facilityId }),
+            message: `A verification code was sent to ${maskEmail(user.email)}.`,
+          };
+        }
+      }
+      await this.repo.updateLastLogin(user.id);
+      return { ...(await this.issueTokens(user)), two_factor_bypassed: true };
+    }
+
     // Success — reset failed count, update last login
     await this.repo.updateLastLogin(user.id);
+    return this.issueTokens(user);
+  }
 
-    // Generate tokens
+  /** Completes a 2FA login: pending token + emailed code → real tokens. */
+  async verify2fa(pendingToken: string, code: string) {
+    let payload: { userId: string; facilityId: string };
+    try {
+      payload = verifyPendingTwoFactorToken(pendingToken);
+    } catch {
+      throw Errors.AUTH_INVALID('Invalid or expired login session — sign in again');
+    }
+
+    const user = await this.repo.findUserById(payload.userId);
+    if (!user || !user.isActive) throw Errors.AUTH_INVALID('Invalid or expired code');
+
+    const ok = await this.otp.verifyAndConsume(user.id, 'LOGIN_2FA', code);
+    if (!ok) throw Errors.AUTH_INVALID('Invalid or expired code');
+
+    await this.repo.updateLastLogin(user.id);
+    return this.issueTokens(user);
+  }
+
+  /** 2FA enrollment, step 1: email a code to the user's own address. */
+  async request2faEnable(userId: string) {
+    const user = await this.repo.findUserById(userId);
+    if (!user || !user.isActive) throw Errors.AUTH_INVALID('User not found');
+
+    const config = await this.resolveMailConfig(user.facilityId);
+    if (!config) {
+      throw Errors.VALIDATION_ERROR('Email sending must be configured (Settings → Email) before enabling 2FA');
+    }
+    const sent = await this.sendLoginCode(user, user.facilityId, config.config, config.facilityName);
+    if (!sent) {
+      throw Errors.VALIDATION_ERROR('Could not send the verification email — check the email settings');
+    }
+    return { message: `A verification code was sent to ${maskEmail(user.email)}.` };
+  }
+
+  /** 2FA enrollment, step 2: prove the email works, then switch it on. */
+  async enable2fa(userId: string, code: string) {
+    const user = await this.repo.findUserById(userId);
+    if (!user || !user.isActive) throw Errors.AUTH_INVALID('User not found');
+
+    const ok = await this.otp.verifyAndConsume(user.id, 'LOGIN_2FA', code);
+    if (!ok) throw Errors.AUTH_INVALID('Invalid or expired code');
+
+    await this.prisma.user.update({ where: { id: userId }, data: { twoFactorEnabled: true } });
+    return { two_factor_enabled: true };
+  }
+
+  async disable2fa(userId: string, password: string) {
+    const user = await this.repo.findUserById(userId);
+    if (!user || !user.isActive) throw Errors.AUTH_INVALID('User not found');
+
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) throw Errors.USER_WRONG_PASSWORD();
+
+    await this.prisma.user.update({ where: { id: userId }, data: { twoFactorEnabled: false } });
+    return { two_factor_enabled: false };
+  }
+
+  private async resolveMailConfig(
+    facilityId: string,
+  ): Promise<{ config: MailConfig; facilityName: string } | null> {
+    const facility = await this.prisma.facility.findUnique({ where: { id: facilityId } });
+    if (!facility) return null;
+    const config = mailConfigFromSettings(facility.settings);
+    return config ? { config, facilityName: facility.name } : null;
+  }
+
+  private async sendLoginCode(
+    user: { id: string; email: string },
+    facilityId: string,
+    config: MailConfig,
+    facilityName: string,
+  ): Promise<boolean> {
+    const code = await this.otp.issue(user.id, facilityId, 'LOGIN_2FA');
+    try {
+      await this.mail.send(config, {
+        to: user.email,
+        subject: 'Your ColdChain login code',
+        template: 'otp-code',
+        context: {
+          facilityName,
+          purposeLabel: 'Login verification code',
+          code,
+          expiresMinutes: OTP_TTL_MINUTES,
+        },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async issueTokens(user: TokenUser) {
     const accessToken = signAccessToken({
       userId: user.id,
       facilityId: user.facilityId,
@@ -195,6 +328,7 @@ export class AuthService {
       role: user.role,
       facility_id: user.facilityId,
       must_change_password: user.mustChangePassword,
+      two_factor_enabled: user.twoFactorEnabled,
     };
   }
 }

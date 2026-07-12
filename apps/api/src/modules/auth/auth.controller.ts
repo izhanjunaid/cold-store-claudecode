@@ -5,6 +5,9 @@ import {
   ChangePasswordRequest,
   ForgotPasswordRequest,
   ResetPasswordWithOtpRequest,
+  Verify2faRequest,
+  Enable2faRequest,
+  Disable2faRequest,
 } from '@coldchain/shared';
 import type { z } from 'zod';
 import { AuthService } from './auth.service';
@@ -74,6 +77,56 @@ export async function authRoutes(app: FastifyInstance) {
       }
       const body = request.body as z.infer<typeof ResetPasswordWithOtpRequest>;
       const result = await service.resetPassword(facilityId, body.email, body.code, body.new_password);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/auth/login/verify-2fa — public, completes a pending 2FA login.
+  app.route({
+    method: 'POST',
+    url: '/v1/auth/login/verify-2fa',
+    schema: { body: Verify2faRequest },
+    config: { rateLimit: { max: 5, timeWindow: '5 minutes' } },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof Verify2faRequest>;
+      const result = await service.verify2fa(body.pending_token, body.code);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/auth/2fa/request-enable — emails a code to the caller's own address.
+  app.route({
+    method: 'POST',
+    url: '/v1/auth/2fa/request-enable',
+    preHandler: [app.authenticate],
+    handler: async (request, reply) => {
+      const result = await service.request2faEnable(request.user!.userId);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/auth/2fa/enable — verify the code, switch 2FA on.
+  app.route({
+    method: 'POST',
+    url: '/v1/auth/2fa/enable',
+    preHandler: [app.authenticate],
+    schema: { body: Enable2faRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof Enable2faRequest>;
+      const result = await service.enable2fa(request.user!.userId, body.code);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/auth/2fa/disable — confirm password, switch 2FA off.
+  app.route({
+    method: 'POST',
+    url: '/v1/auth/2fa/disable',
+    preHandler: [app.authenticate],
+    schema: { body: Disable2faRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof Disable2faRequest>;
+      const result = await service.disable2fa(request.user!.userId, body.password);
       return sendSuccess(reply, result);
     },
   });
