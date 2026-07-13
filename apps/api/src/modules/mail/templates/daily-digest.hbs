@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;">
+    <div style="max-width:600px;margin:0 auto;padding:24px;">
+      <div style="background:#0f766e;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0;">
+        <h1 style="margin:0;font-size:18px;">{{facilityName}}</h1>
+        <p style="margin:4px 0 0;font-size:13px;opacity:.9;">Daily digest · {{date}}</p>
+      </div>
+
+      <div style="background:#fff;padding:20px 24px;border:1px solid #e5e7eb;border-top:0;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;">
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;">Active lots</td>
+            <td style="padding:8px 0;text-align:right;font-weight:bold;">{{activeLots}}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;">Bags in storage</td>
+            <td style="padding:8px 0;text-align:right;font-weight:bold;">{{totalBags}}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;">Occupancy</td>
+            <td style="padding:8px 0;text-align:right;font-weight:bold;">{{occupancyPct}}%</td>
+          </tr>
+        </table>
+
+        {{#if hasReceivables}}
+        <h2 style="font-size:14px;margin:0 0 8px;color:#0f766e;">Receivables</h2>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;">
+          <tr>
+            <td style="padding:6px 0;color:#6b7280;">Total outstanding</td>
+            <td style="padding:6px 0;text-align:right;font-weight:bold;">{{arTotal}}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#b91c1c;">Overdue 90+ days</td>
+            <td style="padding:6px 0;text-align:right;font-weight:bold;color:#b91c1c;">{{overdue90}}</td>
+          </tr>
+        </table>
+        {{/if}}
+
+        {{#if hasStorageAlerts}}
+        <h2 style="font-size:14px;margin:0 0 8px;color:#b45309;">Rooms near capacity ({{warningPct}}%+)</h2>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px;">
+          {{#each fullChambers}}
+          <tr style="border-bottom:1px solid #f0f0f0;">
+            <td style="padding:6px 0;">{{this.name}}</td>
+            <td style="padding:6px 0;text-align:right;">{{this.bags}} / {{this.capacity}} bags</td>
+            <td style="padding:6px 0;text-align:right;font-weight:bold;color:#b45309;">{{this.occupancy_pct}}%</td>
+          </tr>
+          {{/each}}
+        </table>
+        {{/if}}
+
+        {{#if hasAgingLots}}
+        <h2 style="font-size:14px;margin:0 0 8px;color:#b45309;">Lots needing attention</h2>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px;">
+          <tr style="color:#6b7280;text-align:left;">
+            <th style="padding:6px 0;font-weight:normal;">Lot</th>
+            <th style="padding:6px 0;font-weight:normal;">Owner</th>
+            <th style="padding:6px 0;font-weight:normal;text-align:right;">Days</th>
+          </tr>
+          {{#each agingLots}}
+          <tr style="border-bottom:1px solid #f0f0f0;">
+            <td style="padding:6px 0;">{{this.lot_number}} <span style="color:#9ca3af;">({{this.commodity_name}})</span></td>
+            <td style="padding:6px 0;">{{this.owner_name}}</td>
+            <td style="padding:6px 0;text-align:right;font-weight:bold;">{{this.days_in_storage}}</td>
+          </tr>
+          {{/each}}
+        </table>
+        {{/if}}
+
+        {{#unless hasReceivables}}{{#unless hasStorageAlerts}}{{#unless hasAgingLots}}
+        <p style="font-size:13px;color:#6b7280;">Nothing needs your attention today. All clear.</p>
+        {{/unless}}{{/unless}}{{/unless}}
+      </div>
+
+      <p style="font-size:11px;color:#9ca3af;text-align:center;margin:16px 0 0;">
+        Sent by ColdChain. Turn this off in Settings → Notifications.
+      </p>
+    </div>
+  </body>
+</html>

@@ -31,6 +31,15 @@ export const EmailSettingsResponse = EmailSettings.extend({
 });
 export type EmailSettingsResponseType = z.infer<typeof EmailSettingsResponse>;
 
+// Email notifications. The daily digest emails the facility admin a summary of
+// overdue receivables, storage-capacity alerts and aging lots, once a day at
+// digest_hour (facility-local, 0–23). Sending requires configured email.
+export const NotificationSettings = z.object({
+  daily_digest_enabled: z.boolean(),
+  digest_hour: z.number().int().min(0).max(23),
+});
+export type NotificationSettingsType = z.infer<typeof NotificationSettings>;
+
 export const FacilitySettings = z.object({
   weight_dispute_threshold_kg: z.number().nonnegative(),
   storage_alert_thresholds: z.record(z.string().uuid(), z.number().int().positive()),
@@ -41,6 +50,7 @@ export const FacilitySettings = z.object({
   gst_default_rate: z.number().min(0).max(100),
   late_payment_surcharge: LatePaymentSurchargeRule,
   email: EmailSettings,
+  notifications: NotificationSettings,
 });
 export type FacilitySettingsType = z.infer<typeof FacilitySettings>;
 
@@ -61,6 +71,10 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
     smtp_user: '',
     from_name: 'ColdChain',
     admin_email: '',
+  },
+  notifications: {
+    daily_digest_enabled: false,
+    digest_hour: 8,
   },
 };
 

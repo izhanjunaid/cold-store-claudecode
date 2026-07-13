@@ -31,6 +31,7 @@ import { userRoutes } from '../modules/user/user.controller';
 import { facilityRoutes } from '../modules/facility/facility.controller';
 import { permissionsRoutes } from '../modules/permissions/permissions.controller';
 import { auditRoutes } from '../modules/audit/audit.controller';
+import { notificationRoutes } from '../modules/notifications/notifications.controller';
 import type { FastifyInstance } from 'fastify';
 
 export const TEST_FACILITY_ID = '00000000-0000-0000-0000-000000000001';
@@ -89,6 +90,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(facilityRoutes);
   await testApp.register(permissionsRoutes);
   await testApp.register(auditRoutes);
+  await testApp.register(notificationRoutes);
   return testApp;
 }
 
