@@ -1,11 +1,25 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Phase 14 — Rooms & Racks COMPLETE on `phase/14-rooms-racks` (2026-07-11, off `phase/13-production-financials`). Client-requested restructure: chambers are presented as **Rooms** containing **Racks**; lots place bags across racks, move between racks/rooms with a movement log, and pick locations surface at withdrawal/gate. Suite: 138 unit + 384 integration (api) + 90 unit (web) pass.
+- **Active Phase**: Phase 15 — Auth, Permissions & Notifications COMPLETE on `phase/15-auth-permissions` (2026-07-14, off `phase/14-rooms-racks`). Owner-configurable permission matrix replacing the hardcoded role hierarchy, plus the email-enabled account features it unlocks: self-service password reset (OTP), optional login 2FA, session management, an activity-log viewer, and a daily digest. Suite: 184 unit + 433 integration (api) + 91 unit (web) pass. **8 commits local on `phase/15-auth-permissions`, not yet pushed.**
 - **Active Task**: None — next candidates: F-2a ops hardening in the installer, Phase 6 (Quality & Spoilage), E2E suite green. Deferred decision: whether to keep/soft-disable the KATCHI book (owner to decide later).
 - **Blockers**: None
-- **Last Updated**: 2026-07-11
+- **Last Updated**: 2026-07-14
 - **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision. Ops hardening from audit F-2a: run the app under a non-owner DB role and REVOKE UPDATE/DELETE on audit_log + EXECUTE on financial_guards_set (deployment concern, see docs/16 §F-2). Rooms & Racks: partial inter-room split (child-lot move) deferred — inter-room moves are whole-lot in v1.
+
+## Phase 15 — Auth, Permissions & Notifications (2026-07-13 → 2026-07-14)
+
+Replaces the hardcoded 6-level `requireMinRole` hierarchy (duplicated at ~119 route sites) with an **owner-configurable capability matrix**, and adds the account-security and notification features that email infrastructure unlocks. Design spec: `phases/phase-15-auth-permissions.md`. 8 commits (local, unpushed) off `phase/14-rooms-racks`.
+
+- **15.1 Email infrastructure** (`7a9936f`): `nodemailer` + Handlebars mail service (fresh transport per send, 10s timeouts, `test-email`/`otp-code`/`daily-digest` templates), `common/crypto.ts` (aes-256-gcm, key from `APP_ENCRYPTION_KEY` or sha256 of `JWT_SECRET`). `FacilitySettings.email` (Gmail SMTP) with a **write-only** `smtp_password` stored encrypted under `smtp_password_enc`, exposed only as `smtp_password_set`; `POST /v1/facilities/me/test-email`. Settings → Email screen.
+- **15.2 OTP password reset** (`6f128c0`): migration `0006_otp_codes` (sha256 6-digit codes, 10-min expiry, single-use, 5-attempt cap, RLS). Public `POST /v1/auth/forgot-password` (neutral) + `/reset-password` (rate-limited, revokes all refresh tokens). `(auth)/forgot-password` two-step flow. **Security fix**: refresh now rejects revoked/expired token rows (`findRefreshTokenById`).
+- **15.3 Login 2FA** (`32fb1d3`): migration `0007_user_two_factor`; pending-token (`purpose=2fa_pending`) between password check and emailed code; `login/verify-2fa` + `2fa/{request-enable,enable,disable}`. Offline boxes fall back to password-only login with a warning (no lockout). Account page 2FA toggle.
+- **15.4 + 15.5 Permission matrix** (`75b4b3b`): registry `packages/shared/src/permissions.ts` (42 keys, each `defaultMinRole` reproducing the old threshold exactly → 23 parity tests). `app.requirePermission(key)` guard (OWNER short-circuit, 60s per-facility cache + invalidation); `GET/PUT /v1/permissions` + reset (guard `permissions.manage`); overrides stored as a hidden `{role:{grant,revoke}}` delta in `settings.permissions`. **All ~119 `requireMinRole` sites swapped**; `requireMinRole`/`requireRole` deleted (`roleAtLeast` kept for KATCHI/backdating/gate-credit business rules). `login`/`/me` return the effective key list. Web: `can(user, key)`/`useCan`, Settings → Permissions matrix UI, `hasMinRole`→`can` sweep (~35 files; KATCHI toggles stay role-based).
+- **15.6 Sessions** (`85a1dbc`): migration `0008` (refresh_tokens gains `user_agent`, `ip`, `last_used_at`); access token carries an optional `sid` claim marking the current device. Self endpoints `GET /v1/auth/sessions`, `DELETE /:id`, `revoke-others`; admin `GET/POST /v1/users/:id/sessions[/revoke-all]` (`users.manage`). Account page "Active Sessions" card + admin card on the user detail page.
+- **15.7 Activity log viewer** (`2697cd9`): migration `0009` (`(facility_id, changed_at)` index); `GET /v1/audit-logs` (guard `audit.view`) over the DB audit trail — filter by table/action/actor/record/date, paginated, actor names batch-resolved, **password/secret fields masked server-side** (any key matching `/password/i`). Settings → Activity Log with an expandable before/after field diff.
+- **15.8 Email notifications** (`0124387`): `FacilitySettings.notifications { daily_digest_enabled, digest_hour }`; digest service composes overdue receivables + storage alerts + aging lots (reusing dashboard/receivables reports) → `daily-digest.hbs`. A 5-min `setInterval` scheduler sends per-facility at the configured local hour, once/day (last-sent under internal `settings.notifications_state`), disabled under test/reset envs; pure `isDigestDue()` is unit-tested. `POST /v1/notifications/digest/send-now` (`settings.manage`) + Settings → Notifications.
+- **15.9 Docs & guardrails**: this file, `TESTING.md`, `docs/07` (roles → configurable matrix; AUDITOR→VIEWER), `.env.production.example` (optional `APP_ENCRYPTION_KEY`), CLAUDE.md gotcha, and a CI grep gate failing on any `requireMinRole(` in `apps/api/src/modules`.
+- **Tests**: parity + registry (23 unit), OTP/2FA/reset, permissions matrix (11 integration incl. grant/revoke/reset + cache invalidation + hidden-key survival), email settings round-trip (masking), sessions (5), audit (4: guard, masking, actor-name, pagination), notifications (3) + `isDigestDue` (6 unit). Defaults mirror the old hierarchy exactly, so every pre-existing 403/200 assertion passes unchanged.
 
 ## Phase 14 — Rooms & Racks (2026-07-10 → 2026-07-11)
 
@@ -49,6 +63,8 @@ Terminology decision: **UI says "Room", DB/API/code keep `chamber`** (zero renam
 | 9 | Gate Pass + Peshgi (UI + spec realignment + combined settlement) | COMPLETED | 2026-05-09 | 2026-05-10 |
 | 10 | Reporting & Dashboards | COMPLETED | 2026-05-17 | 2026-05-18 |
 | 11 | Admin, Polish & Pre-Launch | COMPLETED | 2026-05-18 | 2026-05-20 |
+| 14 | Rooms & Racks | COMPLETED | 2026-07-10 | 2026-07-11 |
+| 15 | Auth, Permissions & Notifications | COMPLETED | 2026-07-13 | 2026-07-14 |
 
 ## Test Counts
 

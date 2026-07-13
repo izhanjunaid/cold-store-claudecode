@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { randomUUID } from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import { PrismaClient } from '@coldchain/db';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../test/helpers';
@@ -12,9 +13,10 @@ let createdUserId: string | null = null;
 
 // A controlled audit row we insert directly so masking + actor-name resolution
 // can be asserted deterministically (independent of which writes the DB trigger
-// happens to attribute).
+// happens to attribute). audit_log is append-only (migration 0002), so the row
+// can't be cleaned up — a fresh record id per run keeps the assertion exact.
 const PROBE_TABLE = 'audit_probe';
-const PROBE_RECORD = '11111111-1111-1111-1111-111111111111';
+const PROBE_RECORD = randomUUID();
 
 beforeAll(async () => {
   app = await getTestApp();
@@ -37,7 +39,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.auditLog.deleteMany({ where: { tableName: PROBE_TABLE } }).catch(() => {});
+  // audit_log is append-only, so the probe row can't be deleted; the throwaway
+  // user has no dependents and its DELETE writes no audit row (no DELETE branch).
   if (createdUserId) await prisma.user.delete({ where: { id: createdUserId } }).catch(() => {});
   await prisma.$disconnect();
   await closeTestApp();

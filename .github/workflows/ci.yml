@@ -47,6 +47,14 @@ jobs:
       - name: Generate Prisma client
         run: pnpm --filter @coldchain/db run db:generate
 
+      - name: Guardrail — legacy role guards removed (Phase 15)
+        run: |
+          if grep -rn "requireMinRole(" apps/api/src/modules; then
+            echo "::error::requireMinRole( found in api modules — use app.requirePermission('<key>') instead"
+            exit 1
+          fi
+          echo "OK: route authorization goes through the permission matrix"
+
       - name: Typecheck
         run: pnpm typecheck
 

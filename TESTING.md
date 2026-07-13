@@ -68,8 +68,9 @@
 | Audit P4 | −2 | 25 | — | 25 | ALL PASS (watermark 6, reversal 8, opening balances 11; JE-11 unit tests removed with dead templates) |
 | CoA follow-ups | — | 2 | — | 13 | ALL PASS (parent-required rule 2 integration; 11 web page tests: CoA management 7, P&L/BS unclassified rendering 4) |
 | 14 (Rooms & Racks) | 11 | 33 | — | 44 | ALL PASS (planTrim 6 unit + 5 template; rack CRUD 11 + placement/move/withdrawal/transfer 22 integration) |
+| 15 (Auth/Permissions/Notifications) | ~46 | ~49 | — | ~95 | ALL PASS (crypto/jwt/mail + permission parity 23 + isDigestDue 6 unit; permissions matrix 11, email settings masking, OTP/2FA/reset, sessions 5, audit 4, notifications 3 integration) |
 
-> Live suite after Phase 14 (2026-07-11): **138 unit + 384 integration (api) + 90 unit (web) green**.
+> Live suite after Phase 15 (2026-07-14): **184 unit + 433 integration (api) + 91 unit (web) green**. Because every permission key's default reproduces the old `requireMinRole` threshold, all pre-Phase-15 403/200 assertions pass unchanged.
 
 ### Phase 14 Tests (Rooms & Racks)
 
