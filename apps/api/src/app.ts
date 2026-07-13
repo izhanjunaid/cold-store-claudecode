@@ -36,6 +36,7 @@ import { reportingRoutes } from './modules/reporting/reporting.controller';
 import { userRoutes } from './modules/user/user.controller';
 import { facilityRoutes } from './modules/facility/facility.controller';
 import { permissionsRoutes } from './modules/permissions/permissions.controller';
+import { auditRoutes } from './modules/audit/audit.controller';
 import { testRoutes } from './modules/_test/test.controller';
 
 export async function buildApp() {
@@ -120,6 +121,7 @@ export async function buildApp() {
   await app.register(userRoutes);
   await app.register(facilityRoutes);
   await app.register(permissionsRoutes);
+  await app.register(auditRoutes);
 
   // E2E-only test routes. Double-guarded: NODE_ENV check AND env var check.
   if (process.env['NODE_ENV'] !== 'production' && process.env['ALLOW_TEST_RESET'] === '1') {

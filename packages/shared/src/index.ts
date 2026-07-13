@@ -21,4 +21,5 @@ export * from './schemas/reports';
 export * from './schemas/users';
 export * from './schemas/facility';
 export * from './schemas/permissions';
+export * from './schemas/audit';
 export * from './permissions';

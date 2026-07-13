@@ -448,6 +448,7 @@ model AuditLog {
 
   @@index([facilityId, tableName, recordId])
   @@index([changedAt])
+  @@index([facilityId, changedAt])
   @@map("audit_log")
 }
 
