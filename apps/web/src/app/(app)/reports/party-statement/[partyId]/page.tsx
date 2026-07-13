@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { PartyLedgerResponseType } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -35,7 +35,7 @@ export default function PartyStatementDetailPage() {
   const search = useSearchParams();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
-  const canView = hasMinRole(user?.role, 'ACCOUNTANT');
+  const canView = can(user, 'reports.financial');
 
   const dateFrom = search.get('date_from') ?? '';
   const dateTo = search.get('date_to') ?? '';

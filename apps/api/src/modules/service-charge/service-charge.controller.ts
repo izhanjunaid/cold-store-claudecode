@@ -7,7 +7,6 @@ import {
 import { ServiceChargeService } from './service-charge.service';
 import { ServiceChargeRepository } from './service-charge.repository';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { z } from 'zod';
 
 const IdParam = z.object({ id: z.string().uuid() });
@@ -30,7 +29,7 @@ export async function serviceChargeRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/service-charges',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('service_charges.manage')],
     schema: { body: CreateServiceChargeRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateServiceChargeRequest>;
@@ -59,7 +58,7 @@ export async function serviceChargeRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/service-charges/:id',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('service_charges.manage')],
     schema: { params: IdParam, body: UpdateServiceChargeRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -77,7 +76,7 @@ export async function serviceChargeRoutes(app: FastifyInstance) {
   app.route({
     method: 'DELETE',
     url: '/v1/service-charges/:id',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('service_charges.manage')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

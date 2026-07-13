@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -40,7 +40,7 @@ export default function EmployeeDetailPage() {
   const params = useParams();
   const id = params['id'] as string;
   const { user } = useAuthStore();
-  const isOwner = hasMinRole(user?.role, 'OWNER');
+  const isOwner = can(user, 'employees.terminate');
 
   const [emp, setEmp] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);

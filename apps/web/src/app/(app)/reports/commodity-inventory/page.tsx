@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronRight } from 'lucide-react';
 import type { CommodityInventoryRowType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { apiClient } from '@/lib/api-client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 
 export default function CommodityInventoryPage() {
   const user = useAuthStore((s) => s.user);
-  const canView = hasMinRole(user?.role, 'MANAGER');
+  const canView = can(user, 'reports.inventory');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery<CommodityInventoryRowType[]>({

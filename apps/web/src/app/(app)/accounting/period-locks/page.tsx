@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { LockKeyhole, LockOpen, Info } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -47,7 +47,7 @@ type PendingAction = { kind: 'lock' | 'unlock'; year: number; month: number } | 
 
 export default function PeriodLocksPage() {
   const { user } = useAuthStore();
-  const canLock = hasMinRole(user?.role, 'MANAGER');
+  const canLock = can(user, 'accounting.period_lock');
   const canUnlock = user?.role === 'OWNER';
 
   const now = new Date();

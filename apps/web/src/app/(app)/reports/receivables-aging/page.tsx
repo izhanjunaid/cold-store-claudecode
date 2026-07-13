@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import type { ReceivablesAgingResponseType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { apiClient } from '@/lib/api-client';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -22,7 +22,7 @@ const fmtPkr = formatCount;
 export default function ReceivablesAgingPage() {
   const user = useAuthStore((s) => s.user);
   const router = useRouter();
-  const canView = hasMinRole(user?.role, 'ACCOUNTANT');
+  const canView = can(user, 'reports.financial');
 
   const today = new Date().toISOString().slice(0, 10);
   const [asOfDate, setAsOfDate] = useState(today);

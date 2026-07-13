@@ -8,7 +8,6 @@ import {
   LogOutwardRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { Errors } from '../../common/errors';
 import { GatePassRepository } from './gate-pass.repository';
 import { GatePassService } from './gate-pass.service';
@@ -36,7 +35,7 @@ export async function gatePassRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/gate-passes/inward',
-    preHandler: [app.authenticate, requireMinRole('SECURITY')],
+    preHandler: [app.authenticate, app.requirePermission('gate_passes.log')],
     schema: { body: LogInwardRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof LogInwardRequest>;
@@ -52,7 +51,7 @@ export async function gatePassRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/gate-passes/outward',
-    preHandler: [app.authenticate, requireMinRole('SECURITY')],
+    preHandler: [app.authenticate, app.requirePermission('gate_passes.log')],
     schema: { body: LogOutwardWithCreditAuth },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof LogOutwardWithCreditAuth>;
@@ -69,7 +68,7 @@ export async function gatePassRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/gate-passes',
-    preHandler: [app.authenticate, requireMinRole('SECURITY')],
+    preHandler: [app.authenticate, app.requirePermission('gate_passes.log')],
     schema: { querystring: GatePassListQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof GatePassListQuery>;
@@ -81,7 +80,7 @@ export async function gatePassRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/gate-passes/:id',
-    preHandler: [app.authenticate, requireMinRole('SECURITY')],
+    preHandler: [app.authenticate, app.requirePermission('gate_passes.log')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -93,7 +92,7 @@ export async function gatePassRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/gate-passes/:id/link-lot',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('gate_passes.link_lot')],
     schema: { params: IdParam, body: LinkLotRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -106,7 +105,7 @@ export async function gatePassRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/gate-passes/:id/outward',
-    preHandler: [app.authenticate, requireMinRole('SECURITY')],
+    preHandler: [app.authenticate, app.requirePermission('gate_passes.log')],
     schema: { params: IdParam, body: ClearOutwardRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -125,7 +124,7 @@ export async function gatePassRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/gate-passes/:id/receipt',
-    preHandler: [app.authenticate, requireMinRole('SECURITY')],
+    preHandler: [app.authenticate, app.requirePermission('gate_passes.log')],
     schema: { params: IdParam, querystring: FormatQuery },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

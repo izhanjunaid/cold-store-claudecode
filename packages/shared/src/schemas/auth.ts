@@ -19,6 +19,7 @@ export const LoginResponse = z.object({
     name: z.string(),
     role: UserRole,
     facility_id: z.string().uuid(),
+    permissions: z.array(z.string()).optional(),
   }),
 });
 
@@ -63,6 +64,7 @@ export const MeResponse = z.object({
   role: UserRole,
   facility_id: z.string().uuid(),
   two_factor_enabled: z.boolean(),
+  permissions: z.array(z.string()),
 });
 
 export const ForgotPasswordRequest = z.object({

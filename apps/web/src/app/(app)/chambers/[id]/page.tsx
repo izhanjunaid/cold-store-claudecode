@@ -9,7 +9,7 @@ import { apiClient } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { useApiMutation } from '@/hooks/use-api-mutation';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -70,7 +70,7 @@ export default function RoomDetailPage() {
   const chamberId = params['id'] as string;
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
-  const canManage = hasMinRole(user?.role, 'MANAGER');
+  const canManage = can(user, 'chambers.manage');
 
   const { data: chamber, isLoading: loading } = useQuery({
     queryKey: qk.chambers.detail(chamberId),

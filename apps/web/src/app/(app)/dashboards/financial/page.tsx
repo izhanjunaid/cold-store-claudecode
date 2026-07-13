@@ -6,7 +6,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recha
 import { RefreshCw } from 'lucide-react';
 import type { DashboardResponseType, ReceivablesAgingResponseType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,7 +24,7 @@ const BUCKET_COLORS = ['hsl(var(--chart-2))', 'hsl(var(--chart-3))', '#fb923c', 
 export default function FinancialDashboardPage() {
   const user = useAuthStore((s) => s.user);
   const router = useRouter();
-  const canView = hasMinRole(user?.role, 'ACCOUNTANT');
+  const canView = can(user, 'reports.financial');
 
   const dashboardQ = useQuery<DashboardResponseType>({
     queryKey: ['dashboard', user?.facility_id, 'financial'],

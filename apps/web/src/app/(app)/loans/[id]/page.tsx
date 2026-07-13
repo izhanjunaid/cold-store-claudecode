@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { Banknote, FileText } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -52,9 +52,9 @@ export default function LoanDetailPage() {
   const loanId = params['id'] as string;
   const { user } = useAuthStore();
 
-  const isOwner = user?.role === 'OWNER';
-  const canRepay = hasMinRole(user?.role, 'MANAGER');
-  const canView = hasMinRole(user?.role, 'ACCOUNTANT');
+  const isOwner = can(user, 'loans.issue');
+  const canRepay = can(user, 'loans.record_repayment');
+  const canView = can(user, 'loans.view');
 
   const [loan, setLoan] = useState<Loan | null>(null);
   const [loading, setLoading] = useState(true);

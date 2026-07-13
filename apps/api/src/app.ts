@@ -13,6 +13,7 @@ import {
 import errorHandler from './plugins/error-handler';
 import facilityScope from './plugins/facility-scope';
 import authPlugin from './plugins/auth';
+import permissionsPlugin from './plugins/permissions';
 import mailPlugin from './plugins/mail';
 import { authRoutes } from './modules/auth/auth.controller';
 import { partyRoutes } from './modules/party/party.controller';
@@ -34,6 +35,7 @@ import { gatePassRoutes } from './modules/gate-pass/gate-pass.controller';
 import { reportingRoutes } from './modules/reporting/reporting.controller';
 import { userRoutes } from './modules/user/user.controller';
 import { facilityRoutes } from './modules/facility/facility.controller';
+import { permissionsRoutes } from './modules/permissions/permissions.controller';
 import { testRoutes } from './modules/_test/test.controller';
 
 export async function buildApp() {
@@ -64,6 +66,7 @@ export async function buildApp() {
   await app.register(errorHandler);
   await app.register(facilityScope);
   await app.register(authPlugin);
+  await app.register(permissionsPlugin);
   await app.register(mailPlugin);
 
   // OpenAPI / Swagger
@@ -116,6 +119,7 @@ export async function buildApp() {
   await app.register(reportingRoutes);
   await app.register(userRoutes);
   await app.register(facilityRoutes);
+  await app.register(permissionsRoutes);
 
   // E2E-only test routes. Double-guarded: NODE_ENV check AND env var check.
   if (process.env['NODE_ENV'] !== 'production' && process.env['ALLOW_TEST_RESET'] === '1') {

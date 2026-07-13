@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { UpdateFacilityRequest, TestEmailRequest } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { FacilityService } from './facility.service';
 import { MailService, mailConfigFromSettings } from '../mail/mail.service';
 
@@ -25,7 +24,7 @@ export async function facilityRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/facilities/me',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('settings.manage')],
     schema: { body: UpdateFacilityRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof UpdateFacilityRequest>;
@@ -39,7 +38,7 @@ export async function facilityRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/facilities/me/test-email',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('settings.manage')],
     schema: { body: TestEmailRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof TestEmailRequest>;

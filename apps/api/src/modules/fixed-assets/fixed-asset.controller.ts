@@ -8,7 +8,6 @@ import {
   FixedAssetListQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
@@ -25,7 +24,7 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/fixed-assets',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     schema: { querystring: FixedAssetListQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof FixedAssetListQuery>;
@@ -42,7 +41,7 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/fixed-assets',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('fixed_assets.manage')],
     schema: { body: CreateFixedAssetRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateFixedAssetRequest>;
@@ -55,7 +54,7 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/fixed-assets/:id',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -67,7 +66,7 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/fixed-assets/:id/commission',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('fixed_assets.manage')],
     schema: { params: IdParam, body: CommissionAssetRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -80,7 +79,7 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/fixed-assets/:id/dispose',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('fixed_assets.manage')],
     schema: { params: IdParam, body: DisposeAssetRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -93,7 +92,7 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/depreciation/runs',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('fixed_assets.manage')],
     schema: { body: RunDepreciationRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof RunDepreciationRequest>;
@@ -109,7 +108,7 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/depreciation/runs',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     handler: async (request, reply) => {
       const data = await service.listRuns(request.user!.facilityId);
       return sendSuccess(reply, data);

@@ -6,7 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, ReferenceLine, Tooltip, ResponsiveContaine
 import { CheckCircle2 } from 'lucide-react';
 import type { DashboardResponseType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { apiClient } from '@/lib/api-client';
 import { formatCount, formatMoney } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,7 +40,7 @@ function TileSkeletons({ count }: { count: number }) {
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const router = useRouter();
-  const canView = hasMinRole(user?.role, 'OPERATOR');
+  const canView = can(user, 'reports.operational');
 
   const { data, isLoading, error } = useQuery<DashboardResponseType>({
     queryKey: ['dashboard', user?.facility_id],

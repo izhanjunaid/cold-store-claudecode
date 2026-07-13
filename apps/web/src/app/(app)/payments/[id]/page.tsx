@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { Plus, X } from 'lucide-react';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -84,7 +84,7 @@ export default function PaymentDetailPage() {
   const [showDishonourForm, setShowDishonourForm] = useState(false);
   const [dishonourSubmitting, setDishonourSubmitting] = useState(false);
 
-  const isAccountant = !!user && hasMinRole(user.role, 'ACCOUNTANT');
+  const isAccountant = can(user, 'payments.record');
 
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
   const [rows, setRows] = useState<AllocationRow[]>([]);

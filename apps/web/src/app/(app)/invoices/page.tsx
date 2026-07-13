@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
@@ -15,7 +15,7 @@ const FILTER_KEYS = ['status', 'date_from', 'date_to'] as const;
 export default function InvoiceListPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const canAccess = !user || hasMinRole(user.role, 'ACCOUNTANT');
+  const canAccess = !user || can(user, 'billing.view');
 
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(FILTER_KEYS);
 

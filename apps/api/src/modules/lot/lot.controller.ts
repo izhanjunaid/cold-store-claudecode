@@ -12,7 +12,6 @@ import { PlacementService } from './placement.service';
 import { OutboundService } from '../outbound/outbound.service';
 import { OutboundRepository } from '../outbound/outbound.repository';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { z } from 'zod';
 
@@ -40,7 +39,7 @@ export async function lotRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/lots',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('lots.manage')],
     schema: { body: CreateLotRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateLotRequest>;
@@ -90,7 +89,7 @@ export async function lotRoutes(app: FastifyInstance) {
   app.route({
     method: 'PUT',
     url: '/v1/lots/:id/placements',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('lots.manage')],
     schema: { params: IdParam, body: SetLotPlacementsRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -109,7 +108,7 @@ export async function lotRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/lots/:id/move',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('lots.manage')],
     schema: { params: IdParam, body: MoveLotRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -173,7 +172,7 @@ export async function lotRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/lots/:id',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('lots.manage')],
     schema: { params: IdParam, body: UpdateLotRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -217,7 +216,7 @@ export async function lotRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/lots/:id/receipt',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('lots.manage')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

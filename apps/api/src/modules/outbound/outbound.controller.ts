@@ -7,7 +7,6 @@ import {
 import { OutboundService } from './outbound.service';
 import { OutboundRepository } from './outbound.repository';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { z } from 'zod';
 
 const IdParam = z.object({ id: z.string().uuid() });
@@ -19,7 +18,7 @@ export async function outboundRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/outbound-events',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
     schema: { body: CreateOutboundRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateOutboundRequest>;
@@ -57,7 +56,7 @@ export async function outboundRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/outbound-events/:id/weight',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
     schema: { params: IdParam, body: UpdateOutboundWeightRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -75,7 +74,7 @@ export async function outboundRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/outbound-events/:id/finalize',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('outbound.finalize')],
     schema: { params: IdParam, body: FinalizeOutboundRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -95,7 +94,7 @@ export async function outboundRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/outbound-events/:id/dispatch-note',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

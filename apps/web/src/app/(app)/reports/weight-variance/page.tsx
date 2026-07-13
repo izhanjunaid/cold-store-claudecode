@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { WeightVarianceRowType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState, type DataTableColumn } from '@/components/data-table';
@@ -39,7 +39,7 @@ const columns: DataTableColumn<WeightVarianceRowType>[] = [
 export default function WeightVariancePage() {
   const user = useAuthStore((s) => s.user);
   const router = useRouter();
-  const canView = hasMinRole(user?.role, 'MANAGER');
+  const canView = can(user, 'reports.inventory');
 
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(
     ['date_from', 'date_to'],

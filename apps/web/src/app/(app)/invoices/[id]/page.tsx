@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { Banknote, FileText, Plus, Trash2 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -98,7 +98,7 @@ export default function InvoiceDetailPage() {
   const [adjDiscountValue, setAdjDiscountValue] = useState('');
   const [adjSubmitting, setAdjSubmitting] = useState(false);
 
-  const canManage = !!user && hasMinRole(user.role, 'MANAGER');
+  const canManage = can(user, 'invoices.manage');
 
   const fetchInvoice = useCallback(async () => {
     setLoading(true);

@@ -11,7 +11,6 @@ import {
   PartyStatementQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { resolveBookTypeForRead } from '../accounting/book-gate';
 import { PaymentService } from '../payment/payment.service';
 import { PaymentRepository } from '../payment/payment.repository';
@@ -41,7 +40,7 @@ export async function reportingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/reports/dashboard',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('reports.operational')],
     schema: { querystring: DashboardReportQuery },
     handler: async (request, reply) => {
       const data = await getDashboard(
@@ -59,7 +58,7 @@ export async function reportingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/reports/lot-aging',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('reports.inventory')],
     schema: { querystring: LotAgingReportQuery },
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof LotAgingReportQuery>;
@@ -74,7 +73,7 @@ export async function reportingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/reports/receivables-aging',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('reports.financial')],
     schema: { querystring: ReceivablesAgingReportQuery },
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof ReceivablesAgingReportQuery>;
@@ -94,7 +93,7 @@ export async function reportingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/reports/commodity-inventory',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('reports.inventory')],
     schema: { querystring: CommodityInventoryReportQuery },
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof CommodityInventoryReportQuery>;
@@ -113,7 +112,7 @@ export async function reportingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/reports/weight-variance',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('reports.inventory')],
     schema: { querystring: WeightVarianceReportQuery },
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof WeightVarianceReportQuery>;
@@ -132,7 +131,7 @@ export async function reportingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/reports/seasonal-summary',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('reports.seasonal')],
     schema: { querystring: SeasonalSummaryReportQuery },
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof SeasonalSummaryReportQuery>;
@@ -151,7 +150,7 @@ export async function reportingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/reports/ownership-transfers',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('reports.inventory')],
     schema: { querystring: OwnershipTransfersReportQuery },
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof OwnershipTransfersReportQuery>;
@@ -170,7 +169,7 @@ export async function reportingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/reports/party-statement/:partyId',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('reports.financial')],
     schema: { params: PartyIdParam, querystring: PartyStatementQuery },
     handler: async (request, reply) => {
       const { partyId } = request.params as z.infer<typeof PartyIdParam>;

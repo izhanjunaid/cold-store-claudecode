@@ -9,7 +9,6 @@ import {
 import { PaymentService } from './payment.service';
 import { PaymentRepository } from './payment.repository';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
@@ -26,7 +25,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/payments',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('payments.record')],
     schema: { body: CreatePaymentRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreatePaymentRequest>;
@@ -53,7 +52,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/payments',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('billing.view')],
     schema: { querystring: PaymentListQuery },
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof PaymentListQuery>;
@@ -74,7 +73,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/payments/:id',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('billing.view')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -87,7 +86,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/payments/:id/allocate',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('payments.record')],
     schema: { params: IdParam, body: AllocatePaymentRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -106,7 +105,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/payments/:id/dishonour',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('payments.record')],
     schema: { params: IdParam, body: DishonourPaymentRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -125,7 +124,7 @@ export async function paymentRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/parties/:partyId/ledger',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('billing.view')],
     schema: { params: PartyIdParam },
     handler: async (request, reply) => {
       const { partyId } = request.params as z.infer<typeof PartyIdParam>;

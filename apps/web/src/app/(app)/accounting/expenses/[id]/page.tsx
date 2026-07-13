@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -42,8 +42,8 @@ export default function ExpenseVoucherDetailPage() {
   const id = params['id'] as string;
   const { user } = useAuthStore();
   const confirm = useConfirm();
-  const isManager = hasMinRole(user?.role, 'MANAGER');
-  const isAccountant = hasMinRole(user?.role, 'ACCOUNTANT');
+  const isManager = can(user, 'expenses.approve');
+  const isAccountant = can(user, 'expenses.record');
 
   const [v, setV] = useState<ExpenseVoucher | null>(null);
   const [loading, setLoading] = useState(true);

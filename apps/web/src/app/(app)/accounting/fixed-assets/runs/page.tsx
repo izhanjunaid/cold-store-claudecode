@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Play } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -27,7 +27,7 @@ const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transpar
 
 export default function DepreciationRunsPage() {
   const { user } = useAuthStore();
-  const isOwner = hasMinRole(user?.role, 'OWNER');
+  const isOwner = can(user, 'fixed_assets.manage');
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showRunModal, setShowRunModal] = useState(false);

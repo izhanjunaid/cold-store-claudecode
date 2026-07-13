@@ -9,7 +9,6 @@ import {
   CancelExpenseRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
@@ -26,7 +25,7 @@ export async function expenseRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/expense-vouchers',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
     schema: { querystring: ExpenseVoucherListQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof ExpenseVoucherListQuery>;
@@ -38,7 +37,7 @@ export async function expenseRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/expense-vouchers',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
     schema: { body: CreateExpenseVoucherRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateExpenseVoucherRequest>;
@@ -52,7 +51,7 @@ export async function expenseRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/expense-vouchers/petty-cash-replenish',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
     schema: { body: PettyCashReplenishRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof PettyCashReplenishRequest>;
@@ -64,7 +63,7 @@ export async function expenseRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/expense-vouchers/:id',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -76,7 +75,7 @@ export async function expenseRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/expense-vouchers/:id',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
     schema: { params: IdParam, body: UpdateExpenseVoucherRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -89,7 +88,7 @@ export async function expenseRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/expense-vouchers/:id/approve',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('expenses.approve')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -101,7 +100,7 @@ export async function expenseRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/expense-vouchers/:id/accrue',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -113,7 +112,7 @@ export async function expenseRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/expense-vouchers/:id/pay',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
     schema: { params: IdParam, body: PayExpenseRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -126,7 +125,7 @@ export async function expenseRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/expense-vouchers/:id/cancel',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('expenses.approve')],
     schema: { params: IdParam, body: CancelExpenseRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

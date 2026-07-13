@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
@@ -37,8 +37,8 @@ const columns: DataTableColumn<LoanSummary>[] = [
 export default function LoansDashboardPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const canAccess = !user || hasMinRole(user.role, 'ACCOUNTANT');
-  const isOwner = user?.role === 'OWNER';
+  const canAccess = !user || can(user, 'loans.view');
+  const isOwner = can(user, 'loans.issue');
 
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(['status']);
   const params = useMemo(() => ({ page: state.page, page_size: state.perPage, ...state.filters }), [state]);

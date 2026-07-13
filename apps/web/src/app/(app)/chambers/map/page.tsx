@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -63,7 +63,7 @@ function fillTier(pct: number) {
 export default function RoomMapPage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
-  const canView = hasMinRole(user?.role, 'MANAGER');
+  const canView = can(user, 'chambers.manage');
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 

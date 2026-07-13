@@ -12,7 +12,6 @@ import {
   PayrollRunListQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
@@ -36,7 +35,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/employees',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('payroll.view')],
     schema: { querystring: EmployeeListQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof EmployeeListQuery>;
@@ -53,7 +52,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/employees',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('employees.manage')],
     schema: { body: CreateEmployeeRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateEmployeeRequest>;
@@ -65,7 +64,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/employees/:id',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('payroll.view')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -77,7 +76,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/employees/:id',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('employees.manage')],
     schema: { params: IdParam, body: UpdateEmployeeRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -90,7 +89,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/employees/:id/terminate',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('employees.terminate')],
     schema: { params: IdParam, body: TerminateEmployeeRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -105,7 +104,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/payroll-runs',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('payroll.view')],
     schema: { querystring: PayrollRunListQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof PayrollRunListQuery>;
@@ -120,7 +119,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/payroll-runs',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('payroll.draft')],
     schema: { body: CreatePayrollRunRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreatePayrollRunRequest>;
@@ -133,7 +132,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/payroll-runs/:id',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('payroll.view')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -145,7 +144,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/payroll-runs/:id/lines/:lineId',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('payroll.draft')],
     schema: { params: RunLineParam, body: UpdatePayrollLineRequest },
     handler: async (request, reply) => {
       const { id, lineId } = request.params as z.infer<typeof RunLineParam>;
@@ -158,7 +157,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/payroll-runs/:id/finalize',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('payroll.finalize')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -170,7 +169,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/payroll-runs/:id/pay',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('payroll.finalize')],
     schema: { params: IdParam, body: PayPayrollRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -183,7 +182,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/payroll-runs/:id/remit',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('payroll.remit')],
     schema: { params: IdParam, body: RemitGovtRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -196,7 +195,7 @@ export async function payrollRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/payroll-runs/:id/lines/:lineId/slip',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('payroll.view')],
     schema: { params: RunLineParam, querystring: FormatQuery },
     handler: async (request, reply) => {
       const { id, lineId } = request.params as z.infer<typeof RunLineParam>;

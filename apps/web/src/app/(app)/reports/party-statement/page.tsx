@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { can } from '@/lib/permissions';
 import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -26,7 +27,7 @@ function defaultRange() {
 export default function PartyStatementPickerPage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
-  const canView = hasMinRole(user?.role, 'ACCOUNTANT');
+  const canView = can(user, 'reports.financial');
 
   const range = defaultRange();
   const [partyQuery, setPartyQuery] = useState('');

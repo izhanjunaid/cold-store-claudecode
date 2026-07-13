@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { Input } from '@/components/ui/input';
@@ -33,7 +33,7 @@ const EXPENSE_ACCOUNTS = [
 export default function NewExpenseVoucherPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const canCreate = hasMinRole(user?.role, 'ACCOUNTANT');
+  const canCreate = can(user, 'expenses.record');
 
   const [voucherDate, setVoucherDate] = useState(new Date().toISOString().slice(0, 10));
   const [accountCode, setAccountCode] = useState('5010');

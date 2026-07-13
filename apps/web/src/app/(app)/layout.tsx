@@ -17,6 +17,8 @@ interface MeResponse {
   role: string;
   facility_id: string;
   must_change_password?: boolean;
+  two_factor_enabled?: boolean;
+  permissions?: string[];
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

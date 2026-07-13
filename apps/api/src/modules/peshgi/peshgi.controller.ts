@@ -7,7 +7,6 @@ import {
   PartyLoanListQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
@@ -27,7 +26,7 @@ export async function peshgiRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/loans',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('loans.view')],
     schema: { querystring: PartyLoanListQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof PartyLoanListQuery>;
@@ -40,7 +39,7 @@ export async function peshgiRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/loans/issue',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('loans.issue')],
     schema: { body: IssuePeshgiRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof IssuePeshgiRequest>;
@@ -54,7 +53,7 @@ export async function peshgiRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/loans/:id',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('loans.view')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -67,7 +66,7 @@ export async function peshgiRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/loans/:id/repayments',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('loans.record_repayment')],
     schema: { params: IdParam, body: RecordRepaymentRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -86,7 +85,7 @@ export async function peshgiRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/loans/:id/write-off',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('loans.issue')],
     schema: { params: IdParam, body: WriteOffPeshgiRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -105,7 +104,7 @@ export async function peshgiRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/loans/:id/acknowledgment',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('loans.view')],
     schema: { params: IdParam, querystring: FormatQuery },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Check, Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
@@ -49,8 +49,8 @@ const FILTER_KEYS = ['employee_type', 'is_active'] as const;
 export default function EmployeeListPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const canAccess = !user || hasMinRole(user.role, 'ACCOUNTANT');
-  const canCreate = hasMinRole(user?.role, 'MANAGER');
+  const canAccess = !user || can(user, 'payroll.view');
+  const canCreate = can(user, 'employees.manage');
 
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(FILTER_KEYS, { defaultPerPage: 50 });
   const params = useMemo(() => ({ page: state.page, page_size: state.perPage, ...state.filters }), [state]);

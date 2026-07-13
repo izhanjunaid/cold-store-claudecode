@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { OwnershipTransferRowType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
@@ -48,7 +48,7 @@ const columns: DataTableColumn<OwnershipTransferRowType>[] = [
 export default function OwnershipTransfersPage() {
   const user = useAuthStore((s) => s.user);
   const router = useRouter();
-  const canView = hasMinRole(user?.role, 'MANAGER');
+  const canView = can(user, 'reports.inventory');
 
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(
     ['date_from', 'date_to'],

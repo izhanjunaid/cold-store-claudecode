@@ -9,7 +9,6 @@ import {
 import { InvoiceService } from './invoice.service';
 import { InvoiceRepository } from './invoice.repository';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 
@@ -29,7 +28,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/invoices',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('billing.view')],
     schema: { querystring: InvoiceListQuery },
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof InvoiceListQuery>;
@@ -55,7 +54,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/invoices/:id',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('invoices.manage')],
     schema: { params: IdParam, body: UpdateDraftInvoiceRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -69,7 +68,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/invoices/:id/lines',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('invoices.manage')],
     schema: { params: IdParam, body: AddInvoiceLineRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -83,7 +82,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
   app.route({
     method: 'DELETE',
     url: '/v1/invoices/:id/lines/:lineId',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('invoices.manage')],
     schema: { params: LineIdParam },
     handler: async (request, reply) => {
       const { id, lineId } = request.params as z.infer<typeof LineIdParam>;
@@ -96,7 +95,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/invoices/:id/finalize',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('invoices.manage')],
     schema: { params: IdParam, body: FinalizeInvoiceRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

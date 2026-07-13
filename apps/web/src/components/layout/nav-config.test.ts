@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { navGroupsForRole, navItemsForRole, navLabelForPath } from './nav-config';
+import { navGroupsForUser, navItemsForUser, navLabelForPath } from './nav-config';
+import { defaultPermissionsForRole, type Role } from '@coldchain/shared';
 
-function hrefs(role: string): string[] {
-  return navItemsForRole(role).map((i) => i.href);
+// Build a user with the DEFAULT effective permissions for a role, matching how
+// the server computes them with no overrides. This keeps the nav test aligned
+// with the real permission source instead of a hand-maintained role rank.
+function userFor(role: Role) {
+  return { role, permissions: defaultPermissionsForRole(role) };
 }
 
-describe('navGroupsForRole', () => {
+function hrefs(role: Role): string[] {
+  return navItemsForUser(userFor(role)).map((i) => i.href);
+}
+
+describe('navGroupsForUser', () => {
   it('shows everything to OWNER', () => {
     const items = hrefs('OWNER');
     expect(items).toContain('/dashboard');
@@ -15,7 +23,7 @@ describe('navGroupsForRole', () => {
   });
 
   it('never links to /quality — the Quality module has no page yet', () => {
-    for (const role of ['OWNER', 'MANAGER', 'ACCOUNTANT', 'OPERATOR', 'SECURITY']) {
+    for (const role of ['OWNER', 'MANAGER', 'ACCOUNTANT', 'OPERATOR', 'SECURITY'] as Role[]) {
       expect(hrefs(role)).not.toContain('/quality');
     }
   });
@@ -38,7 +46,7 @@ describe('navGroupsForRole', () => {
     expect(items).not.toContain('/quality');
   });
 
-  it('hides MANAGER-gated settings from ACCOUNTANT but shows finance', () => {
+  it('hides admin settings from ACCOUNTANT but shows finance', () => {
     const items = hrefs('ACCOUNTANT');
     expect(items).toContain('/invoices');
     expect(items).toContain('/payments');
@@ -50,10 +58,16 @@ describe('navGroupsForRole', () => {
   });
 
   it('drops groups that end up empty', () => {
-    const groups = navGroupsForRole('VIEWER');
+    const groups = navGroupsForUser(userFor('VIEWER'));
     expect(groups.find((g) => g.label === 'Admin')).toBeUndefined();
     expect(groups.find((g) => g.label === 'Finance')).toBeUndefined();
     expect(groups.every((g) => g.items.length > 0)).toBe(true);
+  });
+
+  it('reflects a granted permission (owner customization)', () => {
+    // Grant an OPERATOR the accounting.view key → Accounting appears.
+    const user = { role: 'OPERATOR' as Role, permissions: [...defaultPermissionsForRole('OPERATOR'), 'accounting.view'] };
+    expect(navItemsForUser(user).map((i) => i.href)).toContain('/accounting');
   });
 });
 

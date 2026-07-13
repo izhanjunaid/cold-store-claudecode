@@ -3,7 +3,6 @@ import { CreateOwnershipTransferRequest } from '@coldchain/shared';
 import { OwnershipTransferService } from './ownership-transfer.service';
 import { OwnershipTransferRepository } from './ownership-transfer.repository';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { z } from 'zod';
 
 const LotIdParam = z.object({ id: z.string().uuid() });
@@ -22,7 +21,7 @@ export async function ownershipTransferRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/lots/:id/transfer',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('lots.transfer_ownership')],
     schema: { params: LotIdParam, body: CreateOwnershipTransferRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof LotIdParam>;
@@ -46,7 +45,7 @@ export async function ownershipTransferRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/lots/:id/transfer/:transferId/acknowledgment',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('lots.transfer_ownership')],
     schema: { params: TransferParams },
     handler: async (request, reply) => {
       const { id, transferId } = request.params as z.infer<typeof TransferParams>;

@@ -21,6 +21,16 @@ import { Errors } from '../../common/errors';
 // an account exists or whether an email actually went out.
 const FORGOT_PASSWORD_MESSAGE = 'If an account with that email exists, a code has been sent.';
 
+// Enrich a login/2FA success result with the user's effective permissions so
+// the web app can gate nav/pages from a single source. 2FA-pending results
+// (no user) pass through untouched.
+async function withPermissions<T extends object>(app: FastifyInstance, result: T): Promise<T> {
+  if (!('user' in result) || !result.user) return result;
+  const user = result.user as { facility_id: string; role: string };
+  const permissions = await app.getEffectivePermissions(user.facility_id, user.role);
+  return { ...result, user: { ...user, permissions } };
+}
+
 export async function authRoutes(app: FastifyInstance) {
   const service = new AuthService(
     new AuthRepository(app.prisma),
@@ -42,7 +52,7 @@ export async function authRoutes(app: FastifyInstance) {
       }
       const body = request.body as { email: string; password: string };
       const result = await service.login(facilityId, body.email, body.password);
-      return sendSuccess(reply, result);
+      return sendSuccess(reply, await withPermissions(app, result));
     },
   });
 
@@ -90,7 +100,7 @@ export async function authRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof Verify2faRequest>;
       const result = await service.verify2fa(body.pending_token, body.code);
-      return sendSuccess(reply, result);
+      return sendSuccess(reply, await withPermissions(app, result));
     },
   });
 
@@ -161,7 +171,8 @@ export async function authRoutes(app: FastifyInstance) {
     preHandler: [app.authenticate],
     handler: async (request, reply) => {
       const result = await service.me(request.user!.userId);
-      return sendSuccess(reply, result);
+      const permissions = await app.getEffectivePermissions(result.facility_id, result.role);
+      return sendSuccess(reply, { ...result, permissions });
     },
   });
 

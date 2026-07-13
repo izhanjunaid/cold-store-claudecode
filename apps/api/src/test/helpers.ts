@@ -6,6 +6,7 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 import errorHandler from '../plugins/error-handler';
 import facilityScope from '../plugins/facility-scope';
 import authPlugin from '../plugins/auth';
+import permissionsPlugin from '../plugins/permissions';
 import mailPlugin from '../plugins/mail';
 import type { MailConfig } from '../modules/mail/mail.service';
 import { authRoutes } from '../modules/auth/auth.controller';
@@ -28,6 +29,7 @@ import { gatePassRoutes } from '../modules/gate-pass/gate-pass.controller';
 import { reportingRoutes } from '../modules/reporting/reporting.controller';
 import { userRoutes } from '../modules/user/user.controller';
 import { facilityRoutes } from '../modules/facility/facility.controller';
+import { permissionsRoutes } from '../modules/permissions/permissions.controller';
 import type { FastifyInstance } from 'fastify';
 
 export const TEST_FACILITY_ID = '00000000-0000-0000-0000-000000000001';
@@ -54,6 +56,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(errorHandler);
   await testApp.register(facilityScope);
   await testApp.register(authPlugin);
+  await testApp.register(permissionsPlugin);
   await testApp.register(mailPlugin, {
     transportFactory: (config) => ({
       sendMail: async (opts) => {
@@ -83,6 +86,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(reportingRoutes);
   await testApp.register(userRoutes);
   await testApp.register(facilityRoutes);
+  await testApp.register(permissionsRoutes);
   return testApp;
 }
 

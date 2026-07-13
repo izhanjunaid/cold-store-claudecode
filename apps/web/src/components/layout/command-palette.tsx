@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Boxes, Users } from 'lucide-react';
 import { apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { navItemsForRole } from '@/components/layout/nav-config';
+import { navItemsForUser } from '@/components/layout/nav-config';
 import {
   CommandDialog,
   CommandEmpty,
@@ -76,7 +76,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const navItems = useMemo(() => navItemsForRole(user?.role), [user?.role]);
+  const navItems = useMemo(() => navItemsForUser(user), [user]);
 
   const debouncedQuery = useDebounced(query.trim(), 250);
   const searchEnabled = isOpen && debouncedQuery.length >= 2;

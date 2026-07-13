@@ -7,6 +7,10 @@ interface User {
   role: string;
   facility_id: string;
   must_change_password?: boolean;
+  two_factor_enabled?: boolean;
+  // Effective permission keys from the server (login / /me). The single source
+  // of truth for UI gating; see lib/permissions.ts `can()`.
+  permissions?: string[];
 }
 
 interface AuthState {

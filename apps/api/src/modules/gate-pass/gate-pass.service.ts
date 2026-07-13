@@ -8,17 +8,9 @@ import type {
   LogOutwardRequestType,
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
+import { roleAtLeast } from '../../plugins/auth';
 import { generateGatePassNumber } from './gate-pass-number';
 import { GatePassRepository } from './gate-pass.repository';
-
-const ROLE_RANK: Record<string, number> = {
-  OWNER: 6,
-  MANAGER: 5,
-  ACCOUNTANT: 4,
-  OPERATOR: 3,
-  SECURITY: 2,
-  VIEWER: 1,
-};
 
 export class GatePassService {
   constructor(
@@ -297,7 +289,7 @@ export class GatePassService {
             'Outbound has no finalized invoice yet — settle billing first',
           );
         }
-        if ((ROLE_RANK[userRole] ?? 0) < ROLE_RANK['MANAGER']!) {
+        if (!roleAtLeast(userRole, 'MANAGER')) {
           throw Errors.GATE_CREDIT_AUTH_REQUIRES_MANAGER();
         }
       } else {
@@ -309,7 +301,7 @@ export class GatePassService {
               `Payment Pending — invoice balance ${balanceDue.toFixed(2)} PKR`,
             );
           }
-          if ((ROLE_RANK[userRole] ?? 0) < ROLE_RANK['MANAGER']!) {
+          if (!roleAtLeast(userRole, 'MANAGER')) {
             throw Errors.GATE_CREDIT_AUTH_REQUIRES_MANAGER();
           }
         }

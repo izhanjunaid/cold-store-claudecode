@@ -22,7 +22,7 @@ vi.mock('@/stores/auth.store', () => ({
   useAuthStore: () => ({ user: { role: 'ACCOUNTANT' } }),
 }));
 
-vi.mock('@/lib/rbac', () => ({ hasMinRole: () => true }));
+vi.mock('@/lib/permissions', () => ({ can: () => true, useCan: () => true }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 

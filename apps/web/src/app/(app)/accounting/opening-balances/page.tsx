@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { CheckCircle2, Info, Plus, X } from 'lucide-react';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -54,7 +54,7 @@ const BLOCKED_OTHER_CODES = new Set(['1110', '1120', '1130', '1140', '1150', '30
 export default function OpeningBalancesPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const canEnter = hasMinRole(user?.role, 'MANAGER');
+  const canEnter = can(user, 'accounting.post_journal');
 
   const [status, setStatus] = useState<OpeningStatus | null>(null);
   const [parties, setParties] = useState<Party[]>([]);

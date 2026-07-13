@@ -31,24 +31,14 @@ async function authPlugin(app: FastifyInstance) {
       throw Errors.AUTH_INVALID();
     }
   });
-
-  app.decorate(
-    'requireRole',
-    (...roles: string[]) =>
-      async (request: FastifyRequest, _reply: FastifyReply) => {
-        if (!request.user) {
-          throw Errors.AUTH_INVALID();
-        }
-        if (!roles.includes(request.user.role)) {
-          throw Errors.FORBIDDEN(`Role ${request.user.role} cannot access this resource`);
-        }
-      },
-  );
 }
 
 export default fp(authPlugin);
 
-// Hierarchy: OWNER > MANAGER > ACCOUNTANT > OPERATOR > SECURITY > VIEWER
+// Role hierarchy retained for the handful of documented business rules that are
+// intentionally seniority-based (not part of the configurable permission matrix):
+// KATCHI book access (book-gate), backdating and third-party release, and gate-pass
+// credit authorization. Route-level authorization now goes through requirePermission.
 const ROLE_HIERARCHY: Record<string, number> = {
   OWNER: 6,
   MANAGER: 5,
@@ -62,19 +52,6 @@ export function roleAtLeast(role: string | undefined, minRole: string): boolean 
   return (ROLE_HIERARCHY[role ?? ''] ?? 0) >= (ROLE_HIERARCHY[minRole] ?? 0);
 }
 
-export function requireMinRole(minRole: string) {
-  const minLevel = ROLE_HIERARCHY[minRole] ?? 0;
-  return async (request: FastifyRequest, _reply: FastifyReply) => {
-    if (!request.user) {
-      throw Errors.AUTH_INVALID();
-    }
-    const userLevel = ROLE_HIERARCHY[request.user.role] ?? 0;
-    if (userLevel < minLevel) {
-      throw Errors.FORBIDDEN(`Requires ${minRole} or higher`);
-    }
-  };
-}
-
 // Type augmentation
 declare module 'fastify' {
   interface FastifyRequest {
@@ -82,6 +59,5 @@ declare module 'fastify' {
   }
   interface FastifyInstance {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
-    requireRole: (...roles: string[]) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }

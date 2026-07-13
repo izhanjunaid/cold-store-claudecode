@@ -7,7 +7,6 @@ import {
   UserListQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { UserService } from './user.service';
 
 const IdParam = z.object({ id: z.string().uuid() });
@@ -19,7 +18,7 @@ export async function userRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/users',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('users.manage')],
     schema: { querystring: UserListQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof UserListQuery>;
@@ -32,7 +31,7 @@ export async function userRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/users/:id',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('users.manage')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -45,7 +44,7 @@ export async function userRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/users',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('users.manage')],
     schema: { body: CreateUserRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateUserRequest>;
@@ -58,7 +57,7 @@ export async function userRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/users/:id',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('users.manage')],
     schema: { params: IdParam, body: UpdateUserRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -72,7 +71,7 @@ export async function userRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/users/:id/reset-password',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('users.manage')],
     schema: { params: IdParam, body: ResetPasswordRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

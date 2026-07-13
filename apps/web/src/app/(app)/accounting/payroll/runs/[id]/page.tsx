@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -58,9 +58,9 @@ export default function PayrollRunDetailPage() {
   const params = useParams();
   const id = params['id'] as string;
   const { user } = useAuthStore();
-  const isManager = hasMinRole(user?.role, 'MANAGER');
-  const isOwner = hasMinRole(user?.role, 'OWNER');
-  const isAccountant = hasMinRole(user?.role, 'ACCOUNTANT');
+  const isManager = can(user, 'payroll.finalize');
+  const isOwner = can(user, 'payroll.remit');
+  const isAccountant = can(user, 'payroll.view');
 
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [loading, setLoading] = useState(true);

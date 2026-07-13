@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,7 @@ const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transpar
 export default function NewFixedAssetPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const canCreate = hasMinRole(user?.role, 'OWNER');
+  const canCreate = can(user, 'fixed_assets.manage');
 
   const [name, setName] = useState('');
   const [category, setCategory] = useState('COLD_PLANT');

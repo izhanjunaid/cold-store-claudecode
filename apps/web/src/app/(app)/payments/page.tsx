@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState } from '@/components/data-table';
@@ -18,7 +18,7 @@ const FILTER_KEYS = ['status', 'payment_method', 'date_from', 'date_to'] as cons
 export default function PaymentListPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const canAccess = !user || hasMinRole(user.role, 'ACCOUNTANT');
+  const canAccess = !user || can(user, 'billing.view');
 
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(FILTER_KEYS);
 

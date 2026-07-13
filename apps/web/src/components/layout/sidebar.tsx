@@ -6,7 +6,7 @@ import { PanelLeftClose, PanelLeftOpen, Snowflake } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUiStore } from '@/stores/ui.store';
-import { navGroupsForRole } from '@/components/layout/nav-config';
+import { navGroupsForUser } from '@/components/layout/nav-config';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export function Sidebar() {
@@ -14,7 +14,7 @@ export function Sidebar() {
   const { user } = useAuthStore();
   const { sidebarCollapsed, toggleSidebar } = useUiStore();
 
-  const groups = navGroupsForRole(user?.role);
+  const groups = navGroupsForUser(user);
 
   return (
     <aside

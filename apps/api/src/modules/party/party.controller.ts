@@ -3,7 +3,6 @@ import { CreatePartyRequest, UpdatePartyRequest, PartyListQuery } from '@coldcha
 import { PartyService } from './party.service';
 import { PartyRepository } from './party.repository';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { z } from 'zod';
 
 const IdParam = z.object({ id: z.string().uuid() });
@@ -28,7 +27,7 @@ export async function partyRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/parties',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('parties.manage')],
     schema: { body: CreatePartyRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreatePartyRequest>;
@@ -68,7 +67,7 @@ export async function partyRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/parties/:id',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('parties.manage')],
     schema: { params: IdParam, body: UpdatePartyRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -94,7 +93,7 @@ export async function partyRoutes(app: FastifyInstance) {
   app.route({
     method: 'DELETE',
     url: '/v1/parties/:id',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('parties.delete')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

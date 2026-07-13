@@ -7,7 +7,6 @@ import {
 import { RatePlanService } from './rate-plan.service';
 import { RatePlanRepository } from './rate-plan.repository';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { z } from 'zod';
 
 const IdParam = z.object({ id: z.string().uuid() });
@@ -30,7 +29,7 @@ export async function ratePlanRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/rate-plans',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('rate_plans.manage')],
     schema: { body: CreateRatePlanRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateRatePlanRequest>;
@@ -63,7 +62,7 @@ export async function ratePlanRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/rate-plans/:id',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('rate_plans.manage')],
     schema: { params: IdParam, body: UpdateRatePlanRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -84,7 +83,7 @@ export async function ratePlanRoutes(app: FastifyInstance) {
   app.route({
     method: 'DELETE',
     url: '/v1/rate-plans/:id',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('rate_plans.manage')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

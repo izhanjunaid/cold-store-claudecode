@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
@@ -44,8 +44,8 @@ const FILTER_KEYS = ['status', 'category'] as const;
 export default function FixedAssetListPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const canAccess = !user || hasMinRole(user.role, 'ACCOUNTANT');
-  const canCreate = hasMinRole(user?.role, 'OWNER');
+  const canAccess = !user || can(user, 'accounting.view');
+  const canCreate = can(user, 'fixed_assets.manage');
 
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(FILTER_KEYS);
   const params = useMemo(() => ({ page: state.page, page_size: state.perPage, ...state.filters }), [state]);

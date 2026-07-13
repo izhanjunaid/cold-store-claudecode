@@ -19,7 +19,6 @@ import {
   EnterOpeningBalancesRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { assertKatchiWriteAllowed, resolveBookTypeForRead } from './book-gate';
 import { CoaService } from './coa.service';
 import { JournalEntryService } from './journal-entry.service';
@@ -52,7 +51,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/accounting/accounts',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     schema: { querystring: ChartOfAccountsListQuery },
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof ChartOfAccountsListQuery>;
@@ -64,7 +63,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/accounting/accounts/:code',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     schema: { params: CodeParam },
     handler: async (request, reply) => {
       const { code } = request.params as z.infer<typeof CodeParam>;
@@ -76,7 +75,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/accounting/accounts',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.manage_accounts')],
     schema: { body: CreateAccountRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateAccountRequest>;
@@ -88,7 +87,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/accounting/accounts/:code',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.manage_accounts')],
     schema: { params: CodeParam, body: UpdateAccountRequest },
     handler: async (request, reply) => {
       const { code } = request.params as z.infer<typeof CodeParam>;
@@ -105,7 +104,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/accounting/journal-entries',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     schema: { querystring: JournalEntryListQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof JournalEntryListQuery>;
@@ -127,7 +126,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/accounting/journal-entries/:id',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -142,7 +141,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/accounting/journal-entries',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
     schema: { body: CreateManualJournalEntryRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateManualJournalEntryRequest>;
@@ -178,7 +177,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/accounting/journal-entries/:id/post',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -194,7 +193,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/accounting/journal-entries/:id/reverse',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
     schema: { params: IdParam, body: ReverseJournalEntryRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -220,7 +219,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/accounting/general-ledger',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     schema: { querystring: GeneralLedgerQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof GeneralLedgerQuery>;
@@ -233,7 +232,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/accounting/trial-balance',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     schema: { querystring: TrialBalanceQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof TrialBalanceQuery>;
@@ -250,7 +249,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/accounting/profit-loss',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     schema: { querystring: ProfitLossQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof ProfitLossQuery>;
@@ -263,7 +262,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/accounting/balance-sheet',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     schema: { querystring: BalanceSheetQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof BalanceSheetQuery>;
@@ -280,7 +279,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/accounting/opening-balances',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     handler: async (request, reply) => {
       const data = await openingBalance.getStatus(request.user!.facilityId);
       return sendSuccess(reply, data);
@@ -290,7 +289,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/accounting/opening-balances',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
     schema: { body: EnterOpeningBalancesRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof EnterOpeningBalancesRequest>;
@@ -311,7 +310,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/accounting/period-locks',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
     handler: async (request, reply) => {
       const data = await periodLock.list(request.user!.facilityId);
       return sendSuccess(reply, data);
@@ -321,7 +320,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/accounting/period-locks',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.period_lock')],
     schema: { body: LockPeriodRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof LockPeriodRequest>;
@@ -339,7 +338,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/accounting/period-locks/:year/:month/unlock',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('accounting.period_unlock')],
     schema: {
       params: z.object({
         year: z.coerce.number().int(),
@@ -368,7 +367,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/credit-notes',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('invoices.manage')],
     schema: { body: CreateCreditNoteRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateCreditNoteRequest>;
@@ -381,7 +380,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/credit-notes',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('billing.view')],
     schema: { querystring: CreditNoteListQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof CreditNoteListQuery>;
@@ -393,7 +392,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/credit-notes/:id',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('billing.view')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -405,7 +404,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/invoices/:invoiceId/credit-notes',
-    preHandler: [app.authenticate, requireMinRole('ACCOUNTANT')],
+    preHandler: [app.authenticate, app.requirePermission('billing.view')],
     schema: { params: InvoiceIdParam },
     handler: async (request, reply) => {
       const { invoiceId } = request.params as z.infer<typeof InvoiceIdParam>;
@@ -421,7 +420,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/invoices/:invoiceId/write-off',
-    preHandler: [app.authenticate, requireMinRole('OWNER')],
+    preHandler: [app.authenticate, app.requirePermission('invoices.write_off')],
     schema: {
       params: InvoiceIdParam,
       body: BadDebtWriteOffRequest.omit({ invoice_id: true }),

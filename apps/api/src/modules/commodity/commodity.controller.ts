@@ -3,7 +3,6 @@ import { CreateCommodityRequest, UpdateCommodityRequest, CreateVarietyRequest } 
 import { CommodityService } from './commodity.service';
 import { CommodityRepository } from './commodity.repository';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { z } from 'zod';
 
 const IdParam = z.object({ id: z.string().uuid() });
@@ -38,7 +37,7 @@ export async function commodityRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/commodities',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('commodities.manage')],
     schema: { body: CreateCommodityRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateCommodityRequest>;
@@ -55,7 +54,7 @@ export async function commodityRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/commodities/:id',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('commodities.manage')],
     schema: { params: IdParam, body: UpdateCommodityRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -86,7 +85,7 @@ export async function commodityRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/commodities/:id/varieties',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('commodities.manage')],
     schema: { params: IdParam, body: CreateVarietyRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

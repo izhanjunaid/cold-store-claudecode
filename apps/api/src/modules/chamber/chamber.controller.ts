@@ -10,7 +10,6 @@ import {
 import { ChamberService } from './chamber.service';
 import { ChamberRepository } from './chamber.repository';
 import { sendSuccess } from '../../common/response';
-import { requireMinRole } from '../../plugins/auth';
 import { z } from 'zod';
 
 const IdParam = z.object({ id: z.string().uuid() });
@@ -35,7 +34,7 @@ export async function chamberRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/chambers',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('chambers.manage')],
     schema: { body: CreateChamberRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateChamberRequest>;
@@ -68,7 +67,7 @@ export async function chamberRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/chambers/:id',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('chambers.manage')],
     schema: { params: IdParam, body: UpdateChamberRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -89,7 +88,7 @@ export async function chamberRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/chambers/:id/temperature',
-    preHandler: [app.authenticate, requireMinRole('OPERATOR')],
+    preHandler: [app.authenticate, app.requirePermission('chambers.log_temperature')],
     schema: { params: IdParam, body: LogTemperatureRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -112,7 +111,7 @@ export async function chamberRoutes(app: FastifyInstance) {
   app.route({
     method: 'POST',
     url: '/v1/chambers/:id/racks',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('chambers.manage')],
     schema: { params: IdParam, body: CreateRackRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -131,7 +130,7 @@ export async function chamberRoutes(app: FastifyInstance) {
   app.route({
     method: 'PATCH',
     url: '/v1/racks/:id',
-    preHandler: [app.authenticate, requireMinRole('MANAGER')],
+    preHandler: [app.authenticate, app.requirePermission('chambers.manage')],
     schema: { params: IdParam, body: UpdateRackRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

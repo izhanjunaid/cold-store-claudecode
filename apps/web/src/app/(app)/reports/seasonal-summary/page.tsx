@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { SeasonalSummaryResponseType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { apiClient } from '@/lib/api-client';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -23,7 +23,7 @@ function defaultPeriod() {
 
 export default function SeasonalSummaryPage() {
   const user = useAuthStore((s) => s.user);
-  const canView = hasMinRole(user?.role, 'OWNER');
+  const canView = can(user, 'reports.seasonal');
 
   const initial = defaultPeriod();
   const [dateFrom, setDateFrom] = useState(initial.from);
