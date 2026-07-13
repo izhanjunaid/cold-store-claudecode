@@ -398,6 +398,9 @@ model RefreshToken {
   tokenHash  String    @map("token_hash") @db.VarChar(200)
   expiresAt  DateTime  @map("expires_at") @db.Timestamptz()
   revokedAt  DateTime? @map("revoked_at") @db.Timestamptz()
+  userAgent  String?   @map("user_agent") @db.VarChar(400)
+  ip         String?   @db.VarChar(45)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz()
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz()
 
   user     User     @relation(fields: [userId], references: [id])

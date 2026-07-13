@@ -7,6 +7,10 @@ export interface JwtPayload {
   userId: string;
   facilityId: string;
   role: string;
+  // Session id — the refresh-token row this access token was minted from. Lets
+  // the session list mark "this device". Optional: tokens issued before Phase
+  // 15.6 (and the test helper) carry no sid and simply have no current session.
+  sid?: string;
 }
 
 export function signAccessToken(payload: JwtPayload): string {

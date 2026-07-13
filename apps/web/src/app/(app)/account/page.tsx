@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { KeyRound, ShieldCheck, ShieldOff } from 'lucide-react';
+import { KeyRound, ShieldCheck, ShieldOff, Monitor, LogOut } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/layout/page-header';
 import { PageSkeleton } from '@/components/page-skeleton';
+import { describeUserAgent } from '@/lib/user-agent';
 
 interface Me {
   id: string;
@@ -196,7 +197,103 @@ export default function AccountPage() {
             )}
           </CardContent>
         </Card>
+
+        <SessionsCard />
       </div>
     </div>
+  );
+}
+
+interface Session {
+  id: string;
+  user_agent: string | null;
+  ip: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  current: boolean;
+}
+
+const fmtWhen = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+
+function SessionsCard() {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const { data, isLoading } = useQuery({
+    queryKey: ['auth', 'sessions'],
+    queryFn: () => apiClient<{ sessions: Session[] }>('/v1/auth/sessions'),
+  });
+
+  const sessions = data?.sessions ?? [];
+  const others = sessions.filter((s) => !s.current).length;
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['auth', 'sessions'] });
+
+  async function revoke(id: string) {
+    setBusy(true);
+    try {
+      await apiClient(`/v1/auth/sessions/${id}`, { method: 'DELETE' });
+      toast.success('Signed out that device');
+      refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not sign out that device');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revokeOthers() {
+    setBusy(true);
+    try {
+      await apiClient('/v1/auth/sessions/revoke-others', { method: 'POST', body: {} });
+      toast.success('Signed out all other devices');
+      refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not sign out other devices');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-sm">Active Sessions</CardTitle>
+        {others > 0 && (
+          <Button size="sm" variant="outline" onClick={revokeOthers} disabled={busy}>
+            <LogOut className="mr-2 h-4 w-4" aria-hidden />
+            Sign out other devices
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading sessions…</p>
+        ) : sessions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No active sessions.</p>
+        ) : (
+          <ul className="divide-y">
+            {sessions.map((s) => (
+              <li key={s.id} className="flex items-center gap-3 py-3">
+                <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{describeUserAgent(s.user_agent)}</span>
+                    {s.current && <Badge variant="secondary" className="text-[10px]">This device</Badge>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {s.ip ?? 'Unknown IP'} · Last active {fmtWhen(s.last_used_at ?? s.created_at)}
+                  </p>
+                </div>
+                {!s.current && (
+                  <Button size="sm" variant="ghost" onClick={() => revoke(s.id)} disabled={busy}>
+                    Sign out
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }

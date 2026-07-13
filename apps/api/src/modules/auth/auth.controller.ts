@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   LoginRequest,
   RefreshRequest,
@@ -20,6 +20,12 @@ import { Errors } from '../../common/errors';
 // Neutral response for both steps of the reset flow — never reveals whether
 // an account exists or whether an email actually went out.
 const FORGOT_PASSWORD_MESSAGE = 'If an account with that email exists, a code has been sent.';
+
+// Device context recorded against the session (refresh-token row) at issue time.
+function sessionMeta(request: FastifyRequest): { userAgent: string | null; ip: string | null } {
+  const ua = request.headers['user-agent'];
+  return { userAgent: typeof ua === 'string' ? ua : null, ip: request.ip };
+}
 
 // Enrich a login/2FA success result with the user's effective permissions so
 // the web app can gate nav/pages from a single source. 2FA-pending results
@@ -51,7 +57,7 @@ export async function authRoutes(app: FastifyInstance) {
         throw Errors.VALIDATION_ERROR('X-Facility-ID header is required');
       }
       const body = request.body as { email: string; password: string };
-      const result = await service.login(facilityId, body.email, body.password);
+      const result = await service.login(facilityId, body.email, body.password, sessionMeta(request));
       return sendSuccess(reply, await withPermissions(app, result));
     },
   });
@@ -99,7 +105,7 @@ export async function authRoutes(app: FastifyInstance) {
     config: { rateLimit: { max: 5, timeWindow: '5 minutes' } },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof Verify2faRequest>;
-      const result = await service.verify2fa(body.pending_token, body.code);
+      const result = await service.verify2fa(body.pending_token, body.code, sessionMeta(request));
       return sendSuccess(reply, await withPermissions(app, result));
     },
   });
@@ -148,7 +154,7 @@ export async function authRoutes(app: FastifyInstance) {
     schema: { body: RefreshRequest },
     handler: async (request, reply) => {
       const body = request.body as { refresh_token: string };
-      const result = await service.refresh(body.refresh_token);
+      const result = await service.refresh(body.refresh_token, sessionMeta(request));
       return sendSuccess(reply, result);
     },
   });
@@ -189,6 +195,64 @@ export async function authRoutes(app: FastifyInstance) {
         body.current_password,
         body.new_password,
       );
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // GET /v1/auth/sessions — the caller's own active sessions.
+  app.route({
+    method: 'GET',
+    url: '/v1/auth/sessions',
+    preHandler: [app.authenticate],
+    handler: async (request, reply) => {
+      const result = await service.listSessions(request.user!.userId, request.user!.sid);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // DELETE /v1/auth/sessions/:id — sign out one of the caller's own sessions.
+  app.route({
+    method: 'DELETE',
+    url: '/v1/auth/sessions/:id',
+    preHandler: [app.authenticate],
+    handler: async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const result = await service.revokeSession(request.user!.userId, id);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/auth/sessions/revoke-others — sign out every other device.
+  app.route({
+    method: 'POST',
+    url: '/v1/auth/sessions/revoke-others',
+    preHandler: [app.authenticate],
+    handler: async (request, reply) => {
+      const result = await service.revokeOtherSessions(request.user!.userId, request.user!.sid);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // GET /v1/users/:id/sessions — admin view of another user's sessions.
+  app.route({
+    method: 'GET',
+    url: '/v1/users/:id/sessions',
+    preHandler: [app.authenticate, app.requirePermission('users.manage')],
+    handler: async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const result = await service.listUserSessions(id);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/users/:id/sessions/revoke-all — admin force sign-out.
+  app.route({
+    method: 'POST',
+    url: '/v1/users/:id/sessions/revoke-all',
+    preHandler: [app.authenticate, app.requirePermission('users.manage')],
+    handler: async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const result = await service.revokeAllSessions(id);
       return sendSuccess(reply, result);
     },
   });

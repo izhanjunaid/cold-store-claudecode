@@ -14,7 +14,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { PageHeader } from '@/components/layout/page-header';
 
 import { formatDateTime } from '@/lib/format';
+import { describeUserAgent } from '@/lib/user-agent';
 import { PageSkeleton } from '@/components/page-skeleton';
+import { Monitor, LogOut } from 'lucide-react';
 const ROLES = ['OWNER', 'MANAGER', 'ACCOUNTANT', 'OPERATOR', 'SECURITY'];
 const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
@@ -144,6 +146,8 @@ export default function UserDetailPage() {
         </CardContent>
       </Card>
 
+      <AdminSessionsCard userId={id} />
+
       <Dialog open={showReset} onOpenChange={setShowReset}>
         <DialogContent>
           <DialogHeader><DialogTitle>Reset Password</DialogTitle></DialogHeader>
@@ -161,5 +165,78 @@ export default function UserDetailPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+interface AdminSession {
+  id: string;
+  user_agent: string | null;
+  ip: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+function AdminSessionsCard({ userId }: { userId: string }) {
+  const [sessions, setSessions] = useState<AdminSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    apiClient<{ sessions: AdminSession[] }>(`/v1/users/${userId}/sessions`)
+      .then((r) => setSessions(r.sessions))
+      .catch(() => setSessions([]))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(load, [userId]);
+
+  async function revokeAll() {
+    setBusy(true);
+    try {
+      await apiClient(`/v1/users/${userId}/sessions/revoke-all`, { method: 'POST', body: {} });
+      toast.success('Signed the user out of all devices');
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not sign the user out');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="mt-4">
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-sm">Active Sessions</CardTitle>
+        {sessions.length > 0 && (
+          <Button size="sm" variant="outline" className="text-destructive" onClick={revokeAll} disabled={busy}>
+            <LogOut className="mr-2 h-4 w-4" aria-hidden />
+            Sign out all devices
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading sessions…</p>
+        ) : sessions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No active sessions.</p>
+        ) : (
+          <ul className="divide-y">
+            {sessions.map((s) => (
+              <li key={s.id} className="flex items-center gap-3 py-3">
+                <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <span className="text-sm font-medium">{describeUserAgent(s.user_agent)}</span>
+                  <p className="text-xs text-muted-foreground">
+                    {s.ip ?? 'Unknown IP'} · Last active{' '}
+                    {formatDateTime(s.last_used_at ?? s.created_at)}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }

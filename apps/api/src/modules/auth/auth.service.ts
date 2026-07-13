@@ -24,6 +24,12 @@ interface TokenUser {
   mustChangePassword: boolean;
 }
 
+// Device/browser context captured on each session (refresh-token row).
+export interface SessionMeta {
+  userAgent?: string | null;
+  ip?: string | null;
+}
+
 function maskEmail(email: string): string {
   const [local, domain] = email.split('@');
   if (!local || !domain) return email;
@@ -38,7 +44,7 @@ export class AuthService {
     private readonly mail: MailService,
   ) {}
 
-  async login(facilityId: string, email: string, password: string) {
+  async login(facilityId: string, email: string, password: string, meta?: SessionMeta) {
     const user = await this.repo.findUserByEmail(facilityId, email);
     if (!user || !user.isActive) {
       throw Errors.AUTH_INVALID('Invalid email or password');
@@ -76,16 +82,16 @@ export class AuthService {
         }
       }
       await this.repo.updateLastLogin(user.id);
-      return { ...(await this.issueTokens(user)), two_factor_bypassed: true };
+      return { ...(await this.issueTokens(user, meta)), two_factor_bypassed: true };
     }
 
     // Success — reset failed count, update last login
     await this.repo.updateLastLogin(user.id);
-    return this.issueTokens(user);
+    return this.issueTokens(user, meta);
   }
 
   /** Completes a 2FA login: pending token + emailed code → real tokens. */
-  async verify2fa(pendingToken: string, code: string) {
+  async verify2fa(pendingToken: string, code: string, meta?: SessionMeta) {
     let payload: { userId: string; facilityId: string };
     try {
       payload = verifyPendingTwoFactorToken(pendingToken);
@@ -100,7 +106,7 @@ export class AuthService {
     if (!ok) throw Errors.AUTH_INVALID('Invalid or expired code');
 
     await this.repo.updateLastLogin(user.id);
-    return this.issueTokens(user);
+    return this.issueTokens(user, meta);
   }
 
   /** 2FA enrollment, step 1: email a code to the user's own address. */
@@ -176,19 +182,21 @@ export class AuthService {
     }
   }
 
-  private async issueTokens(user: TokenUser) {
-    const accessToken = signAccessToken({
-      userId: user.id,
-      facilityId: user.facilityId,
-      role: user.role,
-    });
-
+  private async issueTokens(user: TokenUser, meta?: SessionMeta) {
     const rawRefreshToken = AuthRepository.generateToken();
     const refreshTokenRecord = await this.repo.createRefreshToken(
       user.id,
       user.facilityId,
       rawRefreshToken,
+      meta,
     );
+
+    const accessToken = signAccessToken({
+      userId: user.id,
+      facilityId: user.facilityId,
+      role: user.role,
+      sid: refreshTokenRecord.id,
+    });
 
     const refreshToken = signRefreshToken({
       userId: user.id,
@@ -209,7 +217,7 @@ export class AuthService {
     };
   }
 
-  async refresh(refreshTokenJwt: string) {
+  async refresh(refreshTokenJwt: string, meta?: SessionMeta) {
     // For simplicity, we use the JWT refresh token approach
     // The refresh token contains userId + tokenId
     const { verifyRefreshToken } = await import('../../common/jwt');
@@ -233,23 +241,27 @@ export class AuthService {
       throw Errors.AUTH_INVALID('User not found or inactive');
     }
 
-    // Issue new tokens
-    const accessToken = signAccessToken({
-      userId: user.id,
-      facilityId: user.facilityId,
-      role: user.role,
-    });
-
+    // Rotate the refresh token but keep this as the same logical session:
+    // carry the device metadata forward from the old row (falling back to the
+    // current request), and revoke the old row.
     const rawRefreshToken = AuthRepository.generateToken();
     const newTokenRecord = await this.repo.createRefreshToken(
       user.id,
       user.facilityId,
       rawRefreshToken,
+      { userAgent: meta?.userAgent ?? tokenRow.userAgent, ip: meta?.ip ?? tokenRow.ip },
     );
 
     // Revoke old refresh token
     await this.repo.revokeRefreshToken(payload.tokenId).catch(() => {
       // Token may already be revoked
+    });
+
+    const accessToken = signAccessToken({
+      userId: user.id,
+      facilityId: user.facilityId,
+      role: user.role,
+      sid: newTokenRecord.id,
     });
 
     const newRefreshToken = signRefreshToken({
@@ -261,6 +273,58 @@ export class AuthService {
       access_token: accessToken,
       refresh_token: newRefreshToken,
     };
+  }
+
+  // --- Sessions (Phase 15.6) -------------------------------------------------
+
+  private formatSession(
+    s: { id: string; userAgent: string | null; ip: string | null; createdAt: Date; lastUsedAt: Date | null },
+    currentSid?: string,
+  ) {
+    return {
+      id: s.id,
+      user_agent: s.userAgent,
+      ip: s.ip,
+      created_at: s.createdAt.toISOString(),
+      last_used_at: s.lastUsedAt ? s.lastUsedAt.toISOString() : null,
+      current: currentSid != null && s.id === currentSid,
+    };
+  }
+
+  /** The caller's own active sessions, with the current one flagged. */
+  async listSessions(userId: string, currentSid?: string) {
+    const sessions = await this.repo.listActiveSessions(userId);
+    return { sessions: sessions.map((s) => this.formatSession(s, currentSid)) };
+  }
+
+  /** Revoke one of the caller's own sessions (idempotent if already gone). */
+  async revokeSession(userId: string, sessionId: string) {
+    await this.repo.revokeUserToken(userId, sessionId);
+    return { message: 'Session signed out.' };
+  }
+
+  /** Sign out every other device, keeping the caller's current session. */
+  async revokeOtherSessions(userId: string, currentSid?: string) {
+    if (!currentSid) {
+      // No current session id on the token (legacy) — nothing safe to keep, so
+      // this becomes a full sign-out of the account's sessions.
+      await this.repo.revokeAllUserTokens(userId);
+      return { message: 'Signed out of all sessions.' };
+    }
+    await this.repo.revokeOtherUserTokens(userId, currentSid);
+    return { message: 'Signed out of all other devices.' };
+  }
+
+  /** Admin: another user's active sessions (no "current" — not the admin's). */
+  async listUserSessions(userId: string) {
+    const sessions = await this.repo.listActiveSessions(userId);
+    return { sessions: sessions.map((s) => this.formatSession(s)) };
+  }
+
+  /** Admin: force-sign-out a user from every device. */
+  async revokeAllSessions(userId: string) {
+    await this.repo.revokeAllUserTokens(userId);
+    return { message: 'Signed the user out of all devices.' };
   }
 
   async logout(userId: string) {

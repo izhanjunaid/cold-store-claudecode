@@ -31,7 +31,12 @@ export class AuthRepository {
     });
   }
 
-  async createRefreshToken(userId: string, facilityId: string, token: string) {
+  async createRefreshToken(
+    userId: string,
+    facilityId: string,
+    token: string,
+    meta?: { userAgent?: string | null; ip?: string | null },
+  ) {
     const tokenHash = createHash('sha256').update(token).digest('hex');
     return this.prisma.refreshToken.create({
       data: {
@@ -39,6 +44,9 @@ export class AuthRepository {
         facilityId,
         tokenHash,
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+        userAgent: meta?.userAgent?.slice(0, 400) ?? null,
+        ip: meta?.ip?.slice(0, 45) ?? null,
+        lastUsedAt: new Date(),
       },
     });
   }
@@ -69,6 +77,39 @@ export class AuthRepository {
     return this.prisma.refreshToken.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
+    });
+  }
+
+  /** Live (unrevoked, unexpired) sessions for a user, most-recently-used first. */
+  async listActiveSessions(userId: string) {
+    return this.prisma.refreshToken.findMany({
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: [{ lastUsedAt: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true, userAgent: true, ip: true, createdAt: true, lastUsedAt: true },
+    });
+  }
+
+  /** Revoke a single session, but only if it belongs to this user. */
+  async revokeUserToken(userId: string, id: string) {
+    return this.prisma.refreshToken.updateMany({
+      where: { id, userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  /** Revoke every live session for a user except the one being kept. */
+  async revokeOtherUserTokens(userId: string, keepId: string) {
+    return this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null, id: { not: keepId } },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  /** Bump last_used_at on a live session (called when its token is refreshed). */
+  async touchRefreshToken(id: string) {
+    return this.prisma.refreshToken.update({
+      where: { id },
+      data: { lastUsedAt: new Date() },
     });
   }
 
