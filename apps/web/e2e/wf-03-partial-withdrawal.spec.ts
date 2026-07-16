@@ -5,6 +5,7 @@
  * DRAFT invoice with auto-generated line items.
  */
 import { test, expect, API_URL, FACILITY_ID, resetFacility } from './fixtures';
+import { pickLotFixtures } from './helpers/lot-fixtures';
 
 test.beforeAll(async () => {
   await resetFacility();
@@ -43,9 +44,7 @@ test.describe('WF-03 — Partial Withdrawal', () => {
       ).json()
     ).data;
 
-    const commodities = (await (await request.get(`${API_URL}/v1/commodities`, { headers: opHeaders })).json()).data;
-    const chambers = (await (await request.get(`${API_URL}/v1/chambers`, { headers: opHeaders })).json()).data;
-    const ratePlans = (await (await request.get(`${API_URL}/v1/rate-plans`, { headers: opHeaders })).json()).data;
+    const fixtures = await pickLotFixtures(request, opHeaders);
 
     // Inbound 60 days ago so MONTHLY rate plans produce a non-zero invoice.
     const inboundDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -54,9 +53,9 @@ test.describe('WF-03 — Partial Withdrawal', () => {
         await request.post(`${API_URL}/v1/lots`, {
           data: {
             owner_party_id: party.id,
-            commodity_id: commodities[0].id,
-            rate_plan_id: ratePlans[0].id,
-            chamber_id: chambers[0].id,
+            commodity_id: fixtures.commodityId,
+            rate_plan_id: fixtures.ratePlanId,
+            chamber_id: fixtures.chamberId,
             quantity_bags: 50,
             accepted_weight_kg: 1000,
             inbound_date: inboundDate,

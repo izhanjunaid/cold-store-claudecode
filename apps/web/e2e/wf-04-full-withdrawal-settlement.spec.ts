@@ -5,6 +5,7 @@
  * Mirrors the existing WF-04 integration test but exercises the UI path.
  */
 import { test, expect, API_URL, FACILITY_ID, resetFacility } from './fixtures';
+import { pickLotFixtures } from './helpers/lot-fixtures';
 
 test.beforeAll(async () => {
   await resetFacility();
@@ -57,9 +58,7 @@ test.describe('WF-04 — Full Withdrawal & Settlement', () => {
       ).json()
     ).data;
 
-    const commodities = (await (await request.get(`${API_URL}/v1/commodities`, { headers: opHeaders })).json()).data;
-    const chambers = (await (await request.get(`${API_URL}/v1/chambers`, { headers: opHeaders })).json()).data;
-    const ratePlans = (await (await request.get(`${API_URL}/v1/rate-plans`, { headers: opHeaders })).json()).data;
+    const fixtures = await pickLotFixtures(request, opHeaders);
 
     const inboundDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const lot = (
@@ -67,9 +66,9 @@ test.describe('WF-04 — Full Withdrawal & Settlement', () => {
         await request.post(`${API_URL}/v1/lots`, {
           data: {
             owner_party_id: party.id,
-            commodity_id: commodities[0].id,
-            rate_plan_id: ratePlans[0].id,
-            chamber_id: chambers[0].id,
+            commodity_id: fixtures.commodityId,
+            rate_plan_id: fixtures.ratePlanId,
+            chamber_id: fixtures.chamberId,
             quantity_bags: 25,
             accepted_weight_kg: 500,
             inbound_date: inboundDate,
