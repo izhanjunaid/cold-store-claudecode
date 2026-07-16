@@ -125,6 +125,124 @@ describe('Ownership Transfer', () => {
 
     const events = await prisma.ownershipHistory.findMany({ where: { lotId: lot.id } });
     expect(events.find((e) => e.eventType === 'TRANSFER_OUT')).toBeDefined();
+    // Same-lot TRANSFER_IN so a later invoice bills the new owner only from
+    // this date forward, not from the lot's original inbound date.
+    const transferIn = events.find((e) => e.eventType === 'TRANSFER_IN');
+    expect(transferIn).toBeDefined();
+    expect(transferIn?.fromPartyId).toBe(fromPartyId);
+    expect(transferIn?.toPartyId).toBe(toPartyId);
+    expect(transferIn?.effectiveDate.toISOString().slice(0, 10)).toBe('2026-04-15');
+  });
+
+  it('FULL transfer: creates an accrued DRAFT invoice billing the outgoing owner for the pre-transfer period', async () => {
+    const lot = await createLot(80); // inbound date defaults to today in createLot()
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/lots/${lot.id}/transfer`,
+      headers: authHeaders(managerToken),
+      payload: {
+        transfer_type: 'FULL',
+        to_party_id: toPartyId,
+        effective_date: '2026-04-15',
+        notes: 'sale to trader',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body).data;
+    expect(body.accrued_invoice_id).toBeTruthy();
+
+    const invRes = await app.inject({
+      method: 'GET',
+      url: `/v1/invoices/${body.accrued_invoice_id}`,
+      headers: authHeaders(managerToken),
+    });
+    expect(invRes.statusCode).toBe(200);
+    const inv = JSON.parse(invRes.body).data;
+    expect(inv.status).toBe('DRAFT');
+    expect(inv.lot_id).toBe(lot.id);
+    expect(inv.outbound_event_id).toBeNull();
+    expect(inv.billing_party_id).toBe(fromPartyId);
+    expect(inv.period_end).toBe('2026-04-15');
+    expect(inv.line_items.length).toBe(1);
+    expect(inv.line_items[0].line_type).toBe('STORAGE');
+    expect(inv.line_items[0].amount_pkr).toBeGreaterThan(0);
+  });
+
+  it('FULL transfer: a later withdrawal by the new owner bills only from the transfer date onward', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: {
+        owner_party_id: fromPartyId,
+        commodity_id: POTATO_ID,
+        rate_plan_id: RATE_PLAN, // MONTHLY_PER_BAG, rate 100, minBillingDays 1
+        chamber_id: CHAMBER_A,
+        quantity_bags: 80,
+        accepted_weight_kg: 1600,
+        inbound_date: '2026-04-01',
+      },
+    });
+    expect(createRes.statusCode).toBe(201);
+    const lot = JSON.parse(createRes.body).data;
+
+    const transferRes = await app.inject({
+      method: 'POST',
+      url: `/v1/lots/${lot.id}/transfer`,
+      headers: authHeaders(managerToken),
+      payload: {
+        transfer_type: 'FULL',
+        to_party_id: toPartyId,
+        effective_date: '2026-04-15',
+      },
+    });
+    expect(transferRes.statusCode).toBe(201);
+
+    const outboundRes = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(operatorToken),
+      payload: {
+        lot_id: lot.id,
+        withdrawal_type: 'FULL',
+        quantity_withdrawn_bags: 80,
+        outbound_date: '2026-05-20',
+      },
+    });
+    expect(outboundRes.statusCode).toBe(201);
+    const outboundId = JSON.parse(outboundRes.body).data.id;
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/v1/outbound-events/${outboundId}/weight`,
+      headers: authHeaders(operatorToken),
+      payload: { outbound_weight_kg: 1560 },
+    });
+
+    const finalizeRes = await app.inject({
+      method: 'POST',
+      url: `/v1/outbound-events/${outboundId}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(finalizeRes.statusCode).toBe(200);
+    const invoiceId = JSON.parse(finalizeRes.body).data.invoice_id;
+
+    const invRes = await app.inject({
+      method: 'GET',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+    });
+    const inv = JSON.parse(invRes.body).data;
+    // New owner is billed from the transfer date (Apr 15), NOT the lot's
+    // original inbound date (Apr 1) — that pre-transfer period was already
+    // billed to the old owner via the accrued invoice at transfer time.
+    expect(inv.billing_party_id).toBe(toPartyId);
+    expect(inv.period_start).toBe('2026-04-15');
+    expect(inv.period_end).toBe('2026-05-20');
+    // MONTHLY_PER_BAG: Apr15->May20 = 35 days -> ceil(35/30) = 2 months
+    expect(inv.line_items[0].amount_pkr).toBe(80 * 100 * 2);
   });
 
   it('PARTIAL transfer: creates child lot with -T1 suffix, decrements parent, writes two events', async () => {

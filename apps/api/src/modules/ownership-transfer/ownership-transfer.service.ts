@@ -4,6 +4,7 @@ import { OwnershipTransferRepository, LOT_INCLUDE_SHAPE_TRANSFER } from './owner
 import { mirrorTransferPlacements } from '../lot/placement.service';
 import { renderTransferAcknowledgment } from '../pdf/pdf.service';
 import type { TransferAcknowledgmentData } from '../pdf/pdf.service';
+import { buildOwnershipTransferAccruedInvoice } from '../invoice/invoice.builder';
 
 export interface CreateTransferInput {
   facilityId: string;
@@ -34,6 +35,7 @@ function mapTransferResponse(
   parent: { id: string; lotNumber: string; currentBalanceBags: number },
   child: { id: string; lotNumber: string } | null,
   transferType: 'FULL' | 'PARTIAL',
+  accruedInvoiceId: string | null = null,
 ) {
   return {
     transfer_id: transfer.id,
@@ -48,6 +50,9 @@ function mapTransferResponse(
     parent_current_balance_bags: parent.currentBalanceBags,
     child_lot_id: child?.id ?? null,
     child_lot_number: child?.lotNumber ?? null,
+    // FULL transfers only: DRAFT invoice billing the outgoing owner for the
+    // pre-transfer accrued period (see buildOwnershipTransferAccruedInvoice).
+    accrued_invoice_id: accruedInvoiceId,
     notes: transfer.notes,
     created_at: transfer.createdAt.toISOString(),
   };
@@ -94,9 +99,41 @@ export class OwnershipTransferService {
       const balance = parent.current_balance_bags;
 
       // Full load of parent (for output + child inheritance)
-      const parentLot = await tx.lot.findUniqueOrThrow({ where: { id: parent.id } });
+      const parentLot = await tx.lot.findUniqueOrThrow({
+        where: { id: parent.id },
+        include: { ratePlan: true },
+      });
 
       if (input.transferType === 'FULL') {
+        // Bill the outgoing owner for the accrued pre-transfer period now —
+        // no outbound event will ever fire for it, since the goods stay put
+        // and only the owner changes (outboundEventId is nullable for
+        // exactly this case). Find where their billing window started: the
+        // latest INITIAL/TRANSFER_IN on this lot, same lookup invoice
+        // builder uses at withdrawal time.
+        const priorOwnership = await tx.ownershipHistory.findFirst({
+          where: { lotId: parent.id, eventType: { in: ['INITIAL', 'TRANSFER_IN'] } },
+          orderBy: { effectiveDate: 'desc' },
+        });
+        const accruedPeriodStart = priorOwnership ? priorOwnership.effectiveDate : parentLot.inboundDate;
+
+        const accruedInvoice = await buildOwnershipTransferAccruedInvoice(tx, {
+          facilityId: input.facilityId,
+          lotId: parent.id,
+          billingPartyId: parentLot.billingPartyId,
+          bookType: parentLot.bookType,
+          periodStart: accruedPeriodStart,
+          periodEnd: effectiveDate,
+          quantityBags: balance,
+          ratePlan: {
+            id: parentLot.ratePlan.id,
+            rateType: parentLot.ratePlan.rateType,
+            rateAmountPkr: Number(parentLot.ratePlan.rateAmountPkr),
+            minBillingDays: parentLot.ratePlan.minBillingDays,
+          },
+          createdBy: input.operatorId,
+        });
+
         const updated = await tx.lot.update({
           where: { id: parent.id },
           data: {
@@ -118,11 +155,30 @@ export class OwnershipTransferService {
             notes: input.notes,
           },
         });
+        // Mirrors the TRANSFER_IN a child lot gets on PARTIAL transfer, but
+        // on the same lot (FULL transfer keeps the same lot id/number): the
+        // new owner's eventual withdrawal invoice will use this event's
+        // effectiveDate as periodStart instead of falling back to the lot's
+        // original INITIAL event.
+        await tx.ownershipHistory.create({
+          data: {
+            lotId: parent.id,
+            eventType: 'TRANSFER_IN',
+            fromPartyId,
+            toPartyId: input.toPartyId,
+            quantityBags: balance,
+            transferPricePkr: input.transferPricePkr,
+            effectiveDate,
+            operatorId: input.operatorId,
+            notes: input.notes,
+          },
+        });
         return mapTransferResponse(
           transfer as unknown as TransferRow,
           { id: updated.id, lotNumber: updated.lotNumber, currentBalanceBags: updated.currentBalanceBags },
           null,
           'FULL',
+          accruedInvoice.id,
         );
       }
 
