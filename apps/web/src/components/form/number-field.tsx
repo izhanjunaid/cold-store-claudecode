@@ -55,8 +55,8 @@ export function NumberField<T extends FieldValues>({
             {label}
             {required && <span className="ml-0.5 text-destructive">*</span>}
           </FormLabel>
-          <FormControl>
-            <div className="relative">
+          <div className="relative">
+            <FormControl>
               <Input
                 {...field}
                 value={field.value ?? ''}
@@ -69,13 +69,13 @@ export function NumberField<T extends FieldValues>({
                 step={step}
                 className={cn('tabular-nums', suffix && 'pr-12')}
               />
-              {suffix && (
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                  {suffix}
-                </span>
-              )}
-            </div>
-          </FormControl>
+            </FormControl>
+            {suffix && (
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                {suffix}
+              </span>
+            )}
+          </div>
           {description && <FormDescription>{description}</FormDescription>}
           <FormMessage />
         </FormItem>

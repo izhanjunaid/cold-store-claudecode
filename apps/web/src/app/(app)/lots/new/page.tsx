@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -175,12 +175,37 @@ export default function LotCreatePage() {
   const placedBags = allocationTotal(allocationRows);
   const unplacedBags = Math.max(0, qty - placedBags);
 
+  // Save & New keeps the munshi on this screen for the next truck instead of
+  // navigating to the lot detail page. A ref (not state) because the button's
+  // onClick and the form's onSubmit fire in the same synchronous event —
+  // state set in onClick wouldn't be visible yet when onSubmit reads it.
+  const saveAndNewRef = useRef(false);
+  // Bumped on each Save & New so <EntrySheet key={...}> remounts and its
+  // auto-focus-on-mount effect re-fires, landing the munshi back on the
+  // first field ready to type the next lot.
+  const [formGeneration, setFormGeneration] = useState(0);
+
   const createLot = useApiMutation<CreatedLot, Record<string, unknown>>({
     mutationFn: (payload) => apiClient<CreatedLot>('/v1/lots', { method: 'POST', body: payload }),
     invalidates: [qk.lots.all],
     successMessage: (lot) => `Lot ${lot.lot_number} created`,
     silentError: true,
-    onSuccess: (lot) => router.push(`/lots/${lot.id}`),
+    onSuccess: (lot) => {
+      if (saveAndNewRef.current) {
+        // Sticky fields repeat truck after truck; everything else resets.
+        const sticky = {
+          inbound_date: form.getValues('inbound_date'),
+          chamber_id: form.getValues('chamber_id'),
+          commodity_id: form.getValues('commodity_id'),
+          rate_plan_id: form.getValues('rate_plan_id'),
+        };
+        form.reset({ ...DEFAULTS, ...sticky });
+        setAllocationRows([]);
+        setFormGeneration((g) => g + 1);
+      } else {
+        router.push(`/lots/${lot.id}`);
+      }
+    },
     onError: (err) => {
       const applied = applyApiErrorToForm(err, setError);
       if (!applied) {
@@ -230,7 +255,7 @@ export default function LotCreatePage() {
             </div>
           )}
 
-          <EntrySheet>
+          <EntrySheet key={formGeneration}>
             <EntryGroup title="Consignment" columns={6}>
               <ComboboxField
                 control={control}
@@ -443,8 +468,24 @@ export default function LotCreatePage() {
               </>
             }
           >
-            <Button type="submit" disabled={createLot.isPending}>
+            <Button
+              type="submit"
+              disabled={createLot.isPending}
+              onClick={() => {
+                saveAndNewRef.current = false;
+              }}
+            >
               {createLot.isPending ? 'Creating…' : 'Create Inbound Lot'}
+            </Button>
+            <Button
+              type="submit"
+              variant="secondary"
+              disabled={createLot.isPending}
+              onClick={() => {
+                saveAndNewRef.current = true;
+              }}
+            >
+              Save & New
             </Button>
             <Button type="button" variant="outline" onClick={() => router.back()}>
               Cancel
