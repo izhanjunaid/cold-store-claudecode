@@ -7,6 +7,12 @@ const prisma = new PrismaClient();
 let app: FastifyInstance;
 let ownerToken: string;
 let accountantToken: string;
+let operatorToken: string;
+let managerToken: string;
+
+const POTATO_ID = '00000000-0000-0000-0000-000000000100';
+const CHAMBER_A = '00000000-0000-0000-0000-000000000200';
+const RATE_PLAN = '00000000-0000-0000-0000-000000000500';
 
 const emailPayload = (over: Record<string, unknown>) => ({
   settings: {
@@ -33,6 +39,8 @@ beforeAll(async () => {
   app = await getTestApp();
   ownerToken = (await loginAsRole(app, 'OWNER')).accessToken;
   accountantToken = (await loginAsRole(app, 'ACCOUNTANT')).accessToken;
+  operatorToken = (await loginAsRole(app, 'OPERATOR')).accessToken;
+  managerToken = (await loginAsRole(app, 'MANAGER')).accessToken;
 });
 
 afterEach(() => {
@@ -73,5 +81,57 @@ describe('Notifications — daily digest', () => {
     expect(mail.to).toBe('digest@coldchain.pk');
     expect(mail.subject).toMatch(/daily digest/i);
     expect(mail.html.length).toBeGreaterThan(0);
+  });
+
+  it('includes an Unbilled Invoices section when a transfer-accrued DRAFT invoice exists', async () => {
+    await patchEmail({ enabled: true, admin_email: 'digest-unbilled@coldchain.pk', smtp_password: 'app-pass-123' });
+
+    const stamp = Date.now();
+    const fromParty = await app.inject({
+      method: 'POST',
+      url: '/v1/parties',
+      headers: authHeaders(operatorToken),
+      payload: { name: `DigestFrom-${stamp}`, party_type: 'FARMER', phone_primary: `0300${stamp % 10000000}`, credit_terms_days: 30 },
+    });
+    const toParty = await app.inject({
+      method: 'POST',
+      url: '/v1/parties',
+      headers: authHeaders(operatorToken),
+      payload: { name: `DigestTo-${stamp}`, party_type: 'TRADER', phone_primary: `0301${stamp % 10000000}`, credit_terms_days: 30 },
+    });
+    const fromPartyId = JSON.parse(fromParty.body).data.id;
+    const toPartyId = JSON.parse(toParty.body).data.id;
+
+    const lotRes = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: {
+        owner_party_id: fromPartyId,
+        commodity_id: POTATO_ID,
+        rate_plan_id: RATE_PLAN,
+        chamber_id: CHAMBER_A,
+        quantity_bags: 5,
+        accepted_weight_kg: 100,
+        inbound_date: '2026-01-01',
+      },
+    });
+    expect(lotRes.statusCode).toBe(201);
+    const lotId = JSON.parse(lotRes.body).data.id;
+
+    const transferRes = await app.inject({
+      method: 'POST',
+      url: `/v1/lots/${lotId}/transfer`,
+      headers: authHeaders(managerToken),
+      payload: { transfer_type: 'FULL', to_party_id: toPartyId, effective_date: '2026-02-01' },
+    });
+    expect(transferRes.statusCode).toBe(201);
+
+    const res = await sendNow(ownerToken);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data.sent).toBe(true);
+
+    const mail = sentMails[sentMails.length - 1]!;
+    expect(mail.html).toMatch(/unbilled/i);
   });
 });

@@ -269,6 +269,99 @@ describe('GET /v1/reports/dashboard', () => {
     expect(body.data.occupancy_pct).toBeGreaterThanOrEqual(0);
     expect(body.data.occupancy_pct).toBeLessThanOrEqual(100);
   });
+
+  it('unbilled_invoices surfaces a DISPATCHED outbound whose invoice is still DRAFT, and a transfer-accrued DRAFT invoice, but not the already-finalized one', async () => {
+    // Dispatch-linked: withdraw + finalize the outbound, but leave the invoice DRAFT.
+    const lotForDispatch = await createLot({
+      ownerPartyId: partyA,
+      commodityId: POTATO_ID,
+      inboundDate: '2026-03-01',
+      quantityBags: 15,
+      acceptedWeightKg: 300,
+    });
+    const outRes = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(operatorToken),
+      payload: {
+        lot_id: lotForDispatch,
+        withdrawal_type: 'FULL',
+        quantity_withdrawn_bags: 15,
+        outbound_date: '2026-03-15',
+      },
+    });
+    expect(outRes.statusCode).toBe(201);
+    const outboundId = JSON.parse(outRes.body).data.id;
+    await app.inject({
+      method: 'PATCH',
+      url: `/v1/outbound-events/${outboundId}/weight`,
+      headers: authHeaders(operatorToken),
+      payload: { outbound_weight_kg: 295 },
+    });
+    const finOutRes = await app.inject({
+      method: 'POST',
+      url: `/v1/outbound-events/${outboundId}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(finOutRes.statusCode).toBe(200);
+    const dispatchInvoiceId = JSON.parse(finOutRes.body).data.invoice_id as string;
+
+    // Transfer-accrued: FULL transfer generates a standalone DRAFT invoice
+    // for the outgoing owner with no outbound event.
+    const lotForTransfer = await createLot({
+      ownerPartyId: partyA,
+      commodityId: POTATO_ID,
+      inboundDate: '2026-03-01',
+      quantityBags: 8,
+      acceptedWeightKg: 160,
+    });
+    const transferRes = await app.inject({
+      method: 'POST',
+      url: `/v1/lots/${lotForTransfer}/transfer`,
+      headers: authHeaders(managerToken),
+      payload: {
+        transfer_type: 'FULL',
+        to_party_id: partyB,
+        effective_date: '2026-03-20',
+      },
+    });
+    expect(transferRes.statusCode).toBe(201);
+    const transferInvoiceId = JSON.parse(transferRes.body).data.accrued_invoice_id as string;
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/reports/dashboard',
+      headers: authHeaders(managerToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.data.unbilled_invoices).not.toBeNull();
+    const ids = body.data.unbilled_invoices.items.map((i: { invoice_id: string }) => i.invoice_id);
+    expect(ids).toContain(dispatchInvoiceId);
+    expect(ids).toContain(transferInvoiceId);
+    expect(ids).not.toContain(invoiceA); // already finalized in beforeAll
+    expect(body.data.unbilled_invoices.count).toBeGreaterThanOrEqual(2);
+    expect(body.data.unbilled_invoices.total_pkr).toBeGreaterThan(0);
+    const dispatchRow = body.data.unbilled_invoices.items.find(
+      (i: { invoice_id: string }) => i.invoice_id === dispatchInvoiceId,
+    );
+    const transferRow = body.data.unbilled_invoices.items.find(
+      (i: { invoice_id: string }) => i.invoice_id === transferInvoiceId,
+    );
+    expect(dispatchRow.source).toBe('DISPATCH');
+    expect(transferRow.source).toBe('TRANSFER');
+  });
+
+  it('unbilled_invoices is null for OPERATOR (financial-gated like the rest of the block)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/reports/dashboard',
+      headers: authHeaders(operatorToken),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data.unbilled_invoices).toBeNull();
+  });
 });
 
 // ============================================================

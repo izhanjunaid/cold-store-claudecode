@@ -107,8 +107,21 @@ export async function getDashboard(
     overdue_90_plus_pkr: number;
   } | null = null;
 
+  let unbilledInvoices: {
+    count: number;
+    total_pkr: number;
+    items: Array<{
+      invoice_id: string;
+      lot_number: string;
+      billing_party_name: string;
+      total_pkr: number;
+      invoice_date: string;
+      source: 'DISPATCH' | 'TRANSFER';
+    }>;
+  } | null = null;
+
   if (includeFinancial) {
-    const [arRows, collectedAgg, aging] = await Promise.all([
+    const [arRows, collectedAgg, aging, draftInvoices] = await Promise.all([
       prisma.$queryRaw<{ ar_total: string | null }[]>`
         SELECT COALESCE(SUM(total_pkr - amount_paid_pkr), 0)::text AS ar_total
         FROM invoices
@@ -125,6 +138,24 @@ export async function getDashboard(
         _sum: { amountPkr: true },
       }),
       getReceivablesAging(prisma, facilityId, {}),
+      // DRAFT invoices already represent money owed with no AR/JE-01 posted
+      // yet. outboundEventId set = goods already dispatched, waiting on the
+      // accountant to finalize; null = a FULL ownership transfer's accrued
+      // invoice for the outgoing owner (see buildOwnershipTransferAccruedInvoice),
+      // which has no outbound event to key off of at all.
+      prisma.invoice.findMany({
+        where: { facilityId, status: 'DRAFT' },
+        select: {
+          id: true,
+          outboundEventId: true,
+          totalPkr: true,
+          invoiceDate: true,
+          lot: { select: { lotNumber: true } },
+          billingParty: { select: { name: true } },
+        },
+        orderBy: { invoiceDate: 'asc' },
+        take: ATTENTION_LIMIT,
+      }),
     ]);
 
     const arTotal = Number(arRows[0]?.ar_total ?? 0);
@@ -132,6 +163,24 @@ export async function getDashboard(
       ar_total_pkr: round2(arTotal),
       collected_today_pkr: round2(Number(collectedAgg._sum.amountPkr ?? 0)),
       overdue_90_plus_pkr: round2(aging.buckets.b_90_plus),
+    };
+
+    const unbilledTotalAgg = await prisma.invoice.aggregate({
+      where: { facilityId, status: 'DRAFT' },
+      _sum: { totalPkr: true },
+      _count: true,
+    });
+    unbilledInvoices = {
+      count: unbilledTotalAgg._count,
+      total_pkr: round2(Number(unbilledTotalAgg._sum.totalPkr ?? 0)),
+      items: draftInvoices.map((inv) => ({
+        invoice_id: inv.id,
+        lot_number: inv.lot.lotNumber,
+        billing_party_name: inv.billingParty.name,
+        total_pkr: Number(inv.totalPkr),
+        invoice_date: inv.invoiceDate.toISOString().slice(0, 10),
+        source: inv.outboundEventId ? 'DISPATCH' : 'TRANSFER',
+      })),
     };
   }
 
@@ -144,5 +193,6 @@ export async function getDashboard(
     chambers,
     attention_required: attentionCandidates,
     financial,
+    unbilled_invoices: unbilledInvoices,
   };
 }

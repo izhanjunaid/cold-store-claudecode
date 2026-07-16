@@ -44,14 +44,17 @@ export class DigestService {
     }));
     const arTotal = dashboard.financial?.ar_total_pkr ?? 0;
     const overdue90 = dashboard.financial?.overdue_90_plus_pkr ?? 0;
+    const unbilledCount = dashboard.unbilled_invoices?.count ?? 0;
+    const unbilledTotal = dashboard.unbilled_invoices?.total_pkr ?? 0;
 
     const hasReceivables = arTotal > 0;
     const hasStorageAlerts = fullChambers.length > 0;
     const hasAgingLots = agingLots.length > 0;
+    const hasUnbilled = unbilledCount > 0;
 
     return {
       config: mailConfigFromSettings(facility.settings),
-      hasContent: hasReceivables || hasStorageAlerts || hasAgingLots,
+      hasContent: hasReceivables || hasStorageAlerts || hasAgingLots || hasUnbilled,
       context: {
         facilityName: facility.name,
         date: new Date().toLocaleDateString('en-GB', { dateStyle: 'full' }),
@@ -66,6 +69,9 @@ export class DigestService {
         warningPct,
         hasAgingLots,
         agingLots,
+        hasUnbilled,
+        unbilledCount,
+        unbilledTotal: fmtPkr(unbilledTotal),
       },
     };
   }

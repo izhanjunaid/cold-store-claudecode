@@ -98,6 +98,23 @@ export const DashboardAttentionRow = z.object({
 });
 export type DashboardAttentionRowType = z.infer<typeof DashboardAttentionRow>;
 
+export const DashboardUnbilledInvoiceRow = z.object({
+  invoice_id: z.string().uuid(),
+  lot_number: z.string(),
+  billing_party_name: z.string(),
+  total_pkr: z.number(),
+  invoice_date: z.string(),
+  source: z.enum(['DISPATCH', 'TRANSFER']),
+});
+export type DashboardUnbilledInvoiceRowType = z.infer<typeof DashboardUnbilledInvoiceRow>;
+
+export const DashboardUnbilledInvoicesBlock = z.object({
+  count: z.number().int(),
+  total_pkr: z.number(),
+  items: z.array(DashboardUnbilledInvoiceRow),
+});
+export type DashboardUnbilledInvoicesBlockType = z.infer<typeof DashboardUnbilledInvoicesBlock>;
+
 export const DashboardResponse = z.object({
   active_lots: z.number().int(),
   total_bags: z.number().int(),
@@ -107,6 +124,7 @@ export const DashboardResponse = z.object({
   chambers: z.array(DashboardChamberRow),
   attention_required: z.array(DashboardAttentionRow),
   financial: DashboardFinancialBlock.nullable(),
+  unbilled_invoices: DashboardUnbilledInvoicesBlock.nullable(),
 });
 export type DashboardResponseType = z.infer<typeof DashboardResponse>;
 

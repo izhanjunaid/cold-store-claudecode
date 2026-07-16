@@ -88,7 +88,7 @@ export default function DashboardPage() {
       {data?.financial && (
         <div className="mb-6">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Financial Snapshot</h2>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <StatTile
               label="AR Outstanding"
               value={formatMoney(data.financial.ar_total_pkr)}
@@ -106,6 +106,14 @@ export default function DashboardPage() {
               caption="invoices 90+ days past due"
               tone={data.financial.overdue_90_plus_pkr > 0 ? 'negative' : 'default'}
             />
+            {data.unbilled_invoices && (
+              <StatTile
+                label="Unbilled Invoices"
+                value={fmt(data.unbilled_invoices.count)}
+                caption={`${formatMoney(data.unbilled_invoices.total_pkr)} in DRAFT invoices`}
+                tone={data.unbilled_invoices.count > 0 ? 'negative' : 'default'}
+              />
+            )}
           </div>
         </div>
       )}
