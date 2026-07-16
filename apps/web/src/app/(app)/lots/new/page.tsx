@@ -289,12 +289,13 @@ export default function LotCreatePage() {
             </EntryGroup>
 
             <EntryGroup title="Goods" columns={4}>
-              <SelectField
+              <ComboboxField
                 control={control}
                 name="commodity_id"
                 label="Commodity"
                 required
                 placeholder="Select commodity…"
+                searchPlaceholder="Search commodities…"
                 options={commodities.map((c) => ({ value: c.id, label: c.name }))}
                 onValueChange={() => {
                   setValue('variety_id', '');
@@ -374,28 +375,32 @@ export default function LotCreatePage() {
             </EntryGroup>
 
             <EntryGroup title="Storage & Logistics" columns={6}>
-              <SelectField
+              <ComboboxField
                 control={control}
                 name="chamber_id"
                 label="Room"
                 required
                 placeholder="Select room…"
+                searchPlaceholder="Search rooms…"
                 options={filteredChambers.map((c) => ({
                   value: c.id,
-                  label: `${c.name} (${c.available_capacity_bags.toLocaleString()} avail / ${c.max_capacity_bags.toLocaleString()})`,
+                  label: c.name,
+                  hint: `${c.available_capacity_bags.toLocaleString()} avail / ${c.max_capacity_bags.toLocaleString()}`,
                 }))}
                 onValueChange={() => setAllocationRows([])}
                 className="xl:col-span-2"
               />
-              <SelectField
+              <ComboboxField
                 control={control}
                 name="rate_plan_id"
                 label="Rate plan"
                 required
                 placeholder="Select rate plan…"
+                searchPlaceholder="Search rate plans…"
                 options={filteredPlans.map((p) => ({
                   value: p.id,
-                  label: `${p.name} (${formatMoney(p.rate_amount_pkr)})`,
+                  label: p.name,
+                  hint: formatMoney(p.rate_amount_pkr),
                 }))}
                 className="xl:col-span-2"
               />

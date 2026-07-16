@@ -8,3 +8,7 @@ class ResizeObserverStub {
 }
 globalThis.ResizeObserver =
   globalThis.ResizeObserver ?? (ResizeObserverStub as unknown as typeof ResizeObserver);
+
+// jsdom doesn't implement scrollIntoView, which cmdk (Combobox's option list)
+// calls to keep the highlighted item in view when its popover opens.
+Element.prototype.scrollIntoView = Element.prototype.scrollIntoView ?? (() => {});

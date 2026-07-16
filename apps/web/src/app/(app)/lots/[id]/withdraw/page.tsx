@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { cn } from '@/lib/utils';
+import { Combobox } from '@/components/ui/combobox';
 import { PageHeader } from '@/components/layout/page-header';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { useLotPlacements } from '@/components/lot-location';
@@ -236,20 +236,14 @@ export default function WithdrawPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Receiving party</Label>
-              <select
+              <Combobox
                 value={form.receiving_party_id}
-                onChange={(e) => setForm({ ...form, receiving_party_id: e.target.value })}
-                className={cn(
-                  'flex w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                )}
-              >
-                <option value="">— Optional —</option>
-                {parties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.party_type})
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setForm({ ...form, receiving_party_id: v })}
+                options={parties.map((p) => ({ value: p.id, label: p.name, hint: p.party_type }))}
+                placeholder="— Optional —"
+                searchPlaceholder="Search parties…"
+                testId="combobox-receiving_party_id"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Notes</Label>

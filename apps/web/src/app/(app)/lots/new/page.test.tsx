@@ -61,12 +61,16 @@ function renderPage() {
   );
 }
 
+async function pickCombobox(testId: string, optionText: string) {
+  fireEvent.click(await screen.findByTestId(testId));
+  fireEvent.click(await screen.findByText(optionText));
+}
+
 async function fillRequiredFields() {
-  fireEvent.click(await screen.findByTestId('combobox-owner_party_id'));
-  fireEvent.click(await screen.findByText('Farmer One'));
-  fireEvent.change(screen.getByLabelText(/^Commodity/), { target: { value: COMMODITY.id } });
-  fireEvent.change(screen.getByLabelText(/^Room/), { target: { value: CHAMBER.id } });
-  fireEvent.change(screen.getByLabelText(/^Rate plan/), { target: { value: RATE_PLAN.id } });
+  await pickCombobox('combobox-owner_party_id', 'Farmer One');
+  await pickCombobox('combobox-commodity_id', COMMODITY.name);
+  await pickCombobox('combobox-chamber_id', CHAMBER.name);
+  await pickCombobox('combobox-rate_plan_id', RATE_PLAN.name);
   fireEvent.change(screen.getByLabelText(/^Quantity/), { target: { value: '10' } });
   fireEvent.change(screen.getByLabelText(/^Accepted weight/), { target: { value: '200' } });
   fireEvent.change(screen.getByLabelText(/^Inbound date/), { target: { value: '2026-01-15' } });
@@ -107,9 +111,9 @@ describe('LotCreatePage — Save & New', () => {
     expect(push).not.toHaveBeenCalled();
 
     // Sticky fields (date, room, commodity, rate plan) survive the reset.
-    await waitFor(() => expect(screen.getByLabelText(/^Commodity/)).toHaveValue('commodity-1'));
-    expect(screen.getByLabelText(/^Room/)).toHaveValue('chamber-1');
-    expect(screen.getByLabelText(/^Rate plan/)).toHaveValue('rate-1');
+    await waitFor(() => expect(screen.getByTestId('combobox-commodity_id')).toHaveTextContent(COMMODITY.name));
+    expect(screen.getByTestId('combobox-chamber_id')).toHaveTextContent(CHAMBER.name);
+    expect(screen.getByTestId('combobox-rate_plan_id')).toHaveTextContent(RATE_PLAN.name);
     expect(screen.getByLabelText(/^Inbound date/)).toHaveValue('2026-01-15');
 
     // Everything else clears for the next truck.
