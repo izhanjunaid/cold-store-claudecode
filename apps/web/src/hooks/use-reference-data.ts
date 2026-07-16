@@ -54,7 +54,6 @@ export interface RatePlanRef {
 }
 
 export interface FacilitySettings {
-  weight_dispute_threshold_pct?: number;
   weight_dispute_threshold_kg?: number;
   chamber_capacity_warning_pct?: number;
   backdating_max_days?: number | null;

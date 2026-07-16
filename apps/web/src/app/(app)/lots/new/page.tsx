@@ -124,8 +124,12 @@ export default function LotCreatePage() {
     ],
   });
 
-  // Thresholds come from facility settings (backend enforces both pct AND kg).
-  const pctThreshold = facility?.settings?.weight_dispute_threshold_pct ?? 2;
+  // Dispute threshold is an absolute kg variance, matching the server
+  // (lot.service.ts) exactly — a percent-based check was deliberately
+  // removed there in Phase 12.1 because it false-flagged small lots (a
+  // couple of kg of moisture loss on a 2-bag lot reads as a large percent
+  // but isn't a real dispute). variancePct is still shown for context below,
+  // it just doesn't gate the note requirement.
   const kgThreshold = facility?.settings?.weight_dispute_threshold_kg ?? 5;
   const capacityWarnPct = facility?.settings?.chamber_capacity_warning_pct ?? 90;
 
@@ -134,7 +138,7 @@ export default function LotCreatePage() {
   const qty = parseInt(qtyStr) || 0;
   const variancePct = declared > 0 ? (Math.abs(accepted - declared) / declared) * 100 : 0;
   const varianceKg = declared > 0 ? Math.abs(accepted - declared) : 0;
-  const hasDispute = declared > 0 && (variancePct > pctThreshold || varianceKg > kgThreshold);
+  const hasDispute = declared > 0 && varianceKg > kgThreshold;
 
   const partyOptions = useMemo(
     () => parties.map((p) => ({ value: p.id, label: p.name, hint: p.party_type })),
@@ -338,7 +342,7 @@ export default function LotCreatePage() {
                   required
                   rows={2}
                   placeholder="Explain the weight variance…"
-                  description={`Variance exceeds the facility threshold (${pctThreshold}% or ${kgThreshold} kg) — a note is required.`}
+                  description={`Variance exceeds the facility threshold (${kgThreshold} kg) — a note is required.`}
                   className="col-span-full"
                 />
               )}
