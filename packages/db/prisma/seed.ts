@@ -37,6 +37,10 @@ async function main() {
         storage_alert_thresholds: {},
         gst_registered: false,
         number_format: 'en-PK',
+        // Unlimited backdating for dev/E2E: E2E specs and manual dev testing
+        // routinely create historically-dated fixtures as OPERATOR; the new
+        // 7-day production default would reject them.
+        backdating_max_days: null,
       },
     },
   });

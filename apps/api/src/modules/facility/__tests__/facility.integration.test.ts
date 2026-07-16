@@ -117,7 +117,7 @@ describe('Phase 12 facility settings', () => {
     expect(res.statusCode).toBe(200);
     const s = JSON.parse(res.body).data.settings;
     expect(s.chamber_capacity_warning_pct).toBe(90);
-    expect(s.backdating_max_days).toBeNull();
+    expect(s.backdating_max_days).toBe(7);
     expect(s.gst_default_rate).toBe(18);
     expect(s.late_payment_surcharge).toEqual({
       enabled: false,

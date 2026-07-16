@@ -60,7 +60,11 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
   gst_registered: false,
   number_format: 'en-PK',
   chamber_capacity_warning_pct: 90,
-  backdating_max_days: null,
+  // 7 days: OPERATOR-level entries older than this need a MANAGER (see
+  // roleAtLeast checks in lot/outbound create). Dev/test/E2E fixtures
+  // explicitly opt back into null (unlimited) so historically-dated test
+  // data keeps working — see apps/api/src/test/setup.ts, prisma/seed.ts.
+  backdating_max_days: 7,
   gst_default_rate: 18,
   late_payment_surcharge: { enabled: false, pct_per_month: 2, grace_days: 30 },
   email: {

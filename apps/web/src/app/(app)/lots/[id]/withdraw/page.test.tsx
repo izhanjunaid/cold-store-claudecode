@@ -28,12 +28,14 @@ const LOT = {
   current_balance_bags: 40,
 };
 const RECEIVING_PARTY = { id: 'party-2', name: 'Trader Two', party_type: 'TRADER', is_active: true };
+const FACILITY = { id: 'fac-1', name: 'Test Facility', settings: { backdating_max_days: 3 } };
 
 function routeApiClient() {
   apiClient.mockImplementation((path: string, opts?: { method?: string; body?: unknown }) => {
     if (path === `/v1/lots/${LOT_ID}`) return Promise.resolve(LOT);
     if (path.startsWith('/v1/parties')) return Promise.resolve([RECEIVING_PARTY]);
     if (path === `/v1/lots/${LOT_ID}/placements`) return Promise.resolve(null);
+    if (path === '/v1/facilities/me') return Promise.resolve(FACILITY);
     if (path === '/v1/outbound-events' && opts?.method === 'POST') {
       return Promise.resolve({ id: 'outbound-1' });
     }
@@ -76,4 +78,15 @@ describe('WithdrawPage — searchable receiving party', () => {
       ),
     );
   }, 10_000);
+
+  it('warns client-side when the outbound date exceeds the facility backdating window', async () => {
+    renderPage();
+    await screen.findByText('LOT-260101-0001');
+
+    const dateInput = screen.getByLabelText(/^Outbound date/);
+    fireEvent.change(dateInput, { target: { value: '2026-01-01' } });
+
+    await waitFor(() => expect(screen.getByText(/backdated/i)).toBeInTheDocument());
+    expect(screen.getByText(/manager approval/i)).toBeInTheDocument();
+  });
 });

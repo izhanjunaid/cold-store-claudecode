@@ -112,7 +112,7 @@ export default function LotCreatePage() {
   const [allocationRows, setAllocationRows] = useState<AllocationRow[]>([]);
 
   // Watch the fields that drive the live summary + conditional sections.
-  const [commodityId, declaredStr, acceptedStr, qtyStr, chamberId, billingOverride] = useWatch({
+  const [commodityId, declaredStr, acceptedStr, qtyStr, chamberId, billingOverride, inboundDateStr] = useWatch({
     control,
     name: [
       'commodity_id',
@@ -121,6 +121,7 @@ export default function LotCreatePage() {
       'quantity_bags',
       'chamber_id',
       'billing_override',
+      'inbound_date',
     ],
   });
 
@@ -132,6 +133,14 @@ export default function LotCreatePage() {
   // it just doesn't gate the note requirement.
   const kgThreshold = facility?.settings?.weight_dispute_threshold_kg ?? 5;
   const capacityWarnPct = facility?.settings?.chamber_capacity_warning_pct ?? 90;
+
+  // Server enforcement (lot.service.ts) only rejects this on submit for
+  // OPERATOR-level users; surface it here too so it isn't a surprise error.
+  const backdatingMaxDays = facility?.settings?.backdating_max_days ?? null;
+  const daysBack = inboundDateStr
+    ? Math.floor((Date.now() - new Date(inboundDateStr).getTime()) / 86_400_000)
+    : 0;
+  const isBackdated = backdatingMaxDays !== null && daysBack > backdatingMaxDays;
 
   const declared = parseFloat(declaredStr) || 0;
   const accepted = parseFloat(acceptedStr) || 0;
@@ -468,6 +477,13 @@ export default function LotCreatePage() {
                     label={placedBags > qty ? 'Placed — over quantity' : 'Placed on racks'}
                     value={`${placedBags.toLocaleString()} bags${unplacedBags > 0 ? ` · ${unplacedBags.toLocaleString()} unplaced` : ''}`}
                     tone={placedBags > qty ? 'destructive' : 'default'}
+                  />
+                )}
+                {isBackdated && (
+                  <EntryChip
+                    label="Backdated"
+                    value={`${daysBack} days — manager approval required`}
+                    tone="warning"
                   />
                 )}
               </>

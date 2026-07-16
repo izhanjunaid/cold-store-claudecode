@@ -12,6 +12,7 @@ import { Combobox } from '@/components/ui/combobox';
 import { PageHeader } from '@/components/layout/page-header';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { useLotPlacements } from '@/components/lot-location';
+import { useFacility } from '@/hooks/use-reference-data';
 import { StatusBadge } from '@/components/ui/status-badge';
 
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -37,6 +38,7 @@ export default function WithdrawPage() {
 
   const [lot, setLot] = useState<Lot | null>(null);
   const { data: location } = useLotPlacements(lotId);
+  const { data: facility } = useFacility();
   const [parties, setParties] = useState<Party[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -67,6 +69,14 @@ export default function WithdrawPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Server enforcement (outbound.service.ts) only rejects this on submit for
+  // OPERATOR-level users; surface it here too so it isn't a surprise error.
+  const backdatingMaxDays = facility?.settings?.backdating_max_days ?? null;
+  const daysBack = form.outbound_date
+    ? Math.floor((Date.now() - new Date(form.outbound_date).getTime()) / 86_400_000)
+    : 0;
+  const isBackdated = backdatingMaxDays !== null && daysBack > backdatingMaxDays;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -215,14 +225,20 @@ export default function WithdrawPage() {
             )}
 
             <div className="space-y-1.5">
-              <Label>Outbound date <span className="text-destructive">*</span></Label>
+              <Label htmlFor="outbound_date">Outbound date <span className="text-destructive">*</span></Label>
               <Input
+                id="outbound_date"
                 type="date"
                 value={form.outbound_date}
                 onChange={(e) => setForm({ ...form, outbound_date: e.target.value })}
                 className="tabular-nums"
                 required
               />
+              {isBackdated && (
+                <p className="text-xs text-amber-600">
+                  Backdated {daysBack} days — manager approval required.
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>Vehicle number</Label>

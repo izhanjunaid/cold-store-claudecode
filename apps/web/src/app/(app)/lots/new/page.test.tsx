@@ -35,7 +35,11 @@ const CHAMBER = {
   available_capacity_bags: 1000,
 };
 const RATE_PLAN = { id: 'rate-1', name: 'Monthly', commodity_id: null, rate_type: 'MONTHLY_PER_BAG', rate_amount_pkr: 100 };
-const FACILITY = { id: 'fac-1', name: 'Test Facility', settings: { weight_dispute_threshold_kg: 5, chamber_capacity_warning_pct: 90 } };
+const FACILITY = {
+  id: 'fac-1',
+  name: 'Test Facility',
+  settings: { weight_dispute_threshold_kg: 5, chamber_capacity_warning_pct: 90, backdating_max_days: 3 },
+};
 
 function routeApiClient() {
   apiClient.mockImplementation((path: string, opts?: { method?: string; body?: unknown }) => {
@@ -132,6 +136,18 @@ describe('LotCreatePage — Save & New', () => {
 
       await waitFor(() => expect(apiClient).toHaveBeenCalledWith('/v1/lots', expect.objectContaining({ method: 'POST' })));
       await waitFor(() => expect(push).toHaveBeenCalledWith('/lots/lot-1'));
+    },
+    10_000,
+  );
+
+  it(
+    'warns client-side when the inbound date exceeds the facility backdating window',
+    async () => {
+      renderPage();
+      await fillRequiredFields(); // sets inbound_date to 2026-01-15, well past the 3-day window
+
+      await waitFor(() => expect(screen.getByText(/backdated/i)).toBeInTheDocument());
+      expect(screen.getByText(/manager approval/i)).toBeInTheDocument();
     },
     10_000,
   );

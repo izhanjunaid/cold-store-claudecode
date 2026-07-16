@@ -16,7 +16,10 @@ beforeAll(async () => {
       id: TEST_FACILITY_ID,
       name: 'Test Facility',
       city: 'Lahore',
-      settings: {},
+      // Unlimited backdating: fixtures across the suite create historically-
+      // dated lots/outbounds as OPERATOR; the new 7-day production default
+      // (DEFAULT_FACILITY_SETTINGS.backdating_max_days) would reject them.
+      settings: { backdating_max_days: null },
     },
   });
 
