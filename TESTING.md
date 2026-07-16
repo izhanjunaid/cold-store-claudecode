@@ -72,6 +72,8 @@
 
 > Live suite after Phase 15 (2026-07-14): **184 unit + 433 integration (api) + 91 unit (web) green**. Because every permission key's default reproduces the old `requireMinRole` threshold, all pre-Phase-15 403/200 assertions pass unchanged.
 
+> Live suite after the billing hardening sprint (2026-07-17): **184 unit + 438 integration (api) + 94 unit (web) green** (`pnpm --filter @coldchain/api exec vitest run`, `… -c vitest.integration.config.ts`, `pnpm --filter @coldchain/web exec vitest run`). New coverage: FULL-transfer accrued billing (ownership-transfer.integration.test.ts), dashboard/digest unbilled-invoices (reporting + notifications integration), and RTL component tests for the lot-intake and withdrawal forms.
+
 ### Phase 14 Tests (Rooms & Racks)
 
 **Unit (11)**
