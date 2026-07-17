@@ -7,17 +7,18 @@ import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
-import { useChambers } from '@/hooks/use-reference-data';
+import { useChambers, useParties } from '@/hooks/use-reference-data';
 import { qk } from '@/lib/query-keys';
 import { lotColumns, type LotRow } from './columns';
 
-const FILTER_KEYS = ['search', 'marka', 'status', 'chamber_id'] as const;
+const FILTER_KEYS = ['search', 'marka', 'status', 'chamber_id', 'party_id'] as const;
 
 export default function LotListPage() {
   const router = useRouter();
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters, queryParams } =
     useTableState(FILTER_KEYS);
   const { data: chambers = [] } = useChambers();
+  const { data: parties = [] } = useParties();
 
   const { data, isLoading, isError } = useListQuery<LotRow>(
     qk.lots.list(queryParams),
@@ -59,7 +60,7 @@ export default function LotListPage() {
         onResetFilters={resetFilters}
         toolbar={{
           searchKey: 'search',
-          searchPlaceholder: 'Search lot # or marka…',
+          searchPlaceholder: 'Search lot #, marka, party, or vehicle…',
           facets: [
             {
               key: 'status',
@@ -74,6 +75,11 @@ export default function LotListPage() {
               key: 'chamber_id',
               label: 'Room',
               options: chambers.map((c) => ({ label: c.name, value: c.id })),
+            },
+            {
+              key: 'party_id',
+              label: 'Owner',
+              options: parties.map((p) => ({ label: p.name, value: p.id })),
             },
           ],
         }}

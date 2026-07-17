@@ -213,6 +213,58 @@ describe('Lot CRUD & inbound workflow', () => {
     expect(rows.every((l) => (l.marka ?? '').toUpperCase().startsWith('ZZTOP'))).toBe(true);
   });
 
+  it('GET /v1/lots?search= — matches by owner party name', async () => {
+    const partyRes = await app.inject({
+      method: 'POST',
+      url: '/v1/parties',
+      headers: authHeaders(operatorToken),
+      payload: {
+        name: 'Search Owner Zzyx',
+        party_type: 'FARMER',
+        phone_primary: '03009000099',
+        credit_terms_days: 30,
+      },
+    });
+    const searchPartyId = JSON.parse(partyRes.body).data.id;
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: baseLot({ owner_party_id: searchPartyId, quantity_bags: 3 }),
+    });
+    expect(createRes.statusCode).toBe(201);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/lots?search=zzyx',
+      headers: authHeaders(operatorToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body).data as Array<{ owner_party_name: string | null }>;
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.every((l) => (l.owner_party_name ?? '').toLowerCase().includes('zzyx'))).toBe(true);
+  });
+
+  it('GET /v1/lots?search= — matches by vehicle number', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: baseLot({ owner_party_id: ownerPartyId, quantity_bags: 3, vehicle_number: 'LEB-9988' }),
+    });
+    expect(createRes.statusCode).toBe(201);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/lots?search=leb-9988',
+      headers: authHeaders(operatorToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body).data as Array<{ vehicle_number: string | null }>;
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.every((l) => (l.vehicle_number ?? '').toLowerCase().includes('leb-9988'))).toBe(true);
+  });
+
   it('PATCH /v1/lots/:id — updates marka', async () => {
     const createRes = await app.inject({
       method: 'POST',

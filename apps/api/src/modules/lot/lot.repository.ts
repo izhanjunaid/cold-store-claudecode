@@ -45,11 +45,14 @@ export class LotRepository {
     if (filters.marka) {
       where.marka = { startsWith: filters.marka, mode: 'insensitive' };
     }
-    // Free-text search spans lot number and marka.
+    // Free-text search spans lot number, marka, owner party name, and vehicle number —
+    // the fields a munshi actually has in hand ("where is Haji Sahib's stock?").
     if (filters.search) {
       where.OR = [
         { lotNumber: { contains: filters.search, mode: 'insensitive' } },
         { marka: { contains: filters.search, mode: 'insensitive' } },
+        { ownerParty: { name: { contains: filters.search, mode: 'insensitive' } } },
+        { vehicleNumber: { contains: filters.search, mode: 'insensitive' } },
       ];
     }
 
