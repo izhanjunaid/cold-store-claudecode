@@ -1,7 +1,7 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Ops Quick-Wins COMPLETE on `phase/17-ops-quickwins` (2026-07-17 → 18, off `phase/16-billing-hardening`). Second audit batch (roadmap items 17, 16, 10, 9): backdating default + client-side warnings, non-blocking credit-limit warning at withdrawal, lots search by party/vehicle + owner facet, and the F-2a DB-role hardening that closes the last open docs/16 audit finding. Suite: 187 unit + 444 integration (api) + 98 unit (web) pass. **6 commits local on `phase/17-ops-quickwins`, not yet pushed** (nor are phase/15 and phase/16).
+- **Active Phase**: Ops Quick-Wins COMPLETE on `phase/17-ops-quickwins` (2026-07-17 → 18, off `phase/16-billing-hardening`). Second audit batch (roadmap items 17, 16, 10, 9): backdating default + client-side warnings, non-blocking credit-limit warning at withdrawal, lots search by party/vehicle + owner facet, and the F-2a DB-role hardening that closes the last open docs/16 audit finding. Suite: 187 unit + 444 integration (api) + 98 unit (web) pass. **`phase/17-ops-quickwins` is the latest branch of the main development line** — phase/15, /16, and /17 all pushed to origin 2026-07-18.
 - **Active Task**: None — remaining audit findings (next candidates by rank): rent estimate on withdraw form + invoice link on outbound page (#6), rate-plan snapshot at inbound (#7), inline quick-create party (#8), WhatsApp/SMS party notifications (#11), estimated charges on parchi (#12). See the full audit report for the ranked list.
 - **Blockers**: None. Field caveat: the F-2a installer/updater changes are verified against a scratch postgres:16 container but should be exercised once on a real box install + update before the next client rollout.
 - **Last Updated**: 2026-07-18
