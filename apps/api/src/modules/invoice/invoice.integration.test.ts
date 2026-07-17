@@ -162,6 +162,8 @@ beforeAll(async () => {
   app = await getTestApp();
 
   await withGuardsDisabled(prisma, async () => {
+    await prisma.paymentAllocation.deleteMany({ where: { payment: { facilityId: TEST_FACILITY_ID } } });
+    await prisma.payment.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
     await prisma.invoice.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
@@ -187,6 +189,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await withGuardsDisabled(prisma, async () => {
+    await prisma.paymentAllocation.deleteMany({ where: { payment: { facilityId: TEST_FACILITY_ID } } });
+    await prisma.payment.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
     await prisma.invoice.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
@@ -865,5 +869,127 @@ describe('Invoice — draft-stage discount (Phase 12)', () => {
     const d = lines.reduce((s, l) => s + Number(l.debitAmount), 0);
     const c = lines.reduce((s, l) => s + Number(l.creditAmount), 0);
     expect(d).toBeCloseTo(c);
+  });
+});
+
+describe('Party GET — over_credit_limit (credit exposure)', () => {
+  // OPERATOR (and lower roles) can read this endpoint, but AR totals are
+  // ACCOUNTANT+ only (billing.view) — so the response must expose a boolean
+  // flag for the withdrawal-screen warning, never the outstanding_pkr figure.
+  it('reports over_credit_limit=true when unpaid finalized invoices exceed the limit, without exposing the outstanding amount', async () => {
+    const partyRes = await app.inject({
+      method: 'POST',
+      url: '/v1/parties',
+      headers: authHeaders(operatorToken),
+      payload: {
+        name: 'Credit Check Party',
+        party_type: 'FARMER',
+        phone_primary: '03009300101',
+        credit_terms_days: 30,
+        credit_limit_pkr: 1500,
+      },
+    });
+    expect(partyRes.statusCode).toBe(201);
+    const creditPartyId = JSON.parse(partyRes.body).data.id as string;
+
+    const lot = await createLot({
+      ratePlanId: RATE_PLAN_MONTHLY, // 100/bag/month
+      quantity: 20,
+      inboundDate: '2026-01-01',
+      ownerPartyId: creditPartyId,
+    });
+    // Jan 1 -> Feb 1 = 31 days -> ceil(31/30) = 2 months: 20 * 100 * 2 = 4000
+    const { invoiceId } = await finalizeOutbound({
+      lotId: lot.id,
+      quantity: 20,
+      outboundDate: '2026-02-01',
+    });
+    // getOutstandingPkr only counts FINALIZED invoices; the dispatch-created
+    // invoice starts DRAFT until explicitly finalized.
+    const invFinalize = await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${invoiceId}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(invFinalize.statusCode).toBe(200);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/parties/${creditPartyId}`,
+      headers: authHeaders(operatorToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body).data;
+    expect(body.credit_limit_pkr).toBe(1500);
+    expect(body.over_credit_limit).toBe(true);
+    expect(body.outstanding_pkr).toBeUndefined();
+
+    // Paying down below the limit clears the flag.
+    const payRes = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: creditPartyId,
+        payment_date: '2026-02-05',
+        amount_pkr: 3000,
+        payment_method: 'CASH',
+        allocations: [{ invoice_id: invoiceId, allocated_amount_pkr: 3000 }],
+      },
+    });
+    expect(payRes.statusCode).toBe(201);
+
+    const res2 = await app.inject({
+      method: 'GET',
+      url: `/v1/parties/${creditPartyId}`,
+      headers: authHeaders(operatorToken),
+    });
+    expect(JSON.parse(res2.body).data.over_credit_limit).toBe(false);
+  });
+
+  it('over_credit_limit is false when a credit limit is set but there is no outstanding balance', async () => {
+    const partyRes = await app.inject({
+      method: 'POST',
+      url: '/v1/parties',
+      headers: authHeaders(operatorToken),
+      payload: {
+        name: 'Under Limit Party',
+        party_type: 'FARMER',
+        phone_primary: '03009300103',
+        credit_terms_days: 30,
+        credit_limit_pkr: 5000,
+      },
+    });
+    const partyId = JSON.parse(partyRes.body).data.id as string;
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/parties/${partyId}`,
+      headers: authHeaders(operatorToken),
+    });
+    expect(JSON.parse(res.body).data.over_credit_limit).toBe(false);
+  });
+
+  it('omits over_credit_limit for a party with no credit limit set', async () => {
+    const partyRes = await app.inject({
+      method: 'POST',
+      url: '/v1/parties',
+      headers: authHeaders(operatorToken),
+      payload: {
+        name: 'No Limit Party',
+        party_type: 'FARMER',
+        phone_primary: '03009300102',
+        credit_terms_days: 30,
+      },
+    });
+    const partyId = JSON.parse(partyRes.body).data.id as string;
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/parties/${partyId}`,
+      headers: authHeaders(operatorToken),
+    });
+    expect(JSON.parse(res.body).data.over_credit_limit).toBeUndefined();
   });
 });

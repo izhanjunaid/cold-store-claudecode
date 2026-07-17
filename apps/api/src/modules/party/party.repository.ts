@@ -53,6 +53,19 @@ export class PartyRepository {
     });
   }
 
+  /** Unpaid balance across FINALIZED invoices billed to this party — the AR exposure a credit limit is checked against. */
+  async getOutstandingPkr(facilityId: string, partyId: string): Promise<number> {
+    const rows = await this.prisma.$queryRaw<{ outstanding: string | null }[]>`
+      SELECT COALESCE(SUM(total_pkr - amount_paid_pkr), 0)::text AS outstanding
+      FROM invoices
+      WHERE facility_id = ${facilityId}::uuid
+        AND billing_party_id = ${partyId}::uuid
+        AND status = 'FINALIZED'
+        AND total_pkr > amount_paid_pkr
+    `;
+    return Number(rows[0]?.outstanding ?? 0);
+  }
+
   async create(data: Prisma.PartyUncheckedCreateInput) {
     return this.prisma.party.create({
       data,

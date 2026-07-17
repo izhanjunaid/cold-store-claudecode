@@ -50,7 +50,7 @@ interface UpdatePartyInput {
   notes?: string;
 }
 
-function toResponse(party: PartyRecord) {
+function toResponse(party: PartyRecord, overCreditLimit?: boolean) {
   return {
     id: party.id,
     facility_id: party.facilityId,
@@ -69,6 +69,7 @@ function toResponse(party: PartyRecord) {
     notes: party.notes ?? null,
     created_at: party.createdAt.toISOString(),
     created_by: party.createdBy,
+    ...(overCreditLimit !== undefined && { over_credit_limit: overCreditLimit }),
   };
 }
 
@@ -94,7 +95,14 @@ export class PartyService {
   async getById(facilityId: string, id: string) {
     const party = await this.repo.findById(facilityId, id);
     if (!party) throw Errors.PARTY_NOT_FOUND();
-    return toResponse(party as PartyRecord);
+    // Outstanding AR is billing-sensitive (ACCOUNTANT+ only, see billing.view);
+    // this endpoint is reachable by OPERATOR, so only a boolean crosses the wire.
+    let overCreditLimit: boolean | undefined;
+    if (party.creditLimitPkr) {
+      const outstandingPkr = await this.repo.getOutstandingPkr(facilityId, id);
+      overCreditLimit = outstandingPkr > party.creditLimitPkr.toNumber();
+    }
+    return toResponse(party as PartyRecord, overCreditLimit);
   }
 
   async create(input: CreatePartyInput) {

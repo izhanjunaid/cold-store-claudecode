@@ -42,4 +42,7 @@ export const PartyResponse = z.object({
   notes: z.string().nullable(),
   created_at: z.string(),
   created_by: z.string().uuid(),
+  /** Only set on GET :id when a credit limit exists; never the outstanding
+   * PKR figure itself, since this endpoint is reachable below ACCOUNTANT. */
+  over_credit_limit: z.boolean().optional(),
 });

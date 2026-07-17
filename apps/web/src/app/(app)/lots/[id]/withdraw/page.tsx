@@ -21,6 +21,8 @@ interface Lot {
   lot_number: string;
   status: string;
   owner_party_name: string | null;
+  billing_party_id: string;
+  billing_party_name: string | null;
   commodity_name: string | null;
   current_balance_bags: number;
 }
@@ -29,6 +31,10 @@ interface Party {
   name: string;
   party_type: string;
   is_active: boolean;
+}
+interface BillingPartyCredit {
+  credit_limit_pkr: number | null;
+  over_credit_limit?: boolean;
 }
 
 export default function WithdrawPage() {
@@ -40,6 +46,7 @@ export default function WithdrawPage() {
   const { data: location } = useLotPlacements(lotId);
   const { data: facility } = useFacility();
   const [parties, setParties] = useState<Party[]>([]);
+  const [billingCredit, setBillingCredit] = useState<BillingPartyCredit | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,10 +62,14 @@ export default function WithdrawPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setLot(await apiClient<Lot>(`/v1/lots/${lotId}`));
+      const loadedLot = await apiClient<Lot>(`/v1/lots/${lotId}`);
+      setLot(loadedLot);
       const partyRes = await apiClient<{ data: Party[] } | Party[]>('/v1/parties?is_active=true&per_page=100');
       const list = Array.isArray(partyRes) ? partyRes : partyRes.data;
       setParties(list.filter((p) => p.is_active));
+      if (loadedLot.billing_party_id) {
+        setBillingCredit(await apiClient<BillingPartyCredit>(`/v1/parties/${loadedLot.billing_party_id}`));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -126,6 +137,12 @@ export default function WithdrawPage() {
   return (
     <div className="max-w-4xl">
       <PageHeader title="New Withdrawal" crumb="Withdraw" />
+
+      {billingCredit?.over_credit_limit && (
+        <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {lot.billing_party_name ?? 'Billing party'} is over credit limit. This does not block withdrawal.
+        </div>
+      )}
 
       <Card className="mb-5 bg-muted/30">
         <CardContent className="grid grid-cols-2 gap-3 pt-6 text-sm md:grid-cols-4">
