@@ -105,6 +105,11 @@ describe('Party CRUD', () => {
     expect(body.success).toBe(true);
     expect(body.data.length).toBeGreaterThan(0);
     expect(body.meta.total).toBeGreaterThan(0);
+    // over_credit_limit is computed only on GET :id — list rows must not carry
+    // it (regression: .map(toResponse) leaked the array index into the field).
+    for (const row of body.data as Array<Record<string, unknown>>) {
+      expect(row).not.toHaveProperty('over_credit_limit');
+    }
   });
 
   it('GET /v1/parties — filters by type', async () => {

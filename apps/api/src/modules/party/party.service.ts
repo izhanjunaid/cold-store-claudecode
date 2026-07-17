@@ -87,7 +87,9 @@ export class PartyService {
     });
 
     return {
-      data: (data as PartyRecord[]).map(toResponse),
+      // Not .map(toResponse): the array index would flow into the
+      // overCreditLimit parameter and leak into every row.
+      data: (data as PartyRecord[]).map((p) => toResponse(p)),
       meta: { page: query.page, per_page: query.per_page, total },
     };
   }
