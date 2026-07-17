@@ -22,6 +22,8 @@ else
 POSTGRES_USER=coldchain
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_DB=coldchain
+APP_DB_USER=coldchain_app
+APP_DB_PASSWORD=$(openssl rand -hex 24)
 JWT_SECRET=$(openssl rand -hex 48)
 JWT_REFRESH_SECRET=$(openssl rand -hex 48)
 PUBLIC_ORIGIN=http://coldchain.local
@@ -36,6 +38,30 @@ EOF
   chmod 600 "$ENV_FILE" 2>/dev/null || true
   echo "    Wrote $ENV_FILE — keep it safe and OUT of git."
 fi
+
+# Boxes provisioned before the F-2a hardening lack the app-role vars — add them.
+if ! grep -qE '^APP_DB_PASSWORD=' "$ENV_FILE"; then
+  echo "==> Adding least-privilege app-role credentials to $ENV_FILE..."
+  printf 'APP_DB_USER=coldchain_app\nAPP_DB_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$ENV_FILE"
+fi
+
+# shellcheck disable=SC1090
+set -a; . "$ENV_FILE"; set +a
+
+# Postgres first, so the least-privilege runtime role (F-2a) exists before the
+# api container ever tries to connect as it. ALTER DEFAULT PRIVILEGES in the
+# role script also makes the tables the migrate service is about to create
+# auto-granted to the app role.
+echo "==> Starting Postgres and creating the app role..."
+docker compose --env-file "$ENV_FILE" up -d postgres
+for i in $(seq 1 30); do
+  if docker compose --env-file "$ENV_FILE" exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then break; fi
+  [[ "$i" == "30" ]] && { echo "    ERROR: Postgres did not become ready." >&2; exit 1; }
+  sleep 2
+done
+docker compose --env-file "$ENV_FILE" exec -T postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v app_password="$APP_DB_PASSWORD" -f - < scripts/app-role.sql
+echo "    App role ready."
 
 echo "==> Building images and starting the stack (this is slow the first time)..."
 docker compose --env-file "$ENV_FILE" up -d --build

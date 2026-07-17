@@ -134,7 +134,7 @@ database upgrading itself; don't close Docker while it runs.
 <summary><b>For the ColdChain provider (setup notes — clients can ignore this)</b></summary>
 
 ### What to give the client
-Zip and send these **five files** (they're self‑contained — they pull the app images from the public
+Zip and send these **six files** (they're self‑contained — they pull the app images from the public
 GHCR registry, so the client never needs the source repo):
 
 ```
@@ -143,6 +143,7 @@ Caddyfile
 install.ps1
 install.bat
 INSTALL.md   (this file)
+scripts/app-role.sql   (keep the scripts/ folder — install.ps1 loads it from there)
 ```
 
 The client unzips the folder and double‑clicks `install.bat`. Nothing else is required on their side.
@@ -150,11 +151,30 @@ The client unzips the folder and double‑clicks `install.bat`. Nothing else is 
 ### How the installer works
 - Generates `.env.production` with strong random secrets on first run (never overwrites an existing one).
 - `docker compose pull` of `ghcr.io/izhanjunaid/coldchain-{api,web}:<tag>` (default `latest` = newest release; public). The installer syncs `COLDCHAIN_TAG` in `.env.production` to the requested `-Tag` on every run, so `install.bat -Tag vX.Y.Z` updates an existing box too.
+- Starts Postgres alone first and runs `scripts/app-role.sql` to create/sync `coldchain_app` — the
+  least‑privilege role the API connects as (see "Database hardening" below).
 - `docker compose up -d` → the one‑shot `migrate` service applies the Prisma baseline, then `api`/`web`/`caddy` start.
 - Provisions a **clean** facility at the fixed id the web login expects, the owner (+ any staff you add),
   and the 83‑account standard chart of accounts — **no demo/sample data**. The clean‑DB guard refuses
   to provision over an existing facility, so re‑running is safe.
 - Temporary passwords are shown once; `must_change_password` is on for every user.
+
+### Database hardening (F‑2a)
+The API runs as `coldchain_app`, a least‑privilege Postgres role that can read/write rows but
+cannot run DDL or call `financial_guards_set()` — the function that would disable the financial
+audit/immutability triggers (docs/16, finding F‑2a). Only the database owner (used solely by the
+one‑shot `migrate` service) keeps that ability. `scripts/app-role.sql` creates and re‑syncs the
+role; the installer and `scripts/update.sh` run it automatically at the right points, so:
+
+- **Always update a box via `install.bat -Tag vX.Y.Z` or `scripts/update.sh`** — a bare
+  `docker compose up -d` on a box whose `.env.production` predates this hardening will start the
+  API with empty app‑role credentials and it will crash‑loop until either script is run once.
+- **Restoring a backup onto a brand‑new box:** run the installer first, then `scripts/restore.sh`.
+  Dumps contain `GRANT … TO coldchain_app` statements, and the restore aborts if the role doesn't
+  exist yet (the installer creates it).
+- To verify the hardening on a box:
+  `docker compose --env-file .env.production exec postgres psql -U coldchain_app -d coldchain -c "SELECT financial_guards_set(false)"`
+  must fail with *permission denied*.
 
 ### Non‑interactive install (e.g. you set it up remotely)
 ```powershell

@@ -72,6 +72,8 @@ if (-not (Test-Path $EnvFile)) {
     "POSTGRES_USER=coldchain"
     "POSTGRES_PASSWORD=$(New-Secret 24)"
     "POSTGRES_DB=coldchain"
+    "APP_DB_USER=coldchain_app"
+    "APP_DB_PASSWORD=$(New-Secret 24)"
     "JWT_SECRET=$(New-Secret 48)"
     "JWT_REFRESH_SECRET=$(New-Secret 48)"
     "PUBLIC_ORIGIN=http://localhost"
@@ -100,6 +102,10 @@ if ($envText -match '(?m)^COLDCHAIN_TAG=') {
 } else {
   $envText = $envText.TrimEnd() + "`nCOLDCHAIN_TAG=$Tag`n"
 }
+# Boxes installed before the F-2a hardening lack the app-role credentials — add them.
+if ($envText -notmatch '(?m)^APP_DB_PASSWORD=') {
+  $envText = $envText.TrimEnd() + "`nAPP_DB_USER=coldchain_app`nAPP_DB_PASSWORD=$(New-Secret 24)`n"
+}
 [System.IO.File]::WriteAllText((Join-Path (Get-Location) $EnvFile), $envText, (New-Object System.Text.ASCIIEncoding))
 Say "   Version: $Tag" Green
 
@@ -116,6 +122,27 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ---------------------------------------------------------------- 4) Start
+# Postgres first: the least-privilege role the api connects as (F-2a) must exist
+# before the api container starts, and its default-privilege setup must run
+# before migrations create the tables.
+Step "Preparing the database..."
+Compose up -d postgres
+if ($LASTEXITCODE -ne 0) { Fail "Database failed to start. Open Docker Desktop to see the error, then try again." }
+$pgReady = $false
+for ($i = 0; $i -lt 30; $i++) {
+  docker compose --env-file $EnvFile exec -T postgres pg_isready -U coldchain -d coldchain *> $null
+  if ($LASTEXITCODE -eq 0) { $pgReady = $true; break }
+  Start-Sleep -Seconds 2
+}
+if (-not $pgReady) { Fail "Database did not become ready. Open Docker Desktop to check the postgres container, then try again." }
+
+$appPw = ([regex]::Match((Get-Content $EnvFile -Raw), '(?m)^APP_DB_PASSWORD=(.*)$')).Groups[1].Value.Trim()
+if (-not $appPw) { Fail "APP_DB_PASSWORD missing from $EnvFile - delete the file and run the installer again." }
+Get-Content (Join-Path $PSScriptRoot "scripts\app-role.sql") -Raw |
+  docker compose --env-file $EnvFile exec -T postgres psql -U coldchain -d coldchain -v ON_ERROR_STOP=1 -v app_password=$appPw -f -
+if ($LASTEXITCODE -ne 0) { Fail "Could not set up the database role. Please contact your ColdChain provider with a photo of this screen." }
+Say "   OK - database role ready." Green
+
 Step "Starting ColdChain..."
 Compose up -d
 if ($LASTEXITCODE -ne 0) { Fail "ColdChain failed to start. Open Docker Desktop to see the error, then try again." }

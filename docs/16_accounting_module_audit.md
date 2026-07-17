@@ -26,8 +26,17 @@
 > one-shot, visible in party statements and AR aging, on-account payments
 > settle it FIFO; migration 0004). `19dd1f4` — month-end revenue accrual
 > decided OFF (Gap 4: JE-11/JE-11R deleted, decision recorded in docs/09,
-> basis-of-preparation note on the monthly P&L). Still open: only the F-2a
-> ops step (non-owner runtime DB role with REVOKEs) — a deployment concern.
+> basis-of-preparation note on the monthly P&L).
+>
+> **F-2a ops step resolved (2026-07-18, phase/17-ops-quickwins):** migration
+> 0010 revokes EXECUTE on `financial_guards_set()` from PUBLIC, and the
+> production api now runs as `coldchain_app` — a least-privilege DML-only
+> role created by `scripts/app-role.sql` (wired into install.ps1,
+> bootstrap.sh, and update.sh; see INSTALL.md "Database hardening"). The full
+> sequence (role → migrations → grants → app DML works, guard toggle and DDL
+> denied, default privileges cover future migrations) was verified against a
+> scratch postgres:16 container; remaining caveat: exercise once on a real
+> box install/update before treating field deployment as proven.
 
 ---
 

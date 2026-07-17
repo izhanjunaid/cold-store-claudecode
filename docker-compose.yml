@@ -67,7 +67,12 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3001"
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      # Least-privilege runtime role (F-2a): DML only, cannot run DDL or call
+      # financial_guards_set() to disable the financial integrity triggers.
+      # Created/updated idempotently by scripts/app-role.sql (installers and
+      # update.sh run it). Only the one-shot `migrate` service above uses the
+      # owner credentials.
+      DATABASE_URL: postgresql://${APP_DB_USER:-coldchain_app}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       # Requests are same-origin behind Caddy, so CORS rarely fires; set to the public origin anyway.

@@ -22,6 +22,14 @@ ENV_FILE=".env.production"
 log() { echo "[update $(date -u +%FT%TZ)] $*"; }
 compose() { docker compose --env-file "$ENV_FILE" "$@"; }
 
+# Boxes provisioned before the F-2a hardening lack the app-role vars — add them
+# before sourcing, so this update run creates the role and the recreated api
+# container can log in as it.
+if ! grep -qE '^APP_DB_PASSWORD=' "$ENV_FILE"; then
+  echo "[update] adding least-privilege app-role credentials to $ENV_FILE"
+  printf 'APP_DB_USER=coldchain_app\nAPP_DB_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$ENV_FILE"
+fi
+
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
 PREV_TAG="${COLDCHAIN_TAG:-latest}"
@@ -36,6 +44,16 @@ set_tag() {
 }
 
 heartbeat() { [ -n "${HEALTHCHECK_URL:-}" ] && curl -fsS -m 10 "$1" >/dev/null 2>&1 || true; }
+
+# Create/sync the least-privilege runtime role (F-2a). Idempotent; safe to run
+# against a live stack. Run before recreating containers (so the api's new
+# credentials work immediately) and again after migrations (so tables granted
+# under an older app-role.sql are covered too).
+sync_app_role() {
+  compose exec -T postgres \
+    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -v app_password="$APP_DB_PASSWORD" -f - < scripts/app-role.sql \
+    || log "WARNING: app-role sync failed (is Postgres up?)."
+}
 
 api_healthy() {
   for _ in $(seq 1 20); do
@@ -59,6 +77,10 @@ fi
 
 set_tag "$NEW_TAG"
 
+# Ensure the app role exists on the still-running old stack BEFORE containers
+# are recreated with the (possibly new) app-role credentials.
+sync_app_role
+
 if ! compose pull; then
   log "ERROR: image pull failed (offline?). Reverting tag to '$PREV_TAG'."
   set_tag "$PREV_TAG"
@@ -67,6 +89,9 @@ fi
 
 # Brings up the one-shot migrate (prisma migrate deploy), then recreates api/web/caddy.
 compose up -d
+
+# Re-sync grants now that this release's migrations have run.
+sync_app_role
 
 if api_healthy; then
   log "SUCCESS: '$NEW_TAG' is healthy."

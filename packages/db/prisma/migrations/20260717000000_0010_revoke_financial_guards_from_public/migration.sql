@@ -1,0 +1,21 @@
+-- ============================================================================
+-- 0010 — Revoke EXECUTE on financial_guards_set() from PUBLIC (F-2a, part 1)
+--
+-- financial_guards_set(bool) disables/enables every audit_* and guard_*
+-- trigger on the financial tables (see migration 0002). It exists only for
+-- test-harness fixture cleanup and MUST NOT be callable by the application's
+-- runtime DB role in production — otherwise the immutability guarantees the
+-- rest of 0002 added are just one SQL call away from being switched off.
+--
+-- PostgreSQL grants EXECUTE on new functions to PUBLIC by default, so this
+-- was callable by *any* role that could connect, including a future
+-- least-privilege runtime role, until explicitly revoked here.
+--
+-- This alone does not yet harden anything: the app currently still connects
+-- as the schema owner (which keeps EXECUTE via ownership regardless of this
+-- REVOKE). It only completes once deploys switch the api service to a
+-- non-owner role that was never granted this privilege back — see
+-- scripts/create-app-role.sh and INSTALL.md.
+-- ============================================================================
+
+REVOKE EXECUTE ON FUNCTION financial_guards_set(boolean) FROM PUBLIC;

@@ -383,6 +383,28 @@ describe('period_locks history is preserved', () => {
 // ============================================================
 
 describe('financial_guards_set', () => {
+  it('is not executable by PUBLIC (F-2a: migration 0010 revoke)', async () => {
+    // proacl IS NULL means "default ACL", which for functions includes EXECUTE
+    // for PUBLIC — so the revoke must leave an explicit non-null ACL with no
+    // PUBLIC (grantee oid 0) EXECUTE entry. This locks the migration in CI and
+    // catches any future re-grant. The owner keeps EXECUTE (the test-harness
+    // toggle above still works); production hardening additionally runs the
+    // api under a non-owner role (scripts/app-role.sql) that never gets it.
+    const rows = await prisma.$queryRawUnsafe<
+      { default_acl: boolean; public_execute: boolean }[]
+    >(`
+      SELECT p.proacl IS NULL AS default_acl,
+             COALESCE((SELECT bool_or(a.grantee = 0)
+                       FROM aclexplode(p.proacl) a
+                       WHERE a.privilege_type = 'EXECUTE'), false) AS public_execute
+      FROM pg_proc p
+      WHERE p.proname = 'financial_guards_set'
+    `);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.default_acl).toBe(false);
+    expect(rows[0]!.public_execute).toBe(false);
+  });
+
   it('allows purging posted entries while disabled and blocks again after re-enable', async () => {
     const jeId = await postManualJe('POSTED');
     await withGuardsDisabled(prisma, async () => {
