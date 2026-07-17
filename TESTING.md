@@ -74,6 +74,8 @@
 
 > Live suite after the billing hardening sprint (2026-07-17): **184 unit + 438 integration (api) + 94 unit (web) green** (`pnpm --filter @coldchain/api exec vitest run`, `… -c vitest.integration.config.ts`, `pnpm --filter @coldchain/web exec vitest run`). New coverage: FULL-transfer accrued billing (ownership-transfer.integration.test.ts), dashboard/digest unbilled-invoices (reporting + notifications integration), and RTL component tests for the lot-intake and withdrawal forms.
 
+> Live suite after the ops quick-wins batch (2026-07-18): **187 unit + 444 integration (api) + 98 unit (web) green**. New coverage: backdating default (facility.service unit + legacy-settings integration), `over_credit_limit` on party GET (invoice suite) + list-row regression (party suite), lots search by owner name/vehicle (lot suite), `financial_guards_set` ACL lock (financial-guards suite), and RTL backdating/credit-warning tests on both entry forms. The F-2a installer path is additionally verified by a scratch postgres:16 container run (role → migrate → grants → privilege assertions), not by the vitest suites.
+
 ### Phase 14 Tests (Rooms & Racks)
 
 **Unit (11)**

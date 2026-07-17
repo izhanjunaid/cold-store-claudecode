@@ -1,11 +1,25 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Billing Hardening Sprint COMPLETE on `phase/16-billing-hardening` (2026-07-17, off `phase/15-auth-permissions`). Fixes the top findings from a product/ops audit of the munshi (clerk) inward/outbound/billing workflow: FULL ownership transfer billed the wrong owner for the wrong period, the inbound form's weight-dispute prompt didn't match server enforcement, DRAFT invoices could go unfinalized with no visibility, lot intake had no fast-entry path for high-volume days, and several lot/withdrawal fields were non-searchable native selects. Suite: 184 unit + 438 integration (api) + 94 unit (web) pass. **5 commits local on `phase/16-billing-hardening`, not yet pushed.**
-- **Active Task**: None — remaining audit findings (not in this sprint): rate-plan snapshot at inbound (stop retroactive repricing), AR-aging↔GL on-account reconciliation, cheque clearance workflow, credit-limit warning at withdrawal, WhatsApp/SMS party notifications, client self-service portal. See the full audit report for the ranked list.
-- **Blockers**: None
-- **Last Updated**: 2026-07-17
-- **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision. Ops hardening from audit F-2a: run the app under a non-owner DB role and REVOKE UPDATE/DELETE on audit_log + EXECUTE on financial_guards_set (deployment concern, see docs/16 §F-2). Rooms & Racks: partial inter-room split (child-lot move) deferred — inter-room moves are whole-lot in v1.
+- **Active Phase**: Ops Quick-Wins COMPLETE on `phase/17-ops-quickwins` (2026-07-17 → 18, off `phase/16-billing-hardening`). Second audit batch (roadmap items 17, 16, 10, 9): backdating default + client-side warnings, non-blocking credit-limit warning at withdrawal, lots search by party/vehicle + owner facet, and the F-2a DB-role hardening that closes the last open docs/16 audit finding. Suite: 187 unit + 444 integration (api) + 98 unit (web) pass. **6 commits local on `phase/17-ops-quickwins`, not yet pushed** (nor are phase/15 and phase/16).
+- **Active Task**: None — remaining audit findings (next candidates by rank): rent estimate on withdraw form + invoice link on outbound page (#6), rate-plan snapshot at inbound (#7), inline quick-create party (#8), WhatsApp/SMS party notifications (#11), estimated charges on parchi (#12). See the full audit report for the ranked list.
+- **Blockers**: None. Field caveat: the F-2a installer/updater changes are verified against a scratch postgres:16 container but should be exercised once on a real box install + update before the next client rollout.
+- **Last Updated**: 2026-07-18
+- **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision. Rooms & Racks: partial inter-room split (child-lot move) deferred — inter-room moves are whole-lot in v1.
+
+## Ops Quick-Wins (2026-07-17 → 18)
+
+Second batch from the munshi-workflow audit, on `phase/17-ops-quickwins` off `phase/16-billing-hardening`.
+
+| Commit | Scope |
+|--------|-------|
+| `fc26710` | **Backdating default 7 days + client-side warnings (audit #17).** `DEFAULT_FACILITY_SETTINGS.backdating_max_days` null (unlimited) → 7; test/seed fixtures explicitly opt back into null. Lot intake and withdraw forms now warn before submit when the entered date exceeds the facility window (server enforcement already existed for OPERATOR; the form just made it a surprise 4xx). Also fixed a missing label→input association on the withdraw outbound-date field. |
+| `6ae9afb` | **Credit-limit warning at withdrawal (audit #16).** `GET /v1/parties/:id` gains `over_credit_limit` — a server-computed boolean (unpaid FINALIZED invoice balance vs `credit_limit_pkr`, omitted when no limit set). Deliberately a boolean, not the AR figure: the endpoint is reachable by OPERATOR while AR totals are `billing.view` (ACCOUNTANT+) everywhere else. Withdraw form shows a non-blocking amber banner. |
+| `f0789f0` | **Lots search by party/vehicle + owner facet (audit #10).** Lots free-text search now also matches owner party name and vehicle number ("where is Haji Sahib's stock?"); lots list gains an Owner facet over the existing `party_id` filter. |
+| `7029e89` | **Fix: over_credit_limit index leak.** `.map(toResponse)` passed the array index into the new optional parameter — every party list row emitted `over_credit_limit: 0,1,2…`. Caught by full-suite typecheck; regression test locks list rows to never carry the field. |
+| `f88d0a7` | **F-2a ops hardening (audit #9) — closes the last open docs/16 finding.** Migration 0010 revokes EXECUTE on `financial_guards_set()` from PUBLIC (ACL locked by integration test); new `scripts/app-role.sql` creates `coldchain_app`, a DML-only runtime role (no DDL, no guard toggle) the api container now connects as — the one-shot `migrate` service keeps owner creds. install.ps1/bootstrap.sh start postgres first and create the role before migrations (DEFAULT PRIVILEGES make future migrations' tables auto-granted); update.sh syncs the role before container recreation and re-syncs after migrations; both append `APP_DB_*` to pre-hardening env files. Whole sequence verified on a scratch postgres:16 container: app-role DML works, `financial_guards_set` and DDL denied (42501), owner toggle intact, future-migration tables inherited grants. INSTALL.md documents the hardening + restore-onto-fresh-box caveat; client zip now includes `scripts/app-role.sql`. |
+
+**Tests (TDD)**: backdating unit + integration-default fix, 3 `over_credit_limit` invoice-suite tests, 2 lots-search integration tests, 1 ACL integration test, 1 party-list regression test, RTL warning tests on both forms — each written first and watched fail (except the plain-DDL ACL test, verified red-to-green by design review + scratch-container run).
 
 ## Billing Hardening Sprint (2026-07-17)
 
