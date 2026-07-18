@@ -8,6 +8,9 @@ import {
   Verify2faRequest,
   Enable2faRequest,
   Disable2faRequest,
+  TotpEnableRequest,
+  TotpDisableRequest,
+  RegenerateBackupCodesRequest,
 } from '@coldchain/shared';
 import type { z } from 'zod';
 import { AuthService } from './auth.service';
@@ -145,6 +148,56 @@ export async function authRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof Disable2faRequest>;
       const result = await service.disable2fa(request.user!.userId, body.password);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/auth/2fa/totp/setup — mint a pending secret, return the QR URI.
+  app.route({
+    method: 'POST',
+    url: '/v1/auth/2fa/totp/setup',
+    preHandler: [app.authenticate],
+    handler: async (request, reply) => {
+      const result = await service.setupTotp(request.user!.userId);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/auth/2fa/totp/enable — verify a live code, enable, return backup codes (once).
+  app.route({
+    method: 'POST',
+    url: '/v1/auth/2fa/totp/enable',
+    preHandler: [app.authenticate],
+    schema: { body: TotpEnableRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof TotpEnableRequest>;
+      const result = await service.enableTotp(request.user!.userId, body.code);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/auth/2fa/totp/disable — confirm password, switch TOTP off.
+  app.route({
+    method: 'POST',
+    url: '/v1/auth/2fa/totp/disable',
+    preHandler: [app.authenticate],
+    schema: { body: TotpDisableRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof TotpDisableRequest>;
+      const result = await service.disableTotp(request.user!.userId, body.password);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/auth/2fa/backup-codes/regenerate — confirm password, fresh set.
+  app.route({
+    method: 'POST',
+    url: '/v1/auth/2fa/backup-codes/regenerate',
+    preHandler: [app.authenticate],
+    schema: { body: RegenerateBackupCodesRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof RegenerateBackupCodesRequest>;
+      const result = await service.regenerateBackupCodes(request.user!.userId, body.password);
       return sendSuccess(reply, result);
     },
   });

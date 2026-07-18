@@ -316,6 +316,7 @@ model Facility {
   auditLogs      AuditLog[]
   refreshTokens  RefreshToken[]
   otpCodes       OtpCode[]
+  userBackupCodes UserBackupCode[]
   parties        Party[]
   chambers       Chamber[]
   ratePlans      RatePlan[]
@@ -358,12 +359,17 @@ model User {
   lockedUntil      DateTime? @map("locked_until") @db.Timestamptz()
   mustChangePassword Boolean @default(false) @map("must_change_password")
   twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
+  // TOTP authenticator-app 2FA (Phase 18). Secret is aes-256-gcm encrypted via
+  // common/crypto.ts. Secret present + enabledAt null = enrollment pending.
+  totpSecretEnc    String?   @map("totp_secret_enc") @db.VarChar(500)
+  totpEnabledAt    DateTime? @map("totp_enabled_at") @db.Timestamptz()
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
 
   facility              Facility           @relation(fields: [facilityId], references: [id])
   refreshTokens         RefreshToken[]
   otpCodes              OtpCode[]
+  backupCodes           UserBackupCode[]
   partiesCreated        Party[]            @relation("PartyCreatedBy")
   temperatureLogs       TemperatureLog[]
   lotsCreated           Lot[]              @relation("LotCreatedBy")
@@ -430,6 +436,23 @@ model OtpCode {
 
   @@index([userId, purpose])
   @@map("otp_codes")
+}
+
+// One-time recovery codes for TOTP 2FA (Phase 18). codeHash = sha256 hex of
+// the XXXX-XXXX code; single-use via usedAt (atomic updateMany consume).
+model UserBackupCode {
+  id         String    @id @default(uuid()) @db.Uuid
+  facilityId String    @map("facility_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  codeHash   String    @map("code_hash") @db.VarChar(64)
+  usedAt     DateTime? @map("used_at") @db.Timestamptz()
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  user     User     @relation(fields: [userId], references: [id])
+  facility Facility @relation(fields: [facilityId], references: [id])
+
+  @@index([userId])
+  @@map("user_backup_codes")
 }
 
 model AuditLog {

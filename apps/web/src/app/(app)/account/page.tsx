@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { KeyRound, ShieldCheck, ShieldOff, Monitor, LogOut } from 'lucide-react';
+import QRCode from 'qrcode';
+import { KeyRound, ShieldCheck, ShieldOff, Smartphone, Mail, Monitor, LogOut, Copy } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,8 @@ interface Me {
   name_urdu: string | null;
   role: string;
   two_factor_enabled: boolean;
+  two_factor_method: 'totp' | 'email' | null;
+  backup_codes_remaining: number | null;
 }
 
 export default function AccountPage() {
@@ -30,59 +33,6 @@ export default function AccountPage() {
     queryKey: ['auth', 'me'],
     queryFn: () => apiClient<Me>('/v1/auth/me'),
   });
-
-  const [enableStep, setEnableStep] = useState<'idle' | 'code'>('idle');
-  const [code, setCode] = useState('');
-  const [disablePassword, setDisablePassword] = useState('');
-  const [showDisable, setShowDisable] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
-
-  async function startEnable() {
-    setBusy(true);
-    try {
-      const result = await apiClient<{ message: string }>('/v1/auth/2fa/request-enable', { method: 'POST', body: {} });
-      toast.success(result.message);
-      setEnableStep('code');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not send the code');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmEnable(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await apiClient('/v1/auth/2fa/enable', { method: 'POST', body: { code } });
-      toast.success('Two-factor authentication enabled');
-      setEnableStep('idle');
-      setCode('');
-      refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Invalid code');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmDisable(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await apiClient('/v1/auth/2fa/disable', { method: 'POST', body: { password: disablePassword } });
-      toast.success('Two-factor authentication disabled');
-      setShowDisable(false);
-      setDisablePassword('');
-      refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Wrong password');
-    } finally {
-      setBusy(false);
-    }
-  }
 
   if (isLoading || !me) return <PageSkeleton />;
 
@@ -121,88 +71,384 @@ export default function AccountPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-sm">Two-Factor Authentication</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-2 text-sm">
-              {me.two_factor_enabled ? (
-                <>
-                  <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden />
-                  <span>Enabled — signing in requires a code emailed to {me.email}.</span>
-                </>
-              ) : (
-                <>
-                  <ShieldOff className="h-4 w-4 text-muted-foreground" aria-hidden />
-                  <span>Disabled — your account is protected by password only.</span>
-                </>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Requires working email settings (Settings → Email). If the server cannot send email
-              at sign-in time, login proceeds with a warning instead of locking you out.
-            </p>
-
-            {!me.two_factor_enabled && enableStep === 'idle' && (
-              <Button size="sm" onClick={startEnable} disabled={busy}>
-                {busy ? 'Sending code…' : 'Enable 2FA'}
-              </Button>
-            )}
-
-            {!me.two_factor_enabled && enableStep === 'code' && (
-              <form onSubmit={confirmEnable} className="flex items-end gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="enable-code">6-digit code from your email</Label>
-                  <Input
-                    id="enable-code"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                    placeholder="123456"
-                    className="w-40 text-center font-mono tracking-[0.3em]"
-                    autoComplete="one-time-code"
-                  />
-                </div>
-                <Button type="submit" size="sm" disabled={busy || code.length !== 6}>Confirm</Button>
-                <Button type="button" size="sm" variant="ghost" onClick={() => { setEnableStep('idle'); setCode(''); }}>
-                  Cancel
-                </Button>
-              </form>
-            )}
-
-            {me.two_factor_enabled && !showDisable && (
-              <Button size="sm" variant="outline" onClick={() => setShowDisable(true)}>Disable 2FA</Button>
-            )}
-
-            {me.two_factor_enabled && showDisable && (
-              <form onSubmit={confirmDisable} className="flex items-end gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="disable-password">Confirm your password</Label>
-                  <Input
-                    id="disable-password"
-                    type="password"
-                    value={disablePassword}
-                    onChange={(e) => setDisablePassword(e.target.value)}
-                    className="w-56"
-                    autoComplete="current-password"
-                  />
-                </div>
-                <Button type="submit" size="sm" variant="destructive" disabled={busy || disablePassword.length < 8}>
-                  Disable
-                </Button>
-                <Button type="button" size="sm" variant="ghost" onClick={() => { setShowDisable(false); setDisablePassword(''); }}>
-                  Cancel
-                </Button>
-              </form>
-            )}
-          </CardContent>
-        </Card>
+        <TwoFactorCard me={me} onChanged={() => queryClient.invalidateQueries({ queryKey: ['auth', 'me'] })} />
 
         <SessionsCard />
       </div>
     </div>
   );
 }
+
+// ─── Two-factor authentication ─────────────────────────────────────────────
+
+function TwoFactorCard({ me, onChanged }: { me: Me; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  // TOTP enrollment
+  const [totpStep, setTotpStep] = useState<'idle' | 'qr'>('idle');
+  const [otpauthUri, setOtpauthUri] = useState('');
+  const [totpSecret, setTotpSecret] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  // One-time backup-codes reveal (after enable or regenerate)
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  // Email 2FA enrollment
+  const [emailStep, setEmailStep] = useState<'idle' | 'code'>('idle');
+  const [emailCode, setEmailCode] = useState('');
+  // Password confirmations
+  const [confirmAction, setConfirmAction] = useState<'disable-totp' | 'disable-email' | 'regen' | null>(null);
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  async function run<T>(fn: () => Promise<T>, onOk?: (result: T) => void) {
+    setBusy(true);
+    try {
+      const result = await fn();
+      onOk?.(result);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const startTotpSetup = () =>
+    run(
+      () => apiClient<{ otpauth_uri: string; secret: string }>('/v1/auth/2fa/totp/setup', { method: 'POST', body: {} }),
+      (r) => {
+        setOtpauthUri(r.otpauth_uri);
+        setTotpSecret(r.secret);
+        setTotpStep('qr');
+      },
+    );
+
+  const confirmTotpEnable = (e: React.FormEvent) => {
+    e.preventDefault();
+    void run(
+      () => apiClient<{ backup_codes: string[] }>('/v1/auth/2fa/totp/enable', { method: 'POST', body: { code: totpCode } }),
+      (r) => {
+        toast.success('Authenticator app 2FA enabled');
+        setBackupCodes(r.backup_codes);
+        setTotpStep('idle');
+        setTotpCode('');
+        onChanged();
+      },
+    );
+  };
+
+  const submitConfirm = (e: React.FormEvent) => {
+    e.preventDefault();
+    const password = confirmPassword;
+    if (confirmAction === 'disable-totp') {
+      void run(
+        () => apiClient('/v1/auth/2fa/totp/disable', { method: 'POST', body: { password } }),
+        () => {
+          toast.success('Two-factor authentication disabled');
+          resetConfirm();
+          setBackupCodes(null);
+          onChanged();
+        },
+      );
+    } else if (confirmAction === 'disable-email') {
+      void run(
+        () => apiClient('/v1/auth/2fa/disable', { method: 'POST', body: { password } }),
+        () => {
+          toast.success('Two-factor authentication disabled');
+          resetConfirm();
+          onChanged();
+        },
+      );
+    } else if (confirmAction === 'regen') {
+      void run(
+        () => apiClient<{ backup_codes: string[] }>('/v1/auth/2fa/backup-codes/regenerate', { method: 'POST', body: { password } }),
+        (r) => {
+          toast.success('New backup codes generated — the old ones no longer work');
+          setBackupCodes(r.backup_codes);
+          resetConfirm();
+          onChanged();
+        },
+      );
+    }
+  };
+
+  function resetConfirm() {
+    setConfirmAction(null);
+    setConfirmPassword('');
+  }
+
+  const startEmailEnable = () =>
+    run(
+      () => apiClient<{ message: string }>('/v1/auth/2fa/request-enable', { method: 'POST', body: {} }),
+      (r) => {
+        toast.success(r.message);
+        setEmailStep('code');
+      },
+    );
+
+  const confirmEmailEnable = (e: React.FormEvent) => {
+    e.preventDefault();
+    void run(
+      () => apiClient('/v1/auth/2fa/enable', { method: 'POST', body: { code: emailCode } }),
+      () => {
+        toast.success('Email 2FA enabled');
+        setEmailStep('idle');
+        setEmailCode('');
+        onChanged();
+      },
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-sm">Two-Factor Authentication</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        {me.two_factor_method === 'totp' ? (
+          <>
+            <div className="flex items-center gap-2 text-sm">
+              <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden />
+              <span>
+                Enabled via authenticator app — codes work fully offline.{' '}
+                <span className="text-muted-foreground">
+                  {me.backup_codes_remaining ?? 0} of 8 backup codes remaining.
+                </span>
+              </span>
+            </div>
+            {confirmAction === null && (
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => setConfirmAction('regen')}>
+                  Regenerate backup codes
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setConfirmAction('disable-totp')}>
+                  Disable 2FA
+                </Button>
+              </div>
+            )}
+          </>
+        ) : me.two_factor_method === 'email' ? (
+          <>
+            <div className="flex items-center gap-2 text-sm">
+              <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden />
+              <span>Enabled — signing in requires a code emailed to {me.email}.</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Email codes need working email settings and internet at sign-in time; if the server
+              cannot send the email, login proceeds with a warning. For stronger, fully offline
+              protection switch to the authenticator app below.
+            </p>
+            {confirmAction === null && (
+              <div className="flex gap-2">
+                <Button size="sm" onClick={startTotpSetup} disabled={busy || totpStep === 'qr'}>
+                  <Smartphone className="mr-2 h-4 w-4" aria-hidden />
+                  Switch to authenticator app
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setConfirmAction('disable-email')}>
+                  Disable 2FA
+                </Button>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 text-sm">
+              <ShieldOff className="h-4 w-4 text-muted-foreground" aria-hidden />
+              <span>Disabled — your account is protected by password only.</span>
+            </div>
+            {totpStep === 'idle' && emailStep === 'idle' && (
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 rounded-md border p-3">
+                  <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  <div className="flex-1 space-y-1">
+                    <p className="text-sm font-medium">Authenticator app (recommended)</p>
+                    <p className="text-xs text-muted-foreground">
+                      Google Authenticator, Microsoft Authenticator, or any TOTP app. Works fully
+                      offline — no email or internet needed to sign in.
+                    </p>
+                    <Button size="sm" onClick={startTotpSetup} disabled={busy}>
+                      {busy ? 'Preparing…' : 'Set up authenticator app'}
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 rounded-md border p-3">
+                  <Mail className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <div className="flex-1 space-y-1">
+                    <p className="text-sm font-medium">Email codes</p>
+                    <p className="text-xs text-muted-foreground">
+                      A code is emailed at sign-in. Requires working email settings; if the server
+                      is offline, login falls back to password-only with a warning.
+                    </p>
+                    <Button size="sm" variant="outline" onClick={startEmailEnable} disabled={busy}>
+                      {busy ? 'Sending code…' : 'Enable email codes'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {totpStep === 'qr' && (
+          <TotpEnrollPanel
+            otpauthUri={otpauthUri}
+            secret={totpSecret}
+            code={totpCode}
+            setCode={setTotpCode}
+            busy={busy}
+            onSubmit={confirmTotpEnable}
+            onCancel={() => { setTotpStep('idle'); setTotpCode(''); }}
+          />
+        )}
+
+        {emailStep === 'code' && (
+          <form onSubmit={confirmEmailEnable} className="flex items-end gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="enable-code">6-digit code from your email</Label>
+              <Input
+                id="enable-code"
+                inputMode="numeric"
+                maxLength={6}
+                value={emailCode}
+                onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="123456"
+                className="w-40 text-center font-mono tracking-[0.3em]"
+                autoComplete="one-time-code"
+              />
+            </div>
+            <Button type="submit" size="sm" disabled={busy || emailCode.length !== 6}>Confirm</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => { setEmailStep('idle'); setEmailCode(''); }}>
+              Cancel
+            </Button>
+          </form>
+        )}
+
+        {confirmAction !== null && (
+          <form onSubmit={submitConfirm} className="flex items-end gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="confirm-password">
+                {confirmAction === 'regen' ? 'Confirm your password to regenerate' : 'Confirm your password'}
+              </Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-56"
+                autoComplete="current-password"
+                autoFocus
+              />
+            </div>
+            <Button
+              type="submit"
+              size="sm"
+              variant={confirmAction === 'regen' ? 'default' : 'destructive'}
+              disabled={busy || confirmPassword.length < 8}
+            >
+              {confirmAction === 'regen' ? 'Regenerate' : 'Disable'}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={resetConfirm}>Cancel</Button>
+          </form>
+        )}
+
+        {backupCodes && (
+          <BackupCodesPanel codes={backupCodes} onDismiss={() => setBackupCodes(null)} />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function TotpEnrollPanel({
+  otpauthUri,
+  secret,
+  code,
+  setCode,
+  busy,
+  onSubmit,
+  onCancel,
+}: {
+  otpauthUri: string;
+  secret: string;
+  code: string;
+  setCode: (value: string) => void;
+  busy: boolean;
+  onSubmit: (e: React.FormEvent) => void;
+  onCancel: () => void;
+}) {
+  const [qrDataUrl, setQrDataUrl] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    QRCode.toDataURL(otpauthUri, { margin: 1, width: 192 })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => { /* manual-entry fallback below always works */ });
+    return () => { cancelled = true; };
+  }, [otpauthUri]);
+
+  return (
+    <div className="space-y-3 rounded-md border p-4">
+      <p className="text-sm font-medium">Scan this QR code with your authenticator app</p>
+      {qrDataUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={qrDataUrl} alt="TOTP enrollment QR code" className="h-48 w-48 rounded bg-white p-1" />
+      ) : (
+        <p className="text-xs text-muted-foreground">Generating QR code…</p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Can&apos;t scan? Enter this key manually:{' '}
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{secret}</code>
+      </p>
+      <form onSubmit={onSubmit} className="flex items-end gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="totp-code">6-digit code from the app</Label>
+          <Input
+            id="totp-code"
+            inputMode="numeric"
+            maxLength={6}
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+            placeholder="123456"
+            className="w-40 text-center font-mono tracking-[0.3em]"
+            autoComplete="one-time-code"
+            autoFocus
+          />
+        </div>
+        <Button type="submit" size="sm" disabled={busy || code.length !== 6}>Verify & Enable</Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
+      </form>
+    </div>
+  );
+}
+
+function BackupCodesPanel({ codes, onDismiss }: { codes: string[]; onDismiss: () => void }) {
+  async function copyAll() {
+    try {
+      await navigator.clipboard.writeText(codes.join('\n'));
+      toast.success('Backup codes copied');
+    } catch {
+      toast.error('Could not copy — select and copy the codes manually');
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4">
+      <p className="text-sm font-medium text-amber-900">
+        Save these backup codes now — they will not be shown again.
+      </p>
+      <p className="text-xs text-amber-800">
+        Each code signs you in once if your phone is lost or unavailable. Keep them somewhere safe
+        (printed and locked away beats a sticky note on the monitor).
+      </p>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm text-amber-950 sm:grid-cols-4">
+        {codes.map((c) => <span key={c}>{c}</span>)}
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" onClick={copyAll}>
+          <Copy className="mr-2 h-4 w-4" aria-hidden />
+          Copy all
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDismiss}>I saved them</Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sessions ──────────────────────────────────────────────────────────────
 
 interface Session {
   id: string;

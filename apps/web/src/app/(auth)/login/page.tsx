@@ -18,6 +18,7 @@ interface LoginResponse {
   two_factor_bypassed?: boolean;
   user?: { id: string; email: string; name: string; role: string; facility_id: string };
   requires_2fa?: boolean;
+  method?: 'totp' | 'email';
   pending_token?: string;
   message?: string;
 }
@@ -33,6 +34,7 @@ export default function LoginPage() {
   const [nextPath, setNextPath] = useState<string | null>(null);
   const [step, setStep] = useState<'credentials' | '2fa'>('credentials');
   const [pendingToken, setPendingToken] = useState('');
+  const [twoFaMethod, setTwoFaMethod] = useState<'totp' | 'email'>('email');
   const [twoFaMessage, setTwoFaMessage] = useState('');
   const [code, setCode] = useState('');
   const [bypassWarning, setBypassWarning] = useState(false);
@@ -78,7 +80,13 @@ export default function LoginPage() {
       });
       if (result.requires_2fa && result.pending_token) {
         setPendingToken(result.pending_token);
-        setTwoFaMessage(result.message ?? 'Enter the verification code from your email.');
+        setTwoFaMethod(result.method ?? 'email');
+        setTwoFaMessage(
+          result.message ??
+            (result.method === 'totp'
+              ? 'Enter the code from your authenticator app, or a backup code.'
+              : 'Enter the verification code from your email.'),
+        );
         setStep('2fa');
         return;
       }
@@ -169,22 +177,29 @@ export default function LoginPage() {
                   </div>
                 )}
                 <div className="space-y-1.5">
-                  <Label htmlFor="code">6-digit code</Label>
+                  <Label htmlFor="code">
+                    {twoFaMethod === 'totp' ? 'Authenticator code (or backup code)' : '6-digit code'}
+                  </Label>
                   <Input
                     id="code"
-                    inputMode="numeric"
-                    pattern="\d{6}"
-                    maxLength={6}
+                    inputMode={twoFaMethod === 'totp' ? 'text' : 'numeric'}
+                    maxLength={twoFaMethod === 'totp' ? 9 : 6}
                     value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                    onChange={(e) =>
+                      setCode(
+                        twoFaMethod === 'totp'
+                          ? e.target.value.replace(/[^A-Za-z0-9-]/g, '')
+                          : e.target.value.replace(/\D/g, ''),
+                      )
+                    }
                     required
                     autoFocus
-                    placeholder="123456"
-                    className="text-center font-mono text-lg tracking-[0.5em]"
+                    placeholder={twoFaMethod === 'totp' ? '123456 or AB2C-DE3F' : '123456'}
+                    className="text-center font-mono text-lg tracking-[0.3em]"
                     autoComplete="one-time-code"
                   />
                 </div>
-                <Button type="submit" disabled={loading || code.length !== 6} className="w-full">
+                <Button type="submit" disabled={loading || code.length < 6} className="w-full">
                   {loading ? 'Verifying…' : 'Verify & Sign In'}
                 </Button>
                 <button

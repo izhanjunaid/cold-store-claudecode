@@ -12,6 +12,14 @@ import {
 import { Errors } from '../../common/errors';
 import { hashPassword, verifyPassword, needsRehash } from '../../common/password';
 import { passwordMinLength } from '../../common/env';
+import { encryptSecret, decryptSecret } from '../../common/crypto';
+import {
+  TotpService,
+  generateTotpSecret,
+  buildOtpauthUri,
+  verifyTotpToken,
+  looksLikeBackupCode,
+} from './totp.service';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
@@ -38,12 +46,21 @@ function maskEmail(email: string): string {
 }
 
 export class AuthService {
+  private readonly totp: TotpService;
+
   constructor(
     private readonly repo: AuthRepository,
     private readonly prisma: PrismaClient,
     private readonly otp: OtpService,
     private readonly mail: MailService,
-  ) {}
+  ) {
+    this.totp = new TotpService(prisma);
+  }
+
+  /** TOTP is fully enrolled (secret stored AND confirmed with a working code). */
+  private static totpActive(user: { totpSecretEnc: string | null; totpEnabledAt: Date | null }): boolean {
+    return Boolean(user.totpSecretEnc && user.totpEnabledAt);
+  }
 
   async login(facilityId: string, email: string, password: string, meta?: SessionMeta) {
     const user = await this.repo.findUserByEmail(facilityId, email);
@@ -76,9 +93,21 @@ export class AuthService {
       });
     }
 
-    // Password verified. If 2FA is on and email works, park the login behind
-    // an emailed code; if email is unconfigured/unreachable (offline box),
-    // proceed but flag the bypass so the UI can warn.
+    // Password verified. TOTP (authenticator app) is checked first and has NO
+    // bypass: verification is clock-based and fully offline, so "email is
+    // down" can never downgrade a TOTP account to password-only.
+    if (AuthService.totpActive(user)) {
+      return {
+        requires_2fa: true as const,
+        method: 'totp' as const,
+        pending_token: signPendingTwoFactorToken({ userId: user.id, facilityId: user.facilityId }),
+        message: 'Enter the code from your authenticator app, or a backup code.',
+      };
+    }
+
+    // Email 2FA (legacy): park the login behind an emailed code; if email is
+    // unconfigured/unreachable (offline box), proceed but flag the bypass so
+    // the UI can warn.
     if (user.twoFactorEnabled) {
       const config = await this.resolveMailConfig(facilityId);
       if (config) {
@@ -86,6 +115,7 @@ export class AuthService {
         if (sent) {
           return {
             requires_2fa: true as const,
+            method: 'email' as const,
             pending_token: signPendingTwoFactorToken({ userId: user.id, facilityId: user.facilityId }),
             message: `A verification code was sent to ${maskEmail(user.email)}.`,
           };
@@ -100,7 +130,7 @@ export class AuthService {
     return this.issueTokens(user, meta);
   }
 
-  /** Completes a 2FA login: pending token + emailed code → real tokens. */
+  /** Completes a 2FA login: pending token + authenticator/email/backup code → real tokens. */
   async verify2fa(pendingToken: string, code: string, meta?: SessionMeta) {
     let payload: { userId: string; facilityId: string };
     try {
@@ -112,7 +142,25 @@ export class AuthService {
     const user = await this.repo.findUserById(payload.userId);
     if (!user || !user.isActive) throw Errors.AUTH_INVALID('Invalid or expired code');
 
-    const ok = await this.otp.verifyAndConsume(user.id, 'LOGIN_2FA', code);
+    let ok = false;
+    if (AuthService.totpActive(user)) {
+      const trimmed = code.trim();
+      let secret: string | null = null;
+      try {
+        secret = decryptSecret(user.totpSecretEnc!);
+      } catch {
+        // Encryption key changed since enrollment — authenticator codes cannot
+        // be checked, but backup codes (plain sha256) still can.
+      }
+      if (secret && /^\d{6}$/.test(trimmed)) {
+        ok = await verifyTotpToken(trimmed, secret);
+      }
+      if (!ok && looksLikeBackupCode(trimmed)) {
+        ok = await this.totp.consumeBackupCode(user.id, trimmed);
+      }
+    } else {
+      ok = await this.otp.verifyAndConsume(user.id, 'LOGIN_2FA', code);
+    }
     if (!ok) throw Errors.AUTH_INVALID('Invalid or expired code');
 
     await this.repo.updateLastLogin(user.id);
@@ -156,6 +204,87 @@ export class AuthService {
 
     await this.prisma.user.update({ where: { id: userId }, data: { twoFactorEnabled: false } });
     return { two_factor_enabled: false };
+  }
+
+  /**
+   * TOTP enrollment, step 1: mint a secret and hand back the otpauth URI for
+   * the QR code. Stored encrypted immediately, but 2FA stays OFF until a
+   * working code proves the authenticator was actually set up (enableTotp).
+   * Re-running overwrites any previous pending secret.
+   */
+  async setupTotp(userId: string) {
+    const user = await this.repo.findUserById(userId);
+    if (!user || !user.isActive) throw Errors.AUTH_INVALID('User not found');
+
+    const facility = await this.prisma.facility.findUnique({ where: { id: user.facilityId } });
+    const issuer = facility?.name || 'ColdChain';
+
+    const secret = generateTotpSecret();
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { totpSecretEnc: encryptSecret(secret), totpEnabledAt: null },
+    });
+    return { otpauth_uri: buildOtpauthUri(user.email, issuer, secret), secret };
+  }
+
+  /** TOTP enrollment, step 2: verify a live code, switch 2FA on, mint backup codes. */
+  async enableTotp(userId: string, code: string) {
+    const user = await this.repo.findUserById(userId);
+    if (!user || !user.isActive) throw Errors.AUTH_INVALID('User not found');
+    if (!user.totpSecretEnc) {
+      throw Errors.VALIDATION_ERROR('Set up the authenticator first (scan the QR code)');
+    }
+
+    let secret: string;
+    try {
+      secret = decryptSecret(user.totpSecretEnc);
+    } catch {
+      throw Errors.VALIDATION_ERROR('Stored authenticator secret is unreadable — set up again');
+    }
+    const ok = await verifyTotpToken(code.trim(), secret);
+    if (!ok) throw Errors.AUTH_INVALID('Invalid or expired code');
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { totpEnabledAt: new Date(), twoFactorEnabled: true },
+    });
+    const backupCodes = await this.totp.mintBackupCodes(userId, user.facilityId);
+    return {
+      two_factor_enabled: true as const,
+      two_factor_method: 'totp' as const,
+      backup_codes: backupCodes,
+    };
+  }
+
+  /** Switch TOTP (and 2FA entirely) off. Requires the account password. */
+  async disableTotp(userId: string, password: string) {
+    const user = await this.repo.findUserById(userId);
+    if (!user || !user.isActive) throw Errors.AUTH_INVALID('User not found');
+
+    const valid = await verifyPassword(password, user.passwordHash);
+    if (!valid) throw Errors.USER_WRONG_PASSWORD();
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { totpSecretEnc: null, totpEnabledAt: null, twoFactorEnabled: false },
+    });
+    await this.totp.deleteBackupCodes(userId);
+    return { two_factor_enabled: false };
+  }
+
+  /** Replace all backup codes with a fresh set (e.g. after using several). */
+  async regenerateBackupCodes(userId: string, password: string) {
+    const user = await this.repo.findUserById(userId);
+    if (!user || !user.isActive) throw Errors.AUTH_INVALID('User not found');
+    if (!AuthService.totpActive(user)) {
+      throw Errors.VALIDATION_ERROR('Backup codes require authenticator-app 2FA to be enabled');
+    }
+
+    const valid = await verifyPassword(password, user.passwordHash);
+    if (!valid) throw Errors.USER_WRONG_PASSWORD();
+
+    const backupCodes = await this.totp.mintBackupCodes(userId, user.facilityId);
+    return { backup_codes: backupCodes };
   }
 
   private async resolveMailConfig(
@@ -401,6 +530,7 @@ export class AuthService {
   async me(userId: string) {
     const user = await this.repo.findUserById(userId);
     if (!user) throw Errors.AUTH_INVALID('User not found');
+    const totpActive = AuthService.totpActive(user);
     return {
       id: user.id,
       email: user.email,
@@ -409,7 +539,9 @@ export class AuthService {
       role: user.role,
       facility_id: user.facilityId,
       must_change_password: user.mustChangePassword,
-      two_factor_enabled: user.twoFactorEnabled,
+      two_factor_enabled: user.twoFactorEnabled || totpActive,
+      two_factor_method: totpActive ? ('totp' as const) : user.twoFactorEnabled ? ('email' as const) : null,
+      backup_codes_remaining: totpActive ? await this.totp.remainingBackupCodes(userId) : null,
     };
   }
 }
