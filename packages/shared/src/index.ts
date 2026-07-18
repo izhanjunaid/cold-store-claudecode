@@ -23,3 +23,4 @@ export * from './schemas/facility';
 export * from './schemas/permissions';
 export * from './schemas/audit';
 export * from './permissions';
+export * from './password-policy';

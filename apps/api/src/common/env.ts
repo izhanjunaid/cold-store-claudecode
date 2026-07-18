@@ -1,3 +1,5 @@
+import { PASSWORD_MIN_LENGTH_DEFAULT } from '@coldchain/shared';
+
 // Hardcoded fallbacks in jwt.ts / crypto.ts — a production box that never set
 // the real env vars would silently run with these, making JWTs forgeable.
 const DEV_JWT_SECRET = 'dev-secret';
@@ -8,6 +10,12 @@ export interface EnvLike {
   JWT_SECRET?: string;
   JWT_REFRESH_SECRET?: string;
   APP_ENCRYPTION_KEY?: string;
+}
+
+/** Deployment-configurable password length floor (PASSWORD_MIN_LENGTH env). */
+export function passwordMinLength(): number {
+  const raw = Number(process.env['PASSWORD_MIN_LENGTH']);
+  return Number.isInteger(raw) && raw > 0 ? raw : PASSWORD_MIN_LENGTH_DEFAULT;
 }
 
 export interface EnvLogger {

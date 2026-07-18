@@ -158,6 +158,27 @@ describe('OTP password reset', () => {
     expect(row!.attemptCount).toBe(1);
   });
 
+  it('rejects a policy-violating new password WITHOUT consuming the code', async () => {
+    const code = lastEmailedCode();
+
+    // Blocklisted password → 400 with the policy reason, not a code error.
+    const tooCommon = await resetWith(TEST_EMAIL, code, 'password123');
+    expect(tooCommon.statusCode).toBe(400);
+    expect(JSON.parse(tooCommon.body).error.message).toMatch(/too common/);
+
+    // Too short → 400 with the length reason.
+    const tooShort = await resetWith(TEST_EMAIL, code, 'tiny!123');
+    expect(tooShort.statusCode).toBe(400);
+    expect(JSON.parse(tooShort.body).error.message).toMatch(/at least 10 characters/);
+
+    // The code survives both rejections — still unconsumed with no attempts
+    // burned, so the user can retry it with an acceptable password.
+    const row = await prisma.otpCode.findFirst({
+      where: { userId: testUserId, purpose: 'PASSWORD_RESET', consumedAt: null },
+    });
+    expect(row).not.toBeNull();
+  });
+
   it('resets the password with the correct code and revokes sessions', async () => {
     // Establish a session that must die on reset
     const preLogin = await loginWith(TEST_EMAIL, INITIAL_PASSWORD);

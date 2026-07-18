@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
-import type { UserResponseType } from '@coldchain/shared';
+import { validateNewPassword, PASSWORD_MIN_LENGTH_DEFAULT, type UserResponseType } from '@coldchain/shared';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -69,7 +69,8 @@ export default function UserDetailPage() {
   }
 
   async function resetPassword() {
-    if (newPassword.length < 8) return toast.error('Password must be at least 8 characters');
+    const policy = validateNewPassword(newPassword);
+    if (!policy.ok) return toast.error(policy.reason!);
     setResetting(true);
     try {
       const updated = await apiClient<UserResponseType>(`/v1/users/${id}/reset-password`, {
@@ -156,7 +157,8 @@ export default function UserDetailPage() {
           </p>
           <div className="space-y-1.5">
             <Label>New Password</Label>
-            <Input type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} className="font-mono" autoFocus />
+            <Input type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={PASSWORD_MIN_LENGTH_DEFAULT} className="font-mono" autoFocus />
+            <p className="text-xs text-muted-foreground">At least {PASSWORD_MIN_LENGTH_DEFAULT} characters, not a common password.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowReset(false)}>Cancel</Button>

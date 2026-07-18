@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { KeyRound } from 'lucide-react';
+import { validateNewPassword, PASSWORD_MIN_LENGTH_DEFAULT } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -47,6 +48,11 @@ export default function ForgotPasswordPage() {
     setError('');
     if (newPassword !== confirmPassword) {
       setError('Passwords do not match');
+      return;
+    }
+    const policy = validateNewPassword(newPassword);
+    if (!policy.ok) {
+      setError(policy.reason!);
       return;
     }
     setLoading(true);
@@ -127,11 +133,11 @@ export default function ForgotPasswordPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="new-password">New password</Label>
-                  <Input id="new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength={8} placeholder="At least 8 characters" autoComplete="new-password" />
+                  <Input id="new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength={PASSWORD_MIN_LENGTH_DEFAULT} placeholder={`At least ${PASSWORD_MIN_LENGTH_DEFAULT} characters`} autoComplete="new-password" />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="confirm-password">Confirm new password</Label>
-                  <Input id="confirm-password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required minLength={8} placeholder="Repeat the new password" autoComplete="new-password" />
+                  <Input id="confirm-password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required minLength={PASSWORD_MIN_LENGTH_DEFAULT} placeholder="Repeat the new password" autoComplete="new-password" />
                 </div>
                 <Button type="submit" disabled={loading || code.length !== 6} className="w-full">
                   {loading ? 'Resetting…' : 'Reset Password'}

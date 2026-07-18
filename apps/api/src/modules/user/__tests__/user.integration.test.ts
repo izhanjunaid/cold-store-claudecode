@@ -150,7 +150,7 @@ describe('User Management', () => {
       method: 'POST',
       url: '/v1/auth/change-password',
       headers: authHeaders(userToken),
-      payload: { current_password: 'tempPass!1', new_password: 'newPass!2' },
+      payload: { current_password: 'tempPass!1', new_password: 'newPass!234' },
     });
     expect(change.statusCode).toBe(200);
     expect(JSON.parse(change.body).data.must_change_password).toBe(false);
@@ -217,6 +217,64 @@ describe('User Management', () => {
     });
     expect(change.statusCode).toBe(422);
     expect(JSON.parse(change.body).error.code).toBe('USER_WRONG_PASSWORD');
+  });
+
+  it('rejects passwords that violate the policy (too short / too common) on create, reset, and change', async () => {
+    // Create with a too-short initial password → 400 with the length reason.
+    const shortCreate = await app.inject({
+      method: 'POST',
+      url: '/v1/users',
+      headers: authHeaders(ownerToken),
+      payload: { email: uniqueEmail('short'), name: 'Short PW', role: 'OPERATOR', initial_password: 'short!12' },
+    });
+    expect(shortCreate.statusCode).toBe(400);
+    expect(JSON.parse(shortCreate.body).error.message).toMatch(/at least 10 characters/);
+
+    // Create with a blocklisted password → 400 with the too-common reason.
+    const commonCreate = await app.inject({
+      method: 'POST',
+      url: '/v1/users',
+      headers: authHeaders(ownerToken),
+      payload: { email: uniqueEmail('common'), name: 'Common PW', role: 'OPERATOR', initial_password: 'password123' },
+    });
+    expect(commonCreate.statusCode).toBe(400);
+    expect(JSON.parse(commonCreate.body).error.message).toMatch(/too common/);
+
+    // A valid user changing to a blocklisted password → 400; account untouched.
+    const email = uniqueEmail('policy');
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/users',
+      headers: authHeaders(ownerToken),
+      payload: { email, name: 'Policy Probe', role: 'OPERATOR', initial_password: 'tempPass!1' },
+    });
+    expect(create.statusCode).toBe(201);
+    const userId = JSON.parse(create.body).data.id;
+    const login = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/login',
+      headers: { 'x-facility-id': TEST_FACILITY_ID },
+      payload: { email, password: 'tempPass!1' },
+    });
+    const userToken = JSON.parse(login.body).data.access_token;
+    const change = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/change-password',
+      headers: authHeaders(userToken),
+      payload: { current_password: 'tempPass!1', new_password: 'qwertyuiop' },
+    });
+    expect(change.statusCode).toBe(400);
+    expect(JSON.parse(change.body).error.message).toMatch(/too common/);
+
+    // Admin reset to a too-short password → 400.
+    const reset = await app.inject({
+      method: 'POST',
+      url: `/v1/users/${userId}/reset-password`,
+      headers: authHeaders(ownerToken),
+      payload: { new_password: 'tiny!1234' },
+    });
+    expect(reset.statusCode).toBe(400);
+    expect(JSON.parse(reset.body).error.message).toMatch(/at least 10 characters/);
   });
 
   it('login response carries must_change_password flag', async () => {

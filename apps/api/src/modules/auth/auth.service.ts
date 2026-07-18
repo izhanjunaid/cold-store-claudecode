@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@coldchain/db';
+import { validateNewPassword } from '@coldchain/shared';
 import { AuthRepository } from './auth.repository';
 import { OtpService, OTP_TTL_MINUTES } from './otp.service';
 import { MailService, mailConfigFromSettings, type MailConfig } from '../mail/mail.service';
@@ -10,6 +11,7 @@ import {
 } from '../../common/jwt';
 import { Errors } from '../../common/errors';
 import { hashPassword, verifyPassword, needsRehash } from '../../common/password';
+import { passwordMinLength } from '../../common/env';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
@@ -374,6 +376,13 @@ export class AuthService {
 
   /** Self-service password reset, step 2: verify the emailed code and rotate. */
   async resetPassword(facilityId: string, email: string, code: string, newPassword: string) {
+    // Policy check FIRST: the rejection is then identical whether or not the
+    // account exists (no enumeration through the error shape), and a rejected
+    // password never consumes the single-use code — the user can retry the
+    // same code with a better password.
+    const policy = validateNewPassword(newPassword, { minLength: passwordMinLength() });
+    if (!policy.ok) throw Errors.VALIDATION_ERROR(policy.reason!);
+
     const user = await this.repo.findUserByEmail(facilityId, email);
     if (!user || !user.isActive) throw Errors.AUTH_INVALID('Invalid or expired code');
 

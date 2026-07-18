@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { validateNewPassword, PASSWORD_MIN_LENGTH_DEFAULT } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { defaultRouteForRole } from '@/lib/auth-redirect';
@@ -25,7 +26,8 @@ export default function ChangePasswordPage() {
     e.preventDefault();
     setError(null);
     if (next !== confirm) return setError('New password and confirmation do not match');
-    if (next.length < 8) return setError('New password must be at least 8 characters');
+    const policy = validateNewPassword(next);
+    if (!policy.ok) return setError(policy.reason!);
     setSubmitting(true);
     try {
       const updated = await apiClient<{ must_change_password: boolean }>('/v1/auth/change-password', {
@@ -64,12 +66,14 @@ export default function ChangePasswordPage() {
             </div>
             <div className="space-y-1.5">
               <Label>New password</Label>
-              <Input type="password" value={next} onChange={(e) => setNext(e.target.value)} required minLength={8} autoComplete="new-password" />
-              <p className="text-xs text-muted-foreground">Minimum 8 characters.</p>
+              <Input type="password" value={next} onChange={(e) => setNext(e.target.value)} required minLength={PASSWORD_MIN_LENGTH_DEFAULT} autoComplete="new-password" />
+              <p className="text-xs text-muted-foreground">
+                Minimum {PASSWORD_MIN_LENGTH_DEFAULT} characters. Avoid very common passwords — no other rules.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label>Confirm new password</Label>
-              <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={8} autoComplete="new-password" />
+              <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={PASSWORD_MIN_LENGTH_DEFAULT} autoComplete="new-password" />
             </div>
             {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
             <Button type="submit" disabled={submitting} className="w-full">

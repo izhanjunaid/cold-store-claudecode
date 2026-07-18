@@ -1,11 +1,21 @@
 import type { PrismaClient, Prisma, UserRole } from '@coldchain/db';
-import type {
-  CreateUserRequestType,
-  UpdateUserRequestType,
-  UserListQueryType,
+import {
+  validateNewPassword,
+  type CreateUserRequestType,
+  type UpdateUserRequestType,
+  type UserListQueryType,
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { hashPassword, verifyPassword } from '../../common/password';
+import { passwordMinLength } from '../../common/env';
+
+// NIST 800-63B-4: length floor + common-password blocklist, no composition
+// rules. Enforced in the service (not the Zod schema) because the minimum is
+// deployment-configurable via PASSWORD_MIN_LENGTH.
+function assertPasswordAllowed(password: string): void {
+  const check = validateNewPassword(password, { minLength: passwordMinLength() });
+  if (!check.ok) throw Errors.VALIDATION_ERROR(check.reason!);
+}
 
 function formatUser(u: {
   id: string;
@@ -73,6 +83,7 @@ export class UserService {
     });
     if (existing) throw Errors.USER_EMAIL_TAKEN();
 
+    assertPasswordAllowed(body.initial_password);
     const passwordHash = await hashPassword(body.initial_password);
     const created = await this.prisma.user.create({
       data: {
@@ -114,6 +125,7 @@ export class UserService {
   async resetPassword(facilityId: string, id: string, newPassword: string) {
     const existing = await this.prisma.user.findFirst({ where: { facilityId, id } });
     if (!existing) throw Errors.USER_NOT_FOUND();
+    assertPasswordAllowed(newPassword);
     const passwordHash = await hashPassword(newPassword);
     const updated = await this.prisma.user.update({
       where: { id },
@@ -137,6 +149,7 @@ export class UserService {
     if (!user) throw Errors.USER_NOT_FOUND();
     const ok = await verifyPassword(currentPassword, user.passwordHash);
     if (!ok) throw Errors.USER_WRONG_PASSWORD();
+    assertPasswordAllowed(newPassword);
     const passwordHash = await hashPassword(newPassword);
     const updated = await this.prisma.user.update({
       where: { id: userId },
