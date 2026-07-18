@@ -6,6 +6,7 @@ import { DigestService } from './digest.service';
 
 const TICK_MS = 5 * 60 * 1000; // check every 5 minutes
 const STATE_KEY = 'notifications_state';
+const DEFAULT_CATCHUP_HOURS = 3;
 
 interface NotificationsState {
   last_digest_date?: string;
@@ -20,19 +21,39 @@ function readState(raw: Prisma.JsonValue): NotificationsState {
 }
 
 /**
+ * The facility's own local calendar date, as YYYY-MM-DD. Deliberately NOT
+ * `now.toISOString().slice(0, 10)` — that's the UTC date, which disagrees
+ * with the local date for part of the day in any timezone ahead of UTC (e.g.
+ * Asia/Karachi, UTC+5, disagrees before ~05:00 local). Using the UTC date
+ * here made the "already sent today" check compare against the wrong day.
+ */
+export function localDateString(now: Date): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
  * Whether a facility's digest is due right now. Pure so the scheduling rule can
- * be unit-tested with a fixed clock: enabled, the local hour matches, and it
- * hasn't already gone out today.
+ * be unit-tested with a fixed clock: enabled, the local hour is within the
+ * catch-up window of the configured hour, and it hasn't already gone out
+ * today. The window (default 3h) means a box that was powered off at
+ * digest_hour still sends once it boots, instead of silently skipping the
+ * day — it just never fires before digest_hour or once the window has
+ * passed, so it never crosses into the next calendar day.
  */
 export function isDigestDue(
   notifications: NotificationSettingsType | undefined,
   state: NotificationsState,
   now: Date,
+  catchupHours: number = DEFAULT_CATCHUP_HOURS,
 ): boolean {
   if (!notifications?.daily_digest_enabled) return false;
-  if (now.getHours() !== notifications.digest_hour) return false;
-  const today = now.toISOString().slice(0, 10);
-  return state.last_digest_date !== today;
+  const hour = now.getHours();
+  const targetHour = notifications.digest_hour;
+  if (hour < targetHour || hour >= targetHour + catchupHours) return false;
+  return state.last_digest_date !== localDateString(now);
 }
 
 async function persistLastDigestDate(prisma: PrismaClient, facilityId: string, date: string) {
@@ -62,7 +83,7 @@ export function startNotificationScheduler(app: FastifyInstance): NodeJS.Timeout
     try {
       const facilities = await app.prisma.facility.findMany({ select: { id: true, settings: true } });
       const now = new Date();
-      const today = now.toISOString().slice(0, 10);
+      const today = localDateString(now);
       for (const f of facilities) {
         try {
           const settings = resolveFacilitySettings(f.settings);
