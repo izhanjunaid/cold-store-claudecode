@@ -70,6 +70,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
       # Requests are same-origin behind Caddy, so CORS rarely fires; set to the public origin anyway.
       CORS_ORIGIN: ${PUBLIC_ORIGIN:-http://coldchain.local}
       LOG_LEVEL: ${LOG_LEVEL:-info}

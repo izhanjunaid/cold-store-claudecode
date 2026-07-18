@@ -1,11 +1,13 @@
 import type { PrismaClient } from '@coldchain/db';
 import type { AuditLogQueryType, AuditLogRowType } from '@coldchain/shared';
 
-// Any key whose name mentions "password" carries a secret — a bcrypt hash
-// (users.password_hash) or the encrypted SMTP app-password
-// (settings.email.smtp_password_enc). Redact them so the activity log never
-// surfaces credentials, even in ciphertext form.
-const SENSITIVE_KEY = /password/i;
+// Any key whose name mentions a credential carries a secret — a bcrypt/argon2
+// hash (users.password_hash), an encrypted app-password/API key/TOTP secret
+// (settings.email.smtp_password_enc, settings.email.api_key_enc,
+// users.totp_secret_enc), or a hashed session/OTP token (refresh_tokens.
+// token_hash, otp_codes.code_hash). Redact them so the activity log never
+// surfaces credentials, even in ciphertext/hashed form.
+const SENSITIVE_KEY = /password|secret|api_key|token/i;
 
 function maskSensitive(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(maskSensitive);

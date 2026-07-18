@@ -32,8 +32,22 @@ beforeAll(async () => {
       recordId: PROBE_RECORD,
       action: 'UPDATE',
       changedBy: owner.user.id,
-      oldValues: { password_hash: 'bcrypt-old', smtp_password_enc: 'cipher-old', name: 'Before' },
-      newValues: { password_hash: 'bcrypt-new', smtp_password_enc: 'cipher-new', name: 'After' },
+      oldValues: {
+        password_hash: 'bcrypt-old',
+        smtp_password_enc: 'cipher-old',
+        api_key_enc: 'cipher-old',
+        totp_secret_enc: 'cipher-old',
+        token_hash: 'hash-old',
+        name: 'Before',
+      },
+      newValues: {
+        password_hash: 'bcrypt-new',
+        smtp_password_enc: 'cipher-new',
+        api_key_enc: 'cipher-new',
+        totp_secret_enc: 'cipher-new',
+        token_hash: 'hash-new',
+        name: 'After',
+      },
     },
   });
 });
@@ -72,11 +86,15 @@ describe('Activity log API', () => {
     }>;
     expect(rows.length).toBe(1);
     const row = rows[0]!;
-    // Both the bcrypt hash and the encrypted SMTP password are redacted, in
-    // old and new snapshots; non-secret fields survive.
+    // Every credential-bearing field is redacted, in old and new snapshots;
+    // non-secret fields survive.
     expect(row.new_values['password_hash']).toBe('***');
     expect(row.new_values['smtp_password_enc']).toBe('***');
+    expect(row.new_values['api_key_enc']).toBe('***');
+    expect(row.new_values['totp_secret_enc']).toBe('***');
+    expect(row.new_values['token_hash']).toBe('***');
     expect(row.old_values['password_hash']).toBe('***');
+    expect(row.old_values['api_key_enc']).toBe('***');
     expect(row.new_values['name']).toBe('After');
     // changed_by is batch-resolved to the acting user's name.
     expect(row.changed_by_name).toBe(ownerName);

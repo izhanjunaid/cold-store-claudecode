@@ -46,11 +46,13 @@ export async function authRoutes(app: FastifyInstance) {
   );
   const userService = new UserService(app.prisma);
 
-  // POST /v1/auth/login
+  // POST /v1/auth/login — public. Rate-limited per-IP so the DB account
+  // lockout (5 fails/account/15min) isn't the only brute-force throttle.
   app.route({
     method: 'POST',
     url: '/v1/auth/login',
     schema: { body: LoginRequest },
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
     handler: async (request, reply) => {
       const facilityId = request.headers['x-facility-id'] as string | undefined;
       if (!facilityId) {
@@ -147,11 +149,12 @@ export async function authRoutes(app: FastifyInstance) {
     },
   });
 
-  // POST /v1/auth/refresh
+  // POST /v1/auth/refresh — public, rate-limited per-IP.
   app.route({
     method: 'POST',
     url: '/v1/auth/refresh',
     schema: { body: RefreshRequest },
+    config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
     handler: async (request, reply) => {
       const body = request.body as { refresh_token: string };
       const result = await service.refresh(body.refresh_token, sessionMeta(request));
@@ -194,6 +197,7 @@ export async function authRoutes(app: FastifyInstance) {
         request.user!.userId,
         body.current_password,
         body.new_password,
+        request.user!.sid,
       );
       return sendSuccess(reply, result);
     },

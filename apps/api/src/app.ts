@@ -71,29 +71,33 @@ export async function buildApp() {
   await app.register(permissionsPlugin);
   await app.register(mailPlugin);
 
-  // OpenAPI / Swagger
-  await app.register(swagger, {
-    openapi: {
-      info: {
-        title: 'ColdChain API',
-        version: '1.0.0',
-        description:
-          'Cold storage management platform — REST API. All operational endpoints are namespaced under `/v1/` and scoped via the `X-Facility-ID` header.',
-      },
-      servers: [{ url: 'http://localhost:3001', description: 'Local dev' }],
-      components: {
-        securitySchemes: {
-          bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+  // OpenAPI / Swagger — unauthenticated by design, so keep it off in production
+  // unless explicitly opted back in (SWAGGER_ENABLED=1).
+  const swaggerEnabled = process.env['NODE_ENV'] !== 'production' || process.env['SWAGGER_ENABLED'] === '1';
+  if (swaggerEnabled) {
+    await app.register(swagger, {
+      openapi: {
+        info: {
+          title: 'ColdChain API',
+          version: '1.0.0',
+          description:
+            'Cold storage management platform — REST API. All operational endpoints are namespaced under `/v1/` and scoped via the `X-Facility-ID` header.',
         },
+        servers: [{ url: 'http://localhost:3001', description: 'Local dev' }],
+        components: {
+          securitySchemes: {
+            bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+          },
+        },
+        security: [{ bearerAuth: [] }],
       },
-      security: [{ bearerAuth: [] }],
-    },
-    transform: jsonSchemaTransform,
-  });
-  await app.register(swaggerUi, {
-    routePrefix: '/docs',
-    uiConfig: { docExpansion: 'none', deepLinking: true },
-  });
+      transform: jsonSchemaTransform,
+    });
+    await app.register(swaggerUi, {
+      routePrefix: '/docs',
+      uiConfig: { docExpansion: 'none', deepLinking: true },
+    });
+  }
 
   // Health check
   app.get('/health', async () => {

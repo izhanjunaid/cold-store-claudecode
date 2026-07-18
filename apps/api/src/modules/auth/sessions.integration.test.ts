@@ -108,6 +108,52 @@ describe('Sessions API', () => {
     expect((await doRefresh(a.refreshToken)).statusCode).toBe(401);
   });
 
+  it('changing your own password signs out every other session but keeps the current one', async () => {
+    // A dedicated throwaway user (not the shared role fixtures) so mutating its
+    // password can't affect any other test in this sequential suite.
+    const owner = await loginAsRole(app, 'OWNER');
+    const email = `change-pw-probe-${Date.now()}@coldchain.pk`;
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/users',
+      headers: authHeaders(owner.accessToken),
+      payload: { email, name: 'Change PW Probe', role: 'OPERATOR', initial_password: 'probe-initial-1' },
+    });
+    expect(create.statusCode).toBe(201);
+    const userId = JSON.parse(create.body).data.id as string;
+
+    const loginAsProbe = (password: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/auth/login',
+        headers: { 'x-facility-id': TEST_FACILITY_ID },
+        payload: { email, password },
+      });
+
+    const aRes = await loginAsProbe('probe-initial-1');
+    const bRes = await loginAsProbe('probe-initial-1'); // same user, another device
+    const a = JSON.parse(aRes.body).data as { access_token: string; refresh_token: string };
+    const b = JSON.parse(bRes.body).data as { access_token: string; refresh_token: string };
+
+    const change = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/change-password',
+      headers: authHeaders(a.access_token),
+      payload: { current_password: 'probe-initial-1', new_password: 'probe-changed-1' },
+    });
+    expect(change.statusCode).toBe(200);
+
+    // b (the other device) is signed out...
+    expect((await doRefresh(b.refresh_token)).statusCode).toBe(401);
+    // ...but a (the device that made the change) is not.
+    expect((await doRefresh(a.refresh_token)).statusCode).toBe(200);
+
+    // Best-effort cleanup — the user has refresh_token rows referencing it, so
+    // deletion can be FK-blocked; leaving the throwaway probe behind is harmless.
+    await prisma.refreshToken.deleteMany({ where: { userId } }).catch(() => {});
+    await prisma.user.delete({ where: { id: userId } }).catch(() => {});
+  });
+
   it('admin can list and force-revoke another user\'s sessions; non-admin is denied', async () => {
     const owner = await loginAsRole(app, 'OWNER');
     const subject = await loginAsRole(app, 'SECURITY');

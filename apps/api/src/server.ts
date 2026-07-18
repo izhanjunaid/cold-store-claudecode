@@ -1,7 +1,10 @@
 import { buildApp } from './app';
 import { startNotificationScheduler } from './modules/notifications/scheduler';
+import { validateEnv } from './common/env';
 
 async function start() {
+  validateEnv(process.env, console);
+
   const app = await buildApp();
 
   // Background daily-digest timer (no-op under test/reset envs). Registered

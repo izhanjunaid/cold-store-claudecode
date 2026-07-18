@@ -129,7 +129,12 @@ export class UserService {
     return formatUser(updated);
   }
 
-  async changeOwnPassword(userId: string, currentPassword: string, newPassword: string) {
+  async changeOwnPassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    currentSid?: string,
+  ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw Errors.USER_NOT_FOUND();
     const ok = await bcrypt.compare(currentPassword, user.passwordHash);
@@ -138,6 +143,18 @@ export class UserService {
     const updated = await this.prisma.user.update({
       where: { id: userId },
       data: { passwordHash, mustChangePassword: false },
+    });
+    // A changed password should kill any other live session — brings this in
+    // line with admin reset and OTP self-reset, which both already do this.
+    // Keep the session the request came in on so the caller isn't logged out
+    // of their own change-password submission.
+    await this.prisma.refreshToken.updateMany({
+      where: {
+        userId,
+        revokedAt: null,
+        ...(currentSid ? { id: { not: currentSid } } : {}),
+      },
+      data: { revokedAt: new Date() },
     });
     return formatUser(updated);
   }
