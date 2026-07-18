@@ -1,6 +1,6 @@
 import { beforeAll, afterAll } from 'vitest';
 import { PrismaClient } from '@coldchain/db';
-import bcrypt from 'bcryptjs';
+import { hashPassword } from '../common/password';
 
 export const TEST_FACILITY_ID = '00000000-0000-0000-0000-000000000001';
 export const TEST_USER_PASSWORD = 'admin123';
@@ -20,7 +20,9 @@ beforeAll(async () => {
     },
   });
 
-  const passwordHash = await bcrypt.hash(TEST_USER_PASSWORD, 10);
+  // argon2id (not bcrypt) so test logins never trigger the upgrade-on-login
+  // rehash path — that path is exercised deliberately in a dedicated test.
+  const passwordHash = await hashPassword(TEST_USER_PASSWORD);
 
   const testUsers = [
     { id: '00000000-0000-0000-0000-000000000010', email: 'admin@coldchain.pk', name: 'Test Admin', role: 'OWNER' as const },

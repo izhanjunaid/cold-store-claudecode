@@ -1,4 +1,3 @@
-import bcrypt from 'bcryptjs';
 import type { PrismaClient, Prisma, UserRole } from '@coldchain/db';
 import type {
   CreateUserRequestType,
@@ -6,8 +5,7 @@ import type {
   UserListQueryType,
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
-
-const BCRYPT_ROUNDS = 12;
+import { hashPassword, verifyPassword } from '../../common/password';
 
 function formatUser(u: {
   id: string;
@@ -75,7 +73,7 @@ export class UserService {
     });
     if (existing) throw Errors.USER_EMAIL_TAKEN();
 
-    const passwordHash = await bcrypt.hash(body.initial_password, BCRYPT_ROUNDS);
+    const passwordHash = await hashPassword(body.initial_password);
     const created = await this.prisma.user.create({
       data: {
         facilityId,
@@ -116,7 +114,7 @@ export class UserService {
   async resetPassword(facilityId: string, id: string, newPassword: string) {
     const existing = await this.prisma.user.findFirst({ where: { facilityId, id } });
     if (!existing) throw Errors.USER_NOT_FOUND();
-    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    const passwordHash = await hashPassword(newPassword);
     const updated = await this.prisma.user.update({
       where: { id },
       data: { passwordHash, mustChangePassword: true, failedLoginCount: 0, lockedUntil: null },
@@ -137,9 +135,9 @@ export class UserService {
   ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw Errors.USER_NOT_FOUND();
-    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    const ok = await verifyPassword(currentPassword, user.passwordHash);
     if (!ok) throw Errors.USER_WRONG_PASSWORD();
-    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    const passwordHash = await hashPassword(newPassword);
     const updated = await this.prisma.user.update({
       where: { id: userId },
       data: { passwordHash, mustChangePassword: false },

@@ -1,4 +1,3 @@
-import bcrypt from 'bcryptjs';
 import type { PrismaClient } from '@coldchain/db';
 import { AuthRepository } from './auth.repository';
 import { OtpService, OTP_TTL_MINUTES } from './otp.service';
@@ -10,10 +9,10 @@ import {
   verifyPendingTwoFactorToken,
 } from '../../common/jwt';
 import { Errors } from '../../common/errors';
+import { hashPassword, verifyPassword, needsRehash } from '../../common/password';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
-const BCRYPT_ROUNDS = 12;
 
 interface TokenUser {
   id: string;
@@ -56,7 +55,7 @@ export class AuthService {
     }
 
     // Verify password
-    const valid = await bcrypt.compare(password, user.passwordHash);
+    const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) {
       const shouldLock = user.failedLoginCount + 1 >= MAX_FAILED_ATTEMPTS;
       await this.repo.incrementFailedLogins(
@@ -64,6 +63,15 @@ export class AuthService {
         shouldLock ? new Date(Date.now() + LOCK_DURATION_MS) : undefined,
       );
       throw Errors.AUTH_INVALID('Invalid email or password');
+    }
+
+    // Transparent upgrade: a successful login with a legacy bcrypt hash gets
+    // re-hashed with argon2id, migrating the user base without forcing resets.
+    if (needsRehash(user.passwordHash)) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: await hashPassword(password) },
+      });
     }
 
     // Password verified. If 2FA is on and email works, park the login behind
@@ -141,7 +149,7 @@ export class AuthService {
     const user = await this.repo.findUserById(userId);
     if (!user || !user.isActive) throw Errors.AUTH_INVALID('User not found');
 
-    const valid = await bcrypt.compare(password, user.passwordHash);
+    const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) throw Errors.USER_WRONG_PASSWORD();
 
     await this.prisma.user.update({ where: { id: userId }, data: { twoFactorEnabled: false } });
@@ -372,7 +380,7 @@ export class AuthService {
     const ok = await this.otp.verifyAndConsume(user.id, 'PASSWORD_RESET', code);
     if (!ok) throw Errors.AUTH_INVALID('Invalid or expired code');
 
-    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    const passwordHash = await hashPassword(newPassword);
     await this.prisma.user.update({
       where: { id: user.id },
       data: { passwordHash, failedLoginCount: 0, lockedUntil: null, mustChangePassword: false },

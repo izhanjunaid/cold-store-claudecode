@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import bcrypt from 'bcryptjs';
 import type { FastifyInstance } from 'fastify';
+import { PrismaClient } from '@coldchain/db';
 import { getTestApp, closeTestApp, loginAsAdmin, TEST_FACILITY_ID } from '../../test/helpers';
+
+const prisma = new PrismaClient();
 
 describe('Auth API Integration', () => {
   let app: FastifyInstance;
@@ -10,6 +14,7 @@ describe('Auth API Integration', () => {
   });
 
   afterAll(async () => {
+    await prisma.$disconnect();
     await closeTestApp();
   });
 
@@ -82,6 +87,45 @@ describe('Auth API Integration', () => {
         payload: { email: 'not-an-email', password: 'admin123' },
       });
       expect(res.statusCode).toBe(400);
+    });
+
+    it('transparently upgrades a legacy bcrypt hash to argon2id on successful login', async () => {
+      const email = `legacy-bcrypt-${Date.now()}@coldchain.pk`;
+      const bcryptHash = await bcrypt.hash('legacy-password-123', 10);
+      const created = await prisma.user.create({
+        data: {
+          facilityId: TEST_FACILITY_ID,
+          email,
+          name: 'Legacy Bcrypt User',
+          role: 'OPERATOR',
+          passwordHash: bcryptHash,
+          isActive: true,
+        },
+      });
+      expect(created.passwordHash).toMatch(/^\$2/);
+
+      const first = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/login',
+        headers: { 'x-facility-id': TEST_FACILITY_ID },
+        payload: { email, password: 'legacy-password-123' },
+      });
+      expect(first.statusCode).toBe(200);
+
+      const afterFirstLogin = await prisma.user.findUniqueOrThrow({ where: { id: created.id } });
+      expect(afterFirstLogin.passwordHash).toMatch(/^\$argon2id\$/);
+
+      // The upgraded hash must still authenticate with the same password.
+      const second = await app.inject({
+        method: 'POST',
+        url: '/v1/auth/login',
+        headers: { 'x-facility-id': TEST_FACILITY_ID },
+        payload: { email, password: 'legacy-password-123' },
+      });
+      expect(second.statusCode).toBe(200);
+
+      await prisma.refreshToken.deleteMany({ where: { userId: created.id } }).catch(() => {});
+      await prisma.user.delete({ where: { id: created.id } }).catch(() => {});
     });
   });
 

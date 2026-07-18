@@ -2,8 +2,10 @@ import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { CHART_OF_ACCOUNTS } from './chart-of-accounts';
 
-// bcryptjs hash of 'admin123' with 10 rounds
-// Pre-computed to avoid needing bcryptjs as a seed dependency
+// bcryptjs hash of 'admin123' with 10 rounds. Pre-computed to avoid needing
+// bcryptjs as a seed dependency. Deliberately left as legacy bcrypt (not
+// argon2id) — this is the real-world case the auth login flow upgrades
+// transparently on first successful login (see common/password.ts).
 const ADMIN_PASSWORD_HASH = '$2a$10$qeCjtZftGtPYgSz2HgOfVekOtcMvmclxPNJH04C9spvcHolg0bnFK';
 
 const prisma = new PrismaClient();
