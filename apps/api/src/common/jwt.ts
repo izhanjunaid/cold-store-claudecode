@@ -13,8 +13,12 @@ export interface JwtPayload {
   sid?: string;
 }
 
+// Short-lived access tokens (default 30min) cap the blast radius of a stolen
+// token; the web client silently refreshes on 401, so users never notice.
+// JWT_ACCESS_TTL overrides (e.g. '8h' restores the pre-Phase-18 behavior).
 export function signAccessToken(payload: JwtPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' });
+  const ttl = process.env['JWT_ACCESS_TTL'] || '30m';
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: ttl } as jwt.SignOptions);
 }
 
 export function signRefreshToken(payload: { userId: string; tokenId: string }): string {

@@ -371,6 +371,19 @@ export class AuthService {
     // Logout, password reset, admin reset and session revocation all revoke
     // rows — a revoked or expired row means this refresh token is dead.
     const tokenRow = await this.repo.findRefreshTokenById(payload.tokenId);
+
+    // Reuse detection: replaying a token that was superseded BY ROTATION is
+    // the theft signal — rotation revoked it at the moment it was legitimately
+    // exchanged, so a second presentation means two parties hold it. Kill
+    // every session for the user: the attacker's stolen line and the victim's
+    // live one both die, which is exactly what surfaces the compromise.
+    // Tokens revoked for ordinary reasons (logout, session revoke, password
+    // change) are routinely replayed by stale tabs — plain 401, no nuke; same
+    // for expired or unknown tokens.
+    if (tokenRow && tokenRow.revokedAt && tokenRow.rotatedAt) {
+      await this.repo.revokeAllUserTokens(payload.userId);
+      throw Errors.AUTH_INVALID('Refresh token revoked or expired');
+    }
     if (!tokenRow || tokenRow.revokedAt || tokenRow.expiresAt <= new Date()) {
       throw Errors.AUTH_INVALID('Refresh token revoked or expired');
     }

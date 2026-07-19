@@ -71,6 +71,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-30m}
+      PASSWORD_MIN_LENGTH: ${PASSWORD_MIN_LENGTH:-10}
       # Requests are same-origin behind Caddy, so CORS rarely fires; set to the public origin anyway.
       CORS_ORIGIN: ${PUBLIC_ORIGIN:-http://coldchain.local}
       LOG_LEVEL: ${LOG_LEVEL:-info}

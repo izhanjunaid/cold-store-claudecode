@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import jwt from 'jsonwebtoken';
 import {
   signAccessToken,
   verifyAccessToken,
@@ -52,5 +53,25 @@ describe('JWT utilities', () => {
   it('an access token is NOT a valid 2FA pending token', () => {
     const token = signAccessToken(payload);
     expect(() => verifyPendingTwoFactorToken(token)).toThrow('Not a 2FA pending token');
+  });
+
+  describe('access token TTL', () => {
+    afterEach(() => {
+      delete process.env['JWT_ACCESS_TTL'];
+    });
+
+    const expOf = (token: string) => {
+      const decoded = jwt.decode(token) as { exp: number; iat: number };
+      return decoded.exp - decoded.iat;
+    };
+
+    it('defaults to 30 minutes', () => {
+      expect(expOf(signAccessToken(payload))).toBe(30 * 60);
+    });
+
+    it('honours a JWT_ACCESS_TTL override', () => {
+      process.env['JWT_ACCESS_TTL'] = '8h';
+      expect(expOf(signAccessToken(payload))).toBe(8 * 60 * 60);
+    });
   });
 });

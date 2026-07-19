@@ -66,10 +66,17 @@ export class AuthRepository {
     return this.prisma.refreshToken.findUnique({ where: { id } });
   }
 
+  /**
+   * Revoke a token because it was superseded by rotation. rotatedAt marks it
+   * as rotation-revoked — the ONLY kind of revoked token whose replay is a
+   * theft signal (see AuthService.refresh reuse detection). All other revoke
+   * paths (logout, session revoke, password change) leave rotatedAt null.
+   */
   async revokeRefreshToken(id: string) {
+    const now = new Date();
     return this.prisma.refreshToken.update({
       where: { id },
-      data: { revokedAt: new Date() },
+      data: { revokedAt: now, rotatedAt: now },
     });
   }
 
