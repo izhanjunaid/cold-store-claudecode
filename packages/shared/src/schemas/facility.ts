@@ -7,15 +7,24 @@ export const LatePaymentSurchargeRule = z.object({
 });
 export type LatePaymentSurchargeRuleType = z.infer<typeof LatePaymentSurchargeRule>;
 
-// Outbound email (SMTP) configuration. The SMTP password is write-only:
-// it is accepted via EmailSettingsUpdate.smtp_password, stored encrypted under
-// an internal `smtp_password_enc` key, and surfaced only as `smtp_password_set`.
+// Outbound email configuration. Two providers:
+//   BREVO (recommended) — HTTPS API, free tier, only a verified sender email
+//     needed. Secret: api_key (write-only → encrypted api_key_enc).
+//   SMTP (legacy) — any SMTP server incl. Gmail app passwords. Secret:
+//     smtp_password (write-only → encrypted smtp_password_enc).
+// Secrets are surfaced only as *_set booleans, never returned.
+export const EmailProvider = z.enum(['SMTP', 'BREVO']);
+export type EmailProviderType = z.infer<typeof EmailProvider>;
+
 export const EmailSettings = z.object({
   enabled: z.boolean(),
+  provider: EmailProvider.default('SMTP'),
   smtp_host: z.string().min(1).max(200),
   smtp_port: z.number().int().min(1).max(65535),
   smtp_secure: z.boolean(),
   smtp_user: z.string().max(200),
+  // Sender address for API providers (Brevo requires it to be a verified sender).
+  from_email: z.string().email().max(200).or(z.literal('')).default(''),
   from_name: z.string().max(100),
   admin_email: z.string().email().max(200).or(z.literal('')),
 });
@@ -23,11 +32,13 @@ export type EmailSettingsType = z.infer<typeof EmailSettings>;
 
 export const EmailSettingsUpdate = EmailSettings.extend({
   smtp_password: z.string().min(1).max(200).optional(),
+  api_key: z.string().min(1).max(500).optional(),
 });
 export type EmailSettingsUpdateType = z.infer<typeof EmailSettingsUpdate>;
 
 export const EmailSettingsResponse = EmailSettings.extend({
   smtp_password_set: z.boolean(),
+  api_key_set: z.boolean(),
 });
 export type EmailSettingsResponseType = z.infer<typeof EmailSettingsResponse>;
 
@@ -65,10 +76,12 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
   late_payment_surcharge: { enabled: false, pct_per_month: 2, grace_days: 30 },
   email: {
     enabled: false,
+    provider: 'SMTP',
     smtp_host: 'smtp.gmail.com',
     smtp_port: 587,
     smtp_secure: false,
     smtp_user: '',
+    from_email: '',
     from_name: 'ColdChain',
     admin_email: '',
   },

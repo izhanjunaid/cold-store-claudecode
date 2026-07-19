@@ -60,12 +60,43 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(authPlugin);
   await testApp.register(permissionsPlugin);
   await testApp.register(mailPlugin, {
+    // SMTP sends land here…
     transportFactory: (config) => ({
       sendMail: async (opts) => {
         sentMails.push({ config, ...opts });
         return {};
       },
     }),
+    // …and API-provider (Brevo) sends land here, normalized into the same
+    // CapturedMail shape so every existing suite (which greps subject/html
+    // for OTP codes etc.) works regardless of the configured provider.
+    fetchImpl: (async (_url: unknown, init?: { headers?: Record<string, string>; body?: string }) => {
+      const payload = JSON.parse(init?.body ?? '{}') as {
+        sender?: { name?: string; email?: string };
+        to?: Array<{ email: string }>;
+        subject?: string;
+        htmlContent?: string;
+      };
+      sentMails.push({
+        config: {
+          provider: 'BREVO',
+          host: '',
+          port: 0,
+          secure: false,
+          user: '',
+          password: '',
+          apiKey: init?.headers?.['api-key'] ?? '',
+          fromEmail: payload.sender?.email ?? '',
+          fromName: payload.sender?.name ?? '',
+          adminEmail: '',
+        },
+        from: `"${payload.sender?.name ?? ''}" <${payload.sender?.email ?? ''}>`,
+        to: payload.to?.[0]?.email ?? '',
+        subject: payload.subject ?? '',
+        html: payload.htmlContent ?? '',
+      });
+      return new Response('{}', { status: 201 });
+    }) as typeof fetch,
   });
   testApp.get('/health', async () => ({ success: true, data: { status: 'ok' } }));
   await testApp.register(authRoutes);

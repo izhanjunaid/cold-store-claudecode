@@ -325,3 +325,109 @@ describe('Phase 15 email settings', () => {
     expect(res.statusCode).toBe(400);
   });
 });
+
+describe('Phase 18 email settings — Brevo provider', () => {
+  const brevoPayload = {
+    enabled: true,
+    provider: 'BREVO',
+    smtp_host: 'smtp.gmail.com',
+    smtp_port: 587,
+    smtp_secure: false,
+    smtp_user: '',
+    from_email: 'owner@coldchain.pk',
+    from_name: 'Brevo Cold Store',
+    admin_email: 'owner@coldchain.pk',
+  };
+
+  it('PATCH stores the API key encrypted; responses expose only api_key_set', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/facilities/me',
+      headers: authHeaders(ownerToken),
+      payload: { settings: { email: { ...brevoPayload, api_key: 'xkeysib-secret-123' } } },
+    });
+    expect(res.statusCode).toBe(200);
+    const email = JSON.parse(res.body).data.settings.email;
+    expect(email.provider).toBe('BREVO');
+    expect(email.from_email).toBe('owner@coldchain.pk');
+    expect(email.api_key_set).toBe(true);
+    expect(email.api_key).toBeUndefined();
+    expect(email.api_key_enc).toBeUndefined();
+
+    // Stored encrypted, not plaintext.
+    const row = await prisma.facility.findUnique({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    const stored = (row!.settings as Record<string, any>)['email'];
+    expect(stored.api_key).toBeUndefined();
+    expect(stored.api_key_enc).toBeTruthy();
+    expect(stored.api_key_enc).not.toContain('xkeysib-secret-123');
+  });
+
+  it('PATCH without api_key keeps the existing key', async () => {
+    const before = await prisma.facility.findUnique({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    const encBefore = (before!.settings as Record<string, any>)['email'].api_key_enc;
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/facilities/me',
+      headers: authHeaders(ownerToken),
+      payload: { settings: { email: { ...brevoPayload, from_name: 'Renamed Brevo Store' } } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data.settings.email.api_key_set).toBe(true);
+
+    const after = await prisma.facility.findUnique({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    expect((after!.settings as Record<string, any>)['email'].api_key_enc).toBe(encBefore);
+  });
+
+  it('POST test-email sends through the Brevo API with the stored key and sender', async () => {
+    sentMails.length = 0;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/facilities/me/test-email',
+      headers: authHeaders(ownerToken),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data.sent).toBe(true);
+    expect(sentMails).toHaveLength(1);
+    expect(sentMails[0]!.config.provider).toBe('BREVO');
+    expect(sentMails[0]!.config.apiKey).toBe('xkeysib-secret-123');
+    expect(sentMails[0]!.to).toBe('owner@coldchain.pk');
+    expect(sentMails[0]!.from).toContain('owner@coldchain.pk');
+  });
+
+  it('forgot-password OTP goes out through Brevo when it is the configured provider', async () => {
+    sentMails.length = 0;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/auth/forgot-password',
+      headers: { 'x-facility-id': TEST_FACILITY_ID },
+      payload: { email: 'admin@coldchain.pk' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(sentMails).toHaveLength(1);
+    expect(sentMails[0]!.config.provider).toBe('BREVO');
+    expect(sentMails[0]!.to).toBe('admin@coldchain.pk');
+    expect(sentMails[0]!.html).toMatch(/\d{6}/);
+  });
+
+  it('BREVO without an API key is treated as not configured', async () => {
+    // Fresh facility state: strip the stored api_key_enc via a raw settings write.
+    const row = await prisma.facility.findUnique({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    const settings = { ...(row!.settings as Record<string, any>) };
+    settings['email'] = { ...settings['email'] };
+    delete settings['email'].api_key_enc;
+    await prisma.facility.update({ where: { id: TEST_FACILITY_ID }, data: { settings } });
+
+    sentMails.length = 0;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/facilities/me/test-email',
+      headers: authHeaders(ownerToken),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).data.sent).toBe(false);
+    expect(sentMails).toHaveLength(0);
+  });
+});

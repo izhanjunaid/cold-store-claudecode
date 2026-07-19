@@ -13,8 +13,10 @@ import { encryptSecret } from '../../common/crypto';
 // (they live in the same JSON column so the facilities audit trigger covers them).
 const INTERNAL_SETTINGS_KEYS = ['permissions', 'notifications_state'];
 
-// Internal key inside settings.email holding the aes-256-gcm encrypted SMTP password.
+// Internal keys inside settings.email holding aes-256-gcm encrypted secrets:
+// the SMTP password (legacy provider) and the email API key (Brevo).
 const SMTP_PASSWORD_ENC_KEY = 'smtp_password_enc';
+const API_KEY_ENC_KEY = 'api_key_enc';
 
 /**
  * Resolve a facility's raw JSON settings column into a fully-populated
@@ -53,13 +55,15 @@ function format(row: {
   const merged = mergeSettings(row.settings, undefined) as unknown as Record<string, unknown>;
   for (const key of INTERNAL_SETTINGS_KEYS) delete merged[key];
 
-  // The stored email object may carry the encrypted password — strip it and
-  // expose only whether a password is set.
+  // The stored email object may carry encrypted secrets — strip them and
+  // expose only whether each is set.
   const emailStored = (merged['email'] as Record<string, unknown> | undefined) ?? {};
   const emailRaw: Record<string, unknown> = { ...DEFAULT_FACILITY_SETTINGS.email, ...emailStored };
   const passwordSet = Boolean(emailRaw[SMTP_PASSWORD_ENC_KEY]);
+  const apiKeySet = Boolean(emailRaw[API_KEY_ENC_KEY]);
   delete emailRaw[SMTP_PASSWORD_ENC_KEY];
-  merged['email'] = { ...emailRaw, smtp_password_set: passwordSet };
+  delete emailRaw[API_KEY_ENC_KEY];
+  merged['email'] = { ...emailRaw, smtp_password_set: passwordSet, api_key_set: apiKeySet };
 
   return {
     id: row.id,
@@ -100,18 +104,25 @@ export class FacilityService {
       for (const key of INTERNAL_SETTINGS_KEYS) delete settingsPatch[key];
 
       if (settingsPatch['email'] !== undefined) {
-        const { smtp_password, ...emailPublic } = settingsPatch['email'] as Record<string, unknown> & {
+        const { smtp_password, api_key, ...emailPublic } = settingsPatch['email'] as Record<string, unknown> & {
           smtp_password?: string;
+          api_key?: string;
         };
         delete emailPublic[SMTP_PASSWORD_ENC_KEY];
+        delete emailPublic[API_KEY_ENC_KEY];
         const existingEmail =
           existing.settings && typeof existing.settings === 'object' && !Array.isArray(existing.settings)
             ? ((existing.settings as Record<string, unknown>)['email'] as Record<string, unknown> | undefined)
             : undefined;
-        // smtp_password is write-only: provided → encrypt and replace; omitted → keep existing.
+        // Secrets are write-only: provided → encrypt and replace; omitted → keep existing.
         const passwordEnc =
           smtp_password !== undefined ? encryptSecret(smtp_password) : existingEmail?.[SMTP_PASSWORD_ENC_KEY];
-        settingsPatch['email'] = passwordEnc ? { ...emailPublic, [SMTP_PASSWORD_ENC_KEY]: passwordEnc } : emailPublic;
+        const apiKeyEnc = api_key !== undefined ? encryptSecret(api_key) : existingEmail?.[API_KEY_ENC_KEY];
+        settingsPatch['email'] = {
+          ...emailPublic,
+          ...(passwordEnc ? { [SMTP_PASSWORD_ENC_KEY]: passwordEnc } : {}),
+          ...(apiKeyEnc ? { [API_KEY_ENC_KEY]: apiKeyEnc } : {}),
+        };
       }
 
       data.settings = mergeSettings(
