@@ -12,8 +12,13 @@ vi.mock('@/lib/api-client', () => ({
 }));
 
 let role = 'OWNER';
+let permissions: string[] = [];
 vi.mock('@/stores/auth.store', () => ({
-  useAuthStore: () => ({ user: { role } }),
+  // Honour the selector so useCan's `useAuthStore((s) => s.user)` works.
+  useAuthStore: (selector?: (s: unknown) => unknown) => {
+    const state = { user: { role, permissions } };
+    return selector ? selector(state) : state;
+  },
 }));
 
 const confirmFn = vi.fn().mockResolvedValue(true);
@@ -69,16 +74,26 @@ describe('ChartOfAccountsPage — owner management', () => {
     confirmFn.mockClear();
     apiClient.mockResolvedValue(ACCOUNTS);
     role = 'OWNER';
+    permissions = [];
   });
 
-  it('shows Add Account to the OWNER only', async () => {
+  it('shows Add Account to a user with accounting.manage_accounts', async () => {
     render(<ChartOfAccountsPage />);
     await waitFor(() => expect(screen.getByText(/Cash on Hand/)).toBeTruthy());
     expect(screen.getByRole('button', { name: /add account/i })).toBeTruthy();
   });
 
-  it('hides all management controls from an ACCOUNTANT', async () => {
+  it('shows management to a non-owner who was granted the permission', async () => {
+    role = 'MANAGER';
+    permissions = ['accounting.manage_accounts'];
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Cash on Hand/)).toBeTruthy());
+    expect(screen.getByRole('button', { name: /add account/i })).toBeTruthy();
+  });
+
+  it('hides all management controls from a user without the permission', async () => {
     role = 'ACCOUNTANT';
+    permissions = [];
     render(<ChartOfAccountsPage />);
     await waitFor(() => expect(screen.getByText(/Cash on Hand/)).toBeTruthy());
     expect(screen.queryByRole('button', { name: /add account/i })).toBeNull();

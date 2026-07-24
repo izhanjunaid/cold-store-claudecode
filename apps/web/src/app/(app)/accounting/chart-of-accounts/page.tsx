@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { Plus } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
-import { useAuthStore } from '@/stores/auth.store';
+import { useCan } from '@/lib/permissions';
 import { useConfirm } from '@/components/form';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -62,9 +62,10 @@ const emptyDraft = () => ({
 });
 
 export default function ChartOfAccountsPage() {
-  const { user } = useAuthStore();
   const confirm = useConfirm();
-  const isOwner = user?.role === 'OWNER';
+  // Gate on the permission key, not a hard-coded OWNER check, so an owner who
+  // delegates accounting.manage_accounts sees the controls (phase/19 audit).
+  const canManage = useCan('accounting.manage_accounts');
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [classFilter, setClassFilter] = useState('');
@@ -182,7 +183,7 @@ export default function ChartOfAccountsPage() {
               <option value="EXPENSE">Expenses</option>
             </select>
             <span className="text-sm text-muted-foreground">{accounts.length} accounts</span>
-            {isOwner && (
+            {canManage && (
               <Button size="sm" onClick={() => { setDraft(emptyDraft()); setShowAdd(true); }}>
                 <Plus className="mr-1.5 h-4 w-4" aria-hidden /> Add account
               </Button>
@@ -201,15 +202,15 @@ export default function ChartOfAccountsPage() {
               <TableHead>Type</TableHead>
               <TableHead>Normal</TableHead>
               <TableHead>Status</TableHead>
-              {isOwner && <TableHead className="w-44 text-right">Actions</TableHead>}
+              {canManage && <TableHead className="w-44 text-right">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <DataTableSkeleton columns={isOwner ? 7 : 6} rows={5} />
+              <DataTableSkeleton columns={canManage ? 7 : 6} rows={5} />
             ) : accounts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isOwner ? 7 : 6} className="h-24 text-center text-muted-foreground">No accounts</TableCell>
+                <TableCell colSpan={canManage ? 7 : 6} className="h-24 text-center text-muted-foreground">No accounts</TableCell>
               </TableRow>
             ) : (
               accounts.map((a) => (
@@ -233,7 +234,7 @@ export default function ChartOfAccountsPage() {
                       <span className="text-muted-foreground">Inactive</span>
                     )}
                   </TableCell>
-                  {isOwner && (
+                  {canManage && (
                     <TableCell className="text-right">
                       {!a.is_system_account && (
                         <div className="flex justify-end gap-1">

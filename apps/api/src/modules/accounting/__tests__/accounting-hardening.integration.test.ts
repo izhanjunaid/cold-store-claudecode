@@ -154,7 +154,10 @@ async function cleanup() {
     await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.periodLock.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.chartOfAccounts.deleteMany({
-      where: { facilityId: TEST_FACILITY_ID, accountCode: { in: ['7000', '7010', '9902', '9903', '9904', '9905', '3910'] } },
+      where: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: { in: ['1999', '4995', '7000', '7010', '7900', '7910', '9902', '9903', '9904', '9905', '3910'] },
+      },
     });
     await prisma.chartOfAccounts.updateMany({
       where: { facilityId: TEST_FACILITY_ID, accountCode: { in: ['1010', '6080'] } },
@@ -219,11 +222,12 @@ describe('audit attribution (F-2b)', () => {
   });
 
   it('chart-of-accounts audit rows carry the acting user', async () => {
+    // 6020 Rent is a non-system account — system accounts reject renames (phase/19).
     const res = await app.inject({
       method: 'PATCH',
-      url: '/v1/accounting/accounts/4050',
+      url: '/v1/accounting/accounts/6020',
       headers: authHeaders(ownerToken),
-      payload: { account_name: 'Storage Revenue — Other (attributed)' },
+      payload: { account_name: 'Rent (attributed)' },
     });
     expect(res.statusCode).toBe(200);
     const accountId = JSON.parse(res.body).data.id as string;
@@ -239,9 +243,9 @@ describe('audit attribution (F-2b)', () => {
 
     await app.inject({
       method: 'PATCH',
-      url: '/v1/accounting/accounts/4050',
+      url: '/v1/accounting/accounts/6020',
       headers: authHeaders(ownerToken),
-      payload: { account_name: 'Storage Revenue — Other' },
+      payload: { account_name: 'Rent' },
     });
   });
 });
@@ -806,6 +810,159 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
     expect(stray).toBeTruthy();
     expect(stray!.amount_pkr).toBe(300);
     expect(bs.is_balanced).toBe(true);
+  });
+});
+
+// ============================================================
+// Phase 19 audit — CoA guardrails
+// ============================================================
+
+describe('account codes must not collide with another class range (phase/19)', () => {
+  it('rejects an EXPENSE account numbered in the asset range', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '1999',
+        account_name: 'Miscoded Expense',
+        account_class: 'EXPENSE',
+        account_type: 'DETAIL',
+        parent_account_code: '6000',
+        normal_balance: 'DEBIT',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects an ASSET account numbered in the revenue range', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '4995',
+        account_name: 'Miscoded Asset',
+        account_class: 'ASSET',
+        account_type: 'DETAIL',
+        parent_account_code: '1200',
+        normal_balance: 'DEBIT',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
+  });
+});
+
+describe('deactivation requires a zero ledger balance (phase/19)', () => {
+  it('blocks deactivating an account holding a balance; allows it once zeroed', async () => {
+    const header = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '7900',
+        account_name: 'Deactivation Test Header',
+        account_class: 'EXPENSE',
+        account_type: 'HEADER',
+        normal_balance: 'DEBIT',
+      },
+    });
+    expect(header.statusCode).toBe(201);
+    const detail = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '7910',
+        account_name: 'Deactivation Test Detail',
+        account_class: 'EXPENSE',
+        account_type: 'DETAIL',
+        parent_account_code: '7900',
+        normal_balance: 'DEBIT',
+      },
+    });
+    expect(detail.statusCode).toBe(201);
+
+    const je = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/journal-entries',
+      headers: authHeaders(managerToken),
+      payload: {
+        entry_date: '2026-02-12',
+        description: 'deactivation balance test',
+        posting_status: 'POSTED',
+        lines: [
+          { account_code: '7910', debit_amount: 120, credit_amount: 0 },
+          { account_code: '1010', debit_amount: 0, credit_amount: 120 },
+        ],
+      },
+    });
+    expect(je.statusCode).toBe(201);
+
+    const blocked = await app.inject({
+      method: 'PATCH',
+      url: '/v1/accounting/accounts/7910',
+      headers: authHeaders(ownerToken),
+      payload: { is_active: false },
+    });
+    expect(blocked.statusCode).toBe(409);
+    expect(JSON.parse(blocked.body).error.code).toBe('ACCOUNT_HAS_BALANCE');
+
+    const offset = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/journal-entries',
+      headers: authHeaders(managerToken),
+      payload: {
+        entry_date: '2026-02-13',
+        description: 'deactivation balance offset',
+        posting_status: 'POSTED',
+        lines: [
+          { account_code: '1010', debit_amount: 120, credit_amount: 0 },
+          { account_code: '7910', debit_amount: 0, credit_amount: 120 },
+        ],
+      },
+    });
+    expect(offset.statusCode).toBe(201);
+
+    const allowed = await app.inject({
+      method: 'PATCH',
+      url: '/v1/accounting/accounts/7910',
+      headers: authHeaders(ownerToken),
+      payload: { is_active: false },
+    });
+    expect(allowed.statusCode).toBe(200);
+    expect(JSON.parse(allowed.body).data.is_active).toBe(false);
+  });
+});
+
+describe('system accounts cannot be renamed (phase/19)', () => {
+  it('rejects renaming 1010 Cash on Hand', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/accounting/accounts/1010',
+      headers: authHeaders(ownerToken),
+      payload: { account_name: 'Petty Cash' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('SYSTEM_ACCOUNT_PROTECTED');
+  });
+
+  it('still allows renaming a non-system account', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/accounting/accounts/6030',
+      headers: authHeaders(ownerToken),
+      payload: { account_name: 'Maintenance & Repairs (renamed)' },
+    });
+    expect(res.statusCode).toBe(200);
+    await app.inject({
+      method: 'PATCH',
+      url: '/v1/accounting/accounts/6030',
+      headers: authHeaders(ownerToken),
+      payload: { account_name: 'Maintenance & Repairs' },
+    });
   });
 });
 

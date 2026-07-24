@@ -110,11 +110,12 @@ describe('audit triggers on financial tables', () => {
   });
 
   it('renaming an account writes an UPDATE audit row with before/after values', async () => {
+    // 6050 Insurance is non-system — system accounts reject renames (phase/19).
     const res = await app.inject({
       method: 'PATCH',
-      url: '/v1/accounting/accounts/1010',
+      url: '/v1/accounting/accounts/6050',
       headers: authHeaders(ownerToken),
-      payload: { account_name: 'Cash on Hand (renamed)' },
+      payload: { account_name: 'Insurance (renamed)' },
     });
     expect(res.statusCode).toBe(200);
     const accountId = JSON.parse(res.body).data.id as string;
@@ -122,8 +123,16 @@ describe('audit triggers on financial tables', () => {
     const rows = await auditRows('chart_of_accounts', accountId);
     const update = rows.find((r) => r.action === 'UPDATE');
     expect(update).toBeTruthy();
-    expect((update!.old_values as Record<string, unknown>)['account_name']).toBe('Cash on Hand');
-    expect((update!.new_values as Record<string, unknown>)['account_name']).toBe('Cash on Hand (renamed)');
+    expect((update!.old_values as Record<string, unknown>)['account_name']).toBe('Insurance');
+    expect((update!.new_values as Record<string, unknown>)['account_name']).toBe('Insurance (renamed)');
+
+    // Restore so the account name stays stable for other suites.
+    await app.inject({
+      method: 'PATCH',
+      url: '/v1/accounting/accounts/6050',
+      headers: authHeaders(ownerToken),
+      payload: { account_name: 'Insurance' },
+    });
   });
 
   it('deleting a draft entry writes a DELETE audit row', async () => {

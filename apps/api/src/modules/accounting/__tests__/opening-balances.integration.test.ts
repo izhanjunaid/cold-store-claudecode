@@ -132,6 +132,31 @@ describe('Gap 1 · opening balances', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('rejects a P&L-class account in other_lines (phase/19)', async () => {
+    const res = await enter(managerToken, {
+      as_of_date: '2026-01-01',
+      other_lines: [{ account_code: '4010', debit_pkr: 0, credit_pkr: 5000, description: 'bad revenue opening' }],
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects the 3010 plug account entered directly in other_lines (phase/19)', async () => {
+    const res = await enter(managerToken, {
+      as_of_date: '2026-01-01',
+      other_lines: [{ account_code: '3010', debit_pkr: 0, credit_pkr: 5000 }],
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects a header account in other_lines (phase/19)', async () => {
+    const res = await enter(managerToken, {
+      as_of_date: '2026-01-01',
+      other_lines: [{ account_code: '1000', debit_pkr: 5000, credit_pkr: 0 }],
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('ACCOUNTANT cannot enter opening balances', async () => {
     const res = await enter(accountantToken, FULL_BODY());
     expect(res.statusCode).toBe(403);

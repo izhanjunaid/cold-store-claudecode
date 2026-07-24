@@ -5,9 +5,7 @@ import { buildJE03AdvanceReceived } from '../templates/je-03-advance-received';
 import { buildJE04AdvanceApplied } from '../templates/je-04-advance-applied';
 import { buildJE05CreditNote } from '../templates/je-05-credit-note';
 import { buildJE06ChequeDishonoured } from '../templates/je-06-cheque-dishonoured';
-import { buildJE07Overpayment } from '../templates/je-07-overpayment';
 import { buildJE08BadDebtWriteOff } from '../templates/je-08-bad-debt-writeoff';
-import { buildJE10OwnershipTransferBilling } from '../templates/je-10-ownership-transfer-billing';
 import { arAccountForParty, assetAccountForPaymentMethod, revenueAccountForCommodity } from '../templates/types';
 
 function totals(lines: { debitAmount: number; creditAmount: number }[]) {
@@ -221,23 +219,6 @@ describe('JE template balance enforcement', () => {
     expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1020');
   });
 
-  it('JE-07 overpayment splits credit between AR and 2010', () => {
-    const draft = buildJE07Overpayment({
-      paymentId: 'pay4',
-      paymentDate: new Date(),
-      paymentMethod: 'CASH',
-      bookType: 'PACCI',
-      party: farmerParty,
-      appliedAmountPkr: 5000,
-      overpaymentAmountPkr: 1500,
-    });
-    const t = totals(draft.lines);
-    expect(t.d).toBe(6500);
-    expect(t.c).toBe(6500);
-    expect(draft.lines.find((l) => l.accountCode === '1110')?.creditAmount).toBe(5000);
-    expect(draft.lines.find((l) => l.accountCode === '2010')?.creditAmount).toBe(1500);
-  });
-
   it('JE-08 bad debt: debits 6080, credits AR', () => {
     const draft = buildJE08BadDebtWriteOff({
       invoiceId: 'inv6',
@@ -255,22 +236,12 @@ describe('JE template balance enforcement', () => {
     expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1110');
   });
 
-  it('JE-10 billing reassignment: DR new-party AR, CR old-party AR', () => {
-    const draft = buildJE10OwnershipTransferBilling({
-      ownershipHistoryId: 'oh1',
-      effectiveDate: new Date(),
-      amountPkr: 3000,
-      bookType: 'PACCI',
-      fromParty: farmerParty,
-      toParty: traderParty,
-      lot: { id: 'l3', lotNumber: 'LOT-3' },
-    });
-    expect(draft.lines.find((l) => l.debitAmount > 0)?.accountCode).toBe('1120'); // trader
-    expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1110'); // farmer
-  });
-
-  // JE-11 / JE-11R (month-end revenue accrual) were removed deliberately:
-  // revenue is invoice-basis by decision (docs/09 §JE-11, docs/16 Gap 4).
+  // JE-07 (overpayment) and JE-10 (ownership-transfer AR shift) were removed in
+  // phase/19: both had zero production callers. Overpayment is prevented by
+  // allocation guards (PAYMENT_OVER_ALLOCATED); FULL-transfer accrued billing
+  // splits a standalone draft invoice through JE-01 instead. JE-11 / JE-11R
+  // (month-end revenue accrual) were removed earlier — revenue is invoice-basis
+  // by decision (docs/09 §JE-11, docs/16 Gap 4).
 });
 
 describe('Account-mapping helpers', () => {

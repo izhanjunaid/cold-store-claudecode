@@ -16,6 +16,11 @@ import type { JournalEntryService } from './journal-entry.service';
 // loan record to drive recovery).
 const BLOCKED_OTHER_LINE_CODES = new Set(['1110', '1120', '1130', '1140', '1150']);
 
+// Opening balances belong on the balance sheet; a P&L-class opening line has no
+// meaning (its net effect is owner equity, which the plug already books). And
+// 3010 is the plug account itself, so it must not be posted to directly. The
+// web already enforces both; mirror it server-side (phase/19 audit item 4).
+const OTHER_LINE_ALLOWED_CLASSES = new Set(['ASSET', 'LIABILITY', 'EQUITY']);
 const EQUITY_PLUG_ACCOUNT = '3010';
 const CASH_ACCOUNT = '1010';
 const BANK_ACCOUNT = '1020';
@@ -58,6 +63,35 @@ export class OpeningBalanceService {
         where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED' },
       });
       if (existing) throw Errors.OPENING_BALANCES_ALREADY_ENTERED();
+
+      const otherCodes = [...new Set(body.other_lines.map((l) => l.account_code))];
+      if (otherCodes.length > 0) {
+        const accounts = await tx.chartOfAccounts.findMany({
+          where: { facilityId, accountCode: { in: otherCodes } },
+        });
+        const byCode = new Map(accounts.map((a) => [a.accountCode, a]));
+        for (const code of otherCodes) {
+          if (code === EQUITY_PLUG_ACCOUNT) {
+            throw Errors.VALIDATION_ERROR(
+              `Account ${EQUITY_PLUG_ACCOUNT} is the opening-balance plug and is booked automatically; do not enter it directly`,
+              'other_lines',
+            );
+          }
+          const account = byCode.get(code);
+          if (!account) {
+            throw Errors.VALIDATION_ERROR(`Account ${code} does not exist`, 'other_lines');
+          }
+          if (account.accountType !== 'DETAIL') {
+            throw Errors.VALIDATION_ERROR(`Account ${code} is a header account and cannot hold a balance`, 'other_lines');
+          }
+          if (!OTHER_LINE_ALLOWED_CLASSES.has(account.accountClass)) {
+            throw Errors.VALIDATION_ERROR(
+              `Account ${code} is a ${account.accountClass} account — opening balances accept only ASSET, LIABILITY and EQUITY lines`,
+              'other_lines',
+            );
+          }
+        }
+      }
 
       const lines: JournalEntryLineDraft[] = [];
 

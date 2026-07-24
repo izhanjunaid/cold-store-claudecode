@@ -39,7 +39,13 @@ export const Errors = {
   ACCOUNT_NOT_FOUND: () =>
     new AppError('ACCOUNT_NOT_FOUND', 'Account code does not exist in CoA', 404),
   SYSTEM_ACCOUNT_PROTECTED: () =>
-    new AppError('SYSTEM_ACCOUNT_PROTECTED', 'System accounts cannot be deleted or recoded', 409),
+    new AppError('SYSTEM_ACCOUNT_PROTECTED', 'System accounts cannot be deleted, recoded or renamed', 409),
+  ACCOUNT_HAS_BALANCE: () =>
+    new AppError(
+      'ACCOUNT_HAS_BALANCE',
+      'Account has a non-zero ledger balance; post an adjustment to zero it before deactivating',
+      409,
+    ),
   CREDIT_NOTE_EXCEEDS_INVOICE: () =>
     new AppError('CREDIT_NOTE_EXCEEDS_INVOICE', 'Credit note total exceeds original invoice', 422),
   INVALID_PARENT_ACCOUNT: (msg: string) =>
