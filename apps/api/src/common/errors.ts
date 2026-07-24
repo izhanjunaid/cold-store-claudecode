@@ -162,6 +162,12 @@ export const Errors = {
     new AppError('PESHGI_INACTIVE', 'Loan is fully recovered or written off; cannot record repayment', 409),
   PESHGI_ALREADY_CLOSED: () =>
     new AppError('PESHGI_ALREADY_CLOSED', 'Loan is not ACTIVE; cannot write off', 409),
+  PESHGI_REPAYMENT_REQUIRES_SETTLEMENT: () =>
+    new AppError(
+      'PESHGI_REPAYMENT_REQUIRES_SETTLEMENT',
+      'Produce-deduction recoveries must be recorded through a payment with a LOAN allocation, not as a standalone repayment',
+      422,
+    ),
   // Phase 9 — Gate Pass
   GATE_PASS_NOT_FOUND: () =>
     new AppError('GATE_PASS_NOT_FOUND', 'Gate pass does not exist', 404),

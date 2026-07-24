@@ -101,16 +101,16 @@ export class PeshgiService {
         throw Errors.PESHGI_OVER_REPAYMENT();
       }
 
-      // DEDUCTED_FROM_PRODUCE may not have a cash-side; the JE-19 is built only when
-      // a cash-side asset account is supplied. The combined-settlement allocator
-      // (see payment.service) supplies it via the payment's asset_account_code.
-      const isProduceDeduction = body.payment_method === 'DEDUCTED_FROM_PRODUCE';
+      // Standalone repayments always post a cash-side JE-19 (DR asset / CR 1140),
+      // keeping GL 1140 in step with the loan subledger. The schema restricts
+      // this endpoint to CASH/BANK_TRANSFER with a required asset account;
+      // produce-deduction recoveries are journalled only through the
+      // combined-settlement allocator (phase/19 audit). Defense-in-depth guard:
+      // Cast: the schema already narrows payment_method to CASH/BANK_TRANSFER,
+      // but this guard also protects any future internal caller.
       const assetAccount = body.asset_account_code ?? null;
-      if (!isProduceDeduction && !assetAccount) {
-        throw Errors.VALIDATION_ERROR(
-          'asset_account_code is required for CASH or BANK_TRANSFER',
-          'asset_account_code',
-        );
+      if ((body.payment_method as string) === 'DEDUCTED_FROM_PRODUCE' || !assetAccount) {
+        throw Errors.PESHGI_REPAYMENT_REQUIRES_SETTLEMENT();
       }
 
       const repayment = await tx.partyLoanRepayment.create({
@@ -125,27 +125,25 @@ export class PeshgiService {
         },
       });
 
-      if (assetAccount) {
-        const draft = buildJE19PeshgiRecovered({
-          loanId: loan.id,
-          loanNumber: loan.loanNumber,
-          repaymentId: repayment.id,
-          partyId: loan.partyId,
-          partyName: loan.party.name,
-          entryDate: new Date(body.repayment_date),
-          amountPkr: amount,
-          toAssetAccountCode: assetAccount,
-          bookType: loan.bookType,
-        });
-        const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
-          postingStatus: 'POSTED',
-        });
+      const draft = buildJE19PeshgiRecovered({
+        loanId: loan.id,
+        loanNumber: loan.loanNumber,
+        repaymentId: repayment.id,
+        partyId: loan.partyId,
+        partyName: loan.party.name,
+        entryDate: new Date(body.repayment_date),
+        amountPkr: amount,
+        toAssetAccountCode: assetAccount,
+        bookType: loan.bookType,
+      });
+      const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
+        postingStatus: 'POSTED',
+      });
 
-        await tx.partyLoanRepayment.update({
-          where: { id: repayment.id },
-          data: { journalEntryId: posted.id },
-        });
-      }
+      await tx.partyLoanRepayment.update({
+        where: { id: repayment.id },
+        data: { journalEntryId: posted.id },
+      });
 
       const newBalance = round2(balance - amount);
       await tx.partyLoan.update({

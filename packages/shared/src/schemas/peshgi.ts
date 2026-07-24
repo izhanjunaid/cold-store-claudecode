@@ -22,23 +22,18 @@ export const IssuePeshgiRequest = z.object({
 });
 export type IssuePeshgiRequestType = z.infer<typeof IssuePeshgiRequest>;
 
-export const RecordRepaymentRequest = z
-  .object({
-    repayment_date: dateOnly,
-    amount_pkr: z.number().positive(),
-    payment_method: LoanRepaymentMethod,
-    asset_account_code: z.string().regex(/^[0-9]+$/).optional(),
-    notes: z.string().optional(),
-  })
-  .superRefine((val, ctx) => {
-    if (val.payment_method !== 'DEDUCTED_FROM_PRODUCE' && !val.asset_account_code) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['asset_account_code'],
-        message: 'asset_account_code is required for CASH or BANK_TRANSFER',
-      });
-    }
-  });
+// A standalone repayment must post a cash-side JE (JE-19), so it accepts only
+// CASH / BANK_TRANSFER with a required asset account. DEDUCTED_FROM_PRODUCE has
+// no cash side and is created only by the combined-settlement allocator inside
+// the payment flow (never through this endpoint), keeping GL 1140 in step with
+// the loan subledger (phase/19 audit).
+export const RecordRepaymentRequest = z.object({
+  repayment_date: dateOnly,
+  amount_pkr: z.number().positive(),
+  payment_method: z.enum(['CASH', 'BANK_TRANSFER']),
+  asset_account_code: z.string().regex(/^[0-9]+$/),
+  notes: z.string().optional(),
+});
 export type RecordRepaymentRequestType = z.infer<typeof RecordRepaymentRequest>;
 
 export const WriteOffPeshgiRequest = z.object({

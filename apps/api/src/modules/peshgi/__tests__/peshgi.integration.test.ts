@@ -371,3 +371,62 @@ describe('Phase 9 — Peshgi (Loans) realigned API', () => {
     expect(body.data.principal_pkr).toBe(15000);
   });
 });
+
+describe('Phase 19 — produce-deduction repayments must be journalled', () => {
+  it('rejects a standalone DEDUCTED_FROM_PRODUCE repayment (no cash side, no JE)', async () => {
+    await cleanup();
+    const loan = await issueLoan(30000, '2026-05-01');
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/loans/${loan.id}/repayments`,
+      headers: authHeaders(managerToken),
+      payload: {
+        repayment_date: '2026-06-01',
+        amount_pkr: 10000,
+        payment_method: 'DEDUCTED_FROM_PRODUCE',
+      },
+    });
+    // Rejected at the schema boundary — the endpoint only accepts CASH/BANK_TRANSFER,
+    // both of which post JE-19. Produce deductions flow through combined settlement.
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects a CASH repayment with no asset_account_code', async () => {
+    await cleanup();
+    const loan = await issueLoan(30000, '2026-05-02');
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/loans/${loan.id}/repayments`,
+      headers: authHeaders(managerToken),
+      payload: { repayment_date: '2026-06-02', amount_pkr: 10000, payment_method: 'CASH' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('keeps GL 1140 in lockstep with the loan subledger', async () => {
+    await cleanup();
+    const loan = await issueLoan(40000, '2026-05-03');
+    const rep = await app.inject({
+      method: 'POST',
+      url: `/v1/loans/${loan.id}/repayments`,
+      headers: authHeaders(managerToken),
+      payload: {
+        repayment_date: '2026-06-03',
+        amount_pkr: 15000,
+        payment_method: 'CASH',
+        asset_account_code: '1010',
+      },
+    });
+    expect(rep.statusCode).toBe(201);
+    const updated = JSON.parse(rep.body).data;
+
+    // GL 1140 net (debit − credit) must equal the outstanding loan balance.
+    const agg = await prisma.journalEntryLine.aggregate({
+      where: { facilityId: TEST_FACILITY_ID, accountCode: '1140', journalEntry: { postingStatus: 'POSTED' } },
+      _sum: { debitAmount: true, creditAmount: true },
+    });
+    const glBalance = Number(agg._sum.debitAmount ?? 0) - Number(agg._sum.creditAmount ?? 0);
+    expect(glBalance).toBeCloseTo(updated.balance_outstanding_pkr);
+    expect(glBalance).toBeCloseTo(25000);
+  });
+});
