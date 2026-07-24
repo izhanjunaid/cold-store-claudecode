@@ -24,7 +24,13 @@ interface PartyRow {
   b_61_90: number;
   b_90_plus: number;
   oldest_invoice_days: number;
+  unapplied_credit_pkr: number;
+  net_due_pkr: number;
 }
+
+// GL AR control accounts (party receivables). 1140 Peshgi is a separate loan
+// control and is deliberately excluded.
+const AR_CONTROL_ACCOUNTS = ['1110', '1120', '1130', '1150'];
 
 export async function getReceivablesAging(
   prisma: PrismaClient,
@@ -71,22 +77,25 @@ export async function getReceivablesAging(
     },
   });
 
-  const onAccountPayments = openingLines.length
-    ? await prisma.payment.findMany({
-        where: {
-          facilityId,
-          ...(filters.party_id ? { partyId: filters.party_id } : {}),
-          isAdvance: false,
-          status: { not: 'DISHONOURED' },
-          paymentDate: { lte: asOfDate },
-        },
-        select: {
-          partyId: true,
-          amountPkr: true,
-          allocations: { where: { voidedAt: null }, select: { allocatedAmountPkr: true } },
-        },
-      })
-    : [];
+  // On-account (unallocated) receipts reduce a party's GL AR for the full
+  // receipt (JE-02) but never touch invoice amountPaidPkr. Fetch them
+  // unconditionally so they reduce the party's net receivable, not only their
+  // opening balance — otherwise aging overstates against the balance sheet
+  // (phase/19 audit item 5).
+  const onAccountPayments = await prisma.payment.findMany({
+    where: {
+      facilityId,
+      ...(filters.party_id ? { partyId: filters.party_id } : {}),
+      isAdvance: false,
+      status: { not: 'DISHONOURED' },
+      paymentDate: { lte: asOfDate },
+    },
+    select: {
+      partyId: true,
+      amountPkr: true,
+      allocations: { where: { voidedAt: null }, select: { allocatedAmountPkr: true } },
+    },
+  });
 
   const onAccountByParty = new Map<string, number>();
   for (const pay of onAccountPayments) {
@@ -96,6 +105,9 @@ export async function getReceivablesAging(
       onAccountByParty.set(pay.partyId, (onAccountByParty.get(pay.partyId) ?? 0) + unallocated);
     }
   }
+  // Credit remaining after opening balances have absorbed their share; the
+  // leftover reduces invoice-based dues (tracked as unapplied credit).
+  const remainingCredit = new Map(onAccountByParty);
 
   const openingByParty = new Map<
     string,
@@ -117,7 +129,13 @@ export async function getReceivablesAging(
   const byParty = new Map<string, PartyRow>();
 
   for (const [pid, opening] of openingByParty) {
-    const due = round2(Math.max(0, opening.net - (onAccountByParty.get(pid) ?? 0)));
+    // On-account credit absorbs the opening balance first (same FIFO as before);
+    // whatever it can't cover here stays as unapplied credit for the invoices.
+    const grossOpening = Math.max(0, opening.net);
+    const credit = remainingCredit.get(pid) ?? 0;
+    const applied = Math.min(credit, grossOpening);
+    remainingCredit.set(pid, credit - applied);
+    const due = round2(grossOpening - applied);
     if (due <= 0.005) continue;
 
     const key = bucketFor(asOfDate, opening.date);
@@ -134,6 +152,8 @@ export async function getReceivablesAging(
       b_61_90: 0,
       b_90_plus: 0,
       oldest_invoice_days: ageInDays(asOfDate, opening.date),
+      unapplied_credit_pkr: 0,
+      net_due_pkr: 0,
       [key]: due,
     } as PartyRow);
   }
@@ -158,6 +178,8 @@ export async function getReceivablesAging(
         b_61_90: 0,
         b_90_plus: 0,
         oldest_invoice_days: 0,
+        unapplied_credit_pkr: 0,
+        net_due_pkr: 0,
       };
       byParty.set(inv.billingPartyId, row);
     }
@@ -169,6 +191,49 @@ export async function getReceivablesAging(
     );
   }
 
+  // Parties whose only activity is an unapplied credit (payment with nothing to
+  // apply it to) carry a true credit balance — show it as negative net due so
+  // the aging reconciles with the GL AR control.
+  for (const [pid, credit] of remainingCredit) {
+    const leftover = round2(credit);
+    if (leftover <= 0.005) continue;
+    const existing = byParty.get(pid);
+    if (existing) {
+      existing.unapplied_credit_pkr += leftover;
+    } else {
+      byParty.set(pid, {
+        party_id: pid,
+        party_name: '',
+        party_type: '',
+        total_due_pkr: 0,
+        b_0_30: 0,
+        b_31_60: 0,
+        b_61_90: 0,
+        b_90_plus: 0,
+        oldest_invoice_days: 0,
+        unapplied_credit_pkr: leftover,
+        net_due_pkr: 0,
+      });
+    }
+  }
+
+  // Backfill names for pure-credit rows.
+  const nameless = Array.from(byParty.values()).filter((r) => r.party_name === '');
+  if (nameless.length) {
+    const found = await prisma.party.findMany({
+      where: { facilityId, id: { in: nameless.map((r) => r.party_id) } },
+      select: { id: true, name: true, partyType: true },
+    });
+    const nameMap = new Map(found.map((p) => [p.id, p]));
+    for (const r of nameless) {
+      const p = nameMap.get(r.party_id);
+      if (p) {
+        r.party_name = p.name;
+        r.party_type = p.partyType;
+      }
+    }
+  }
+
   const roundedBuckets = {
     b_0_30: round2(buckets.b_0_30),
     b_31_60: round2(buckets.b_31_60),
@@ -178,15 +243,49 @@ export async function getReceivablesAging(
   };
 
   const allParties: PartyRow[] = Array.from(byParty.values())
-    .map((r) => ({
-      ...r,
-      total_due_pkr: round2(r.total_due_pkr),
-      b_0_30: round2(r.b_0_30),
-      b_31_60: round2(r.b_31_60),
-      b_61_90: round2(r.b_61_90),
-      b_90_plus: round2(r.b_90_plus),
-    }))
-    .sort((a, b) => b.total_due_pkr - a.total_due_pkr);
+    .map((r) => {
+      const total_due_pkr = round2(r.total_due_pkr);
+      const unapplied_credit_pkr = round2(r.unapplied_credit_pkr);
+      return {
+        ...r,
+        total_due_pkr,
+        b_0_30: round2(r.b_0_30),
+        b_31_60: round2(r.b_31_60),
+        b_61_90: round2(r.b_61_90),
+        b_90_plus: round2(r.b_90_plus),
+        unapplied_credit_pkr,
+        net_due_pkr: round2(total_due_pkr - unapplied_credit_pkr),
+      };
+    })
+    .sort((a, b) => b.net_due_pkr - a.net_due_pkr);
+
+  const total_unapplied_credit_pkr = round2(
+    allParties.reduce((s, r) => s + r.unapplied_credit_pkr, 0),
+  );
+  const net_total_pkr = round2(roundedBuckets.total_pkr - total_unapplied_credit_pkr);
+
+  // GL tie-out: the balance-sheet Trade Receivables comes from the AR control
+  // accounts. Surface the control total and the variance so a divergence is
+  // visible rather than silent (docs claimed automatic reconciliation).
+  const glAgg = await prisma.journalEntryLine.aggregate({
+    where: {
+      facilityId,
+      accountCode: { in: AR_CONTROL_ACCOUNTS },
+      ...(filters.party_id ? { partyId: filters.party_id } : {}),
+      journalEntry: {
+        facilityId,
+        postingStatus: 'POSTED',
+        bookType: 'PACCI',
+        entryDate: { lte: asOfDate },
+      },
+    },
+    _sum: { debitAmount: true, creditAmount: true },
+  });
+  const gl_ar_control_total_pkr = round2(
+    Number(glAgg._sum.debitAmount ?? 0) - Number(glAgg._sum.creditAmount ?? 0),
+  );
+  const variance_pkr = round2(net_total_pkr - gl_ar_control_total_pkr);
+  const reconciled = Math.abs(variance_pkr) < 0.01;
 
   const page = filters.page ?? 1;
   const perPage = filters.per_page ?? 50;
@@ -196,6 +295,11 @@ export async function getReceivablesAging(
   return {
     as_of_date: asOfDate.toISOString().slice(0, 10),
     buckets: roundedBuckets,
+    total_unapplied_credit_pkr,
+    net_total_pkr,
+    gl_ar_control_total_pkr,
+    variance_pkr,
+    reconciled,
     parties,
     meta: { page, per_page: perPage, total },
   };

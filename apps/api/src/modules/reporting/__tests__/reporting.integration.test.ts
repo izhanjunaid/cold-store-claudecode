@@ -456,6 +456,56 @@ describe('GET /v1/reports/receivables-aging', () => {
       }
     }
     expect(Math.abs(ar.buckets.total_pkr - glSum)).toBeLessThan(0.5);
+    // The report now carries its own GL control total + variance (phase/19).
+    expect(ar.reconciled).toBe(true);
+    expect(Math.abs(ar.gl_ar_control_total_pkr - ar.net_total_pkr)).toBeLessThan(0.01);
+    expect(Math.abs(ar.gl_ar_control_total_pkr - glSum)).toBeLessThan(0.5);
+  });
+
+  it('on-account credit reduces net due (not the gross buckets) and stays GL-reconciled (phase/19)', async () => {
+    const party = await createParty(`AR-OnAccount-${Date.now()}`, `0302${Date.now() % 1000000}`.slice(0, 11));
+    const lotId = await createLot({
+      ownerPartyId: party,
+      commodityId: POTATO_ID,
+      inboundDate: '2026-03-01',
+      quantityBags: 30,
+      acceptedWeightKg: 600,
+    });
+    const inv = await fullWithdrawAndFinalize(lotId, '2026-03-28', 600, 30);
+    const onAccount = Math.round(inv.totalPkr * 0.3);
+
+    const pay = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: party,
+        payment_date: '2026-04-01',
+        amount_pkr: onAccount,
+        payment_method: 'CASH',
+        allocations: [],
+      },
+    });
+    expect(pay.statusCode).toBe(201);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/reports/receivables-aging?party_id=${party}`,
+      headers: authHeaders(accountantToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const ar = JSON.parse(res.body).data;
+    const row = ar.parties.find((p: { party_id: string }) => p.party_id === party);
+    expect(row).toBeTruthy();
+    // Gross bucket total is the full invoice; the unapplied credit shows as a
+    // separate reduction, and net = gross − credit.
+    expect(row.total_due_pkr).toBeCloseTo(inv.totalPkr, 1);
+    expect(row.unapplied_credit_pkr).toBeCloseTo(onAccount, 1);
+    expect(row.net_due_pkr).toBeCloseTo(inv.totalPkr - onAccount, 1);
+    expect(ar.net_total_pkr).toBeCloseTo(inv.totalPkr - onAccount, 1);
+    // GL AR control for this party (JE-01 debit − JE-02 credit) equals net.
+    expect(ar.gl_ar_control_total_pkr).toBeCloseTo(inv.totalPkr - onAccount, 1);
+    expect(ar.reconciled).toBe(true);
   });
 });
 

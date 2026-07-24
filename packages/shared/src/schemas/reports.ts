@@ -161,12 +161,23 @@ export const ReceivablesAgingPartyRow = z.object({
   b_61_90: z.number(),
   b_90_plus: z.number(),
   oldest_invoice_days: z.number().int(),
+  // Unallocated on-account credit held for the party; net_due may go negative
+  // when the party is in a credit position (phase/19 audit).
+  unapplied_credit_pkr: z.number(),
+  net_due_pkr: z.number(),
 });
 export type ReceivablesAgingPartyRowType = z.infer<typeof ReceivablesAgingPartyRow>;
 
 export const ReceivablesAgingResponse = z.object({
   as_of_date: z.string(),
   buckets: ReceivablesAgingBuckets,
+  total_unapplied_credit_pkr: z.number(),
+  net_total_pkr: z.number(),
+  // GL AR control total (1110/1120/1130/1150, POSTED, PACCI) and the variance
+  // against net_total — surfaces divergence instead of assuming reconciliation.
+  gl_ar_control_total_pkr: z.number(),
+  variance_pkr: z.number(),
+  reconciled: z.boolean(),
   parties: z.array(ReceivablesAgingPartyRow),
 });
 export type ReceivablesAgingResponseType = z.infer<typeof ReceivablesAgingResponse>;
