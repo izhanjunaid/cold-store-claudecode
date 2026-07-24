@@ -48,6 +48,10 @@ export const FacilitySettings = z.object({
   chamber_capacity_warning_pct: z.number().int().min(1).max(100),
   backdating_max_days: z.number().int().min(0).nullable(),
   gst_default_rate: z.number().min(0).max(100),
+  // Month (1–12) the fiscal year starts. Drives the balance-sheet virtual
+  // closing (current-year P&L is bounded to this FY; earlier years roll into
+  // retained earnings) and the web report period presets.
+  fiscal_year_start_month: z.number().int().min(1).max(12),
   late_payment_surcharge: LatePaymentSurchargeRule,
   email: EmailSettings,
   notifications: NotificationSettings,
@@ -66,6 +70,7 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
   // data keeps working — see apps/api/src/test/setup.ts, prisma/seed.ts.
   backdating_max_days: 7,
   gst_default_rate: 18,
+  fiscal_year_start_month: 7, // July — Pakistan's standard fiscal year (matches web DEFAULT_FY_START_MONTH)
   late_payment_surcharge: { enabled: false, pct_per_month: 2, grace_days: 30 },
   email: {
     enabled: false,

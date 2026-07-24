@@ -111,7 +111,10 @@ export const CreateManualJournalEntryRequest = z.object({
   entry_date: dateOnly,
   description: z.string().min(1).max(500),
   book_type: BookType.optional().default('PACCI'),
-  posting_status: z.enum(['AUTO_DRAFT', 'POSTED']).optional().default('AUTO_DRAFT'),
+  // Default to POSTED: the web form posts by default and F-7's intent is that
+  // leaving an entry as a draft is an explicit choice, not a silent one that
+  // vanishes from every report (phase/19 audit item 12).
+  posting_status: z.enum(['AUTO_DRAFT', 'POSTED']).optional().default('POSTED'),
   lines: z
     .array(
       z.object({
@@ -301,22 +304,23 @@ export const ProfitLossResponse = z.object({
   cost_of_service_lines: z.array(StatementLine),
   total_cost_of_service_pkr: z.number(),
   gross_profit_pkr: z.number(),
-  gross_profit_pct: z.number(),
+  // Margins are null when net revenue is zero/negative — undefined, not 0%.
+  gross_profit_pct: z.number().nullable(),
 
   operating_expense_lines: z.array(StatementLine),
   total_operating_expense_pkr: z.number(),
   operating_profit_pkr: z.number(),
-  operating_profit_pct: z.number(),
+  operating_profit_pct: z.number().nullable(),
 
   other_income_lines: z.array(StatementLine),
   total_other_income_pkr: z.number(),
 
   depreciation_amortisation_pkr: z.number(),
   ebitda_pkr: z.number(),
-  ebitda_pct: z.number(),
+  ebitda_pct: z.number().nullable(),
 
   net_profit_pkr: z.number(),
-  net_profit_pct: z.number(),
+  net_profit_pct: z.number().nullable(),
 
   // Activity in accounts the header rollups could not place (F-6b);
   // amounts are signed as their contribution to net profit.
@@ -355,7 +359,13 @@ export const BalanceSheetResponse = z.object({
   total_liabilities_pkr: z.number(),
 
   equity_lines: z.array(StatementLine),
+  // Retained earnings = posted 3020 + accumulated prior fiscal-year results;
+  // current_year_pl covers only the fiscal year containing as_of_date (virtual
+  // closing). fiscal_year_start is that FY's first day (ISO date).
+  retained_earnings_pkr: z.number(),
+  prior_years_pl_pkr: z.number(),
   current_year_pl_pkr: z.number(),
+  fiscal_year_start: z.string(),
   total_equity_pkr: z.number(),
   total_liabilities_and_equity_pkr: z.number(),
 

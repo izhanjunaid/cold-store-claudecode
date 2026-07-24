@@ -1,5 +1,7 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import type { ProfitLossQueryType, BalanceSheetQueryType } from '@coldchain/shared';
+import { resolveFacilitySettings } from '../facility/facility.service';
+import { fiscalYearStart } from './fiscal-year';
 
 type Sums = { debit: number; credit: number };
 type SumMap = Map<string, Sums>;
@@ -101,7 +103,11 @@ export class FinancialStatementsService {
     const depreciation_amortisation_pkr = round2(da);
     const ebitda_pkr = round2(operating_profit_pkr + depreciation_amortisation_pkr);
 
-    const pct = (n: number) => (net_revenue_pkr > 0 ? round2((n / net_revenue_pkr) * 100) : 0);
+    // A margin over zero or negative net revenue is undefined, not 0% —
+    // returning 0 would read as "break-even" when the period actually has no
+    // revenue base. null renders as "—" in the UI (phase/19 audit item 14).
+    const pct = (n: number): number | null =>
+      net_revenue_pkr > 0 ? round2((n / net_revenue_pkr) * 100) : null;
 
     // Flat arrays retained for CSV / back-compat
     const revenue_lines = [...revenue_groups.flatMap((g) => g.lines), ...other_income_lines];
@@ -160,6 +166,22 @@ export class FinancialStatementsService {
     const accounts = await this.loadAccounts(facilityId);
     const sums = aggregate(lines);
 
+    // Virtual closing (phase/19 audit): the "Current Year Profit/(Loss)" line
+    // must cover only the fiscal year containing as_of_date. Everything earlier
+    // is prior-period result and belongs in retained earnings — no closing JE
+    // is posted (that would violate the ledger-immutability guards), so we
+    // present it. `sums` above spans all postings up to as_of (used for
+    // all-time P&L); a second window gives the current-FY slice.
+    const facility = await this.prisma.facility.findUniqueOrThrow({
+      where: { id: facilityId },
+      select: { settings: true },
+    });
+    const fyStartMonth = resolveFacilitySettings(facility.settings).fiscal_year_start_month;
+    const fyStart = fiscalYearStart(new Date(query.as_of_date), fyStartMonth);
+    const fyStartIso = fyStart.toISOString().slice(0, 10);
+    const fyLines = await this.fetchLines(facilityId, fyStartIso, query.as_of_date, query.book_type);
+    const fySums = aggregate(fyLines);
+
     const assetAmt = (s: Sums) => s.debit - s.credit; // contra (accum deprec) naturally negative → net book value
     const crAmt = (s: Sums) => s.credit - s.debit;
 
@@ -204,25 +226,47 @@ export class FinancialStatementsService {
       total_current_liabilities_pkr + total_non_current_liabilities_pkr + sumLines(unclassified_liability_lines),
     );
 
-    // Equity — Capital (3010) + Retained Earnings (3020); exclude 3030 (computed below)
+    // Equity — Capital (3010) and other equity detail accounts. Exclude BOTH
+    // 3020 Retained Earnings (folded into retained_earnings_pkr below) and 3030
+    // Current Year P&L (never posted; computed live).
     const equity_lines = accounts
-      .filter((a) => a.accountClass === 'EQUITY' && a.accountType === 'DETAIL' && a.accountCode !== '3030')
+      .filter(
+        (a) =>
+          a.accountClass === 'EQUITY' &&
+          a.accountType === 'DETAIL' &&
+          a.accountCode !== '3020' &&
+          a.accountCode !== '3030',
+      )
       .map((a) => line(a, sums, crAmt))
       .filter((l) => l.amount_pkr !== 0);
 
-    // Current-year P&L YTD inside as_of_date
-    let currentYearPL = 0;
-    for (const a of accounts) {
-      if (a.accountType !== 'DETAIL') continue;
-      const s = sums.get(a.accountCode);
-      if (!s) continue;
-      if (a.accountClass === 'REVENUE') currentYearPL += s.credit - s.debit;
-      else if (a.accountClass === 'COST_OF_SERVICE') currentYearPL -= s.debit - s.credit;
-      else if (a.accountClass === 'EXPENSE') currentYearPL -= s.debit - s.credit;
-    }
-    const current_year_pl_pkr = round2(currentYearPL);
+    // P&L-class net result over a given window (revenue − cost − expense).
+    const plNet = (window: SumMap): number => {
+      let net = 0;
+      for (const a of accounts) {
+        if (a.accountType !== 'DETAIL') continue;
+        const s = window.get(a.accountCode);
+        if (!s) continue;
+        if (a.accountClass === 'REVENUE') net += s.credit - s.debit;
+        else if (a.accountClass === 'COST_OF_SERVICE') net -= s.debit - s.credit;
+        else if (a.accountClass === 'EXPENSE') net -= s.debit - s.credit;
+      }
+      return net;
+    };
 
-    const total_equity_pkr = round2(sumLines(equity_lines) + current_year_pl_pkr);
+    // Current-year P&L = current fiscal-year window; prior years = all-time
+    // (up to as_of) minus current year. Retained earnings merges the posted
+    // 3020 balance (today only touched by opening balances) with that
+    // accumulated prior-year result. This keeps the identity exact:
+    //   retained + current = posted-3020 + all-time-P&L
+    // which is precisely what the old single "current_year_pl" line summed.
+    const current_year_pl_pkr = round2(plNet(fySums));
+    const allTimePL = plNet(sums);
+    const prior_years_pl_pkr = round2(allTimePL - plNet(fySums));
+    const posted3020 = sums.get('3020');
+    const retained_earnings_pkr = round2((posted3020 ? crAmt(posted3020) : 0) + prior_years_pl_pkr);
+
+    const total_equity_pkr = round2(sumLines(equity_lines) + retained_earnings_pkr + current_year_pl_pkr);
     const total_liabilities_and_equity_pkr = round2(total_liabilities_pkr + total_equity_pkr);
 
     return {
@@ -241,7 +285,10 @@ export class FinancialStatementsService {
       total_liabilities_pkr,
 
       equity_lines,
+      retained_earnings_pkr,
+      prior_years_pl_pkr,
       current_year_pl_pkr,
+      fiscal_year_start: fyStartIso,
       total_equity_pkr,
       total_liabilities_and_equity_pkr,
 

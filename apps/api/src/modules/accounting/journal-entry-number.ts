@@ -1,15 +1,18 @@
 import type { Prisma } from '@coldchain/db';
 
+// UTC getters throughout so a document's number always agrees with the
+// accounting period derived in period.ts (which also uses UTC). Local-time
+// getters put a late-evening-UTC entry in the wrong month on non-UTC servers.
 export function formatJournalEntryNumber(date: Date, next: number): string {
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getUTCFullYear());
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
   const seq = String(next).padStart(4, '0');
   return `JE-${yyyy}${mm}-${seq}`;
 }
 
 export function journalEntryNumberPrefix(date: Date): string {
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getUTCFullYear());
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
   return `JE-${yyyy}${mm}-`;
 }
 
@@ -38,8 +41,8 @@ export async function generateJournalEntryNumber(
 }
 
 export function formatCreditNoteNumber(date: Date, next: number): string {
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getUTCFullYear());
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
   const seq = String(next).padStart(4, '0');
   return `CN-${yyyy}${mm}-${seq}`;
 }
@@ -49,8 +52,8 @@ export async function generateCreditNoteNumber(
   facilityId: string,
   date: Date,
 ): Promise<string> {
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getUTCFullYear());
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
   const prefix = `CN-${yyyy}${mm}-`;
   const lockKey = `${facilityId}:${prefix}`;
 

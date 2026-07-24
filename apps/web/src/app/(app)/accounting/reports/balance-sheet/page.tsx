@@ -38,7 +38,10 @@ interface BS {
   total_non_current_liabilities_pkr: number;
   total_liabilities_pkr: number;
   equity_lines: Line[];
+  retained_earnings_pkr: number;
+  prior_years_pl_pkr: number;
   current_year_pl_pkr: number;
+  fiscal_year_start: string;
   total_equity_pkr: number;
   total_liabilities_and_equity_pkr: number;
   is_balanced: boolean;
@@ -120,7 +123,8 @@ export default function BalanceSheetPage() {
     for (const l of data.unclassified_asset_lines) rows.push({ section: 'Assets — Unclassified', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     for (const l of data.unclassified_liability_lines) rows.push({ section: 'Liabilities — Unclassified', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     for (const l of data.equity_lines) rows.push({ section: 'Equity', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
-    rows.push({ section: 'Equity', code: '', account: 'Current Year Profit / (Loss)', amount: data.current_year_pl_pkr });
+    rows.push({ section: 'Equity', code: '', account: "Retained Earnings (incl. prior years' results)", amount: data.retained_earnings_pkr });
+    rows.push({ section: 'Equity', code: '', account: `Current Year Profit / (Loss) — FY from ${data.fiscal_year_start}`, amount: data.current_year_pl_pkr });
     const csv = buildCsv(rows, [
       { header: 'Section', value: (r) => r.section },
       { header: 'Code', value: (r) => r.code },
@@ -213,7 +217,8 @@ export default function BalanceSheetPage() {
               {data.equity_lines.map((l) => (
                 <StatementRow key={l.account_code} depth={1} code={l.account_code} label={l.account_name} amount={l.amount_pkr} prior={pl(l.account_code)} href={glHref(l.account_code)} />
               ))}
-              <StatementRow depth={1} label="Current Year Profit / (Loss)" amount={data.current_year_pl_pkr} prior={cmp?.current_year_pl_pkr} />
+              <StatementRow depth={1} label="Retained Earnings (incl. prior years' results)" amount={data.retained_earnings_pkr} prior={cmp?.retained_earnings_pkr} />
+              <StatementRow depth={1} label={`Current Year Profit / (Loss) — FY from ${data.fiscal_year_start}`} amount={data.current_year_pl_pkr} prior={cmp?.current_year_pl_pkr} />
               <StatementRow emphasis="total" label="Total Equity" amount={data.total_equity_pkr} prior={cmp?.total_equity_pkr} />
 
               <StatementRow emphasis="grand" label="Total Liabilities &amp; Equity" amount={data.total_liabilities_and_equity_pkr} prior={cmp?.total_liabilities_and_equity_pkr} />

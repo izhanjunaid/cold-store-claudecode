@@ -634,20 +634,55 @@ describe('Phase 8 — Trial balance & financial statements', () => {
     expect(body.ebitda_pkr).toBeCloseTo(body.operating_profit_pkr + body.depreciation_amortisation_pkr);
   });
 
-  it('P&L net profit equals balance-sheet current-year P&L for the same period/book', async () => {
-    const plRes = await app.inject({
-      method: 'GET',
-      url: '/v1/accounting/profit-loss?date_from=2026-01-01&date_to=2026-12-31',
-      headers: authHeaders(accountantToken),
-    });
+  it('P&L net profit equals balance-sheet current-year P&L over the fiscal-year window', async () => {
+    // The balance sheet applies virtual closing: current_year_pl_pkr covers only
+    // the fiscal year containing as_of_date (phase/19). Tie it out by running the
+    // P&L over that same [fiscal_year_start, as_of] window.
     const bsRes = await app.inject({
       method: 'GET',
       url: '/v1/accounting/balance-sheet?as_of_date=2026-12-31',
       headers: authHeaders(accountantToken),
     });
-    const pl = JSON.parse(plRes.body).data;
     const bs = JSON.parse(bsRes.body).data;
+    const plRes = await app.inject({
+      method: 'GET',
+      url: `/v1/accounting/profit-loss?date_from=${bs.fiscal_year_start}&date_to=2026-12-31`,
+      headers: authHeaders(accountantToken),
+    });
+    const pl = JSON.parse(plRes.body).data;
     expect(pl.net_profit_pkr).toBeCloseTo(bs.current_year_pl_pkr);
+  });
+
+  it('P&L margins are null (not 0%) when net revenue is zero/negative (phase/19)', async () => {
+    // A contra-revenue-only window has negative net revenue and no base to
+    // express a margin against.
+    const je = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/journal-entries',
+      headers: authHeaders(managerToken),
+      payload: {
+        entry_date: '2027-02-10',
+        description: 'contra-revenue only window',
+        posting_status: 'POSTED',
+        lines: [
+          { account_code: '4910', debit_amount: 500, credit_amount: 0 },
+          { account_code: '1010', debit_amount: 0, credit_amount: 500 },
+        ],
+      },
+    });
+    expect(je.statusCode).toBe(201);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/accounting/profit-loss?date_from=2027-02-01&date_to=2027-02-28',
+      headers: authHeaders(accountantToken),
+    });
+    const body = JSON.parse(res.body).data;
+    expect(body.net_revenue_pkr).toBeLessThan(0);
+    expect(body.gross_profit_pct).toBeNull();
+    expect(body.operating_profit_pct).toBeNull();
+    expect(body.net_profit_pct).toBeNull();
+    expect(body.ebitda_pct).toBeNull();
   });
 });
 
