@@ -1,11 +1,27 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Active Phase**: Ops Quick-Wins COMPLETE on `phase/17-ops-quickwins` (2026-07-17 → 18, off `phase/16-billing-hardening`). Second audit batch (roadmap items 17, 16, 10, 9): backdating default + client-side warnings, non-blocking credit-limit warning at withdrawal, lots search by party/vehicle + owner facet, and the F-2a DB-role hardening that closes the last open docs/16 audit finding. Suite: 187 unit + 444 integration (api) + 98 unit (web) pass. **`phase/17-ops-quickwins` is the latest branch of the main development line** — phase/15, /16, and /17 all pushed to origin 2026-07-18.
-- **Active Task**: None — remaining audit findings (next candidates by rank): rent estimate on withdraw form + invoice link on outbound page (#6), rate-plan snapshot at inbound (#7), inline quick-create party (#8), WhatsApp/SMS party notifications (#11), estimated charges on parchi (#12). See the full audit report for the ranked list.
-- **Blockers**: None. Field caveat: the F-2a installer/updater changes are verified against a scratch postgres:16 container but should be exercised once on a real box install + update before the next client rollout.
-- **Last Updated**: 2026-07-18
+- **Active Phase**: Accounting Audit COMPLETE on `phase/19-accounting-audit` (2026-07-24 → 25, off `phase/17-ops-quickwins`). Full senior-accountant audit of the accounting module (chart of accounts, opening balances, TB/P&L/BS/GL reports, payments, invoices, peshgi) — 17 findings remediated. Headline fixes: fiscal-year-bounded balance-sheet equity ("virtual closing"), AR-aging↔GL reconciliation tie-out, one-click late-payment surcharge (GL-based, migration-free), invoice VOID, CoA guardrails. Full write-up in `docs/17_accounting_audit_phase19.md`. **Zero Prisma migrations.** Suite: 200 unit + 468 integration (api) + 99 unit (web) pass. `phase/17-ops-quickwins` remains the pushed tip of the main line; phase/19 is local pending review.
+- **Active Task**: None — accounting audit remediation complete.
+- **Blockers**: None. Field caveat (unchanged): the F-2a installer/updater changes are verified against a scratch postgres:16 container but should be exercised once on a real box before the next client rollout. New note: pre-existing peshgi produce-deduction repayments recorded before the phase/19 fix (if any) carry no journal entry and need a one-time manual adjusting JE.
+- **Last Updated**: 2026-07-25
 - **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision. Rooms & Racks: partial inter-room split (child-lot move) deferred — inter-room moves are whole-lot in v1.
+
+## Accounting Audit (Phase 19, 2026-07-24 → 25)
+
+Full accounting-module audit (senior engineer + senior accountant) on `phase/19-accounting-audit` off `phase/17-ops-quickwins`. Every finding verified against source + existing tests/git history before change. 17 findings; **no Prisma migrations**. Detailed write-up: `docs/17_accounting_audit_phase19.md`.
+
+| Commit | Scope |
+|--------|-------|
+| `fix(accounting): CoA guardrails …` | **A + B + D.** CoA create rejects a code whose leading digit collides with another class's assigned range (unassigned 0/7/8/9 stay legal for F-6b custom heads); deactivation blocked when GL balance ≠ 0 (`ACCOUNT_HAS_BALANCE`); system-account rename blocked; web CoA management gated on `can(accounting.manage_accounts)` not a hard-coded OWNER check. Opening-balance `other_lines` restricted server-side to ASSET/LIABILITY/EQUITY DETAIL and never the 3010 plug (mirrors UI). Removed dead JE-07/JE-10 templates (zero callers). |
+| `feat(accounting): fiscal-year virtual closing …` | **C + E + F.** Balance-sheet "Current Year P/L" bounded to the fiscal year containing as_of (facility `fiscal_year_start_month`, default July); prior years roll into a computed Retained Earnings line (posted 3020 + accumulated prior result); identity preserved, TB stays pre-closing. New `fiscal-year.ts` helper. P&L margins → null (not misleading 0%) on zero/negative net revenue. JE/CN numbering UTC month (matches period derivation). Manual JEs default POSTED. |
+| `fix(peshgi): produce-deduction repayments …` | **J.** `/repayments` accepts only CASH/BANK_TRANSFER + required asset account (each posts JE-19); produce-deduction recoveries flow through combined settlement only — closes a GL-1140-vs-subledger drift. |
+| `feat(reports): AR aging — unapplied credits + GL tie-out` | **G.** On-account credits reduce net due (buckets stay gross, net may go negative); response gains `gl_ar_control_total_pkr`/`variance_pkr`/`reconciled` tying the aging to GL 1110/1120/1130/1150. Web page: net/credit/GL tiles + reconciliation banner + Credits/Net Due columns. |
+| `feat(invoices): void a finalized, unpaid invoice …` | **H.** `POST /v1/invoices/:id/void` (`invoices.void`, OWNER) reverses JE-01 and sets VOID when the invoice is unpaid with no credit notes/surcharges; period-lock aware. Shared `InvoiceStatus` realigned to Prisma. |
+| `feat(billing): one-click late-payment surcharge …` | **I.** GL-based JE-21 (`DR party AR / CR 4210`), migration-free: one JE per chargeable month = idempotent by count; suggestions + apply + list endpoints; surcharge lines surfaced in aging + party ledger; invoice-detail surcharge card. |
+| `docs(accounting): align docs/09 + docs/16; add docs/17` | **K.** docs/09 §2/§3/§5/§7 corrected to as-built; docs/16 statuses annotated; new `docs/17_accounting_audit_phase19.md`; PROGRESS + TESTING updated. |
+
+**Tests (TDD)**: CoA guardrails (prefix/deactivation/rename), opening-balance line restrictions, UTC numbering unit, fiscal-year unit + virtual-closing integration (identity preserved, balanced), negative-margin P&L, aging reconciliation (invoice + on-account → net = GL), invoice void (reversal cross-link, guards ×4, RBAC), surcharge calc unit + integration (idempotency, aging/statement inclusion, RBAC, disabled/paid-off rejections), peshgi produce-deduction rejection + GL-1140 invariant. Each written first and watched fail where the harness allowed.
 
 ## Ops Quick-Wins (2026-07-17 → 18)
 

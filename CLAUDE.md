@@ -96,6 +96,7 @@ pnpm --filter @coldchain/db db:studio
 | `14_state_machines.md` | Status transitions for lots, invoices, transfers |
 | `15_accounting_audit.md` | Audit trail and reconciliation rules |
 | `16_accounting_module_audit.md` | Post-implementation accounting audit (2026-07-06/07) — findings + remediation status |
+| `17_accounting_audit_phase19.md` | Second accounting audit (2026-07-24/25, phase/19) — CoA, opening balances, statements, payments/invoices/peshgi; 17 findings + fixes |
 
 ## Domain Terminology
 
@@ -110,3 +111,13 @@ pnpm --filter @coldchain/db db:studio
 | **Chamber** | Refrigerated storage room within the cold store |
 | **Lot** | A discrete batch of produce from one party, tracked through its lifecycle |
 | **Marka** | Identification mark (name/initials/symbol) painted or stamped on a lot's bardana (gunny sacks) or crates so operators and security can tell whose stack is whose. Not unique; does not change on ownership transfer |
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

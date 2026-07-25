@@ -76,6 +76,13 @@
 
 > Live suite after the ops quick-wins batch (2026-07-18): **187 unit + 444 integration (api) + 98 unit (web) green**. New coverage: backdating default (facility.service unit + legacy-settings integration), `over_credit_limit` on party GET (invoice suite) + list-row regression (party suite), lots search by owner name/vehicle (lot suite), `financial_guards_set` ACL lock (financial-guards suite), and RTL backdating/credit-warning tests on both entry forms. The F-2a installer path is additionally verified by a scratch postgres:16 container run (role → migrate → grants → privilege assertions), not by the vitest suites.
 
+> Live suite after the phase/19 accounting audit (2026-07-25): **200 unit + 468 integration (api) + 99 unit (web) green**. New coverage: CoA guardrails (cross-class code range, balance-guarded deactivation, system-account rename block), opening-balance line restrictions (P&L class / 3010 plug / header), UTC document numbering (unit), fiscal-year helper (unit) + balance-sheet virtual closing (prior-FY vs current-FY split with the equity identity asserted), null P&L margins on non-positive net revenue, AR-aging↔GL reconciliation with an unapplied on-account credit, invoice void (reversal cross-link, four rejection guards, RBAC), late-payment surcharge (8 calc unit cases + apply/idempotency/aging/statement/RBAC integration), and peshgi produce-deduction rejection with a GL-1140-vs-subledger invariant.
+>
+> Two integration files (`password-reset`, `placement`) intermittently hit the
+> 15 s `hookTimeout` when the whole suite runs sequentially on a slow machine;
+> both pass in isolation (31 tests). Re-run them alone before treating such a
+> failure as a regression.
+
 ### Phase 14 Tests (Rooms & Racks)
 
 **Unit (11)**

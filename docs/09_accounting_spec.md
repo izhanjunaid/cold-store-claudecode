@@ -81,6 +81,9 @@ The CoA is designed for a cold storage business: every account name and number r
 | 1331 | Accum. Depreciation — Vehicles | Detail | Contra-asset |
 | 1340 | Computer & Software | Detail | Tablets, PCs, ColdChain subscription |
 | 1341 | Accum. Depreciation — Computer | Detail | Contra-asset |
+| 1350 | Capital Work in Progress | Detail | Assets under construction, not yet depreciating |
+| 1360 | Intangible Assets — Software | Detail | Capitalised software licences |
+| 1361 | Accum. Amortisation — Software | Detail | Contra-asset |
 
 ---
 
@@ -107,9 +110,9 @@ The CoA is designed for a cold storage business: every account name and number r
 
 | Code | Account Name | Type | Notes |
 |---|---|---|---|
-| 3010 | Owner's Capital | Detail | Initial and subsequent equity injections |
-| 3020 | Retained Earnings | Detail | Cumulative P&L from prior periods |
-| 3030 | Current Year Profit / (Loss) | Detail | Auto-computed from P&L |
+| 3010 | Owner's Capital | Detail | Initial and subsequent equity injections. Also the plug account for the guided opening-balance entry (there is no separate "Opening Balance Equity" account) |
+| 3020 | Retained Earnings | Detail | Posted only by opening balances. On the balance sheet it is **presented** as posted 3020 + accumulated prior fiscal years' result — see §5.3 virtual closing |
+| 3030 | Current Year Profit / (Loss) | Detail | **Never posted to.** The balance sheet computes the current fiscal year's result live and presents it on this line |
 
 ---
 
@@ -130,8 +133,11 @@ The CoA is designed for a cold storage business: every account name and number r
 | 4140 | Packing Revenue | Detail | Packaging service if offered |
 | 4150 | Other Service Revenue | Detail | Miscellaneous services |
 | **4200** | **Other Income** | Header | |
-| 4210 | Late Payment Surcharge | Detail | If charged on overdue accounts |
+| 4210 | Late Payment Surcharge | Detail | Charged on overdue accounts — see JE-21 |
 | 4220 | Damage Settlement Received | Detail | Insurance or third-party claim recovery |
+| 4230 | Gain on Disposal of Asset | Detail | Proceeds above net book value |
+| **4900** | **Contra Revenue** | Header | Deducted from operating revenue to reach net revenue |
+| 4910 | Discounts Allowed | Detail | Contra-revenue (**debit** normal balance); posted by JE-01 when a draft invoice carries a discount |
 
 ---
 
@@ -166,6 +172,10 @@ The CoA is designed for a cold storage business: every account name and number r
 | 6080 | Bad Debt Expense | Detail | Uncollectable receivables written off |
 | 6090 | Bank Charges | Detail | Transaction fees, cheque charges |
 | 6100 | Miscellaneous | Detail | Petty cash unclassified |
+| 6110 | Loss on Disposal of Asset | Detail | Net book value above disposal proceeds |
+| 6120 | Depreciation — Building | Detail | Non-plant depreciation (P&L; added back for EBITDA) |
+| 6130 | Depreciation — Vehicles | Detail | P&L; added back for EBITDA |
+| 6140 | Amortisation — Software | Detail | P&L; added back for EBITDA |
 | 6150 | Spoilage / Damage Compensation Expense | Detail | Cold store liability for spoilage (JE-09) |
 
 ---
@@ -365,6 +375,14 @@ Payment PAY-202603-0012: status → DISHONOURED
 
 ### JE-07: Overpayment — Client Credit Balance
 
+> **NOT IMPLEMENTED (phase/19). Template removed — it had zero callers.**
+> Over-allocation is *rejected* rather than split: `PAYMENT_OVER_ALLOCATED` and
+> `PAYMENT_EXCEEDS_INVOICE_BALANCE` guard the payment path. A receipt larger
+> than the invoice is instead recorded as a normal payment with a partial (or
+> no) allocation; the unallocated remainder credits GL AR and is reported as
+> `unapplied_credit_pkr` on the AR aging (§5.4). Use JE-03 (advance) when the
+> intent is a genuine advance against future work.
+
 **Operational trigger**: Payment received exceeds the outstanding invoice balance; excess becomes a credit.  
 **Effect**: Receivable goes to zero; excess posted to Advance Receipts (liability) for future offset
 
@@ -421,6 +439,13 @@ DEBIT   2080  Damage / Spoilage Liability Payable       settlement_amount
 
 ### JE-10: Ownership Transfer — Billing Reassignment
 
+> **No AR-shift entry is posted (phase/19). The template was removed — it had
+> zero callers.** The split-billing model below is what is actually built: a
+> FULL transfer writes a same-lot TRANSFER_IN event plus a standalone DRAFT
+> invoice for the outgoing owner's accrued period (phase/16), and that invoice
+> books revenue through the normal **JE-01** on finalize. Nothing moves a
+> balance directly between two parties' AR accounts.
+
 **Operational trigger**: Ownership transfer completed in M3. This is a *custodial* event — the cold store does not buy or sell the produce. No revenue is recognized directly from the transfer action.
 **Accounting impact**: 
 1. The transfer event automatically generates a **DRAFT invoice** for the old owner, covering storage and services up to the transfer date.
@@ -467,6 +492,47 @@ DEBIT   4010–4050           Storage Revenue — [Commodity]  total_prior_accru
 
 *(Note: JE-11R fires immediately before JE-01. This "reversal-and-repost" method ensures clean P&L reporting across periods without complex net-adjustments.)*
 
+---
+
+### JE-21: Late Payment Surcharge (implemented phase/19)
+
+**Operational trigger**: A FINALIZED invoice is overdue beyond the facility's
+grace period and the owner applies a surcharge (one click on the invoice, or
+from the suggestions list). Requires `invoices.manage`.
+**Rule**: facility setting `late_payment_surcharge { enabled, pct_per_month, grace_days }`.
+
+```
+DEBIT   1110 / 1120 / 1130 / 1150  Receivable — [Party Type]   surcharge_amount
+  CREDIT  4210  Late Payment Surcharge                          surcharge_amount
+```
+
+Mechanics:
+- Ages from `invoice_date` (same basis as the AR aging); whole 30-day blocks
+  past `grace_days`, **no pro-rating and no compounding** — each month charges
+  `pct_per_month` on the outstanding principal (`total − paid`, surcharges
+  excluded; payments are deemed to settle principal first).
+- **One posted entry per chargeable month** (`entry_type = ACCRUAL`,
+  `source_table = 'invoice_surcharge'`, `source_id = invoice_id`). The count of
+  posted entries *is* the months-already-charged tally, which makes re-applying
+  inside the same 30-day block a no-op (`SURCHARGE_ALREADY_APPLIED`).
+- The surcharge lives **in the general ledger only** — it is not folded into the
+  invoice's `balance_due`. It appears on the AR aging and the party statement,
+  and is settled by an on-account receipt.
+- An erroneous surcharge is corrected with a manual REVERSAL entry; posted
+  entries are never edited.
+
+---
+
+### Invoice Void (implemented phase/19, no dedicated template)
+
+**Operational trigger**: An invoice was finalized in error and has not been paid,
+credit-noted or surcharged. Requires `invoices.void` (OWNER by default).
+**Effect**: A full mirror reversal of the original JE-01 is posted
+(`entry_type = REVERSAL`, `source_table = 'invoices'`), the original entry is
+marked REVERSED and cross-linked, and the invoice moves to `VOID`. The period
+lock is enforced on the reversal date, so voiding an invoice from a closed month
+posts the reversal in the open one. Anything already paid or credited must go
+through a credit note (JE-05) or a bad-debt write-off (JE-08) instead.
 
 ---
 
@@ -502,9 +568,18 @@ The following financial statements are derived directly from the GL — no manua
 - Run at any time; month-end close locks the period
 
 ### 5.2 Profit & Loss Statement
-- Revenue (Class 4) minus Cost of Services (Class 5) = Gross Profit
-- Gross Profit minus Operating Expenses (Class 6) = Net Profit / (Loss)
-- Filterable by: period, commodity (using account 4010–4050 breakdown)
+
+As built (`financial-statements.service.ts` `getProfitLoss`), the statement is
+presented IFRS-style over a required `[date_from, date_to]` range:
+
+- Operating revenue (headers 4000 + 4100) **less contra revenue** (4900/4910) = **Net revenue**
+- Net revenue less Cost of Services (5000) = **Gross profit**
+- Gross profit less Operating expenses (6000) = **Operating profit (EBIT)**
+- Plus Other income (4200) = **Net profit / (loss)**
+- **EBITDA** = operating profit + depreciation/amortisation add-back (5040, 6120, 6130, 6140)
+- Margin percentages are expressed on net revenue and are **null** (rendered "—") when net revenue is zero or negative — a margin has no meaning without a revenue base
+- **Unclassified bucket (F-6b):** any detail P&L account that the header rollups could not place is surfaced as its own section, signed as its contribution to net profit, so activity is never silently dropped
+- Filterable by: period, book (PACCI default), commodity (using the 4010–4050 breakdown)
 
 **Example ColdChain P&L — Potato Season 2026**
 ```
@@ -533,12 +608,34 @@ NET PROFIT                          1,870,000
 ```
 
 ### 5.3 Balance Sheet (At a Date)
+
+**Virtual closing (as built).** No closing / year-end journal entries are ever
+posted — posted entries are immutable by DB trigger, and a closing entry would
+be a fabricated posting. Instead the equity section is *presented* closed:
+
+- `current_year_pl_pkr` covers **only the fiscal year containing `as_of_date`**
+  (fiscal year start from the facility setting `fiscal_year_start_month`,
+  default 7 = July).
+- `prior_years_pl_pkr` = all-time result up to `as_of_date` − current-year result.
+- **Retained Earnings** is presented as posted 3020 + `prior_years_pl_pkr`.
+- Account 3030 is excluded from `equity_lines` (it is never posted to).
+
+The identity is preserved exactly: `retained + current = posted-3020 + all-time
+P&L`, which is what the single pre-phase-19 "Current Year" line summed.
+
+> **The Trial Balance is deliberately pre-closing** — income and expense
+> accounts there show cumulative movement for the queried range, with no
+> roll-forward into equity. The balance sheet is the only statement that applies
+> the virtual closing.
+
+**Bad debts** are a direct write-off to 6080 (JE-08); there is no allowance /
+provision account, so no "Less: Allowance for Bad Debt" line exists.
+
 ```
 ASSETS
   Cash & Bank                         XXX,XXX
   Trade Receivables                 X,XXX,XXX
-  Less: Allowance for Bad Debt        (XX,XXX)
-  Fixed Assets (Net of Depreciation) X,XXX,XXX
+  Fixed Assets (Net of Depreciation) X,XXX,XXX   ← accum. deprec. nets inside this line
   Total Assets                      X,XXX,XXX
 
 LIABILITIES
@@ -558,9 +655,29 @@ Total Liabilities + Equity = Total Assets ✓
 ```
 
 ### 5.4 Accounts Receivable Aging (Sub-ledger Report)
-- Derived from `invoices` where `status IN (FINALIZED, DISPUTED)` and `balance_due > 0`
-- Segmented: 0–30 / 31–60 / 61–90 / 90+ days from `invoice_date`
-- Reconciles to GL account 1110+1120+1130 total — if it doesn't, there's a posting error
+
+Basis (as built, `reports/receivables-aging.ts`):
+- `invoices` where `status = FINALIZED` and `balance_due > 0` (there is **no**
+  DISPUTED status in the schema — the enum is DRAFT / FINALIZED / VOID /
+  WRITTEN_OFF), bucketed 0–30 / 31–60 / 61–90 / 90+ days from `invoice_date`
+- **plus** per-party opening balances (journal lines with `source_table =
+  'opening_balances'`), bucketed by the opening entry date
+- **plus** late-payment surcharge lines (`source_table = 'invoice_surcharge'`),
+  bucketed by their entry date
+- **less** unapplied on-account credits: a non-advance, non-dishonoured payment
+  that is not fully allocated still credits GL AR for the whole receipt, so its
+  unallocated remainder is reported per party as `unapplied_credit_pkr` and
+  netted into `net_due_pkr` (which may go negative when a party is in credit).
+  Buckets stay gross so the ageing profile is not distorted.
+
+**GL tie-out (not an assumption).** The report returns
+`gl_ar_control_total_pkr` — the balance of accounts 1110/1120/1130/1150 (POSTED,
+PACCI, up to `as_of_date`) — together with `variance_pkr` (net total − control)
+and a `reconciled` flag (|variance| < 0.01). Earlier revisions of this document
+asserted the aging "reconciles automatically"; it did not, and nothing checked.
+The variance is now surfaced on the report and on the aging screen so a
+divergence is visible instead of assumed. Note 1140 (Peshgi) is a separate loan
+control and is deliberately excluded.
 
 ### 5.5 Revenue by Commodity Report
 - Pulls from GL accounts 4010–4050 by date range
@@ -701,19 +818,27 @@ journal_entry_lines.lot_id   ──> lots     (lot-level revenue attribution)
 ## 7. Account Reconciliation Controls
 
 ### 7.1 AR Sub-Ledger Reconciliation
-The system runs a daily background check:
+
+Checked **on demand, inside the AR aging report** (there is no daily background
+job — earlier revisions of this document described one that was never built):
+
 ```
-Sum of all unpaid invoice balances (by party type)
-= GL balance of accounts 1110 + 1120 + 1130
+Net receivable per the aging report
+  (FINALIZED invoice balances + opening balances + surcharges − unapplied credits)
+= GL balance of accounts 1110 + 1120 + 1130 + 1150      ← gl_ar_control_total_pkr
 ```
-If they diverge → system generates a reconciliation alert for the OWNER and ACCOUNTANT.
+
+The report returns `variance_pkr` and `reconciled` on every call; the aging
+screen renders a green "Reconciled" banner or an amber variance warning. A
+non-zero variance is expected and explainable in one case: invoices written in
+the KATCHI book, since the control total is PACCI-only.
 
 ### 7.2 Advance Receipts Reconciliation
 ```
 Sum of unapplied advance payment balances (payment.is_advance = true, not fully applied)
 = GL balance of account 2010
 ```
-Divergence → alert.
+Not yet automated — verify manually from the general ledger when needed.
 
 ### 7.3 Period Locking (Month-End Close)
 - At month end, OWNER or ACCOUNTANT can "Lock Period" for a given month/year

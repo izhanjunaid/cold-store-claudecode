@@ -28,6 +28,30 @@
 > decided OFF (Gap 4: JE-11/JE-11R deleted, decision recorded in docs/09,
 > basis-of-preparation note on the monthly P&L).
 >
+> **Follow-up audit (2026-07-24/25, `phase/19-accounting-audit`):** a second,
+> wider accounting review re-verified every F-1…F-14 remediation below (all
+> still in place) and found 17 further issues, now remediated. Full write-up:
+> **`17_accounting_audit_phase19.md`**. Items from *this* document that it
+> closed or amended:
+> - **Gap 3 (invoice void) — CLOSED.** `POST /v1/invoices/:id/void` reverses
+>   JE-01 and sets VOID for a finalized, unpaid, un-credit-noted invoice.
+> - **AR reconciliation — FIXED.** The aging never actually reconciled to the
+>   GL control accounts (this doc and docs/09 both implied it did). It now
+>   returns `gl_ar_control_total_pkr` / `variance_pkr` / `reconciled`, and
+>   unapplied on-account credits reduce the net receivable.
+> - **Balance-sheet equity — FIXED.** "Current Year Profit/(Loss)" was
+>   cumulative since inception with no fiscal-year boundary and Retained
+>   Earnings never accreted; the sheet now applies a virtual closing.
+> - **Peshgi produce-deduction — FIXED.** A standalone `DEDUCTED_FROM_PRODUCE`
+>   repayment decremented the loan with no journal entry, drifting GL 1140 from
+>   the subledger. Pre-fix rows (if any) need a one-time manual adjusting entry.
+> - **Late-payment surcharge — BUILT.** Previously a facility setting with no
+>   posting code on this line (JE-21, GL-based, no migration).
+> - **F-10 follow-through:** CoA create now rejects cross-class code ranges,
+>   deactivation requires a zero balance, system accounts cannot be renamed.
+> - **Gap 8 (bad-debt allowance) and Gap 6 (bank reconciliation) remain
+>   accepted deferrals**, as do F-12 (CoA versioning) and F-14 (RLS).
+>
 > **F-2a ops step resolved (2026-07-18, phase/17-ops-quickwins):** migration
 > 0010 revokes EXECUTE on `financial_guards_set()` from PUBLIC, and the
 > production api now runs as `coldchain_app` — a least-privilege DML-only
