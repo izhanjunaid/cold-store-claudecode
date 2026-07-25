@@ -55,6 +55,21 @@ jobs:
           fi
           echo "OK: route authorization goes through the permission matrix"
 
+      - name: Guardrail — single journal posting path (Phase 20)
+        run: |
+          # Every journal row must be inserted by JournalEntryService.postInTransaction,
+          # which is what enforces debits==credits, the period lock and account validity.
+          # A direct create bypasses all of it. Excluded: the service itself, test files,
+          # and the double-guarded _test reset route.
+          if grep -rn --include="*.ts" -E "journalEntry(Line)?\.(create|createMany|upsert)\(" apps/api/src \
+              | grep -v "modules/accounting/journal-entry.service.ts" \
+              | grep -v "\.test\.ts" \
+              | grep -v "modules/_test/"; then
+            echo "::error::Direct journal-entry write found — post through JournalEntryService.postInTransaction instead"
+            exit 1
+          fi
+          echo "OK: journal rows are written only by postInTransaction"
+
       - name: Typecheck
         run: pnpm typecheck
 

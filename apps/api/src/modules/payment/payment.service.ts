@@ -447,6 +447,22 @@ export class PaymentService {
         // matching the scaled-down amount we originally posted (see record() for the rule).
         const je06Amount = round2(Number(fullPayment.amountPkr) - loanReversalTotal);
         if (je06Amount > 0.005) {
+          // An advance receipt credited 2010 (JE-03), not AR. Only allocating it to an
+          // invoice moves it to AR via JE-04, so whatever is still unallocated must be
+          // reversed against 2010 — reversing it against AR would leave the advance
+          // liability standing AND invent a receivable. record() forces `allocations = []`
+          // when isAdvance, and allocate() rejects LOAN targets, so every allocation an
+          // advance can carry is an invoice allocation that went through JE-04. Read from
+          // the in-memory `allocations` captured before they were voided above.
+          const invoiceAllocTotal = fullPayment.isAdvance
+            ? allocations
+                .filter((a) => a.invoiceId)
+                .reduce((s, a) => s + Number(a.allocatedAmountPkr), 0)
+            : 0;
+          const advanceRemainderPkr = fullPayment.isAdvance
+            ? Math.max(0, round2(je06Amount - invoiceAllocTotal))
+            : 0;
+
           const draft = buildJE06ChequeDishonoured({
             paymentId: id,
             dishonourDate: new Date(),
@@ -454,6 +470,7 @@ export class PaymentService {
             bookType: fullPayment.bookType as 'PACCI' | 'KATCHI',
             party: fullPayment.party,
             originalAssetAccountCode: fullPayment.assetAccountCode,
+            advanceRemainderPkr,
           });
           const posted = await this.journalEntry.postInTransaction(
             tx,

@@ -219,6 +219,58 @@ describe('JE template balance enforcement', () => {
     expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1020');
   });
 
+  // P0-1: an advance cheque that bounces while still sitting in 2010 must reverse
+  // against 2010, not AR. JE-03 booked DR bank / CR 2010; only JE-04 (on allocation)
+  // moves it to AR. Reversing to AR while 2010 still holds the money leaves the
+  // advance liability standing AND invents a receivable — a 2x misstatement.
+  it('JE-06 wholly-unallocated advance bounce debits 2010, never AR', () => {
+    const draft = buildJE06ChequeDishonoured({
+      paymentId: 'pay-adv-1',
+      dishonourDate: new Date(),
+      amountPkr: 12000,
+      bookType: 'PACCI',
+      party: traderParty,
+      advanceRemainderPkr: 12000,
+    });
+    const t = totals(draft.lines);
+    expect(t.d).toBe(12000);
+    expect(t.c).toBe(12000);
+    expect(draft.lines.find((l) => l.accountCode === '2010')?.debitAmount).toBe(12000);
+    expect(draft.lines.find((l) => l.accountCode === '1120')).toBeUndefined();
+    expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1020');
+  });
+
+  it('JE-06 partly-allocated advance bounce splits the debit across 2010 and AR', () => {
+    const draft = buildJE06ChequeDishonoured({
+      paymentId: 'pay-adv-2',
+      dishonourDate: new Date(),
+      amountPkr: 12000,
+      bookType: 'PACCI',
+      party: traderParty,
+      advanceRemainderPkr: 5000, // 7000 already applied to invoices via JE-04
+    });
+    const t = totals(draft.lines);
+    expect(t.d).toBe(12000);
+    expect(t.c).toBe(12000);
+    expect(draft.lines.find((l) => l.accountCode === '2010')?.debitAmount).toBe(5000);
+    expect(draft.lines.find((l) => l.accountCode === '1120')?.debitAmount).toBe(7000);
+    expect(draft.lines.find((l) => l.creditAmount > 0)?.creditAmount).toBe(12000);
+  });
+
+  it('JE-06 without an advance remainder is unchanged — AR only', () => {
+    const draft = buildJE06ChequeDishonoured({
+      paymentId: 'pay-adv-3',
+      dishonourDate: new Date(),
+      amountPkr: 9000,
+      bookType: 'PACCI',
+      party: traderParty,
+      advanceRemainderPkr: 0,
+    });
+    expect(draft.lines).toHaveLength(2);
+    expect(draft.lines.find((l) => l.accountCode === '2010')).toBeUndefined();
+    expect(draft.lines.find((l) => l.accountCode === '1120')?.debitAmount).toBe(9000);
+  });
+
   it('JE-08 bad debt: debits 6080, credits AR', () => {
     const draft = buildJE08BadDebtWriteOff({
       invoiceId: 'inv6',

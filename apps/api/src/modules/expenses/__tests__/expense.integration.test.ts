@@ -296,6 +296,58 @@ describe('Phase 8B — Expense Vouchers', () => {
     expect(res.statusCode).toBe(403);
   });
 
+  // P1-11 regression. accrue/pay read the voucher with no row lock, so two concurrent
+  // calls both passed the status check and both posted — crediting the bank twice for one
+  // voucher. Nothing else stopped it: JE-17A stamps the real voucher id but
+  // (source_table, source_id) is an @@index, not @@unique.
+  it('two concurrent pay() calls post exactly one JE — the loser is rejected', async () => {
+    await cleanup();
+    const v = await createDraft();
+    await app.inject({
+      method: 'POST',
+      url: `/v1/expense-vouchers/${v.id}/approve`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+
+    const payload = {
+      payment_date: '2026-05-05',
+      payment_method: 'BANK_TRANSFER',
+      asset_account_code: '1020',
+    };
+    const [a, b] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: `/v1/expense-vouchers/${v.id}/pay`,
+        headers: authHeaders(accountantToken),
+        payload,
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/v1/expense-vouchers/${v.id}/pay`,
+        headers: authHeaders(accountantToken),
+        payload,
+      }),
+    ]);
+
+    const codes = [a.statusCode, b.statusCode].sort();
+    expect(codes).toEqual([201, 409]);
+
+    const loser = a.statusCode === 409 ? a : b;
+    expect(JSON.parse(loser.body).error.code).toBe('EXPENSE_VOUCHER_INVALID_STATUS');
+
+    // The money moved exactly once.
+    const payJes = await prisma.journalEntry.findMany({
+      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'expense_vouchers', sourceId: v.id },
+      include: { lines: true },
+    });
+    expect(payJes).toHaveLength(1);
+    const bankCredit = payJes[0]!.lines
+      .filter((l) => l.accountCode === '1020')
+      .reduce((s, l) => s + Number(l.creditAmount), 0);
+    expect(bankCredit).toBe(185000);
+  });
+
   it('list filters by status and sequence increments per month', async () => {
     await cleanup();
     const v1 = await createDraft();

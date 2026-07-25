@@ -391,6 +391,123 @@ describe('Payment — Financial Ledger', () => {
     expect(inv.balance_due_pkr).toBe(totalPkr);
   });
 
+  // P0-1 regression. An advance credits 2010 (JE-03); only allocating it moves the money
+  // to AR (JE-04). Reversing an unapplied advance against AR left the advance liability
+  // standing AND created a phantom receivable — a 2x misstatement that still balanced.
+  it('9a. Dishonour of an UNALLOCATED advance cheque reverses 2010, never AR', async () => {
+    const payRes = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: ownerPartyId,
+        payment_date: '2026-04-09',
+        amount_pkr: 5000,
+        payment_method: 'CHEQUE',
+        reference_number: 'CHQ-ADV-BOUNCE',
+        is_advance: true,
+      },
+    });
+    expect(payRes.statusCode).toBe(201);
+    const paymentId = JSON.parse(payRes.body).data.id;
+    expect(JSON.parse(payRes.body).data.status).toBe('ADVANCE');
+
+    const dishonourRes = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${paymentId}/dishonour`,
+      headers: authHeaders(accountantToken),
+      payload: { notes: 'Advance cheque returned' },
+    });
+    expect(dishonourRes.statusCode).toBe(200);
+
+    const reversal = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceId: paymentId, entryType: 'REVERSAL' },
+      include: { lines: true },
+    });
+    expect(reversal).toBeTruthy();
+
+    // The whole receipt was unapplied, so the entire debit belongs to 2010.
+    const advanceLine = reversal!.lines.find((l) => l.accountCode === '2010');
+    expect(advanceLine).toBeTruthy();
+    expect(Number(advanceLine!.debitAmount)).toBe(5000);
+
+    // ...and nothing may be debited to any AR control account.
+    const arDebit = reversal!.lines.find(
+      (l) => ['1110', '1120', '1130', '1150'].includes(l.accountCode) && Number(l.debitAmount) > 0,
+    );
+    expect(arDebit).toBeUndefined();
+
+    // 2010 nets to zero across JE-03 + its reversal — the advance liability is gone.
+    const advanceLines = await prisma.journalEntryLine.findMany({
+      where: { facilityId: TEST_FACILITY_ID, accountCode: '2010', journalEntry: { sourceId: paymentId } },
+    });
+    const net2010 = advanceLines.reduce(
+      (s, l) => s + Number(l.debitAmount) - Number(l.creditAmount),
+      0,
+    );
+    expect(net2010).toBe(0);
+  });
+
+  it('9b. Dishonour of a PARTLY-allocated advance cheque splits the debit across 2010 and AR', async () => {
+    const lot = await createLot({ ownerPartyId, quantity: 10, inboundDate: '2026-03-01' });
+    const invoiceId = await finalizeOutbound({ lotId: lot.id, quantity: 10, outboundDate: '2026-04-07' });
+    const totalPkr = await finalizeInvoice(invoiceId); // 10 × 50 = 500
+
+    const payRes = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: ownerPartyId,
+        payment_date: '2026-04-09',
+        amount_pkr: 2000,
+        payment_method: 'CHEQUE',
+        reference_number: 'CHQ-ADV-PARTIAL',
+        is_advance: true,
+      },
+    });
+    expect(payRes.statusCode).toBe(201);
+    const paymentId = JSON.parse(payRes.body).data.id;
+
+    // Apply part of the advance to the invoice — this posts JE-04 (DR 2010 / CR AR).
+    const allocRes = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${paymentId}/allocate`,
+      headers: authHeaders(accountantToken),
+      payload: { allocations: [{ invoice_id: invoiceId, allocated_amount_pkr: totalPkr }] },
+    });
+    expect(allocRes.statusCode).toBe(200);
+
+    const dishonourRes = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${paymentId}/dishonour`,
+      headers: authHeaders(accountantToken),
+      payload: { notes: 'Partly applied advance cheque returned' },
+    });
+    expect(dishonourRes.statusCode).toBe(200);
+
+    const reversal = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceId: paymentId, entryType: 'REVERSAL' },
+      include: { lines: true },
+    });
+    expect(reversal).toBeTruthy();
+
+    // Unapplied remainder goes to 2010; the applied part goes back to AR.
+    const advanceLine = reversal!.lines.find((l) => l.accountCode === '2010');
+    expect(Number(advanceLine!.debitAmount)).toBe(2000 - totalPkr);
+
+    const arLine = reversal!.lines.find(
+      (l) => ['1110', '1120', '1130', '1150'].includes(l.accountCode) && Number(l.debitAmount) > 0,
+    );
+    expect(Number(arLine!.debitAmount)).toBe(totalPkr);
+
+    // And the entry balances against the full bank credit.
+    const totalDebit = reversal!.lines.reduce((s, l) => s + Number(l.debitAmount), 0);
+    const totalCredit = reversal!.lines.reduce((s, l) => s + Number(l.creditAmount), 0);
+    expect(totalDebit).toBe(2000);
+    expect(totalCredit).toBe(2000);
+  });
+
   it('10. Dishonour non-cheque payment → 409 PAYMENT_NOT_CHEQUE', async () => {
     const payRes = await app.inject({
       method: 'POST',

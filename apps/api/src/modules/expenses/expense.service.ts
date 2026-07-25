@@ -8,6 +8,21 @@ import { buildJE17BPayAccruedExpense } from './templates/je-17b-pay-accrued-paym
 import { buildJE17CPettyCashReplenish } from './templates/je-17c-petty-cash-replenish';
 import { randomUUID } from 'node:crypto';
 
+type Tx = Prisma.TransactionClient;
+
+/**
+ * Row-lock a voucher for the rest of the transaction, so a status check and the JE post
+ * that follows it cannot interleave with a concurrent caller. Mirrors the guard already
+ * used on invoices (`invoice.service.ts`), payments and loans.
+ */
+async function lockVoucher(tx: Tx, facilityId: string, id: string): Promise<void> {
+  await tx.$queryRawUnsafe(
+    `SELECT id FROM expense_vouchers WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+    id,
+    facilityId,
+  );
+}
+
 export class ExpenseService {
   constructor(
     private prisma: PrismaClient,
@@ -96,6 +111,11 @@ export class ExpenseService {
 
   async accrue(facilityId: string, userId: string, id: string) {
     return this.prisma.$transaction(async (tx) => {
+      // Row-lock before reading the status: without it two concurrent calls both see
+      // APPROVED and both post, and nothing downstream stops them —
+      // (source_table, source_id) on journal_entries is an index, not a unique key.
+      await lockVoucher(tx, facilityId, id);
+
       const v = await tx.expenseVoucher.findFirst({ where: { facilityId, id } });
       if (!v) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
       if (v.status !== 'APPROVED') {
@@ -124,6 +144,9 @@ export class ExpenseService {
 
   async pay(facilityId: string, userId: string, id: string, body: any) {
     return this.prisma.$transaction(async (tx) => {
+      // See accrue(): the lock must precede the status read, or concurrent pays double-post.
+      await lockVoucher(tx, facilityId, id);
+
       const v = await tx.expenseVoucher.findFirst({ where: { facilityId, id } });
       if (!v) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
       if (v.status !== 'APPROVED' && v.status !== 'ACCRUED') {
