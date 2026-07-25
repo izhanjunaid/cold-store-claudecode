@@ -191,6 +191,58 @@ export async function getReceivablesAging(
     );
   }
 
+  // Late-payment surcharges (JE-21) debit the party AR control but are not
+  // invoices, so include them here — bucketed by their entry date — to keep the
+  // aging reconciled with the GL once surcharges exist (phase/19 audit).
+  const surchargeLines = await prisma.journalEntryLine.findMany({
+    where: {
+      facilityId,
+      partyId: filters.party_id ?? { not: null },
+      accountCode: { in: AR_CONTROL_ACCOUNTS },
+      journalEntry: {
+        facilityId,
+        sourceTable: 'invoice_surcharge',
+        postingStatus: 'POSTED',
+        bookType: 'PACCI',
+        entryDate: { lte: asOfDate },
+      },
+    },
+    select: {
+      debitAmount: true,
+      creditAmount: true,
+      party: { select: { id: true, name: true, partyType: true } },
+      journalEntry: { select: { entryDate: true } },
+    },
+  });
+  for (const line of surchargeLines) {
+    if (!line.party) continue;
+    const amt = round2(Number(line.debitAmount) - Number(line.creditAmount));
+    if (amt <= 0.005) continue;
+    const key = bucketFor(asOfDate, line.journalEntry.entryDate);
+    buckets[key] += amt;
+    buckets.total_pkr += amt;
+    let row = byParty.get(line.party.id);
+    if (!row) {
+      row = {
+        party_id: line.party.id,
+        party_name: line.party.name,
+        party_type: line.party.partyType,
+        total_due_pkr: 0,
+        b_0_30: 0,
+        b_31_60: 0,
+        b_61_90: 0,
+        b_90_plus: 0,
+        oldest_invoice_days: 0,
+        unapplied_credit_pkr: 0,
+        net_due_pkr: 0,
+      };
+      byParty.set(line.party.id, row);
+    }
+    row[key as Exclude<AgingBucketKey, never>] += amt;
+    row.total_due_pkr += amt;
+    row.oldest_invoice_days = Math.max(row.oldest_invoice_days, ageInDays(asOfDate, line.journalEntry.entryDate));
+  }
+
   // Parties whose only activity is an unapplied credit (payment with nothing to
   // apply it to) carry a true credit balance — show it as negative net due so
   // the aging reconciles with the GL AR control.

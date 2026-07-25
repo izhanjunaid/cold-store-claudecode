@@ -601,9 +601,32 @@ export class PaymentService {
       },
     });
 
+    // Late-payment surcharges (JE-21) debit the party's AR — surface them on the
+    // statement too (only the AR debit line; the 4210 credit line also carries
+    // the partyId but is not the receivable). phase/19 audit.
+    const surchargeLines = await this.prisma.journalEntryLine.findMany({
+      where: {
+        facilityId,
+        partyId,
+        debitAmount: { gt: 0 },
+        journalEntry: {
+          facilityId,
+          sourceTable: 'invoice_surcharge',
+          postingStatus: 'POSTED',
+          ...bookFilter,
+        },
+      },
+      select: {
+        debitAmount: true,
+        creditAmount: true,
+        description: true,
+        journalEntry: { select: { id: true, entryNumber: true, entryDate: true, createdAt: true } },
+      },
+    });
+
     type RawEntry = {
       date: string;
-      type: 'OPENING_BALANCE' | 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
+      type: 'OPENING_BALANCE' | 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE' | 'SURCHARGE';
       reference: string | null;
       description: string;
       debit_pkr: number;
@@ -622,6 +645,16 @@ export class PaymentService {
         credit_pkr: Number(line.creditAmount),
         id: line.journalEntry.id,
         sortKey: `${line.journalEntry.entryDate.toISOString().slice(0, 10)}_0_${line.journalEntry.createdAt.toISOString()}`,
+      })),
+      ...surchargeLines.map((line) => ({
+        date: line.journalEntry.entryDate.toISOString().slice(0, 10),
+        type: 'SURCHARGE' as const,
+        reference: line.journalEntry.entryNumber,
+        description: line.description ?? 'Late payment surcharge',
+        debit_pkr: Number(line.debitAmount),
+        credit_pkr: Number(line.creditAmount),
+        id: line.journalEntry.id,
+        sortKey: `${line.journalEntry.entryDate.toISOString().slice(0, 10)}_1_${line.journalEntry.createdAt.toISOString()}`,
       })),
       ...invoices.map((inv) => ({
         date: inv.invoiceDate.toISOString().slice(0, 10),

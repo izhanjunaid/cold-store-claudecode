@@ -251,7 +251,7 @@ export type OwnershipTransferRowType = z.infer<typeof OwnershipTransferRow>;
 export const PartyStatementEntry = z.object({
   id: z.string().uuid(),
   date: z.string(),
-  type: z.enum(['OPENING_BALANCE', 'INVOICE', 'PAYMENT', 'CREDIT_NOTE']),
+  type: z.enum(['OPENING_BALANCE', 'INVOICE', 'PAYMENT', 'CREDIT_NOTE', 'SURCHARGE']),
   reference: z.string().nullable(),
   description: z.string(),
   debit_pkr: z.number(),

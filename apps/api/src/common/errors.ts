@@ -28,6 +28,8 @@ export const Errors = {
     new AppError('WEIGHT_DISPUTE_UNRESOLVED', 'Dispute note required', 422),
   INVOICE_ALREADY_FINALIZED: () =>
     new AppError('INVOICE_ALREADY_FINALIZED', 'Cannot edit finalized invoice', 409),
+  INVOICE_NOT_VOIDABLE: (msg = 'Only a finalized invoice with no payments, credit notes or surcharges can be voided') =>
+    new AppError('INVOICE_NOT_VOIDABLE', msg, 409),
   CHAMBER_CAPACITY_EXCEEDED: () =>
     new AppError('CHAMBER_CAPACITY_EXCEEDED', 'Chamber at max capacity', 422),
   TRANSFER_SAME_PARTY: () =>
@@ -206,6 +208,17 @@ export const Errors = {
     new AppError(
       'BACKDATING_LIMIT_EXCEEDED',
       `Date is more than ${maxDays} day(s) in the past — requires MANAGER or higher`,
+      422,
+    ),
+  // Phase 19 — late-payment surcharge
+  SURCHARGE_RULE_DISABLED: () =>
+    new AppError('SURCHARGE_RULE_DISABLED', 'Late payment surcharge rule is disabled in facility settings', 422),
+  SURCHARGE_ALREADY_APPLIED: () =>
+    new AppError('SURCHARGE_ALREADY_APPLIED', 'Surcharge already applied for all elapsed periods on this invoice', 409),
+  SURCHARGE_NOT_ELIGIBLE: () =>
+    new AppError(
+      'SURCHARGE_NOT_ELIGIBLE',
+      'Invoice is not eligible for a surcharge (not overdue beyond grace, or nothing outstanding)',
       422,
     ),
 } as const;
