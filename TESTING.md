@@ -77,11 +77,21 @@
 > Live suite after the ops quick-wins batch (2026-07-18): **187 unit + 444 integration (api) + 98 unit (web) green**. New coverage: backdating default (facility.service unit + legacy-settings integration), `over_credit_limit` on party GET (invoice suite) + list-row regression (party suite), lots search by owner name/vehicle (lot suite), `financial_guards_set` ACL lock (financial-guards suite), and RTL backdating/credit-warning tests on both entry forms. The F-2a installer path is additionally verified by a scratch postgres:16 container run (role → migrate → grants → privilege assertions), not by the vitest suites.
 
 > Live suite after the phase/19 accounting audit (2026-07-25): **200 unit + 468 integration (api) + 99 unit (web) green**. New coverage: CoA guardrails (cross-class code range, balance-guarded deactivation, system-account rename block), opening-balance line restrictions (P&L class / 3010 plug / header), UTC document numbering (unit), fiscal-year helper (unit) + balance-sheet virtual closing (prior-FY vs current-FY split with the equity identity asserted), null P&L margins on non-positive net revenue, AR-aging↔GL reconciliation with an unapplied on-account credit, invoice void (reversal cross-link, four rejection guards, RBAC), late-payment surcharge (8 calc unit cases + apply/idempotency/aging/statement/RBAC integration), and peshgi produce-deduction rejection with a GL-1140-vs-subledger invariant.
+> Live suite after the phase/20 audit remediation (2026-07-25): **209 unit + 486 integration (api) + 99 unit (web) green**. New coverage: JE-06 advance-remainder split (unallocated / partly allocated / non-advance regression) and its two integration cases asserting 2010 nets to zero; concurrent expense `pay()` yielding exactly one JE-17A; **advisory-lock behaviour** (lock genuinely held, released at commit, serialises two transactions, and a regression case pinning that the old `OR TRUE` idiom acquires nothing); JE-15B with income tax; `PAYROLL_OTHER_DEDUCTIONS_UNSUPPORTED` rejection; second-remittance rejection; concurrent payroll-run creation for one period; invoice and expense UTC numbering (unit); payroll-run and asset-disposal reversal (mirror JE, per-account net-to-zero, guards, RBAC), including that a REVERSED run stops blocking a replacement period.
 >
 > Two integration files (`password-reset`, `placement`) intermittently hit the
 > 15 s `hookTimeout` when the whole suite runs sequentially on a slow machine;
 > both pass in isolation (31 tests). Re-run them alone before treating such a
-> failure as a regression.
+> failure as a regression. Observed again during phase/20 when the unit and
+> integration suites were run stacked on a loaded machine (2138 s vs the usual
+> ~300 s); the integration suite run alone was green.
+>
+> **Two concurrency tests are load-bearing and easy to weaken by accident.** The
+> expense double-pay and payroll duplicate-period tests assert *exactly one*
+> success and a specific rejection code. An older sibling — the lot-number test
+> asserting "5 concurrent creates all succeed with unique numbers" — passed for
+> the entire period during which advisory locking was silently broken, because a
+> unique constraint was carrying it. Assert the loser, not just the winner.
 
 ### Phase 14 Tests (Rooms & Racks)
 

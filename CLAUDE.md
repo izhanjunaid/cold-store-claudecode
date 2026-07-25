@@ -55,6 +55,8 @@ pnpm --filter @coldchain/db db:studio
 
 - **Route authorization is the permission matrix, not `requireMinRole`.** Phase 15 replaced the numeric role hierarchy with an owner-configurable 42-key registry (`packages/shared/src/permissions.ts`); guard routes with `app.requirePermission('<key>')` (CI fails on any `requireMinRole(` in `apps/api/src/modules`). Each key's `defaultMinRole` mirrors the old threshold, so defaults are behaviour-identical. A few controls stay fixed seniority rules **outside** the matrix and still use `roleAtLeast` (`apps/api/src/plugins/auth.ts`): KATCHI read/write, backdating/third-party release, gate-pass credit auth. Owner overrides live in the hidden `settings.permissions` key (with `notifications_state`) — both stripped from facility responses. Web gates with `can(user, key)` (`apps/web/src/lib/permissions.ts`); `hasMinRole` survives only for the KATCHI toggles.
 
+- **Advisory locks must go through `advisoryXactLock()`** (`apps/api/src/common/advisory-lock.ts`). Prisma's `$queryRaw` cannot deserialise `void`, so `SELECT pg_advisory_xact_lock(...)` throws — and the workaround that was used everywhere, `SELECT 1 AS _lock WHERE pg_advisory_xact_lock(...) IS NOT NULL OR TRUE`, **acquires no lock at all**: PostgreSQL folds the `OR TRUE` and never evaluates the call. Every document-number generator used it, so numbering was protected only by its unique constraints (phase/20 fixed all ten). CI fails on any raw `pg_advisory_*` outside the helper. When writing a concurrency test, **assert the loser** — the lot-number test asserting "all 5 concurrent creates succeed" stayed green throughout the years the lock did nothing.
+
 - **Financial guard triggers** (Prisma migration `0002_financial_audit_and_integrity_guards`) enforce ledger/JE immutability at the DB level. Integration test cleanup that deletes or updates posted financial rows must wrap with `withGuardsDisabled` or the trigger will reject it.
 - **Two migration-looking directories exist under `packages/db`**: `prisma/migrations/` is the real, active Prisma migration history — use it. `migrations/` contains a single legacy `0001_foundation.sql` from before Prisma Migrate was adopted; don't add new migrations there.
 - **E2E requires test-mode flags**: the API must run with `ALLOW_TEST_RESET=1` and non-production `NODE_ENV` for `POST /v1/_test/reset` to work. `pnpm e2e` sets this up automatically — no manual server launch needed.
@@ -97,6 +99,7 @@ pnpm --filter @coldchain/db db:studio
 | `15_accounting_audit.md` | Audit trail and reconciliation rules |
 | `16_accounting_module_audit.md` | Post-implementation accounting audit (2026-07-06/07) — findings + remediation status |
 | `17_accounting_audit_phase19.md` | Second accounting audit (2026-07-24/25, phase/19) — CoA, opening balances, statements, payments/invoices/peshgi; 17 findings + fixes |
+| `18_accounting_remediation_phase20.md` | Third audit + remediation (2026-07-25, phase/20) — payroll, fixed assets, cash/cheque, tax, expenses, concurrency; the advisory-lock defect; cost-side reversal |
 
 ## Domain Terminology
 
