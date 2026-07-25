@@ -762,7 +762,7 @@ model Invoice {
   allocations     PaymentAllocation[]
   creditNotes     CreditNote[]        @relation("CreditNoteOriginalInvoice")
 
-  @@index([facilityId, invoiceNumber])
+  @@unique([facilityId, invoiceNumber])
   @@index([facilityId, status])
   @@index([billingPartyId, status])
   @@index([lotId])

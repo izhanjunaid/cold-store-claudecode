@@ -1,16 +1,20 @@
 import type { Prisma } from '@coldchain/db';
 import { advisoryXactLock } from '../../common/advisory-lock';
 
+// UTC throughout, matching period derivation (`period.ts`) and the phase/19 fix to
+// journal-entry numbering. With local getters, a document created near a month
+// boundary on a non-UTC server could be numbered into a different month than the
+// accounting period it posts to.
 export function formatInvoiceNumber(date: Date, next: number): string {
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getUTCFullYear());
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
   const seq = String(next).padStart(4, '0');
   return `INV-${yyyy}${mm}-${seq}`;
 }
 
 export function invoiceNumberPrefix(date: Date): string {
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getUTCFullYear());
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
   return `INV-${yyyy}${mm}-`;
 }
 

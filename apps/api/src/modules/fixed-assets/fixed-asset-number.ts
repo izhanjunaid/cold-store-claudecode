@@ -13,7 +13,7 @@ export function fixedAssetNumberPrefix(year: number): string {
 
 /**
  * Generate the next FA-YYYY-NNNN number for the facility, scoped to the year of `purchaseDate`.
- * Uses pg_advisory_xact_lock keyed on `${facilityId}:${prefix}` to serialise concurrent inserts.
+ * Serialises concurrent inserts with an advisory lock keyed on `${facilityId}:${prefix}`.
  */
 export async function generateFixedAssetNumber(
   tx: Prisma.TransactionClient,

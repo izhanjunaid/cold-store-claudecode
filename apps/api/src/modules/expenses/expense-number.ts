@@ -1,16 +1,18 @@
 import type { Prisma } from '@coldchain/db';
 import { advisoryXactLock } from '../../common/advisory-lock';
 
+// UTC throughout — see the note in invoice-number.ts. phase/19 fixed this for
+// journal-entry numbering; the expense and invoice generators were missed.
 export function formatExpenseVoucherNumber(date: Date, next: number): string {
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getUTCFullYear());
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
   const seq = String(next).padStart(4, '0');
   return `EXP-${yyyy}${mm}-${seq}`;
 }
 
 export function expenseVoucherNumberPrefix(date: Date): string {
-  const yyyy = String(date.getFullYear());
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(date.getUTCFullYear());
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
   return `EXP-${yyyy}${mm}-`;
 }
 

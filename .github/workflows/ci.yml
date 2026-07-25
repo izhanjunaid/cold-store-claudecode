@@ -70,6 +70,20 @@ jobs:
           fi
           echo "OK: journal rows are written only by postInTransaction"
 
+      - name: Guardrail — advisory locks go through the helper (Phase 20)
+        run: |
+          # `SELECT ... WHERE pg_advisory_xact_lock(...) IS NOT NULL OR TRUE` acquires
+          # nothing: PostgreSQL folds the OR TRUE and never evaluates the call. Every
+          # document-number generator used that form. Route all advisory locks through
+          # common/advisory-lock.ts, which uses a form that actually locks.
+          if grep -rn --include="*.ts" "pg_advisory" apps/api/src \
+              | grep -v "common/advisory-lock.ts" \
+              | grep -v "\.test\.ts"; then
+            echo "::error::Raw pg_advisory_* call found — use advisoryXactLock() from common/advisory-lock.ts"
+            exit 1
+          fi
+          echo "OK: advisory locks go through the helper"
+
       - name: Typecheck
         run: pnpm typecheck
 

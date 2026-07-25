@@ -187,7 +187,11 @@ export class InvoiceService {
       if (body.notes) {
         await tx.invoice.update({ where: { id: invoiceId }, data: { notes: body.notes } });
       }
-      const invoiceNumber = await generateInvoiceNumber(tx, facilityId, new Date());
+      // Number from the invoice's own date, not the wall clock at finalize: a backdated
+      // invoice belongs to its own month's sequence, matching the period it posts to.
+      // The advisory lock inside the generator is keyed on the same date, so the lock
+      // and the number always agree on which month is being extended.
+      const invoiceNumber = await generateInvoiceNumber(tx, facilityId, inv.invoiceDate);
       const updated = await this.repo.finalize(tx, invoiceId, invoiceNumber, userId);
 
       // Phase 8: post JE-01 atomically with finalize so the GL is always reconciled.
