@@ -28,6 +28,11 @@ async function cleanupInner() {
   await prisma.journalEntryLine.deleteMany({
     where: { facilityId: TEST_FACILITY_ID, journalEntry: { sourceTable: 'fixed_assets' } },
   });
+  // Disposal reversals cross-link entries via the reversed_by self-FK; break it first.
+  await prisma.journalEntry.updateMany({
+    where: { facilityId: TEST_FACILITY_ID, sourceTable: 'fixed_assets' },
+    data: { reversedById: null },
+  });
   await prisma.journalEntry.deleteMany({
     where: { facilityId: TEST_FACILITY_ID, sourceTable: 'fixed_assets' },
   });
@@ -317,6 +322,103 @@ describe('Phase 8B — Fixed Assets', () => {
     expect(list.statusCode).toBe(200);
     const body = JSON.parse(list.body);
     expect(Array.isArray(body.data)).toBe(true);
+  });
+
+  // E / P1-3. Disposal was terminal: no un-dispose existed, and the generic JE-reversal
+  // endpoint rejects system-sourced entries, so an asset disposed in error stayed
+  // derecognised with its cost and accumulated depreciation written off for good.
+  it('reverses a disposal: mirror JE posted, asset restored to IN_SERVICE', async () => {
+    await cleanup();
+    const { id } = await createCompressor();
+    await commission(id);
+    await prisma.fixedAsset.update({
+      where: { id },
+      data: { accumulatedDepreciationPkr: 1000000 },
+    });
+
+    const dispose = await app.inject({
+      method: 'POST',
+      url: `/v1/fixed-assets/${id}/dispose`,
+      headers: authHeaders(ownerToken),
+      payload: { disposal_date: '2026-12-15', disposal_proceeds_pkr: 4000000 },
+    });
+    expect(dispose.statusCode).toBe(201);
+    const disposalJeId = JSON.parse(dispose.body).data.disposal_journal_entry_id as string;
+
+    const rev = await app.inject({
+      method: 'POST',
+      url: `/v1/fixed-assets/${id}/reverse-disposal`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'Disposed the wrong asset', reversal_date: '2026-12-20' },
+    });
+    expect(rev.statusCode).toBe(200);
+    const restored = JSON.parse(rev.body).data;
+
+    // Commissioned before disposal, so it goes back to IN_SERVICE, not PURCHASED.
+    expect(restored.status).toBe('IN_SERVICE');
+    expect(restored.disposal_journal_entry_id).toBeNull();
+
+    const original = await prisma.journalEntry.findUnique({ where: { id: disposalJeId } });
+    expect(original!.postingStatus).toBe('REVERSED');
+    expect(original!.reversedById).toBeTruthy();
+
+    // Every account JE-14 touched nets back to zero.
+    const originalLines = await prisma.journalEntryLine.findMany({
+      where: { journalEntryId: disposalJeId },
+    });
+    const mirrorLines = await prisma.journalEntryLine.findMany({
+      where: { journalEntryId: original!.reversedById! },
+    });
+    const byAccount = new Map<string, number>();
+    for (const l of [...originalLines, ...mirrorLines]) {
+      byAccount.set(
+        l.accountCode,
+        (byAccount.get(l.accountCode) ?? 0) + Number(l.debitAmount) - Number(l.creditAmount),
+      );
+    }
+    expect(byAccount.size).toBeGreaterThan(0);
+    for (const [, net] of byAccount) expect(net).toBeCloseTo(0, 2);
+
+    // Accumulated depreciation is intact — the contra was restored by the mirror.
+    const after = await prisma.fixedAsset.findUnique({ where: { id } });
+    expect(Number(after!.accumulatedDepreciationPkr)).toBe(1000000);
+  });
+
+  it('rejects reversing a disposal that was never made, and reversing twice', async () => {
+    await cleanup();
+    const { id } = await createCompressor();
+    await commission(id);
+
+    const notDisposed = await app.inject({
+      method: 'POST',
+      url: `/v1/fixed-assets/${id}/reverse-disposal`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'never disposed' },
+    });
+    expect(notDisposed.statusCode).toBe(409);
+    expect(JSON.parse(notDisposed.body).error.code).toBe('ASSET_NOT_REVERSIBLE');
+
+    await app.inject({
+      method: 'POST',
+      url: `/v1/fixed-assets/${id}/dispose`,
+      headers: authHeaders(ownerToken),
+      payload: { disposal_date: '2026-12-15', disposal_proceeds_pkr: 100000 },
+    });
+    const first = await app.inject({
+      method: 'POST',
+      url: `/v1/fixed-assets/${id}/reverse-disposal`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'undo' },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/v1/fixed-assets/${id}/reverse-disposal`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'undo again' },
+    });
+    expect(second.statusCode).toBe(409);
   });
 
   it('asset numbering increments per year', async () => {

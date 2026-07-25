@@ -1,0 +1,24 @@
+-- ============================================================================
+-- 0012 — REVERSED payroll-run status (Phase 20, audit P1-3)
+--
+-- Once finalized, a payroll run was terminal: no cancel, reverse or un-finalize
+-- existed, and JournalEntryService.reverse() rejects any entry whose source_table
+-- is not 'manual'/'opening_balances' — which every payroll template sets to
+-- 'payroll_runs'. A run finalized in error could not be corrected by any code path,
+-- and the duplicate-period guard blocked creating a replacement for that period.
+--
+-- Reversal mirrors the invoice VOID pattern shipped in phase/19: post a reversing
+-- entry, cross-link both ways, and move the record to a reversed state — rather
+-- than mutating posted rows, which the financial guard triggers forbid outright.
+--
+-- Fixed-asset disposal reversal needs no enum change: it restores the asset to the
+-- status it held before disposal (PURCHASED or IN_SERVICE).
+--
+-- Note on transactionality: PostgreSQL 12+ permits ALTER TYPE ... ADD VALUE inside
+-- a transaction block provided the new value is not *used* in the same transaction.
+-- This migration only adds it, so it applies cleanly under Prisma's per-migration
+-- transaction.
+-- ============================================================================
+
+-- AlterEnum
+ALTER TYPE "PayrollRunStatus" ADD VALUE 'REVERSED';

@@ -161,6 +161,9 @@ export const Errors = {
     ),
   PAYROLL_ALREADY_REMITTED: () =>
     new AppError('PAYROLL_ALREADY_REMITTED', 'This payroll run has already been remitted', 409),
+  PAYROLL_RUN_NOT_REVERSIBLE: (msg: string) =>
+    new AppError('PAYROLL_RUN_NOT_REVERSIBLE', msg, 409),
+  ASSET_NOT_REVERSIBLE: (msg: string) => new AppError('ASSET_NOT_REVERSIBLE', msg, 409),
   PAYROLL_REMITTANCE_EXCEEDS_LIABILITY: (msg: string) =>
     new AppError('PAYROLL_REMITTANCE_EXCEEDS_LIABILITY', msg, 422),
   EXPENSE_VOUCHER_NOT_FOUND: () =>

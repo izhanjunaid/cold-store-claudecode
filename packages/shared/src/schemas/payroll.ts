@@ -110,6 +110,12 @@ export const PayPayrollRequest = z.object({
 });
 export type PayPayrollRequestType = z.infer<typeof PayPayrollRequest>;
 
+export const ReversePayrollRunRequest = z.object({
+  reason: z.string().min(1).max(400),
+  reversal_date: dateOnly.optional(),
+});
+export type ReversePayrollRunRequestType = z.infer<typeof ReversePayrollRunRequest>;
+
 export const RemitGovtRequest = z.object({
   remittance_date: dateOnly,
   from_asset_account_code: z.string().regex(/^[0-9]+$/).default(DEFAULT_BANK_ACCOUNT_CODE),

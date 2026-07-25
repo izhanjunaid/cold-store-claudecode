@@ -4,6 +4,7 @@ import {
   CreateFixedAssetRequest,
   CommissionAssetRequest,
   DisposeAssetRequest,
+  ReverseDisposalRequest,
   RunDepreciationRequest,
   FixedAssetListQuery,
 } from '@coldchain/shared';
@@ -86,6 +87,24 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
       const body = request.body as z.infer<typeof DisposeAssetRequest>;
       const data = await service.dispose(request.user!.facilityId, request.user!.userId, id, body);
       return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/fixed-assets/:id/reverse-disposal',
+    preHandler: [app.authenticate, app.requirePermission('fixed_assets.reverse')],
+    schema: { params: IdParam, body: ReverseDisposalRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof ReverseDisposalRequest>;
+      const data = await service.reverseDisposal(
+        request.user!.facilityId,
+        request.user!.userId,
+        id,
+        body,
+      );
+      return sendSuccess(reply, data);
     },
   });
 

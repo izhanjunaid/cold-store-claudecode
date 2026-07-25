@@ -253,6 +253,7 @@ enum PayrollRunStatus {
   DRAFT
   FINALIZED
   PAID
+  REVERSED
 }
 
 enum ExpenseVoucherStatus {

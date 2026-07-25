@@ -205,6 +205,90 @@ export class FixedAssetService {
   }
 
   /**
+   * Undo a disposal posted in error (audit P1-3).
+   *
+   * Mirrors the invoice VOID pattern: post a reversing entry for JE-14, cross-link both
+   * ways, and restore the asset — rather than mutating the posted entry, which the DB
+   * guard triggers forbid. `JournalEntryService.reverse` cannot be used: it rejects any
+   * entry whose sourceTable is not 'manual'/'opening_balances', and JE-14 stamps
+   * 'fixed_assets'.
+   *
+   * The prior status is derived rather than stored: `commission()` is the only writer of
+   * depreciationStartDate, so its presence means the asset had reached IN_SERVICE.
+   * Accumulated depreciation needs no repair — JE-14 credited the contra account on
+   * disposal and this reversal debits it straight back; no schedule rows were deleted.
+   */
+  async reverseDisposal(facilityId: string, userId: string, id: string, body: any) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM fixed_assets WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+        id,
+        facilityId,
+      );
+
+      const asset = await tx.fixedAsset.findFirst({ where: { facilityId, id } });
+      if (!asset) throw Errors.FIXED_ASSET_NOT_FOUND();
+      if (asset.status !== 'DISPOSED') {
+        throw Errors.ASSET_NOT_REVERSIBLE(
+          `Only a DISPOSED asset can have its disposal reversed (this one is ${asset.status})`,
+        );
+      }
+      if (!asset.disposalJournalEntryId) {
+        throw Errors.ASSET_NOT_REVERSIBLE('Disposal has no journal entry to reverse');
+      }
+
+      const original = await tx.journalEntry.findFirstOrThrow({
+        where: { id: asset.disposalJournalEntryId, facilityId },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (original.postingStatus === 'REVERSED') {
+        throw Errors.ASSET_NOT_REVERSIBLE('Disposal entry has already been reversed');
+      }
+
+      const reversalDate = body?.reversal_date ? new Date(body.reversal_date) : new Date();
+
+      const reversal = await this.journalEntry.postInTransaction(
+        tx,
+        facilityId,
+        userId,
+        {
+          entryType: 'REVERSAL',
+          bookType: original.bookType as 'PACCI' | 'KATCHI',
+          sourceTable: 'fixed_assets',
+          sourceId: id,
+          entryDate: reversalDate,
+          description: `Reversal of disposal ${original.entryNumber} (${asset.assetNumber}) — ${body.reason}`,
+          lines: original.lines.map((l) => ({
+            accountCode: l.accountCode,
+            debitAmount: Number(l.creditAmount),
+            creditAmount: Number(l.debitAmount),
+            partyId: l.partyId,
+            lotId: l.lotId,
+            description: l.description ?? undefined,
+          })),
+        },
+        { postingStatus: 'POSTED' },
+      );
+      await this.journalEntry.markReversed(tx, original.id, reversal.id);
+
+      const tag = `[DISPOSAL REVERSED ${reversalDate.toISOString().slice(0, 10)}]: ${body.reason}`;
+      await tx.fixedAsset.update({
+        where: { id },
+        data: {
+          status: asset.depreciationStartDate ? 'IN_SERVICE' : 'PURCHASED',
+          disposalDate: null,
+          disposalProceedsPkr: null,
+          disposalJournalEntryId: null,
+          notes: asset.notes ? `${asset.notes}\n${tag}` : tag,
+        },
+      });
+
+      const reloaded = await this.repo.findById(facilityId, id, tx);
+      return formatAsset(reloaded);
+    });
+  }
+
+  /**
    * Run monthly depreciation batch for the given period across all IN_SERVICE assets.
    * Idempotent: schedule rows are unique on (asset, year, month) and only created if missing.
    * Once a schedule row is POSTED, re-running for the same period throws DEPRECIATION_ALREADY_POSTED.

@@ -9,6 +9,7 @@ import {
   UpdatePayrollLineRequest,
   PayPayrollRequest,
   RemitGovtRequest,
+  ReversePayrollRunRequest,
   PayrollRunListQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
@@ -189,6 +190,19 @@ export async function payrollRoutes(app: FastifyInstance) {
       const body = request.body as z.infer<typeof RemitGovtRequest>;
       const data = await runs.remit(request.user!.facilityId, request.user!.userId, id, body);
       return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/payroll-runs/:id/reverse',
+    preHandler: [app.authenticate, app.requirePermission('payroll.reverse')],
+    schema: { params: IdParam, body: ReversePayrollRunRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof ReversePayrollRunRequest>;
+      const data = await runs.reverse(request.user!.facilityId, request.user!.userId, id, body);
+      return sendSuccess(reply, data);
     },
   });
 

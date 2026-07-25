@@ -81,6 +81,7 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
 
   // Fixed assets
   { key: 'fixed_assets.manage', group: 'Fixed Assets', label: 'Manage fixed assets', description: 'Create, commission and dispose assets; run depreciation.', defaultMinRole: 'OWNER' },
+  { key: 'fixed_assets.reverse', group: 'Fixed Assets', label: 'Reverse asset disposal', description: 'Undo a disposal posted in error (reverses its journal entry).', defaultMinRole: 'OWNER' },
 
   // Payroll & HR
   { key: 'payroll.view', group: 'Payroll & HR', label: 'View payroll & employees', description: 'View employees, payroll runs and salary slips.', defaultMinRole: 'ACCOUNTANT' },
@@ -89,6 +90,7 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
   { key: 'payroll.draft', group: 'Payroll & HR', label: 'Draft payroll', description: 'Create payroll run drafts and edit their lines.', defaultMinRole: 'ACCOUNTANT' },
   { key: 'payroll.finalize', group: 'Payroll & HR', label: 'Finalize & pay payroll', description: 'Finalize and pay payroll runs.', defaultMinRole: 'MANAGER' },
   { key: 'payroll.remit', group: 'Payroll & HR', label: 'Remit deductions', description: 'Remit payroll deductions to authorities.', defaultMinRole: 'OWNER' },
+  { key: 'payroll.reverse', group: 'Payroll & HR', label: 'Reverse a payroll run', description: 'Reverse a finalized or paid run posted in error (reverses its journal entries).', defaultMinRole: 'OWNER' },
 
   // Expenses
   { key: 'expenses.record', group: 'Expenses', label: 'Record expenses', description: 'View and record expense vouchers, petty-cash, accrue and pay.', defaultMinRole: 'ACCOUNTANT' },

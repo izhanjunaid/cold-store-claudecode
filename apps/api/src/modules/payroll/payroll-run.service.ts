@@ -383,6 +383,90 @@ export class PayrollRunService {
     });
   }
 
+  /**
+   * Reverse a finalized or paid run posted in error (audit P1-3).
+   *
+   * Mirrors the invoice VOID pattern: post a reversing entry for each journal entry the
+   * run produced, cross-link both ways, and move the run to REVERSED — rather than
+   * mutating posted rows, which the DB guard triggers forbid outright. The generic
+   * `JournalEntryService.reverse` cannot be used here: it rejects any entry whose
+   * sourceTable is not 'manual'/'opening_balances', and payroll templates stamp
+   * 'payroll_runs'. That restriction is deliberate — system entries are meant to be
+   * corrected through their own flow, which is what this is.
+   *
+   * All of the run's entries are reversed together (payroll, payment, remittance).
+   * Reversing only some of them would leave the run half-posted with no way to express
+   * that state.
+   */
+  async reverse(facilityId: string, userId: string, runId: string, body: any) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockPayrollRun(tx, facilityId, runId);
+
+      const run = await tx.payrollRun.findFirst({ where: { facilityId, id: runId } });
+      if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      if (run.status === 'DRAFT') {
+        throw Errors.PAYROLL_RUN_NOT_REVERSIBLE(
+          'A DRAFT run has posted nothing to reverse; edit its lines instead',
+        );
+      }
+      if (run.status === 'REVERSED') {
+        throw Errors.PAYROLL_RUN_NOT_REVERSIBLE('This run has already been reversed');
+      }
+
+      const reversalDate = body?.reversal_date ? new Date(body.reversal_date) : new Date();
+
+      // Reverse in the opposite order to posting, so the ledger reads as an unwind.
+      const entryIds = [
+        run.remittanceJournalEntryId,
+        run.paymentJournalEntryId,
+        run.payrollJournalEntryId,
+      ].filter((id): id is string => Boolean(id));
+
+      for (const originalId of entryIds) {
+        const original = await tx.journalEntry.findFirstOrThrow({
+          where: { id: originalId, facilityId },
+          include: { lines: { orderBy: { lineNumber: 'asc' } } },
+        });
+        if (original.postingStatus === 'REVERSED') continue;
+
+        const reversal = await this.journalEntry.postInTransaction(
+          tx,
+          facilityId,
+          userId,
+          {
+            entryType: 'REVERSAL',
+            bookType: original.bookType as 'PACCI' | 'KATCHI',
+            sourceTable: 'payroll_runs',
+            sourceId: runId,
+            entryDate: reversalDate,
+            description: `Reversal of ${original.entryNumber} (payroll ${run.runNumber}) — ${body.reason}`,
+            lines: original.lines.map((l) => ({
+              accountCode: l.accountCode,
+              debitAmount: Number(l.creditAmount),
+              creditAmount: Number(l.debitAmount),
+              partyId: l.partyId,
+              lotId: l.lotId,
+              description: l.description ?? undefined,
+            })),
+          },
+          { postingStatus: 'POSTED' },
+        );
+        await this.journalEntry.markReversed(tx, original.id, reversal.id);
+      }
+
+      const tag = `[REVERSED ${reversalDate.toISOString().slice(0, 10)}]: ${body.reason}`;
+      await tx.payrollRun.update({
+        where: { id: runId },
+        data: {
+          status: 'REVERSED',
+          notes: run.notes ? `${run.notes}\n${tag}` : tag,
+        },
+      });
+
+      return this.getByIdInternal(facilityId, runId, tx);
+    });
+  }
+
   async getById(facilityId: string, id: string) {
     return this.getByIdInternal(facilityId, id, this.prisma);
   }

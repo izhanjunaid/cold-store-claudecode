@@ -52,6 +52,12 @@ export const DisposeAssetRequest = z.object({
 });
 export type DisposeAssetRequestType = z.infer<typeof DisposeAssetRequest>;
 
+export const ReverseDisposalRequest = z.object({
+  reason: z.string().min(1).max(400),
+  reversal_date: dateOnly.optional(),
+});
+export type ReverseDisposalRequestType = z.infer<typeof ReverseDisposalRequest>;
+
 export const RunDepreciationRequest = z.object({
   period_year: z.number().int().min(2020).max(2100),
   period_month: z.number().int().min(1).max(12),

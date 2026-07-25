@@ -29,6 +29,11 @@ async function cleanupInner() {
   await prisma.journalEntryLine.deleteMany({
     where: { facilityId: TEST_FACILITY_ID, journalEntry: { sourceTable: 'payroll_runs' } },
   });
+  // Reversals cross-link entries via the reversed_by self-FK; break it before deleting.
+  await prisma.journalEntry.updateMany({
+    where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payroll_runs' },
+    data: { reversedById: null },
+  });
   await prisma.journalEntry.deleteMany({
     where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payroll_runs' },
   });
@@ -580,6 +585,150 @@ describe('Phase 8B — Payroll', () => {
       where: { facilityId: TEST_FACILITY_ID, periodYear: 2026, periodMonth: 11, payrollType: 'MONTHLY_SALARY' },
     });
     expect(runs).toHaveLength(1);
+  });
+
+  // E / P1-3. Before this, a run finalized in error was terminal: no cancel, no reverse,
+  // and the generic JE-reversal endpoint rejects system-sourced entries. The duplicate-
+  // period guard then blocked creating a corrected replacement for that period.
+  it('reverses a FINALIZED run: mirror JE posted, original marked REVERSED, run REVERSED', async () => {
+    await cleanup();
+    await createSalaried(`Mgr-Rev-${Date.now()}`, 44000);
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2027,
+        period_month: 3,
+        period_from: '2027-03-01',
+        period_to: '2027-03-31',
+      },
+    });
+    const run = JSON.parse(create.body).data;
+
+    const fin = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(fin.statusCode).toBe(200);
+    const originalJeId = JSON.parse(fin.body).data.payroll_journal_entry_id as string;
+    expect(originalJeId).toBeTruthy();
+
+    const rev = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/reverse`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'Wrong salary snapshot', reversal_date: '2027-04-02' },
+    });
+    expect(rev.statusCode).toBe(200);
+    expect(JSON.parse(rev.body).data.status).toBe('REVERSED');
+
+    // Original flipped to REVERSED and cross-linked.
+    const original = await prisma.journalEntry.findUnique({ where: { id: originalJeId } });
+    expect(original!.postingStatus).toBe('REVERSED');
+    expect(original!.reversedById).toBeTruthy();
+
+    // The mirror exists and is the exact opposite of the original.
+    const mirror = await prisma.journalEntry.findUnique({
+      where: { id: original!.reversedById! },
+      include: { lines: true },
+    });
+    expect(mirror!.entryType).toBe('REVERSAL');
+    const originalLines = await prisma.journalEntryLine.findMany({
+      where: { journalEntryId: originalJeId },
+    });
+    const sum = (ls: { debitAmount: unknown; creditAmount: unknown }[], k: 'debitAmount' | 'creditAmount') =>
+      ls.reduce((s, l) => s + Number(l[k]), 0);
+    expect(sum(mirror!.lines, 'debitAmount')).toBeCloseTo(sum(originalLines, 'creditAmount'), 2);
+    expect(sum(mirror!.lines, 'creditAmount')).toBeCloseTo(sum(originalLines, 'debitAmount'), 2);
+
+    // Net effect on the ledger is zero for every account the run touched.
+    const byAccount = new Map<string, number>();
+    for (const l of [...originalLines, ...mirror!.lines]) {
+      byAccount.set(
+        l.accountCode,
+        (byAccount.get(l.accountCode) ?? 0) + Number(l.debitAmount) - Number(l.creditAmount),
+      );
+    }
+    for (const [, net] of byAccount) expect(net).toBeCloseTo(0, 2);
+  });
+
+  it('a REVERSED run no longer blocks a replacement for the same period', async () => {
+    // Same period as the reversal test above — previously PAYROLL_RUN_DUPLICATE_PERIOD.
+    const replacement = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2027,
+        period_month: 3,
+        period_from: '2027-03-01',
+        period_to: '2027-03-31',
+      },
+    });
+    expect(replacement.statusCode).toBe(201);
+    // ...and it takes the next number in that month's sequence.
+    expect(JSON.parse(replacement.body).data.run_number).toMatch(/^PAY-202703-\d{3}$/);
+  });
+
+  it('rejects reversing a DRAFT run and reversing the same run twice', async () => {
+    // Give the draft at least one line — a run with no line items is a valid but
+    // degenerate fixture that later tests reading `data[0]` would trip over.
+    await createDailyWage(`Loader-Rev-${Date.now()}`, 900);
+
+    const draft = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'DAILY_WAGES',
+        period_year: 2027,
+        period_month: 4,
+        period_from: '2027-04-01',
+        period_to: '2027-04-30',
+      },
+    });
+    const draftId = JSON.parse(draft.body).data.id;
+
+    const onDraft = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${draftId}/reverse`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'nothing posted yet' },
+    });
+    expect(onDraft.statusCode).toBe(409);
+    expect(JSON.parse(onDraft.body).error.code).toBe('PAYROLL_RUN_NOT_REVERSIBLE');
+
+    // The 2027-03 run reversed above cannot be reversed again.
+    const already = await prisma.payrollRun.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, periodYear: 2027, periodMonth: 3, status: 'REVERSED' },
+    });
+    const twice = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${already!.id}/reverse`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'again' },
+    });
+    expect(twice.statusCode).toBe(409);
+    expect(JSON.parse(twice.body).error.code).toBe('PAYROLL_RUN_NOT_REVERSIBLE');
+  });
+
+  it('payroll reversal is OWNER-gated (ACCOUNTANT forbidden)', async () => {
+    const already = await prisma.payrollRun.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, periodYear: 2027, periodMonth: 3, status: 'REVERSED' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${already!.id}/reverse`,
+      headers: authHeaders(accountantToken),
+      payload: { reason: 'not allowed' },
+    });
+    expect(res.statusCode).toBe(403);
   });
 
   // Invariant 11: whatever else changes, a run that reached FINALIZED must have a
