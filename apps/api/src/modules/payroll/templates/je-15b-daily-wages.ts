@@ -7,6 +7,7 @@ type Input = {
   totalGrossPkr: number;
   totalEmployerEobiPkr: number;
   totalEmployeeEobiPkr: number;
+  totalIncomeTaxPkr: number;
   totalNetPayablePkr: number;
   bookType: 'PACCI' | 'KATCHI';
 };
@@ -19,6 +20,9 @@ type Input = {
  *     CR  2030  Salaries Payable                      net_payable
  *     CR  2060  EOBI Payable (Employee)               employee_eobi
  *     CR  2061  EOBI Payable (Employer)               employer_eobi
+ *     CR  2070  Income Tax Withheld Payable           tax (if > 0; omit if zero per spec §11.3)
+ *
+ * Net Payable = Gross − Employee EOBI − Income Tax
  *
  * Direct labor posts to 5030 (Cost of Service, affects Gross Profit)
  * and Employer EOBI posts to 5035 (also Cost of Service per spec §11.3).
@@ -28,6 +32,7 @@ export function buildJE15BDailyWages(input: Input): JournalEntryDraft {
   const gross = round2(input.totalGrossPkr);
   const employerEobi = round2(input.totalEmployerEobiPkr);
   const employeeEobi = round2(input.totalEmployeeEobiPkr);
+  const incomeTax = round2(input.totalIncomeTaxPkr);
   const netPayable = round2(input.totalNetPayablePkr);
 
   lines.push({
@@ -68,6 +73,17 @@ export function buildJE15BDailyWages(input: Input): JournalEntryDraft {
       debitAmount: 0,
       creditAmount: employerEobi,
       description: `Employer EOBI payable — ${input.runNumber}`,
+    });
+  }
+
+  // Net pay already has income tax deducted, so without this line the entry is short
+  // by exactly the tax and a daily-wage run carrying tax could never be finalized.
+  if (incomeTax > 0) {
+    lines.push({
+      accountCode: '2070',
+      debitAmount: 0,
+      creditAmount: incomeTax,
+      description: `Income tax withheld — ${input.runNumber}`,
     });
   }
 

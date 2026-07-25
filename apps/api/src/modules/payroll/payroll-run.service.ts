@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
+import { advisoryXactLock } from '../../common/advisory-lock';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting/templates/types';
 import { generatePayrollRunNumber } from './payroll-number';
@@ -13,6 +14,17 @@ import { formatEmployee } from './employee.service';
 const EOBI_EMPLOYEE_PER_MONTH = 375; // 1% of minimum wage
 const EOBI_EMPLOYER_PER_MONTH = 1875; // 5% of minimum wage
 
+type Tx = Prisma.TransactionClient;
+
+/** Row-lock a run so a status read and the JE post that follows cannot interleave. */
+async function lockPayrollRun(tx: Tx, facilityId: string, runId: string): Promise<void> {
+  await tx.$queryRawUnsafe(
+    `SELECT id FROM payroll_runs WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+    runId,
+    facilityId,
+  );
+}
+
 export class PayrollRunService {
   constructor(
     private prisma: PrismaClient,
@@ -23,19 +35,35 @@ export class PayrollRunService {
     const { payroll_type, period_year, period_month } = body;
     const bookType = body.book_type ?? 'PACCI';
 
-    // Check no FINALIZED/PAID run exists for this period+type
-    const existing = await this.prisma.payrollRun.findFirst({
-      where: {
-        facilityId,
-        payrollType: payroll_type,
-        periodYear: period_year,
-        periodMonth: period_month,
-        status: { in: ['DRAFT', 'FINALIZED', 'PAID'] },
-      },
-    });
-    if (existing) throw Errors.PAYROLL_RUN_DUPLICATE_PERIOD();
-
     return this.prisma.$transaction(async (tx) => {
+      // Serialize concurrent creates for the same period+type before checking.
+      //
+      // This check used to run on `this.prisma`, outside the transaction opened below,
+      // and the table carries only a NON-unique index on
+      // (facility_id, period_year, period_month) — so two concurrent creates could both
+      // see nothing and both insert. Moving it inside the transaction is not enough on
+      // its own: under Read Committed both would still read before either wrote.
+      //
+      // An advisory lock is used rather than a unique constraint deliberately. The rule
+      // is "no *live* run for this period" — a reversed run must remain replaceable
+      // (audit P1-3) — and a partial unique index carrying that predicate cannot be
+      // expressed in the Prisma schema, so it would register as permanent drift.
+      await advisoryXactLock(
+        tx,
+        `${facilityId}:payroll-run:${payroll_type}:${period_year}:${period_month}`,
+      );
+
+      const existing = await tx.payrollRun.findFirst({
+        where: {
+          facilityId,
+          payrollType: payroll_type,
+          periodYear: period_year,
+          periodMonth: period_month,
+          status: { in: ['DRAFT', 'FINALIZED', 'PAID'] },
+        },
+      });
+      if (existing) throw Errors.PAYROLL_RUN_DUPLICATE_PERIOD();
+
       const runNumber = await generatePayrollRunNumber(tx, facilityId, period_year, period_month);
 
       // Snapshot all active employees of the matching type
@@ -192,11 +220,27 @@ export class PayrollRunService {
           acc.empEobi += Number(l.eobiEmployeePkr);
           acc.emperEobi += Number(l.eobiEmployerPkr);
           acc.tax += Number(l.incomeTaxPkr);
+          acc.other += Number(l.otherDeductionsPkr);
           acc.net += Number(l.netPayPkr);
           return acc;
         },
-        { gross: 0, empEobi: 0, emperEobi: 0, tax: 0, net: 0 },
+        { gross: 0, empEobi: 0, emperEobi: 0, tax: 0, other: 0, net: 0 },
       );
+
+      // `other_deductions_pkr` is subtracted from net pay (updateLine) but has no
+      // journal line, so the entry came up short by exactly that amount and threw
+      // JOURNAL_UNBALANCED — a message that tells the accountant nothing.
+      //
+      // It is deliberately not given an account here. docs/09 defines the column as
+      // "Advances repaid, etc."; recovering an advance should credit an employee
+      // *receivable*, and crediting a liability instead would leave the receivable
+      // standing while inventing an obligation — the same receivable-plus-liability
+      // error as the advance-cheque bug fixed in Batch A, and one that balances, so
+      // no invariant would catch it. Employee advances do not exist yet (audit P1-2),
+      // so there is no correct account to credit. Refuse explicitly until there is.
+      if (round2(totals.other) > 0.005) {
+        throw Errors.PAYROLL_OTHER_DEDUCTIONS_UNSUPPORTED();
+      }
 
       // Use last day of period as entry date
       const entryDate = new Date(Date.UTC(run.periodYear, run.periodMonth, 0));
@@ -221,6 +265,7 @@ export class PayrollRunService {
               totalGrossPkr: round2(totals.gross),
               totalEmployerEobiPkr: round2(totals.emperEobi),
               totalEmployeeEobiPkr: round2(totals.empEobi),
+              totalIncomeTaxPkr: round2(totals.tax),
               totalNetPayablePkr: round2(totals.net),
               bookType: run.bookType,
             });
@@ -279,10 +324,39 @@ export class PayrollRunService {
 
   async remit(facilityId: string, userId: string, runId: string, body: any) {
     return this.prisma.$transaction(async (tx) => {
+      await lockPayrollRun(tx, facilityId, runId);
+
       const run = await tx.payrollRun.findFirst({ where: { facilityId, id: runId } });
       if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
       if (run.status === 'DRAFT') {
         throw Errors.PAYROLL_RUN_INVALID_STATUS('Cannot remit for a DRAFT run');
+      }
+      // The pointer column is @unique, but the code used to overwrite it — so a second
+      // remit posted a second JE-16B and silently orphaned the first entry's link.
+      if (run.remittanceJournalEntryId) {
+        throw Errors.PAYROLL_ALREADY_REMITTED();
+      }
+
+      // Remitted amounts came straight from the request body with nothing tying them to
+      // what the run actually withheld, so any figure could be paid to the government and
+      // posted against the liability accounts. Bound each leg by the run's own totals.
+      const empEobi = Number(body.remit_employee_eobi_pkr);
+      const emperEobi = Number(body.remit_employer_eobi_pkr);
+      const tax = Number(body.remit_income_tax_pkr ?? 0);
+
+      const lineTotals = await tx.payrollLineItem.aggregate({
+        where: { payrollRunId: runId },
+        _sum: { eobiEmployeePkr: true, incomeTaxPkr: true },
+      });
+      const withheldEmpEobi = Number(lineTotals._sum.eobiEmployeePkr ?? 0);
+      const withheldTax = Number(lineTotals._sum.incomeTaxPkr ?? 0);
+      const withheldEmperEobi = Number(run.totalEmployerEobiPkr);
+
+      const over = (paid: number, withheld: number) => paid > withheld + 0.005;
+      if (over(empEobi, withheldEmpEobi) || over(emperEobi, withheldEmperEobi) || over(tax, withheldTax)) {
+        throw Errors.PAYROLL_REMITTANCE_EXCEEDS_LIABILITY(
+          `Remittance exceeds what this run withheld (employee EOBI ${withheldEmpEobi}, employer EOBI ${withheldEmperEobi}, income tax ${withheldTax})`,
+        );
       }
 
       const draft = buildJE16BGovtRemittance({

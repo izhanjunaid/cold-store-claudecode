@@ -1,4 +1,5 @@
 import type { Prisma } from '@coldchain/db';
+import { advisoryXactLock } from '../../common/advisory-lock';
 
 export function formatDispatchNoteNumber(date: Date, next: number): string {
   const yy = String(date.getFullYear() % 100).padStart(2, '0');
@@ -23,10 +24,7 @@ export async function generateDispatchNoteNumber(
   const prefix = dispatchNotePrefix(date);
   const lockKey = `${facilityId}:${prefix}`;
 
-  await tx.$queryRawUnsafe<unknown[]>(
-    `SELECT 1 AS _lock WHERE pg_advisory_xact_lock(hashtext($1)) IS NOT NULL OR TRUE`,
-    lockKey,
-  );
+  await advisoryXactLock(tx, lockKey);
 
   const rows = await tx.$queryRawUnsafe<{ next: number | bigint }[]>(
     `SELECT COALESCE(MAX(CAST(split_part(dispatch_note_number, '-', 3) AS INT)), 0) + 1 AS next

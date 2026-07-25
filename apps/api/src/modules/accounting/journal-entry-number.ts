@@ -1,4 +1,5 @@
 import type { Prisma } from '@coldchain/db';
+import { advisoryXactLock } from '../../common/advisory-lock';
 
 // UTC getters throughout so a document's number always agrees with the
 // accounting period derived in period.ts (which also uses UTC). Local-time
@@ -24,10 +25,7 @@ export async function generateJournalEntryNumber(
   const prefix = journalEntryNumberPrefix(date);
   const lockKey = `${facilityId}:${prefix}`;
 
-  await tx.$queryRawUnsafe<unknown[]>(
-    `SELECT 1 AS _lock WHERE pg_advisory_xact_lock(hashtext($1)) IS NOT NULL OR TRUE`,
-    lockKey,
-  );
+  await advisoryXactLock(tx, lockKey);
 
   const rows = await tx.$queryRawUnsafe<{ next: number | bigint }[]>(
     `SELECT COALESCE(MAX(CAST(split_part(entry_number, '-', 3) AS INT)), 0) + 1 AS next
@@ -57,10 +55,7 @@ export async function generateCreditNoteNumber(
   const prefix = `CN-${yyyy}${mm}-`;
   const lockKey = `${facilityId}:${prefix}`;
 
-  await tx.$queryRawUnsafe<unknown[]>(
-    `SELECT 1 AS _lock WHERE pg_advisory_xact_lock(hashtext($1)) IS NOT NULL OR TRUE`,
-    lockKey,
-  );
+  await advisoryXactLock(tx, lockKey);
 
   const rows = await tx.$queryRawUnsafe<{ next: number | bigint }[]>(
     `SELECT COALESCE(MAX(CAST(split_part(credit_note_number, '-', 3) AS INT)), 0) + 1 AS next

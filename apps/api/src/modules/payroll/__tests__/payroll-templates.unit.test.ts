@@ -62,6 +62,7 @@ describe('Payroll JE templates', () => {
       totalGrossPkr: 30000,
       totalEmployerEobiPkr: 1875,
       totalEmployeeEobiPkr: 375,
+      totalIncomeTaxPkr: 0,
       totalNetPayablePkr: 29625,
       bookType: 'PACCI',
     });
@@ -71,6 +72,25 @@ describe('Payroll JE templates', () => {
     expect(draft.lines.find((l) => l.accountCode === '5035')?.debitAmount).toBe(1875);
     // Should NOT post to 6010 (that's salaried staff only)
     expect(draft.lines.find((l) => l.accountCode === '6010')).toBeUndefined();
+    // Zero tax omits the 2070 line entirely (spec §11.3), same rule as JE-15.
+    expect(draft.lines.find((l) => l.accountCode === '2070')).toBeUndefined();
+  });
+
+  it('JE-15B credits 2070 when daily wages carry income tax', () => {
+    const draft = buildJE15BDailyWages({
+      payrollRunId: 'r3b',
+      runNumber: 'PAY-202604-DW02',
+      entryDate: new Date('2026-04-30'),
+      totalGrossPkr: 30000,
+      totalEmployerEobiPkr: 1875,
+      totalEmployeeEobiPkr: 375,
+      totalIncomeTaxPkr: 900,
+      totalNetPayablePkr: 28725, // gross - employee EOBI - tax
+      bookType: 'PACCI',
+    });
+    const t = totals(draft.lines);
+    expect(t.d).toBeCloseTo(t.c);
+    expect(draft.lines.find((l) => l.accountCode === '2070')?.creditAmount).toBe(900);
   });
 
   it('JE-16 balances: DR Salaries Payable, CR Bank', () => {

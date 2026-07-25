@@ -396,6 +396,210 @@ describe('Phase 8B — Payroll', () => {
     expect(updated.line_items[0].income_tax_pkr).toBe(1000);
   });
 
+  // C1(i). JE-15B had no 2070 line at all and finalize never passed tax to it, so any
+  // daily-wage run with income tax failed the balance check and could never leave DRAFT.
+  it('finalizes a DAILY_WAGES run carrying income tax (JE-15B credits 2070)', async () => {
+    await cleanup();
+    await createDailyWage(`Loader-${Date.now()}`, 1000);
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'DAILY_WAGES',
+        period_year: 2026,
+        period_month: 8,
+        period_from: '2026-08-01',
+        period_to: '2026-08-31',
+      },
+    });
+    expect(create.statusCode).toBe(201);
+    const run = JSON.parse(create.body).data;
+
+    const upd = await app.inject({
+      method: 'PATCH',
+      url: `/v1/payroll-runs/${run.id}/lines/${run.line_items[0].id}`,
+      headers: authHeaders(accountantToken),
+      payload: { income_tax_pkr: 900 },
+    });
+    expect(upd.statusCode).toBe(200);
+
+    const fin = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(fin.statusCode).toBe(200);
+
+    const je = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payroll_runs', sourceId: run.id },
+      include: { lines: true },
+    });
+    expect(je).toBeTruthy();
+    expect(Number(je!.lines.find((l) => l.accountCode === '2070')?.creditAmount)).toBe(900);
+
+    const d = je!.lines.reduce((s, l) => s + Number(l.debitAmount), 0);
+    const c = je!.lines.reduce((s, l) => s + Number(l.creditAmount), 0);
+    expect(d).toBeCloseTo(c, 2);
+  });
+
+  // C1(ii). other_deductions_pkr is subtracted from net pay but has no JE line, so the
+  // entry came up short by exactly that amount and threw JOURNAL_UNBALANCED — a message
+  // that told the accountant nothing. It has no correct account to credit until employee
+  // advances exist, so refuse it explicitly instead.
+  it('rejects finalize with a clear error when a line carries other deductions', async () => {
+    await cleanup();
+    await createSalaried(`Mgr-OD-${Date.now()}`, 50000);
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2026,
+        period_month: 9,
+        period_from: '2026-09-01',
+        period_to: '2026-09-30',
+      },
+    });
+    const run = JSON.parse(create.body).data;
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/v1/payroll-runs/${run.id}/lines/${run.line_items[0].id}`,
+      headers: authHeaders(accountantToken),
+      payload: { other_deductions_pkr: 2500 },
+    });
+
+    const fin = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(fin.statusCode).toBe(409);
+    expect(JSON.parse(fin.body).error.code).toBe('PAYROLL_OTHER_DEDUCTIONS_UNSUPPORTED');
+
+    // Nothing was posted and the run stayed in DRAFT.
+    const je = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payroll_runs', sourceId: run.id },
+    });
+    expect(je).toBeNull();
+    const after = await prisma.payrollRun.findUnique({ where: { id: run.id } });
+    expect(after!.status).toBe('DRAFT');
+  });
+
+  // C2. remit overwrote remittance_journal_entry_id instead of rejecting, so a second
+  // call posted a second JE-16B and orphaned the first link.
+  it('rejects a second remittance instead of posting a duplicate JE-16B', async () => {
+    await cleanup();
+    await createSalaried(`Mgr-Rem-${Date.now()}`, 40000);
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2026,
+        period_month: 10,
+        period_from: '2026-10-01',
+        period_to: '2026-10-31',
+      },
+    });
+    const run = JSON.parse(create.body).data;
+
+    await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+
+    const remitPayload = {
+      remittance_date: '2026-11-05',
+      remit_employee_eobi_pkr: 375,
+      remit_employer_eobi_pkr: 1875,
+      remit_income_tax_pkr: 0,
+    };
+
+    const first = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/remit`,
+      headers: authHeaders(ownerToken),
+      payload: remitPayload,
+    });
+    expect(first.statusCode).toBe(201);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/remit`,
+      headers: authHeaders(ownerToken),
+      payload: remitPayload,
+    });
+    expect(second.statusCode).toBe(409);
+    expect(JSON.parse(second.body).error.code).toBe('PAYROLL_ALREADY_REMITTED');
+
+    const remittances = await prisma.journalEntry.findMany({
+      where: {
+        facilityId: TEST_FACILITY_ID,
+        sourceTable: 'payroll_runs',
+        sourceId: run.id,
+        entryType: 'GOVT_REMITTANCE',
+      },
+    });
+    expect(remittances).toHaveLength(1);
+  });
+
+  // C3. The duplicate-period check ran outside the transaction that wrote the row, and
+  // the table has only a non-unique index on (facility, year, month) — so two concurrent
+  // creates could both pass it.
+  it('two concurrent creates for the same period+type — exactly one wins', async () => {
+    await cleanup();
+    await createSalaried(`Mgr-Race-${Date.now()}`, 30000);
+
+    const payload = {
+      payroll_type: 'MONTHLY_SALARY',
+      period_year: 2026,
+      period_month: 11,
+      period_from: '2026-11-01',
+      period_to: '2026-11-30',
+    };
+    const [a, b] = await Promise.all([
+      app.inject({ method: 'POST', url: '/v1/payroll-runs', headers: authHeaders(accountantToken), payload }),
+      app.inject({ method: 'POST', url: '/v1/payroll-runs', headers: authHeaders(accountantToken), payload }),
+    ]);
+
+    const codes = [a.statusCode, b.statusCode].sort();
+    expect(codes).toEqual([201, 409]);
+
+    const runs = await prisma.payrollRun.findMany({
+      where: { facilityId: TEST_FACILITY_ID, periodYear: 2026, periodMonth: 11, payrollType: 'MONTHLY_SALARY' },
+    });
+    expect(runs).toHaveLength(1);
+  });
+
+  // Invariant 11: whatever else changes, a run that reached FINALIZED must have a
+  // balanced entry behind it.
+  it('invariant — every FINALIZED payroll run has a balanced journal entry', async () => {
+    const runs = await prisma.payrollRun.findMany({
+      where: { facilityId: TEST_FACILITY_ID, status: { in: ['FINALIZED', 'PAID'] } },
+      select: { id: true, payrollJournalEntryId: true },
+    });
+    for (const r of runs) {
+      expect(r.payrollJournalEntryId).toBeTruthy();
+      const lines = await prisma.journalEntryLine.findMany({
+        where: { journalEntryId: r.payrollJournalEntryId! },
+      });
+      const d = lines.reduce((s, l) => s + Number(l.debitAmount), 0);
+      const c = lines.reduce((s, l) => s + Number(l.creditAmount), 0);
+      expect(d).toBeCloseTo(c, 2);
+    }
+  });
+
   it('returns slip data for a payroll line', async () => {
     const list = await app.inject({
       method: 'GET',

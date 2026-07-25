@@ -153,6 +153,16 @@ export const Errors = {
     new AppError('PAYROLL_LINE_NOT_FOUND', 'Payroll line item does not exist', 404),
   PAYROLL_RUN_DUPLICATE_PERIOD: () =>
     new AppError('PAYROLL_RUN_DUPLICATE_PERIOD', 'A payroll run already exists for this period and type', 409),
+  PAYROLL_OTHER_DEDUCTIONS_UNSUPPORTED: () =>
+    new AppError(
+      'PAYROLL_OTHER_DEDUCTIONS_UNSUPPORTED',
+      'Other deductions cannot be posted yet: there is no account to credit them to until employee advances are supported. Clear the other-deductions amount to finalize this run.',
+      409,
+    ),
+  PAYROLL_ALREADY_REMITTED: () =>
+    new AppError('PAYROLL_ALREADY_REMITTED', 'This payroll run has already been remitted', 409),
+  PAYROLL_REMITTANCE_EXCEEDS_LIABILITY: (msg: string) =>
+    new AppError('PAYROLL_REMITTANCE_EXCEEDS_LIABILITY', msg, 422),
   EXPENSE_VOUCHER_NOT_FOUND: () =>
     new AppError('EXPENSE_VOUCHER_NOT_FOUND', 'Expense voucher does not exist', 404),
   EXPENSE_VOUCHER_INVALID_STATUS: (msg: string) =>
