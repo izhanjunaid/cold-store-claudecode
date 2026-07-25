@@ -249,9 +249,9 @@ export class PaymentService {
     }
     return this.prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRawUnsafe<
-        { id: string; status: string; amount_pkr: string; party_id: string; asset_account_code: string | null; payment_date: Date; book_type: string }[]
+        { id: string; status: string; amount_pkr: string; party_id: string; asset_account_code: string | null; payment_method: string; payment_date: Date; book_type: string }[]
       >(
-        `SELECT id, status, amount_pkr, party_id, asset_account_code, payment_date, book_type FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+        `SELECT id, status, amount_pkr, party_id, asset_account_code, payment_method, payment_date, book_type FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
         id,
         facilityId,
       );
@@ -281,7 +281,11 @@ export class PaymentService {
       const previousStatus = paymentRow.status;
       const paymentDate = new Date(paymentRow.payment_date);
       const bookType = (paymentRow.book_type ?? 'PACCI') as 'PACCI' | 'KATCHI';
-      const assetAccountCode = paymentRow.asset_account_code ?? '1010';
+      // Derive the fallback from the payment's own method rather than assuming cash:
+      // a legacy row with a null asset_account_code paid by cheque belongs to 1020, and
+      // hardcoding '1010' here diverged from PAYMENT_METHOD_ASSET_ACCOUNT.
+      const assetAccountCode =
+        paymentRow.asset_account_code ?? assetAccountForPaymentMethod(paymentRow.payment_method);
 
       for (const alloc of allocations) {
         if (alloc.target === 'INVOICE') {
@@ -486,7 +490,9 @@ export class PaymentService {
 
         // For each loan portion, post a JE-19 reversal: DR 1140 / CR cash account.
         // This unwinds the per-loan cash receipt JE-19 booked during combined settlement.
-        const cashAccount = fullPayment.assetAccountCode ?? '1010';
+        // Same rule as allocate(): fall back to the method's account, not a cash guess.
+        const cashAccount =
+          fullPayment.assetAccountCode ?? assetAccountForPaymentMethod(fullPayment.paymentMethod);
         for (const lr of loanReversals) {
           const reverseDraft = {
             entryType: 'REVERSAL' as const,

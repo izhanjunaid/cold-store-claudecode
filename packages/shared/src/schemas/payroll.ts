@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting-accounts';
 import { BookType } from './enums';
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
@@ -105,13 +106,13 @@ export const FinalizePayrollRequest = z.object({}).optional();
 
 export const PayPayrollRequest = z.object({
   payment_date: dateOnly,
-  from_asset_account_code: z.string().regex(/^[0-9]+$/).default('1020'),
+  from_asset_account_code: z.string().regex(/^[0-9]+$/).default(DEFAULT_BANK_ACCOUNT_CODE),
 });
 export type PayPayrollRequestType = z.infer<typeof PayPayrollRequest>;
 
 export const RemitGovtRequest = z.object({
   remittance_date: dateOnly,
-  from_asset_account_code: z.string().regex(/^[0-9]+$/).default('1020'),
+  from_asset_account_code: z.string().regex(/^[0-9]+$/).default(DEFAULT_BANK_ACCOUNT_CODE),
   remit_employee_eobi_pkr: z.number().nonnegative(),
   remit_employer_eobi_pkr: z.number().nonnegative(),
   remit_income_tax_pkr: z.number().nonnegative().default(0),

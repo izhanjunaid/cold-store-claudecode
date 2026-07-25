@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Banknote, FileText } from 'lucide-react';
+import { assetAccountForPaymentMethod } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -109,7 +110,7 @@ export default function LoanDetailPage() {
           repayment_date: repayDate,
           amount_pkr: amt,
           payment_method: repayMethod,
-          asset_account_code: repayMethod === 'CASH' ? '1010' : '1020',
+          asset_account_code: assetAccountForPaymentMethod(repayMethod),
         },
       });
       setRepayModal(false);

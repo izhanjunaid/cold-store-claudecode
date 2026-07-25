@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting-accounts';
 import { BookType } from './enums';
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
@@ -58,7 +59,7 @@ export type PayExpenseRequestType = z.infer<typeof PayExpenseRequest>;
 export const PettyCashReplenishRequest = z.object({
   replenishment_date: dateOnly,
   amount_pkr: z.number().positive(),
-  source_bank_account_code: z.string().regex(/^[0-9]+$/).default('1020'),
+  source_bank_account_code: z.string().regex(/^[0-9]+$/).default(DEFAULT_BANK_ACCOUNT_CODE),
   book_type: BookType.optional(),
 });
 export type PettyCashReplenishRequestType = z.infer<typeof PettyCashReplenishRequest>;

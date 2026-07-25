@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { toast } from 'sonner';
+import { assetAccountForPaymentMethod } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -150,13 +151,15 @@ export default function ExpenseVoucherDetailPage() {
                 onChange={(e) => {
                   const m = e.target.value as 'CASH' | 'CHEQUE' | 'BANK_TRANSFER';
                   setPaymentMethod(m);
-                  setAssetAccount(m === 'CASH' ? '1010' : '1020');
+                  setAssetAccount(assetAccountForPaymentMethod(m));
                 }}
                 className={SELECT_CLASS}
               >
-                <option value="CASH">Cash (1010)</option>
-                <option value="CHEQUE">Cheque (1020)</option>
-                <option value="BANK_TRANSFER">Bank Transfer (1020)</option>
+                <option value="CASH">Cash ({assetAccountForPaymentMethod('CASH')})</option>
+                <option value="CHEQUE">Cheque ({assetAccountForPaymentMethod('CHEQUE')})</option>
+                <option value="BANK_TRANSFER">
+                  Bank Transfer ({assetAccountForPaymentMethod('BANK_TRANSFER')})
+                </option>
               </select>
             </div>
             <div className="space-y-1.5">

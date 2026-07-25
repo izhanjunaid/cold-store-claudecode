@@ -1,6 +1,7 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting/templates/types';
 import { generatePayrollRunNumber } from './payroll-number';
 import { buildJE15MonthlyPayroll } from './templates/je-15-monthly-payroll';
 import { buildJE15BDailyWages } from './templates/je-15b-daily-wages';
@@ -255,7 +256,7 @@ export class PayrollRunService {
         runNumber: run.runNumber,
         entryDate: new Date(body.payment_date),
         amountPkr: Number(run.totalNetPayablePkr),
-        fromAssetAccountCode: body.from_asset_account_code ?? '1020',
+        fromAssetAccountCode: body.from_asset_account_code ?? DEFAULT_BANK_ACCOUNT_CODE,
         bookType: run.bookType,
       });
 
@@ -291,7 +292,7 @@ export class PayrollRunService {
         employeeEobiPkr: body.remit_employee_eobi_pkr,
         employerEobiPkr: body.remit_employer_eobi_pkr,
         incomeTaxPkr: body.remit_income_tax_pkr ?? 0,
-        fromAssetAccountCode: body.from_asset_account_code ?? '1020',
+        fromAssetAccountCode: body.from_asset_account_code ?? DEFAULT_BANK_ACCOUNT_CODE,
         bookType: run.bookType,
       });
 

@@ -4,6 +4,7 @@ import { JournalEntryService } from '../accounting/journal-entry.service';
 import { FixedAssetRepository } from './fixed-asset.repository';
 import { generateFixedAssetNumber } from './fixed-asset-number';
 import { ASSET_CATEGORY_ACCOUNT_DEFAULTS } from './templates/types';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting/templates/types';
 import { buildJE12AssetPurchase } from './templates/je-12-asset-purchase';
 import { buildJE13Depreciation } from './templates/je-13-depreciation';
 import { buildJE14AssetDisposal } from './templates/je-14-asset-disposal';
@@ -56,7 +57,7 @@ export class FixedAssetService {
     const assetCode = body.asset_account_code ?? defaults.asset;
     const accumCode = body.accum_depr_account_code ?? defaults.accumDepr;
     const deprExpCode = body.depr_expense_account_code ?? defaults.deprExpense;
-    const paidFrom = body.paid_from_account_code ?? '1020';
+    const paidFrom = body.paid_from_account_code ?? DEFAULT_BANK_ACCOUNT_CODE;
     const bookType = body.book_type ?? 'PACCI';
     const purchaseDate = new Date(body.purchase_date);
 
@@ -165,7 +166,7 @@ export class FixedAssetService {
         throw Errors.FIXED_ASSET_INVALID_STATUS(`Asset already ${asset.status}`);
       }
 
-      const proceedsAccount = body.proceeds_account_code ?? '1020';
+      const proceedsAccount = body.proceeds_account_code ?? DEFAULT_BANK_ACCOUNT_CODE;
       const disposalDate = new Date(body.disposal_date);
       const cost = Number(asset.purchaseCostPkr);
       const accum = Number(asset.accumulatedDepreciationPkr);

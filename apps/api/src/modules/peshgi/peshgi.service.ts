@@ -5,17 +5,13 @@ import type {
   WriteOffPeshgiRequestType,
   PartyLoanListQueryType,
 } from '@coldchain/shared';
+import { assetAccountForPaymentMethod } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { generatePeshgiNumber } from './peshgi-number';
 import { buildJE18PeshgiIssued } from './templates/je-18-peshgi-issued';
 import { buildJE19PeshgiRecovered } from './templates/je-19-peshgi-recovered';
 import { buildJE20PeshgiWriteOff } from './templates/je-20-peshgi-write-off';
-
-const PAYMENT_METHOD_ASSET: Record<string, string> = {
-  CASH: '1010',
-  BANK_TRANSFER: '1020',
-};
 
 export class PeshgiService {
   constructor(
@@ -34,7 +30,7 @@ export class PeshgiService {
       const loanNumber = await generatePeshgiNumber(tx, facilityId, issueDate);
       const bookType = body.book_type ?? 'PACCI';
       const sourceAccount =
-        body.source_asset_account_code ?? PAYMENT_METHOD_ASSET[body.payment_method] ?? '1010';
+        body.source_asset_account_code ?? assetAccountForPaymentMethod(body.payment_method);
 
       const loan = await tx.partyLoan.create({
         data: {

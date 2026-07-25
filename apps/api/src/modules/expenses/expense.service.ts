@@ -1,6 +1,7 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting/templates/types';
 import { generateExpenseVoucherNumber } from './expense-number';
 import { buildJE17AExpensePaid } from './templates/je-17a-expense-paid';
 import { buildJE17BExpenseAccrued } from './templates/je-17b-expense-accrued';
@@ -204,7 +205,7 @@ export class ExpenseService {
       const draft = buildJE17CPettyCashReplenish({
         entryDate: new Date(body.replenishment_date),
         amountPkr: body.amount_pkr,
-        sourceBankAccountCode: body.source_bank_account_code ?? '1020',
+        sourceBankAccountCode: body.source_bank_account_code ?? DEFAULT_BANK_ACCOUNT_CODE,
         bookType: body.book_type ?? 'PACCI',
         reference: ref,
       });

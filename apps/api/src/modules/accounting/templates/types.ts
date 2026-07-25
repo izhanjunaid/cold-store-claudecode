@@ -27,12 +27,14 @@ export const PARTY_AR_ACCOUNT: Record<string, string> = {
   OTHER: '1150',
 };
 
-export const PAYMENT_METHOD_ASSET_ACCOUNT: Record<string, string> = {
-  CASH: '1010',
-  CHEQUE: '1020',
-  BANK_TRANSFER: '1020',
-  MOBILE_WALLET: '1030',
-};
+// Payment-method routing lives in @coldchain/shared because the web client needs the
+// same mapping (it used to re-derive it inline, which mis-routed MOBILE_WALLET).
+// Re-exported here so the templates keep importing account routing from one place.
+export {
+  PAYMENT_METHOD_ASSET_ACCOUNT,
+  DEFAULT_BANK_ACCOUNT_CODE,
+  assetAccountForPaymentMethod,
+} from '@coldchain/shared';
 
 export const COMMODITY_REVENUE_ACCOUNT: Record<string, string> = {
   POTATO: '4010',
@@ -46,18 +48,13 @@ export const ACCOUNT_ADVANCE_RECEIPTS = '2010';
 export const ACCOUNT_BAD_DEBT = '6080';
 export const ACCOUNT_DISCOUNTS_ALLOWED = '4910';
 
-// Party types and payment methods are closed enums: an unmapped value is a
-// programming error, and a silent fallback would misclassify the posting
-// (audit finding F-10). Fail loudly instead.
+// Party types are a closed enum: an unmapped value is a programming error, and a
+// silent fallback would misclassify the posting (audit finding F-10). Fail loudly
+// instead. (The payment-method equivalent now lives in @coldchain/shared and is
+// re-exported above; it applies the same rule.)
 export function arAccountForParty(partyType: string): string {
   const account = PARTY_AR_ACCOUNT[partyType];
   if (!account) throw new Error(`No AR account mapping for party type '${partyType}'`);
-  return account;
-}
-
-export function assetAccountForPaymentMethod(method: string): string {
-  const account = PAYMENT_METHOD_ASSET_ACCOUNT[method];
-  if (!account) throw new Error(`No asset account mapping for payment method '${method}'`);
   return account;
 }
 
