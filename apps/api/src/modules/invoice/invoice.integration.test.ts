@@ -30,6 +30,7 @@ let app: FastifyInstance;
 let operatorToken: string;
 let managerToken: string;
 let accountantToken: string;
+let ownerToken: string;
 let securityToken: string;
 let ownerPartyId: string;
 let otherPartyId: string;
@@ -169,6 +170,11 @@ beforeAll(async () => {
     await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.ownershipHistory.deleteMany({ where: { lot: { facilityId: TEST_FACILITY_ID } } });
     await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    // Finalize/void post journal entries; clear them so they don't pollute the
+    // facility GL for downstream test files.
+    await prisma.journalEntryLine.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    await prisma.journalEntry.updateMany({ where: { facilityId: TEST_FACILITY_ID }, data: { reversedById: null } });
+    await prisma.journalEntry.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   });
 
   await seedRatePlans();
@@ -180,6 +186,8 @@ beforeAll(async () => {
   managerUserId = mgr.user.id;
   const acc = await loginAsRole(app, 'ACCOUNTANT');
   accountantToken = acc.accessToken;
+  const own = await loginAsRole(app, 'OWNER');
+  ownerToken = own.accessToken;
   const sec = await loginAsRole(app, 'SECURITY');
   securityToken = sec.accessToken;
 
@@ -196,6 +204,11 @@ afterAll(async () => {
     await prisma.outboundEvent.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.ownershipHistory.deleteMany({ where: { lot: { facilityId: TEST_FACILITY_ID } } });
     await prisma.lot.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    // Finalize/void post journal entries; clear them so they don't pollute the
+    // facility GL for downstream test files.
+    await prisma.journalEntryLine.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    await prisma.journalEntry.updateMany({ where: { facilityId: TEST_FACILITY_ID }, data: { reversedById: null } });
+    await prisma.journalEntry.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   });
   await prisma.$disconnect();
   await closeTestApp();
@@ -991,5 +1004,124 @@ describe('Party GET — over_credit_limit (credit exposure)', () => {
       headers: authHeaders(operatorToken),
     });
     expect(JSON.parse(res.body).data.over_credit_limit).toBeUndefined();
+  });
+
+  // ==========================================================
+  // Phase 19 — Invoice VOID
+  // ==========================================================
+  describe('void a finalized, unpaid invoice', () => {
+    async function finalizedInvoice(outboundDate = '2026-04-30'): Promise<{ invoiceId: string; jeId: string; total: number }> {
+      const lot = await createLot({ ratePlanId: RATE_PLAN_MONTHLY, quantity: 20, inboundDate: '2026-04-01' });
+      const { invoiceId } = await finalizeOutbound({ lotId: lot.id, quantity: 20, outboundDate });
+      const fin = await app.inject({
+        method: 'POST',
+        url: `/v1/invoices/${invoiceId}/finalize`,
+        headers: authHeaders(managerToken),
+        payload: {},
+      });
+      expect(fin.statusCode).toBe(200);
+      const inv = JSON.parse(fin.body).data;
+      const dbInv = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { journalEntryId: true } });
+      return { invoiceId, jeId: dbInv.journalEntryId as string, total: Number(inv.total_pkr) };
+    }
+
+    it('OWNER voids the invoice and reverses its JE-01', async () => {
+      const { invoiceId, jeId } = await finalizedInvoice();
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/invoices/${invoiceId}/void`,
+        headers: authHeaders(ownerToken),
+        payload: { reason: 'issued against the wrong party' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).data.status).toBe('VOID');
+
+      // Original JE-01 marked REVERSED and cross-linked.
+      const original = await prisma.journalEntry.findUniqueOrThrow({ where: { id: jeId } });
+      expect(original.postingStatus).toBe('REVERSED');
+      expect(original.reversedById).toBeTruthy();
+
+      // The reversal mirrors JE-01 (net GL effect on AR is zero).
+      const reversal = await prisma.journalEntry.findUniqueOrThrow({
+        where: { id: original.reversedById as string },
+        include: { lines: true },
+      });
+      expect(reversal.entryType).toBe('REVERSAL');
+      expect(reversal.sourceTable).toBe('invoices');
+
+      // Scoped to this invoice's JE pair: the reversal must cancel JE-01's AR.
+      const arAgg = await prisma.journalEntryLine.aggregate({
+        where: { accountCode: '1110', journalEntryId: { in: [jeId, original.reversedById as string] } },
+        _sum: { debitAmount: true, creditAmount: true },
+      });
+      expect(Number(arAgg._sum.debitAmount ?? 0) - Number(arAgg._sum.creditAmount ?? 0)).toBeCloseTo(0, 2);
+    });
+
+    it('rejects voiding a paid invoice', async () => {
+      const { invoiceId, total } = await finalizedInvoice('2026-05-01');
+      const pay = await app.inject({
+        method: 'POST',
+        url: '/v1/payments',
+        headers: authHeaders(accountantToken),
+        payload: {
+          party_id: ownerPartyId,
+          payment_date: '2026-05-02',
+          amount_pkr: total,
+          payment_method: 'CASH',
+          allocations: [{ target: 'INVOICE', invoice_id: invoiceId, allocated_amount_pkr: total }],
+        },
+      });
+      expect(pay.statusCode).toBe(201);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/invoices/${invoiceId}/void`,
+        headers: authHeaders(ownerToken),
+        payload: { reason: 'too late' },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(JSON.parse(res.body).error.code).toBe('INVOICE_NOT_VOIDABLE');
+    });
+
+    it('rejects voiding a draft invoice', async () => {
+      const lot = await createLot({ ratePlanId: RATE_PLAN_MONTHLY, quantity: 10, inboundDate: '2026-04-01' });
+      const { invoiceId } = await finalizeOutbound({ lotId: lot.id, quantity: 10, outboundDate: '2026-05-03' });
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/invoices/${invoiceId}/void`,
+        headers: authHeaders(ownerToken),
+        payload: { reason: 'still a draft' },
+      });
+      expect(res.statusCode).toBe(409);
+    });
+
+    it('double-void is rejected', async () => {
+      const { invoiceId } = await finalizedInvoice('2026-05-04');
+      const first = await app.inject({
+        method: 'POST',
+        url: `/v1/invoices/${invoiceId}/void`,
+        headers: authHeaders(ownerToken),
+        payload: { reason: 'first void' },
+      });
+      expect(first.statusCode).toBe(200);
+      const second = await app.inject({
+        method: 'POST',
+        url: `/v1/invoices/${invoiceId}/void`,
+        headers: authHeaders(ownerToken),
+        payload: { reason: 'second void' },
+      });
+      expect(second.statusCode).toBe(409);
+    });
+
+    it('MANAGER without the permission is denied', async () => {
+      const { invoiceId } = await finalizedInvoice('2026-05-05');
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/invoices/${invoiceId}/void`,
+        headers: authHeaders(managerToken),
+        payload: { reason: 'not allowed' },
+      });
+      expect(res.statusCode).toBe(403);
+    });
   });
 });

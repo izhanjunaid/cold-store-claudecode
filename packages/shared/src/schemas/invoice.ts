@@ -41,6 +41,13 @@ export const FinalizeInvoiceRequest = z.object({
 });
 export type FinalizeInvoiceRequestType = z.infer<typeof FinalizeInvoiceRequest>;
 
+// VoidInvoiceRequest — reverses a finalized, unpaid invoice's JE-01.
+export const VoidInvoiceRequest = z.object({
+  reason: z.string().min(1).max(400),
+  void_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+export type VoidInvoiceRequestType = z.infer<typeof VoidInvoiceRequest>;
+
 // InvoiceListQuery - for filtering the invoice list
 export const InvoiceListQuery = z.object({
   party_id: z.string().uuid().optional(),

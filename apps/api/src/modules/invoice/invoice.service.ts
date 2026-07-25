@@ -9,6 +9,7 @@ import type {
   AddInvoiceLineRequestType,
   UpdateDraftInvoiceRequestType,
   FinalizeInvoiceRequestType,
+  VoidInvoiceRequestType,
 } from '@coldchain/shared';
 import type { JournalEntryService } from '../accounting/journal-entry.service';
 import { buildJE01InvoiceFinalized } from '../accounting/templates/je-01-invoice-finalized';
@@ -254,6 +255,93 @@ export class InvoiceService {
 
       return formatInvoice(updated);
     });
+  }
+
+  /**
+   * Void a finalized, unpaid invoice: post a full reversal of its JE-01 and set
+   * status VOID. Only allowed when nothing downstream has consumed the invoice
+   * (no payments, credit notes or surcharges) — otherwise correct it with a
+   * credit note or a bad-debt write-off instead (phase/19 audit).
+   */
+  async void(facilityId: string, invoiceId: string, userId: string, body: VoidInvoiceRequestType) {
+    await this.prisma.$transaction(async (tx) => {
+      // Row-lock the invoice so a concurrent payment can't slip in.
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM invoices WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+        invoiceId,
+        facilityId,
+      );
+      const inv = await tx.invoice.findFirst({ where: { id: invoiceId, facilityId } });
+      if (!inv) throw Errors.INVOICE_NOT_FOUND();
+      if (inv.status !== 'FINALIZED') {
+        throw Errors.INVOICE_NOT_VOIDABLE('Only a FINALIZED invoice can be voided');
+      }
+      if (Number(inv.amountPaidPkr) > 0.005) {
+        throw Errors.INVOICE_NOT_VOIDABLE('Invoice has payments or credits applied; use a credit note or write-off');
+      }
+      if (!inv.journalEntryId) {
+        throw Errors.INVOICE_NOT_VOIDABLE('Invoice has no journal entry to reverse');
+      }
+
+      const creditNotes = await tx.creditNote.count({ where: { facilityId, originalInvoiceId: invoiceId } });
+      if (creditNotes > 0) {
+        throw Errors.INVOICE_NOT_VOIDABLE('Invoice has credit notes; use a credit note flow instead');
+      }
+      const liveAllocations = await tx.paymentAllocation.count({ where: { invoiceId, voidedAt: null } });
+      if (liveAllocations > 0) {
+        throw Errors.INVOICE_NOT_VOIDABLE('Invoice has active payment allocations');
+      }
+      const surcharges = await tx.journalEntry.count({
+        where: { facilityId, sourceTable: 'invoice_surcharge', sourceId: invoiceId, postingStatus: 'POSTED' },
+      });
+      if (surcharges > 0) {
+        throw Errors.INVOICE_NOT_VOIDABLE('Invoice has late-payment surcharges; reverse those first');
+      }
+
+      const original = await tx.journalEntry.findFirstOrThrow({
+        where: { id: inv.journalEntryId, facilityId },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+
+      const voidDate = body.void_date ? new Date(body.void_date) : new Date();
+      const reversal = await this.journalEntry!.postInTransaction(
+        tx,
+        facilityId,
+        userId,
+        {
+          entryType: 'REVERSAL',
+          bookType: original.bookType,
+          sourceTable: 'invoices',
+          sourceId: invoiceId,
+          entryDate: voidDate,
+          description: `Void of invoice ${inv.invoiceNumber ?? invoiceId} — ${body.reason}`,
+          lines: original.lines.map((l) => ({
+            accountCode: l.accountCode,
+            debitAmount: Number(l.creditAmount),
+            creditAmount: Number(l.debitAmount),
+            partyId: l.partyId,
+            lotId: l.lotId,
+            description: l.description,
+          })),
+        },
+        { postingStatus: 'POSTED' },
+      );
+      await this.journalEntry!.markReversed(tx, original.id, reversal.id);
+
+      const voidTag = `[VOID ${voidDate.toISOString().slice(0, 10)}]: ${body.reason}`;
+      await tx.invoice.update({
+        where: { id: invoiceId },
+        data: {
+          status: 'VOID',
+          notes: inv.notes ? `${inv.notes}\n${voidTag}` : voidTag,
+        },
+      });
+    });
+
+    // Re-read after commit so the response reflects the VOID status + reversal.
+    const full = await this.repo.findById(facilityId, invoiceId);
+    if (!full) throw Errors.INVOICE_NOT_FOUND();
+    return formatInvoice(full);
   }
 
   async getPdf(facilityId: string, invoiceId: string): Promise<{ filename: string; pdf: Buffer }> {

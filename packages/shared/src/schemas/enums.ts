@@ -37,14 +37,13 @@ export const OutboundStatus = z.enum([
 ]);
 export type OutboundStatus = z.infer<typeof OutboundStatus>;
 
+// Mirrors the Prisma InvoiceStatus enum exactly (phase/19: dropped the stale
+// PREVIEW/PAID/DISPUTED/CANCELLED/OUTSTANDING values that never existed in the DB
+// and added VOID). Payment state is derived from amount_paid, not a status.
 export const InvoiceStatus = z.enum([
   'DRAFT',
-  'PREVIEW',
   'FINALIZED',
-  'PAID',
-  'DISPUTED',
-  'CANCELLED',
-  'OUTSTANDING',
+  'VOID',
   'WRITTEN_OFF',
 ]);
 export type InvoiceStatus = z.infer<typeof InvoiceStatus>;

@@ -69,6 +69,7 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
   { key: 'billing.view', group: 'Billing', label: 'View invoices & payments', description: 'View invoice lists, payments, credit notes and party ledgers.', defaultMinRole: 'ACCOUNTANT' },
   { key: 'invoices.manage', group: 'Billing', label: 'Edit & finalize invoices', description: 'Edit draft invoices, add/remove lines, apply discounts, finalize, issue credit notes.', defaultMinRole: 'MANAGER' },
   { key: 'invoices.write_off', group: 'Billing', label: 'Write off invoices (bad debt)', description: 'Write off an unpaid invoice as bad debt.', defaultMinRole: 'OWNER' },
+  { key: 'invoices.void', group: 'Billing', label: 'Void invoices', description: 'Void a finalized, unpaid invoice (reverses its journal entry).', defaultMinRole: 'OWNER' },
   { key: 'payments.record', group: 'Billing', label: 'Record payments', description: 'Record, allocate and dishonour payments.', defaultMinRole: 'ACCOUNTANT' },
 
   // Accounting

@@ -4,6 +4,7 @@ import {
   AddInvoiceLineRequest,
   UpdateDraftInvoiceRequest,
   FinalizeInvoiceRequest,
+  VoidInvoiceRequest,
   InvoiceListQuery,
 } from '@coldchain/shared';
 import { InvoiceService } from './invoice.service';
@@ -101,6 +102,25 @@ export async function invoiceRoutes(app: FastifyInstance) {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof FinalizeInvoiceRequest>;
       const result = await service.finalize(
+        request.user!.facilityId,
+        id,
+        request.user!.userId,
+        body,
+      );
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/invoices/:id/void — invoices.void (OWNER default)
+  app.route({
+    method: 'POST',
+    url: '/v1/invoices/:id/void',
+    preHandler: [app.authenticate, app.requirePermission('invoices.void')],
+    schema: { params: IdParam, body: VoidInvoiceRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof VoidInvoiceRequest>;
+      const result = await service.void(
         request.user!.facilityId,
         id,
         request.user!.userId,

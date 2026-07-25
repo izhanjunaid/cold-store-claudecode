@@ -98,7 +98,26 @@ export default function InvoiceDetailPage() {
   const [adjDiscountValue, setAdjDiscountValue] = useState('');
   const [adjSubmitting, setAdjSubmitting] = useState(false);
 
+  const [showVoid, setShowVoid] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidSubmitting, setVoidSubmitting] = useState(false);
+
+  const [surcharges, setSurcharges] = useState<{ journal_entry_id: string; entry_date: string; amount_pkr: number; description: string }[]>([]);
+  const [surchargeTotal, setSurchargeTotal] = useState(0);
+  const [surchargeSubmitting, setSurchargeSubmitting] = useState(false);
+
   const canManage = can(user, 'invoices.manage');
+  const canVoid = can(user, 'invoices.void');
+
+  const fetchSurcharges = useCallback(async () => {
+    try {
+      const res = await apiClient<{ total_pkr: number; surcharges: typeof surcharges }>(`/v1/invoices/${id}/surcharges`);
+      setSurcharges(res.surcharges);
+      setSurchargeTotal(res.total_pkr);
+    } catch {
+      /* billing.view may be absent; leave surcharges empty */
+    }
+  }, [id]);
 
   const fetchInvoice = useCallback(async () => {
     setLoading(true);
@@ -113,7 +132,21 @@ export default function InvoiceDetailPage() {
 
   useEffect(() => {
     fetchInvoice();
-  }, [fetchInvoice]);
+    fetchSurcharges();
+  }, [fetchInvoice, fetchSurcharges]);
+
+  async function handleAssessSurcharge() {
+    setSurchargeSubmitting(true);
+    try {
+      const res = await apiClient<{ months_charged: number; amount_pkr: number }>(`/v1/invoices/${id}/surcharges`, { method: 'POST', body: {} });
+      toast.success(`Surcharge applied — ${res.months_charged} month(s), ${formatMoney(res.amount_pkr)}`);
+      await fetchSurcharges();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to apply surcharge');
+    } finally {
+      setSurchargeSubmitting(false);
+    }
+  }
 
   async function handleAddLine() {
     if (!lineDesc.trim() || !linePrice) return;
@@ -208,6 +241,22 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  async function handleVoid() {
+    if (!invoice || !voidReason.trim()) return;
+    setVoidSubmitting(true);
+    try {
+      await apiClient(`/v1/invoices/${id}/void`, { method: 'POST', body: { reason: voidReason.trim() } });
+      toast.success('Invoice voided');
+      setShowVoid(false);
+      setVoidReason('');
+      await fetchInvoice();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to void invoice');
+    } finally {
+      setVoidSubmitting(false);
+    }
+  }
+
   async function handlePdf() {
     try {
       const token = localStorage.getItem('access_token');
@@ -249,6 +298,11 @@ export default function InvoiceDetailPage() {
               <Button onClick={() => router.push(`/payments/new?party_id=${invoice.billing_party_id}`)}>
                 <Banknote className="h-4 w-4" aria-hidden />
                 Record Payment
+              </Button>
+            )}
+            {canVoid && invoice.status === 'FINALIZED' && invoice.amount_paid_pkr === 0 && (
+              <Button variant="destructive" onClick={() => setShowVoid(true)}>
+                Void Invoice
               </Button>
             )}
           </>
@@ -367,6 +421,40 @@ export default function InvoiceDetailPage() {
         </div>
       </Card>
 
+      {(surcharges.length > 0 || (canManage && invoice.status === 'FINALIZED' && invoice.balance_due_pkr > 0)) && (
+        <Card className="mt-4">
+          <CardContent className="pt-6">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Late-Payment Surcharges</h3>
+              {canManage && invoice.status === 'FINALIZED' && invoice.balance_due_pkr > 0 && (
+                <Button size="sm" variant="outline" disabled={surchargeSubmitting} onClick={handleAssessSurcharge}>
+                  {surchargeSubmitting ? 'Assessing…' : 'Assess surcharge'}
+                </Button>
+              )}
+            </div>
+            {surcharges.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No surcharges applied. If the invoice is overdue beyond the grace period and the facility rule is
+                enabled, assessing will post a surcharge to the ledger.
+              </p>
+            ) : (
+              <div className="space-y-1 text-sm">
+                {surcharges.map((s) => (
+                  <div key={s.journal_entry_id} className="flex justify-between">
+                    <span className="text-muted-foreground">{s.entry_date} — {s.description}</span>
+                    <span className="tabular-nums">{formatMoney(s.amount_pkr)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between border-t pt-1 font-semibold">
+                  <span>Total surcharges</span>
+                  <span className="tabular-nums">{formatMoney(surchargeTotal)}</span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Add Line dialog */}
       <Dialog open={showAddLine} onOpenChange={setShowAddLine}>
         <DialogContent>
@@ -455,6 +543,35 @@ export default function InvoiceDetailPage() {
                 {adjSubmitting ? 'Saving…' : 'Apply'}
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showVoid} onOpenChange={setShowVoid}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Void Invoice</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              This reverses the invoice&apos;s journal entry and marks it VOID. Only allowed while the
+              invoice is unpaid with no credit notes. This cannot be undone.
+            </p>
+            <div>
+              <Label htmlFor="void-reason">Reason</Label>
+              <Textarea
+                id="void-reason"
+                value={voidReason}
+                onChange={(e) => setVoidReason(e.target.value)}
+                placeholder="Why is this invoice being voided?"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowVoid(false)}>Cancel</Button>
+            <Button variant="destructive" disabled={!voidReason.trim() || voidSubmitting} onClick={handleVoid}>
+              {voidSubmitting ? 'Voiding…' : 'Void Invoice'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
