@@ -73,6 +73,16 @@ export class PayrollRunService {
         orderBy: { name: 'asc' },
       });
 
+      // Pre-fill each employee's ACTIVE advance instalment (phase 21). One active
+      // advance per employee (enforced at issue) makes this a plain lookup — no
+      // priority ordering to decide when salary can't cover several. The accountant
+      // can edit or zero it per line before finalizing; this is a suggestion, not a
+      // commitment.
+      const activeAdvances = await tx.employeeAdvance.findMany({
+        where: { facilityId, employeeId: { in: employees.map((e) => e.id) }, status: 'ACTIVE' },
+      });
+      const advanceByEmployee = new Map(activeAdvances.map((a) => [a.employeeId, a]));
+
       const run = await tx.payrollRun.create({
         data: {
           facilityId,
@@ -101,7 +111,11 @@ export class PayrollRunService {
           : Number(e.dailyWagePkr ?? 0) * 26; // default 26 working days for daily wage default
         const employeeEobi = e.eobiRegistered ? EOBI_EMPLOYEE_PER_MONTH : 0;
         const employerEobi = e.eobiRegistered ? EOBI_EMPLOYER_PER_MONTH : 0;
-        const net = round2(gross - employeeEobi);
+        const advance = advanceByEmployee.get(e.id);
+        const advanceRecovery = advance
+          ? Math.min(Number(advance.monthlyInstallmentPkr), Number(advance.balanceOutstandingPkr))
+          : 0;
+        const net = round2(gross - employeeEobi - advanceRecovery);
 
         await tx.payrollLineItem.create({
           data: {
@@ -113,6 +127,7 @@ export class PayrollRunService {
             eobiEmployerPkr: employerEobi,
             incomeTaxPkr: 0,
             otherDeductionsPkr: 0,
+            advanceRecoveryPkr: round2(advanceRecovery),
             netPayPkr: net,
             sortOrder: i,
           },
@@ -155,7 +170,20 @@ export class PayrollRunService {
       const empyEobi = body.eobi_employer_pkr ?? Number(line.eobiEmployerPkr);
       const tax = body.income_tax_pkr ?? Number(line.incomeTaxPkr);
       const otherDed = body.other_deductions_pkr ?? Number(line.otherDeductionsPkr);
-      const net = round2(grossPay - empEobi - tax - otherDed);
+
+      // Validate against the employee's live outstanding balance, not the amount the
+      // draft was pre-filled with — the accountant may be raising it back up after
+      // lowering it, or the balance may have moved since the draft was created.
+      const advanceRecovery = body.advance_recovery_pkr ?? Number(line.advanceRecoveryPkr);
+      if (advanceRecovery > 0.005) {
+        const advance = await tx.employeeAdvance.findFirst({
+          where: { facilityId, employeeId: line.employeeId, status: 'ACTIVE' },
+        });
+        const outstanding = advance ? Number(advance.balanceOutstandingPkr) : 0;
+        if (advanceRecovery > outstanding + 0.005) throw Errors.EMPLOYEE_ADVANCE_OVER_RECOVERY();
+      }
+
+      const net = round2(grossPay - empEobi - tax - otherDed - advanceRecovery);
 
       await tx.payrollLineItem.update({
         where: { id: lineId },
@@ -166,6 +194,7 @@ export class PayrollRunService {
           eobiEmployerPkr: empyEobi,
           incomeTaxPkr: tax,
           otherDeductionsPkr: otherDed,
+          advanceRecoveryPkr: advanceRecovery,
           netPayPkr: net,
         },
       });
@@ -179,17 +208,18 @@ export class PayrollRunService {
           acc.emperEobi += Number(l.eobiEmployerPkr);
           acc.tax += Number(l.incomeTaxPkr);
           acc.other += Number(l.otherDeductionsPkr);
+          acc.advanceRecovery += Number(l.advanceRecoveryPkr);
           acc.net += Number(l.netPayPkr);
           return acc;
         },
-        { gross: 0, empEobi: 0, emperEobi: 0, tax: 0, other: 0, net: 0 },
+        { gross: 0, empEobi: 0, emperEobi: 0, tax: 0, other: 0, advanceRecovery: 0, net: 0 },
       );
 
       await tx.payrollRun.update({
         where: { id: runId },
         data: {
           totalGrossPkr: round2(totals.gross),
-          totalDeductionsPkr: round2(totals.empEobi + totals.tax + totals.other),
+          totalDeductionsPkr: round2(totals.empEobi + totals.tax + totals.other + totals.advanceRecovery),
           totalEmployerEobiPkr: round2(totals.emperEobi),
           totalNetPayablePkr: round2(totals.net),
         },
@@ -221,10 +251,11 @@ export class PayrollRunService {
           acc.emperEobi += Number(l.eobiEmployerPkr);
           acc.tax += Number(l.incomeTaxPkr);
           acc.other += Number(l.otherDeductionsPkr);
+          acc.advanceRecovery += Number(l.advanceRecoveryPkr);
           acc.net += Number(l.netPayPkr);
           return acc;
         },
-        { gross: 0, empEobi: 0, emperEobi: 0, tax: 0, other: 0, net: 0 },
+        { gross: 0, empEobi: 0, emperEobi: 0, tax: 0, other: 0, advanceRecovery: 0, net: 0 },
       );
 
       // `other_deductions_pkr` is subtracted from net pay (updateLine) but has no
@@ -255,6 +286,7 @@ export class PayrollRunService {
               totalEmployerEobiPkr: round2(totals.emperEobi),
               totalEmployeeEobiPkr: round2(totals.empEobi),
               totalIncomeTaxPkr: round2(totals.tax),
+              totalAdvanceRecoveryPkr: round2(totals.advanceRecovery),
               totalNetPayablePkr: round2(totals.net),
               bookType: run.bookType,
             })
@@ -266,6 +298,7 @@ export class PayrollRunService {
               totalEmployerEobiPkr: round2(totals.emperEobi),
               totalEmployeeEobiPkr: round2(totals.empEobi),
               totalIncomeTaxPkr: round2(totals.tax),
+              totalAdvanceRecoveryPkr: round2(totals.advanceRecovery),
               totalNetPayablePkr: round2(totals.net),
               bookType: run.bookType,
             });
@@ -273,6 +306,48 @@ export class PayrollRunService {
       const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
         postingStatus: 'POSTED',
       });
+
+      // Recovery does not post its own journal entry — it rode inside the entry just
+      // posted, as the 1230 credit line above. This settles the subledger side: one
+      // EmployeeAdvanceRecovery row per line that carried a recovery, the advance
+      // balance decremented, and the advance closed once it reaches zero.
+      for (const line of run.lineItems) {
+        const recoveryAmount = Number(line.advanceRecoveryPkr);
+        if (recoveryAmount <= 0.005) continue;
+
+        const advance = await tx.employeeAdvance.findFirst({
+          where: { facilityId, employeeId: line.employeeId, status: 'ACTIVE' },
+        });
+        if (!advance) {
+          // Line carried a recovery amount but the employee has no active advance to
+          // apply it to — the advance must have been written off or fully recovered
+          // by another path since this line was last edited. Refuse rather than post
+          // a recovery against nothing.
+          throw Errors.VALIDATION_ERROR(
+            `Line for employee ${line.employeeId} has an advance recovery but no matching ACTIVE advance`,
+          );
+        }
+
+        await tx.employeeAdvanceRecovery.create({
+          data: {
+            advanceId: advance.id,
+            payrollRunId: run.id,
+            payrollLineItemId: line.id,
+            recoveryDate: entryDate,
+            amountPkr: recoveryAmount,
+            createdBy: userId,
+          },
+        });
+
+        const newBalance = round2(Number(advance.balanceOutstandingPkr) - recoveryAmount);
+        await tx.employeeAdvance.update({
+          where: { id: advance.id },
+          data: {
+            balanceOutstandingPkr: newBalance,
+            status: newBalance <= 0.005 ? 'RECOVERED' : 'ACTIVE',
+          },
+        });
+      }
 
       await tx.payrollRun.update({
         where: { id: runId },
@@ -415,6 +490,50 @@ export class PayrollRunService {
 
       const reversalDate = body?.reversal_date ? new Date(body.reversal_date) : new Date();
 
+      // Unwind advance recoveries BEFORE reversing the journal entries (phase 21).
+      // Getting this wrong silently forgives an employee's debt: the balance would
+      // stay reduced while the payroll that reduced it has been undone. Follows the
+      // same shape as PaymentService.dishonour() unwinding loan allocations: capture
+      // the affected rows first (they are the source of the amounts), lock each
+      // parent before mutating its balance, restore balance and status, THEN
+      // soft-void the child rows so the audit trail survives — never delete them.
+      const recoveries = await tx.employeeAdvanceRecovery.findMany({
+        where: { payrollRunId: runId, voidedAt: null },
+      });
+      for (const recovery of recoveries) {
+        await tx.$queryRawUnsafe(
+          `SELECT id FROM employee_advances WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+          recovery.advanceId,
+          facilityId,
+        );
+        const advance = await tx.employeeAdvance.findFirstOrThrow({
+          where: { id: recovery.advanceId, facilityId },
+        });
+        await tx.employeeAdvance.update({
+          where: { id: advance.id },
+          data: {
+            balanceOutstandingPkr: round2(
+              Number(advance.balanceOutstandingPkr) + Number(recovery.amountPkr),
+            ),
+            // Only a RECOVERED advance can have been closed by this run's recovery;
+            // WRITTEN_OFF is a separate, OWNER-only decision this reversal must not undo.
+            //
+            // Edge case, left as-is rather than built out further: if the advance was
+            // later written off (for whatever remained after this recovery), restoring
+            // the balance here while the status stays WRITTEN_OFF is not a bug — the
+            // write-off's JE-23 only covered what was outstanding at write-off time, so
+            // the restored amount was genuinely never written off. The GL stays correct;
+            // the subledger just cannot express "partly written off, partly reopened" as
+            // a single status. There is no un-write-off flow to reconcile this further.
+            status: advance.status === 'RECOVERED' ? 'ACTIVE' : advance.status,
+          },
+        });
+        await tx.employeeAdvanceRecovery.update({
+          where: { id: recovery.id },
+          data: { voidedAt: new Date(), voidedBy: userId },
+        });
+      }
+
       // Reverse in the opposite order to posting, so the ledger reads as an unwind.
       const entryIds = [
         run.remittanceJournalEntryId,
@@ -540,6 +659,7 @@ export class PayrollRunService {
       eobiEmployee: Number(line.eobiEmployeePkr),
       incomeTax: Number(line.incomeTaxPkr),
       otherDeductions: Number(line.otherDeductionsPkr),
+      advanceRecovery: Number(line.advanceRecoveryPkr),
       netPay: Number(line.netPayPkr),
       daysWorked: line.daysWorked ? Number(line.daysWorked) : null,
     };
@@ -579,6 +699,7 @@ function formatRun(r: any) {
       eobi_employer_pkr: Number(l.eobiEmployerPkr),
       income_tax_pkr: Number(l.incomeTaxPkr),
       other_deductions_pkr: Number(l.otherDeductionsPkr),
+      advance_recovery_pkr: Number(l.advanceRecoveryPkr),
       net_pay_pkr: Number(l.netPayPkr),
     })),
   };

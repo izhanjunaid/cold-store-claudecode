@@ -183,6 +183,25 @@ export const Errors = {
       'Produce-deduction recoveries must be recorded through a payment with a LOAN allocation, not as a standalone repayment',
       422,
     ),
+  // Phase 21 — Employee Advances
+  EMPLOYEE_ADVANCE_NOT_FOUND: () =>
+    new AppError('EMPLOYEE_ADVANCE_NOT_FOUND', 'Employee advance does not exist', 404),
+  EMPLOYEE_ADVANCE_ALREADY_ACTIVE: () =>
+    new AppError(
+      'EMPLOYEE_ADVANCE_ALREADY_ACTIVE',
+      'This employee already has an outstanding advance; it must be recovered or written off before another can be issued',
+      409,
+    ),
+  EMPLOYEE_ADVANCE_EXCEEDS_CAP: (msg: string) =>
+    new AppError('EMPLOYEE_ADVANCE_EXCEEDS_CAP', msg, 409),
+  EMPLOYEE_ADVANCE_ALREADY_CLOSED: () =>
+    new AppError('EMPLOYEE_ADVANCE_ALREADY_CLOSED', 'Advance is not ACTIVE; cannot write off', 409),
+  EMPLOYEE_ADVANCE_OVER_RECOVERY: () =>
+    new AppError(
+      'EMPLOYEE_ADVANCE_OVER_RECOVERY',
+      'Recovery amount exceeds the advance\'s outstanding balance',
+      422,
+    ),
   // Phase 9 — Gate Pass
   GATE_PASS_NOT_FOUND: () =>
     new AppError('GATE_PASS_NOT_FOUND', 'Gate pass does not exist', 404),

@@ -153,7 +153,7 @@ afterAll(async () => {
 });
 
 describe('Phase 8 — Chart of Accounts', () => {
-  it('lists 83 seeded accounts (73 from 8A + 8 from 8B + 2 from Phase 12)', async () => {
+  it('lists 84 seeded accounts (73 from 8A + 8 from 8B + 2 from Phase 12 + 1 from Phase 21)', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/accounting/accounts',
@@ -162,7 +162,7 @@ describe('Phase 8 — Chart of Accounts', () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.success).toBe(true);
-    expect(body.data.length).toBe(83);
+    expect(body.data.length).toBe(84);
   });
 
   it('filters by account_class', async () => {

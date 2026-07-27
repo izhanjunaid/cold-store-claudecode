@@ -101,6 +101,11 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
   { key: 'loans.issue', group: 'Loans (Peshgi)', label: 'Issue & write off loans', description: 'Issue new loans and write off outstanding loans.', defaultMinRole: 'OWNER' },
   { key: 'loans.record_repayment', group: 'Loans (Peshgi)', label: 'Record loan repayments', description: 'Record repayments against a loan.', defaultMinRole: 'MANAGER' },
 
+  // Employee Advances
+  { key: 'employee_advances.view', group: 'Employee Advances', label: 'View employee advances', description: 'View advances issued to employees and their recovery history.', defaultMinRole: 'ACCOUNTANT' },
+  { key: 'employee_advances.issue', group: 'Employee Advances', label: 'Issue employee advances', description: 'Issue a cash advance against future salary.', defaultMinRole: 'OWNER' },
+  { key: 'employee_advances.write_off', group: 'Employee Advances', label: 'Write off employee advances', description: 'Write off an outstanding advance balance as bad debt.', defaultMinRole: 'OWNER' },
+
   // Reports
   { key: 'reports.operational', group: 'Reports', label: 'Operational dashboard', description: 'View the operational dashboard.', defaultMinRole: 'OPERATOR' },
   { key: 'reports.inventory', group: 'Reports', label: 'Inventory reports', description: 'Lot aging, commodity inventory, weight variance, ownership transfers.', defaultMinRole: 'MANAGER' },

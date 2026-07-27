@@ -22,6 +22,7 @@ describe('Payroll JE templates', () => {
       totalEmployerEobiPkr: 5625,
       totalEmployeeEobiPkr: 1125,
       totalIncomeTaxPkr: 0,
+      totalAdvanceRecoveryPkr: 0,
       totalNetPayablePkr: 103875,
       bookType: 'PACCI',
     });
@@ -37,6 +38,44 @@ describe('Payroll JE templates', () => {
     expect(draft.lines.find((l) => l.accountCode === '2070')).toBeUndefined();
   });
 
+  // Phase 21: the arithmetic that makes advance recovery postable. Net pay already
+  // has the recovery subtracted (payroll-run.service.ts), so without a matching
+  // credit line the entry would be short by exactly that amount — the same failure
+  // mode phase/20 hit with other_deductions_pkr.
+  it('JE-15 balances with a non-zero advance recovery, crediting 1230', () => {
+    const draft = buildJE15MonthlyPayroll({
+      payrollRunId: 'r1adv',
+      runNumber: 'PAY-202605-001',
+      entryDate: new Date('2026-05-31'),
+      totalGrossPkr: 50000,
+      totalEmployerEobiPkr: 1875,
+      totalEmployeeEobiPkr: 375,
+      totalIncomeTaxPkr: 2000,
+      totalAdvanceRecoveryPkr: 5000,
+      totalNetPayablePkr: 42625, // 50000 - 375 - 2000 - 5000
+      bookType: 'PACCI',
+    });
+    const t = totals(draft.lines);
+    expect(t.d).toBeCloseTo(t.c);
+    expect(draft.lines.find((l) => l.accountCode === '1230')?.creditAmount).toBe(5000);
+  });
+
+  it('JE-15 omits the 1230 line when advance recovery is zero', () => {
+    const draft = buildJE15MonthlyPayroll({
+      payrollRunId: 'r1noadv',
+      runNumber: 'PAY-202605-002',
+      entryDate: new Date('2026-05-31'),
+      totalGrossPkr: 50000,
+      totalEmployerEobiPkr: 1875,
+      totalEmployeeEobiPkr: 375,
+      totalIncomeTaxPkr: 0,
+      totalAdvanceRecoveryPkr: 0,
+      totalNetPayablePkr: 49625,
+      bookType: 'PACCI',
+    });
+    expect(draft.lines.find((l) => l.accountCode === '1230')).toBeUndefined();
+  });
+
   it('JE-15 includes 2070 line when income tax > 0', () => {
     const draft = buildJE15MonthlyPayroll({
       payrollRunId: 'r2',
@@ -46,6 +85,7 @@ describe('Payroll JE templates', () => {
       totalEmployerEobiPkr: 1875,
       totalEmployeeEobiPkr: 375,
       totalIncomeTaxPkr: 5000,
+      totalAdvanceRecoveryPkr: 0,
       totalNetPayablePkr: 694625, // 700k - 375 - 5000
       bookType: 'PACCI',
     });
@@ -63,6 +103,7 @@ describe('Payroll JE templates', () => {
       totalEmployerEobiPkr: 1875,
       totalEmployeeEobiPkr: 375,
       totalIncomeTaxPkr: 0,
+      totalAdvanceRecoveryPkr: 0,
       totalNetPayablePkr: 29625,
       bookType: 'PACCI',
     });
@@ -85,6 +126,7 @@ describe('Payroll JE templates', () => {
       totalEmployerEobiPkr: 1875,
       totalEmployeeEobiPkr: 375,
       totalIncomeTaxPkr: 900,
+      totalAdvanceRecoveryPkr: 0,
       totalNetPayablePkr: 28725, // gross - employee EOBI - tax
       bookType: 'PACCI',
     });

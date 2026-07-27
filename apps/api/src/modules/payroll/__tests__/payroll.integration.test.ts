@@ -17,6 +17,14 @@ async function cleanup() {
 }
 
 async function cleanupInner() {
+  // EmployeeAdvanceRecovery cascades off both payrollLineItem and payrollRun, so it
+  // is gone by the time those deletes below run. The advance rows themselves are a
+  // separate table and need their own cleanup.
+  await prisma.employeeAdvance.updateMany({
+    where: { facilityId: TEST_FACILITY_ID },
+    data: { issueJournalEntryId: null, writeOffJournalEntryId: null },
+  });
+  await prisma.employeeAdvance.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.payrollLineItem.deleteMany({
     where: { payrollRun: { facilityId: TEST_FACILITY_ID } },
   });
@@ -27,15 +35,24 @@ async function cleanupInner() {
   await prisma.payrollRun.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.employee.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.journalEntryLine.deleteMany({
-    where: { facilityId: TEST_FACILITY_ID, journalEntry: { sourceTable: 'payroll_runs' } },
+    where: {
+      facilityId: TEST_FACILITY_ID,
+      journalEntry: { OR: [{ sourceTable: 'payroll_runs' }, { sourceTable: 'employee_advances' }] },
+    },
   });
   // Reversals cross-link entries via the reversed_by self-FK; break it before deleting.
   await prisma.journalEntry.updateMany({
-    where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payroll_runs' },
+    where: {
+      facilityId: TEST_FACILITY_ID,
+      OR: [{ sourceTable: 'payroll_runs' }, { sourceTable: 'employee_advances' }],
+    },
     data: { reversedById: null },
   });
   await prisma.journalEntry.deleteMany({
-    where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payroll_runs' },
+    where: {
+      facilityId: TEST_FACILITY_ID,
+      OR: [{ sourceTable: 'payroll_runs' }, { sourceTable: 'employee_advances' }],
+    },
   });
   await prisma.periodLock.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
 }
@@ -71,6 +88,23 @@ async function createSalaried(name: string, salary: number, eobiRegistered = tru
   });
   expect(res.statusCode).toBe(201);
   return JSON.parse(res.body).data.id as string;
+}
+
+async function issueAdvance(employeeId: string, principal: number, installment: number, date = '2026-05-10') {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/employee-advances/issue',
+    headers: authHeaders(ownerToken),
+    payload: {
+      employee_id: employeeId,
+      issue_date: date,
+      principal_pkr: principal,
+      monthly_installment_pkr: installment,
+      payment_method: 'CASH',
+    },
+  });
+  expect(res.statusCode).toBe(201);
+  return JSON.parse(res.body).data;
 }
 
 async function createDailyWage(name: string, wage: number) {
@@ -729,6 +763,270 @@ describe('Phase 8B — Payroll', () => {
       payload: { reason: 'not allowed' },
     });
     expect(res.statusCode).toBe(403);
+  });
+
+  // Phase 21 — Employee Advances integration.
+
+  it('draft pre-fills the advance instalment, capped at outstanding', async () => {
+    await cleanup();
+    const empId = await createSalaried(`Adv-Prefill-${Date.now()}`, 50000);
+    // Outstanding (3000) is less than the instalment (5000) — the pre-fill must cap.
+    await issueAdvance(empId, 3000, 5000, '2026-06-01');
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2026,
+        period_month: 6,
+        period_from: '2026-06-01',
+        period_to: '2026-06-30',
+      },
+    });
+    expect(create.statusCode).toBe(201);
+    const run = JSON.parse(create.body).data;
+    expect(run.line_items[0].advance_recovery_pkr).toBe(3000);
+    expect(run.line_items[0].net_pay_pkr).toBe(50000 - 375 - 3000);
+  });
+
+  it('accountant can edit the pre-filled recovery down to zero before finalizing', async () => {
+    await cleanup();
+    const empId = await createSalaried(`Adv-Edit-${Date.now()}`, 50000);
+    await issueAdvance(empId, 8000, 4000, '2026-06-01');
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2026,
+        period_month: 6,
+        period_from: '2026-06-01',
+        period_to: '2026-06-30',
+      },
+    });
+    const run = JSON.parse(create.body).data;
+    expect(run.line_items[0].advance_recovery_pkr).toBe(4000);
+
+    const upd = await app.inject({
+      method: 'PATCH',
+      url: `/v1/payroll-runs/${run.id}/lines/${run.line_items[0].id}`,
+      headers: authHeaders(accountantToken),
+      payload: { advance_recovery_pkr: 0 },
+    });
+    expect(upd.statusCode).toBe(200);
+    const updated = JSON.parse(upd.body).data;
+    expect(updated.line_items[0].advance_recovery_pkr).toBe(0);
+    expect(updated.line_items[0].net_pay_pkr).toBe(50000 - 375);
+
+    const fin = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(fin.statusCode).toBe(200);
+
+    // Confirming down to 0 must not have posted anything — the advance is untouched.
+    const advance = await prisma.employeeAdvance.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, employeeId: empId },
+    });
+    expect(advance!.status).toBe('ACTIVE');
+    expect(Number(advance!.balanceOutstandingPkr)).toBe(8000);
+  });
+
+  it('rejects a recovery amount exceeding the outstanding balance', async () => {
+    await cleanup();
+    const empId = await createSalaried(`Adv-Over-${Date.now()}`, 50000);
+    await issueAdvance(empId, 2000, 5000, '2026-06-01');
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2026,
+        period_month: 6,
+        period_from: '2026-06-01',
+        period_to: '2026-06-30',
+      },
+    });
+    const run = JSON.parse(create.body).data;
+
+    const upd = await app.inject({
+      method: 'PATCH',
+      url: `/v1/payroll-runs/${run.id}/lines/${run.line_items[0].id}`,
+      headers: authHeaders(accountantToken),
+      payload: { advance_recovery_pkr: 2500 }, // > 2000 outstanding
+    });
+    expect(upd.statusCode).toBe(422);
+    expect(JSON.parse(upd.body).error.code).toBe('EMPLOYEE_ADVANCE_OVER_RECOVERY');
+  });
+
+  it('finalize with full recovery flips the advance to RECOVERED and credits 1230', async () => {
+    await cleanup();
+    const empId = await createSalaried(`Adv-Full-${Date.now()}`, 50000);
+    const advance = await issueAdvance(empId, 5000, 5000, '2026-06-01');
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2026,
+        period_month: 6,
+        period_from: '2026-06-01',
+        period_to: '2026-06-30',
+      },
+    });
+    const run = JSON.parse(create.body).data;
+    expect(run.line_items[0].advance_recovery_pkr).toBe(5000);
+
+    const fin = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(fin.statusCode).toBe(200);
+
+    const je = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payroll_runs', sourceId: run.id },
+      include: { lines: true },
+    });
+    expect(Number(je!.lines.find((l) => l.accountCode === '1230')?.creditAmount)).toBe(5000);
+
+    const closed = await prisma.employeeAdvance.findUnique({ where: { id: advance.id } });
+    expect(closed!.status).toBe('RECOVERED');
+    expect(Number(closed!.balanceOutstandingPkr)).toBe(0);
+
+    const recovery = await prisma.employeeAdvanceRecovery.findFirst({
+      where: { advanceId: advance.id, payrollRunId: run.id },
+    });
+    expect(recovery).toBeTruthy();
+    expect(Number(recovery!.amountPkr)).toBe(5000);
+    expect(recovery!.voidedAt).toBeNull();
+  });
+
+  // 21.2a — the highest-value test in this phase. A wrong reversal silently forgives
+  // an employee's debt: the balance stays reduced while the payroll that reduced it
+  // has been undone.
+  it('reversing the run restores the advance balance, reverts RECOVERED to ACTIVE, and soft-voids the recovery', async () => {
+    await cleanup();
+    const empId = await createSalaried(`Adv-Reverse-${Date.now()}`, 50000);
+    const advance = await issueAdvance(empId, 5000, 5000, '2026-06-01');
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2026,
+        period_month: 6,
+        period_from: '2026-06-01',
+        period_to: '2026-06-30',
+      },
+    });
+    const run = JSON.parse(create.body).data;
+
+    await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+
+    const afterFinalize = await prisma.employeeAdvance.findUnique({ where: { id: advance.id } });
+    expect(afterFinalize!.status).toBe('RECOVERED');
+
+    const rev = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/reverse`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'Wrong employee snapshot', reversal_date: '2026-07-02' },
+    });
+    expect(rev.statusCode).toBe(200);
+
+    const restored = await prisma.employeeAdvance.findUnique({ where: { id: advance.id } });
+    expect(restored!.status).toBe('ACTIVE');
+    expect(Number(restored!.balanceOutstandingPkr)).toBe(5000);
+
+    // The audit trail survives — soft-voided, not deleted.
+    const recovery = await prisma.employeeAdvanceRecovery.findFirst({
+      where: { advanceId: advance.id, payrollRunId: run.id },
+    });
+    expect(recovery).toBeTruthy();
+    expect(recovery!.voidedAt).not.toBeNull();
+
+    // A corrected replacement run for the same period can now recover it again.
+    const replacement = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2026,
+        period_month: 6,
+        period_from: '2026-06-01',
+        period_to: '2026-06-30',
+      },
+    });
+    expect(replacement.statusCode).toBe(201);
+    expect(JSON.parse(replacement.body).data.line_items[0].advance_recovery_pkr).toBe(5000);
+  });
+
+  it('a WRITTEN_OFF advance is not resurrected by reversing the run that recovered part of it', async () => {
+    await cleanup();
+    const empId = await createSalaried(`Adv-WriteOffReverse-${Date.now()}`, 50000);
+    const advance = await issueAdvance(empId, 8000, 3000, '2026-06-01');
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(accountantToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2026,
+        period_month: 6,
+        period_from: '2026-06-01',
+        period_to: '2026-06-30',
+      },
+    });
+    const run = JSON.parse(create.body).data;
+    expect(run.line_items[0].advance_recovery_pkr).toBe(3000); // partial — 8000 - 3000 = 5000 left
+
+    await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+
+    // Still ACTIVE (only partly recovered) — write it off.
+    await app.inject({
+      method: 'POST',
+      url: `/v1/employee-advances/${advance.id}/write-off`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'Employee terminated with remaining balance' },
+    });
+
+    const rev = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/reverse`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'Correcting after the fact' },
+    });
+    expect(rev.statusCode).toBe(200);
+
+    // The reversal must not undo an OWNER's separate write-off decision.
+    const after = await prisma.employeeAdvance.findUnique({ where: { id: advance.id } });
+    expect(after!.status).toBe('WRITTEN_OFF');
   });
 
   // Invariant 11: whatever else changes, a run that reached FINALIZED must have a

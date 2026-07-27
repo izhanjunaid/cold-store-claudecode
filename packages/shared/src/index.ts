@@ -16,6 +16,7 @@ export * from './schemas/fixed-assets';
 export * from './schemas/payroll';
 export * from './schemas/expenses';
 export * from './schemas/peshgi';
+export * from './schemas/employee-advances';
 export * from './schemas/gate-pass';
 export * from './schemas/reports';
 export * from './schemas/surcharge';

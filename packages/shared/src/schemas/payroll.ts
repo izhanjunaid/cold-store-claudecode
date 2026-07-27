@@ -99,6 +99,7 @@ export const UpdatePayrollLineRequest = z.object({
   eobi_employer_pkr: z.number().nonnegative().optional(),
   income_tax_pkr: z.number().nonnegative().optional(),
   other_deductions_pkr: z.number().nonnegative().optional(),
+  advance_recovery_pkr: z.number().nonnegative().optional(),
 });
 export type UpdatePayrollLineRequestType = z.infer<typeof UpdatePayrollLineRequest>;
 
@@ -136,6 +137,7 @@ export const PayrollLineItemResponse = z.object({
   eobi_employer_pkr: z.number(),
   income_tax_pkr: z.number(),
   other_deductions_pkr: z.number(),
+  advance_recovery_pkr: z.number(),
   net_pay_pkr: z.number(),
 });
 export type PayrollLineItemResponseType = z.infer<typeof PayrollLineItemResponse>;

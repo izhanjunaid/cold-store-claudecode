@@ -15,6 +15,7 @@ const SAMPLE: SalarySlipData = {
   eobiEmployee: 375,
   incomeTax: 0,
   otherDeductions: 1000,
+  advanceRecovery: 0,
   netPay: 43625,
 };
 
@@ -46,6 +47,17 @@ describe('salary-slip template', () => {
     const html = renderSalarySlipHtml({ ...SAMPLE, incomeTax: 500 });
     expect(html).toContain('Income Tax');
     expect(html).toContain('500');
+  });
+
+  it('hides zero advance recovery row', () => {
+    const html = renderSalarySlipHtml({ ...SAMPLE, advanceRecovery: 0 });
+    expect(html).not.toContain('Advance Recovery');
+  });
+
+  it('shows advance recovery row when non-zero', () => {
+    const html = renderSalarySlipHtml({ ...SAMPLE, advanceRecovery: 5000 });
+    expect(html).toContain('Advance Recovery');
+    expect(html).toContain('5000');
   });
 
   it('includes Urdu header', () => {

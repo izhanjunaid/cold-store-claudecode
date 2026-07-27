@@ -360,6 +360,7 @@ export interface SalarySlipData {
   eobiEmployee: number;
   incomeTax: number;
   otherDeductions: number;
+  advanceRecovery: number;
   netPay: number;
 }
 
