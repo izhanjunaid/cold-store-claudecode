@@ -72,6 +72,7 @@ The CoA is designed for a cold storage business: every account name and number r
 | **1200** | **Other Current Assets** | Header | |
 | 1210 | Advance Payments to Suppliers | Detail | Prepaid for supplies, packaging |
 | 1220 | Prepaid Electricity (Security Deposit) | Detail | LESCO / FESCO security deposits |
+| 1230 | Advances to Employees | Detail | Cash advances against future salary (Phase 21); recovered via payroll, see §12.7 |
 | **1300** | **Fixed Assets** | Header | |
 | 1310 | Cold Storage Plant & Equipment | Detail | Compressors, refrigeration units |
 | 1311 | Accum. Depreciation — Plant & Equipment | Detail | Contra-asset (credit balance) |
@@ -1196,10 +1197,12 @@ DEBIT   6015  Employer EOBI — Management & Office    employer_eobi_total
   CREDIT  2060  EOBI Payable — Employee Portion        employee_eobi_total
   CREDIT  2061  EOBI Payable — Employer Portion        employer_eobi_total
   CREDIT  2070  Income Tax Withheld Payable             tax_withheld_total (if > 0)
+  CREDIT  1230  Advances to Employees                  advance_recovery_total (if > 0; Phase 21)
 ```
 
-*(Net Payable = Gross − Employee EOBI − Income Tax Withholding)*  
-*(Note: Do NOT create journal entry lines with zero amounts. If income tax is zero, omit the CR 2070 line entirely.)*
+*(Net Payable = Gross − Employee EOBI − Income Tax Withholding − Advance Recovery)*  
+*(Note: Do NOT create journal entry lines with zero amounts. If income tax is zero, omit the CR 2070 line entirely; same rule for the CR 1230 line when no employee has an advance recovery this run.)*
+*(Advance recovery is deducted from net pay per employee, pre-filled from that employee's active `employee_advances` instalment and confirmable/editable by the accountant before finalizing — see §12.7. It reduces the 1230 receivable, not a liability; `other_deductions_pkr` remains a separate, currently-unsupported field for anything that is genuinely a third-party deduction rather than an advance recovery.)*
 
 **Example — March 2026, 3 salaried staff:**
 ```
@@ -1232,9 +1235,11 @@ DEBIT   5035  Employer EOBI — Direct Labor         employer_eobi_total
   CREDIT  2030  Salaries Payable                     net_wages_payable
   CREDIT  2060  EOBI Payable (Employee)               employee_eobi
   CREDIT  2061  EOBI Payable (Employer)               employer_eobi
+  CREDIT  2070  Income Tax Withheld Payable           tax_withheld_total (if > 0; Phase 20)
+  CREDIT  1230  Advances to Employees                 advance_recovery_total (if > 0; Phase 21)
 ```
 
-*(Note: Direct Labor posts to account 5030 — a Cost of Service, affecting Gross Profit, unlike salaried management which is 6010 — Operating Expense. Employer EOBI for direct labor posts to 5035 — also a Cost of Service, keeping all direct labor costs in Class 5.)*
+*(Note: Direct Labor posts to account 5030 — a Cost of Service, affecting Gross Profit, unlike salaried management which is 6010 — Operating Expense. Employer EOBI for direct labor posts to 5035 — also a Cost of Service, keeping all direct labor costs in Class 5. Daily-wage staff are equally eligible for salary advances and income-tax withholding as salaried staff; both credit lines follow the same zero-omission rule as JE-15.)*
 
 #### JE-16: Salary Payment (Salaries Payable → Cash/Bank)
 
@@ -1503,6 +1508,50 @@ DEBIT   1140  Receivable — Peshgi (Loans)    amount_pkr
 DEBIT   1010 / 1020  Cash / Bank Account             amount_pkr
   CREDIT  1140       Receivable — Peshgi (Loans)     amount_pkr
 ```
+
+---
+
+## 12.7 Employee Advances (Phase 21)
+
+Three accounting audits (docs/16, /17, /18) flagged salary advances as absent: no model, no account, no endpoint, no screen. `payroll_line_items.other_deductions_pkr` — documented elsewhere as "Advances repaid, etc." — was the only candidate hook, and Phase 20 made it reject rather than post: crediting a *liability* for an advance recovery would leave the employee's receivable standing while inventing an obligation, and the entry would still balance, so no invariant would catch it. This section is the receivable that makes recovery correct, kept **strictly separate from the AR (storage bills) ledger and from Peshgi**, mirroring the separation §12.6 already establishes for farmer loans.
+
+### JE-22: Employee Advance Issued
+
+**Operational trigger**: Owner issues a cash advance against an employee's future salary.
+**Source document**: `employee_advances` table
+
+```
+DEBIT   1230  Advances to Employees          principal_pkr
+  CREDIT  1010 / 1020  Cash / Bank Account      principal_pkr
+```
+
+**Limits, enforced at issue**: one ACTIVE advance per employee (a second attempt while a balance is outstanding is rejected), and the principal cannot exceed the employee's own one-month pay — basic salary for SALARIED staff, `daily_wage_pkr × 26` for DAILY_WAGE staff, the same 26-working-day figure payroll already uses when snapshotting a wage line. Both SALARIED and DAILY_WAGE employees are eligible.
+
+### Recovery — no journal entry of its own
+
+Recovery does not post a standalone entry. It rides inside that period's payroll entry (JE-15 or JE-15B, §11.3) as one more credit line to 1230, alongside the EOBI/tax credit lines already there:
+
+```
+  CREDIT  1230  Advances to Employees          advance_recovery_pkr (if > 0)
+```
+
+**Mechanism — auto-suggest, accountant confirms.** When a payroll draft is created, each employee's line is pre-filled with `min(monthly_installment, balance_outstanding)` from their ACTIVE advance, if one exists. The accountant may edit the figure (including down to zero, to skip a month) before finalizing; any edit is validated against the advance's live outstanding balance, not the pre-filled figure. On finalize, one `employee_advance_recoveries` row is written per line that carried a non-zero recovery, the advance's `balance_outstanding_pkr` is decremented, and the advance closes to `RECOVERED` once it reaches zero.
+
+**Reversing the payroll run unwinds the recovery.** If a finalized run is later reversed (`PayrollRunStatus.REVERSED`, added in Phase 20 — see docs/18), each recovery row it created is soft-voided and the corresponding advance balance is restored — otherwise the balance would stay reduced while the payroll that reduced it had been undone. A `WRITTEN_OFF` advance is never reverted back to `ACTIVE` by this — that is a separate OWNER decision write-off (below) makes, and reversal must not silently undo it.
+
+### JE-23: Employee Advance Written Off
+
+**Operational trigger**: OWNER writes off an advance's remaining balance as bad debt — typically an employee who has left with an unrecovered amount the final payroll run could not fully cover.
+**Source document**: `employee_advances` table
+
+```
+DEBIT   6080  Bad Debt Expense               balance_outstanding_pkr
+  CREDIT  1230  Advances to Employees          balance_outstanding_pkr
+```
+
+Mirrors JE-20 (Peshgi write-off) exactly, substituting 1230 for 1140.
+
+**Leaver settlement has no separate flow.** Terminating an employee (`employees.terminate`) posts nothing and does not touch any advance; it only flips the employee to inactive. The employee's final payroll run recovers what it can like any other month, and whatever remains outstanding afterward is the write-off case above. The employee-detail screen surfaces the outstanding balance at termination time precisely because nothing else will.
 
 ---
 

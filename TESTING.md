@@ -92,6 +92,10 @@
 > asserting "5 concurrent creates all succeed with unique numbers" — passed for
 > the entire period during which advisory locking was silently broken, because a
 > unique constraint was carrying it. Assert the loser, not just the winner.
+>
+> Live suite after employee advances (2026-07-30, Phase 21): **213 unit + 499 integration (api) + 99 unit (web) green**. New coverage: JE-15/JE-15B balancing with a nonzero advance recovery + omitting the 1230 line when zero (unit); 2 salary-slip conditional-row cases (unit); issue posting JE-22, principal-cap rejection, write-off posting JE-23, RBAC, and a GL-1230-vs-subledger invariant mirroring the phase/19 GL-1140 pattern (employee-advances integration); payroll draft pre-fill, line-edit over-recovery rejection, full-recovery closing the advance to RECOVERED, and — the highest-value case — reversing the payroll run restoring the advance balance and soft-voiding (not deleting) the recovery row, plus confirming a WRITTEN_OFF advance is not resurrected by that reversal (payroll integration). **A third concurrency test joins the "assert the loser" list**: two concurrent advance-issue calls for the same employee must yield exactly one `201` and one `409 EMPLOYEE_ADVANCE_ALREADY_ACTIVE` — the guard had no lock until this test caught it.
+>
+> This phase's coverage was cross-checked against the live running dev server, not only the isolated test database: every endpoint the new/modified screens call was driven with their exact payload shapes (issue → payroll pre-fill → line-edit → finalize → reverse), with every derived number — the pre-fill amount, the recomputed net pay, the JE balance, the restored subledger balance — verified by hand against the real response. The Chrome browser extension was unavailable for a literal UI click-through; this is the closest verification available in that circumstance and exercises the same code path the UI does, since the pages are thin wrappers over these exact endpoints.
 
 ### Phase 14 Tests (Rooms & Racks)
 
