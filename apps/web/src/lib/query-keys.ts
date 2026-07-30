@@ -33,6 +33,11 @@ export const qk = {
     list: (filters: ListFilters) => ['loans', 'list', filters] as const,
     detail: (id: string) => ['loans', 'detail', id] as const,
   },
+  employeeAdvances: {
+    all: ['employee-advances'] as const,
+    list: (filters: ListFilters) => ['employee-advances', 'list', filters] as const,
+    detail: (id: string) => ['employee-advances', 'detail', id] as const,
+  },
   chambers: {
     all: ['chambers'] as const,
     list: (filters: ListFilters) => ['chambers', 'list', filters] as const,

@@ -9,6 +9,7 @@ import {
   Coins,
   FileBarChart,
   FilePlus2,
+  HandCoins,
   Layers,
   LockKeyhole,
   ReceiptText,
@@ -40,6 +41,7 @@ const cards: AcctCard[] = [
   { title: 'Depreciation Runs', href: '/accounting/fixed-assets/runs', icon: CalendarClock, description: 'Run monthly depreciation (JE-13) and review past runs.' },
   { title: 'Employees', href: '/accounting/payroll/employees', icon: Users, description: 'Manage salaried staff and daily-wage workers, with EOBI registration.' },
   { title: 'Payroll Runs', href: '/accounting/payroll/runs', icon: Wallet, description: 'Create monthly payroll runs, finalize, pay and remit.' },
+  { title: 'Employee Advances', href: '/accounting/payroll/advances', icon: HandCoins, description: 'Issue cash advances against salary and track recovery through payroll.' },
   { title: 'Expense Vouchers', href: '/accounting/expenses', icon: ReceiptText, description: 'Record, approve, accrue, and pay operating expenses.' },
 ];
 
