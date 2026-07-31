@@ -8,6 +8,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { PageMetaProvider } from '@/components/layout/page-meta';
 import { CommandPaletteProvider } from '@/components/layout/command-palette';
 import { ConfirmDialogProvider } from '@/components/form/confirm-dialog';
+import { NumberLocaleProvider } from '@/components/layout/number-locale-provider';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -24,18 +25,20 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={client}>
-      <NuqsAdapter>
-        <TooltipProvider delayDuration={200}>
-          <PageMetaProvider>
-            <ConfirmDialogProvider>
-              <CommandPaletteProvider>
-                {children}
-                <Toaster richColors position="top-right" />
-              </CommandPaletteProvider>
-            </ConfirmDialogProvider>
-          </PageMetaProvider>
-        </TooltipProvider>
-      </NuqsAdapter>
+      <NumberLocaleProvider>
+        <NuqsAdapter>
+          <TooltipProvider delayDuration={200}>
+            <PageMetaProvider>
+              <ConfirmDialogProvider>
+                <CommandPaletteProvider>
+                  {children}
+                  <Toaster richColors position="top-right" />
+                </CommandPaletteProvider>
+              </ConfirmDialogProvider>
+            </PageMetaProvider>
+          </TooltipProvider>
+        </NuqsAdapter>
+      </NumberLocaleProvider>
     </QueryClientProvider>
   );
 }

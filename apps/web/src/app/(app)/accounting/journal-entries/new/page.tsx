@@ -8,10 +8,12 @@ import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
+import { fmtPlain } from '@/lib/accounting-format';
 
 interface Account {
   account_code: string;
@@ -30,6 +32,22 @@ const SELECT_CLASS = 'flex h-8 w-full rounded-md border border-input bg-transpar
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyLine = (): Line => ({ account_code: '', debit_amount: '', credit_amount: '', description: '' });
 
+/**
+ * Parse an amount cell. Returns `null` for a non-empty value that is not a
+ * valid amount, so the caller can refuse rather than post a wrong number.
+ *
+ * Group separators are stripped first: a facility set to lakh/crore reads and
+ * types "40,00,000", and `parseFloat` would silently return **40** for that —
+ * a wrong figure, not an obvious one. Empty stays 0, which is how a blank
+ * debit-or-credit cell is meant to read.
+ */
+export function parseAmount(raw: string): number | null {
+  const s = raw.replace(/[,\s ]/g, '');
+  if (s === '') return 0;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 export default function NewJournalEntryPage() {
   const router = useRouter();
   const { user } = useAuthStore();
@@ -47,9 +65,21 @@ export default function NewJournalEntryPage() {
   }, []);
 
   const detailAccounts = accounts.filter((a) => a.account_type === 'DETAIL' && a.is_active);
-  const totalDebit = lines.reduce((s, l) => s + (parseFloat(l.debit_amount) || 0), 0);
-  const totalCredit = lines.reduce((s, l) => s + (parseFloat(l.credit_amount) || 0), 0);
-  const balanced = Math.abs(totalDebit - totalCredit) < 0.005 && totalDebit > 0;
+  const accountOptions: ComboboxOption[] = detailAccounts.map((a) => ({
+    value: a.account_code,
+    label: `${a.account_code} — ${a.account_name}`,
+    hint: a.account_name,
+  }));
+
+  // A cell that will not parse must block the post, not contribute zero to a
+  // total that then reads "Balanced".
+  const hasUnparseableAmount = lines.some(
+    (l) => parseAmount(l.debit_amount) === null || parseAmount(l.credit_amount) === null,
+  );
+  const totalDebit = lines.reduce((s, l) => s + (parseAmount(l.debit_amount) ?? 0), 0);
+  const totalCredit = lines.reduce((s, l) => s + (parseAmount(l.credit_amount) ?? 0), 0);
+  const balanced =
+    !hasUnparseableAmount && Math.abs(totalDebit - totalCredit) < 0.005 && totalDebit > 0;
 
   const updateLine = (idx: number, patch: Partial<Line>) => setLines((c) => c.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   const addLine = () => setLines((c) => [...c, emptyLine()]);
@@ -58,6 +88,7 @@ export default function NewJournalEntryPage() {
   const submit = async () => {
     setError(null);
     if (!description.trim()) return setError('Description is required');
+    if (hasUnparseableAmount) return setError('One or more amounts are not a valid number');
     if (!balanced) return setError('Debits and credits must balance to a positive total');
     setSubmitting(true);
     try {
@@ -70,8 +101,8 @@ export default function NewJournalEntryPage() {
           posting_status: postingStatus,
           lines: lines.map((l) => ({
             account_code: l.account_code,
-            debit_amount: parseFloat(l.debit_amount) || 0,
-            credit_amount: parseFloat(l.credit_amount) || 0,
+            debit_amount: parseAmount(l.debit_amount) ?? 0,
+            credit_amount: parseAmount(l.credit_amount) ?? 0,
             description: l.description.trim() || undefined,
           })),
         },
@@ -146,19 +177,26 @@ export default function NewJournalEntryPage() {
             {lines.map((l, idx) => (
               <TableRow key={idx}>
                 <TableCell>
-                  <select value={l.account_code} onChange={(e) => updateLine(idx, { account_code: e.target.value })} className={`${SELECT_CLASS} font-mono`}>
-                    <option value="">Select account…</option>
-                    {detailAccounts.map((a) => <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.account_name}</option>)}
-                  </select>
+                  <Combobox
+                    options={accountOptions}
+                    value={l.account_code}
+                    onChange={(v) => updateLine(idx, { account_code: v })}
+                    placeholder="Select account…"
+                    searchPlaceholder="Search by code or name…"
+                    testId={`combobox-account_code-${idx}`}
+                  />
                 </TableCell>
                 <TableCell>
                   <Input value={l.description} onChange={(e) => updateLine(idx, { description: e.target.value })} placeholder="Optional" className="h-8" />
                 </TableCell>
                 <TableCell>
-                  <Input type="number" step={0.01} min={0} value={l.debit_amount} onChange={(e) => updateLine(idx, { debit_amount: e.target.value, credit_amount: '' })} className="h-8 text-right tabular-nums" />
+                  {/* Text, not number: a number input silently discards the group
+                      separators a lakh/crore reader types, so "40,00,000" lands
+                      as an empty cell. parseAmount strips them and validates. */}
+                  <Input inputMode="decimal" value={l.debit_amount} onChange={(e) => updateLine(idx, { debit_amount: e.target.value, credit_amount: '' })} aria-invalid={parseAmount(l.debit_amount) === null} className="h-8 text-right tabular-nums aria-[invalid=true]:border-destructive" />
                 </TableCell>
                 <TableCell>
-                  <Input type="number" step={0.01} min={0} value={l.credit_amount} onChange={(e) => updateLine(idx, { credit_amount: e.target.value, debit_amount: '' })} className="h-8 text-right tabular-nums" />
+                  <Input inputMode="decimal" value={l.credit_amount} onChange={(e) => updateLine(idx, { credit_amount: e.target.value, debit_amount: '' })} aria-invalid={parseAmount(l.credit_amount) === null} className="h-8 text-right tabular-nums aria-[invalid=true]:border-destructive" />
                 </TableCell>
                 <TableCell>
                   {lines.length > 2 && (
@@ -172,11 +210,15 @@ export default function NewJournalEntryPage() {
         <div className="flex items-center justify-between border-t bg-muted/30 px-4 py-3 text-sm">
           <Button variant="link" className="h-auto p-0" onClick={addLine}><Plus className="h-4 w-4" aria-hidden />Add line</Button>
           <div className="flex items-center gap-6">
-            <span className="tabular-nums">Dr {totalDebit.toLocaleString()}</span>
-            <span className="tabular-nums">Cr {totalCredit.toLocaleString()}</span>
+            <span className="tabular-nums">Dr {fmtPlain(totalDebit, 2)}</span>
+            <span className="tabular-nums">Cr {fmtPlain(totalCredit, 2)}</span>
             <span className={`inline-flex items-center gap-1.5 font-medium ${balanced ? 'text-green-600' : 'text-destructive'}`}>
               {balanced ? <CheckCircle2 className="h-4 w-4" /> : <TriangleAlert className="h-4 w-4" />}
-              {balanced ? 'Balanced' : `Diff ${Math.abs(totalDebit - totalCredit).toLocaleString()}`}
+              {hasUnparseableAmount
+                ? 'Invalid amount'
+                : balanced
+                  ? 'Balanced'
+                  : `Diff ${fmtPlain(Math.abs(totalDebit - totalCredit), 2)}`}
             </span>
           </div>
         </div>

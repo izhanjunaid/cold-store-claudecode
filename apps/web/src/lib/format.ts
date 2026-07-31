@@ -4,8 +4,31 @@
  * One format per data type, everywhere: money is "Rs 1,234,567", dates are
  * "22 Jun 2026", timestamps are "22 Jun 2026, 13:07". Financial statements
  * keep their own accounting conventions (parenthesised negatives, em-dash
- * zeros) — see accounting-format.ts.
+ * zeros) — see accounting-format.ts, which reads its number locale from here.
  */
+
+/**
+ * The facility's `number_format` setting. **This module is the only holder** —
+ * accounting-format.ts imports `getNumberLocale()` rather than keeping a copy,
+ * or the setting would move operational screens while leaving the financial
+ * statements behind.
+ *
+ * Note that ICU's `en-PK` groups *internationally* (1,234,567) — only `en-IN`
+ * produces South Asian lakh/crore grouping (12,34,567). A facility that reads
+ * lakh/crore must select en-IN in Settings; the shipped default is en-PK.
+ */
+export type NumberLocale = 'en-PK' | 'en-IN';
+
+let numberLocale: NumberLocale = 'en-PK';
+
+/** Called once per session from <NumberLocaleSync/>; see app/(app)/layout.tsx. */
+export function setNumberLocale(locale: NumberLocale): void {
+  numberLocale = locale;
+}
+
+export function getNumberLocale(): NumberLocale {
+  return numberLocale;
+}
 
 const DATE_FMT = new Intl.DateTimeFormat('en-GB', {
   day: 'numeric',
@@ -32,7 +55,7 @@ function toDate(d: string | number | Date | null | undefined): Date | null {
 export function formatMoney(n: number | null | undefined, opts: { dp?: number } = {}): string {
   const dp = opts.dp ?? 0;
   if (n === null || n === undefined || Number.isNaN(n)) return '—';
-  return `Rs ${n.toLocaleString('en-PK', {
+  return `Rs ${n.toLocaleString(numberLocale, {
     minimumFractionDigits: dp,
     maximumFractionDigits: dp,
   })}`;
@@ -53,5 +76,5 @@ export function formatDateTime(d: string | number | Date | null | undefined): st
 /** "1,234" — plain counts (bags, lots). */
 export function formatCount(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return '—';
-  return n.toLocaleString('en-PK', { maximumFractionDigits: 0 });
+  return n.toLocaleString(numberLocale, { maximumFractionDigits: 0 });
 }

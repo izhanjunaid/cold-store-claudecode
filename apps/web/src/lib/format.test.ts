@@ -1,5 +1,32 @@
-import { describe, expect, it } from 'vitest';
-import { formatCount, formatDate, formatDateTime, formatMoney } from './format';
+import { afterEach, describe, expect, it } from 'vitest';
+import { formatCount, formatDate, formatDateTime, formatMoney, setNumberLocale } from './format';
+import { fmtAcct, fmtPlain } from './accounting-format';
+
+// Every test below assumes the shipped default. The locale is module state, so
+// any test that changes it must put it back.
+afterEach(() => setNumberLocale('en-PK'));
+
+describe('number locale (facility `number_format` setting)', () => {
+  it('defaults to en-PK, which ICU groups internationally', () => {
+    expect(formatMoney(1234567)).toBe('Rs 1,234,567');
+    expect(formatCount(100000)).toBe('100,000');
+  });
+
+  it('groups by lakh/crore under en-IN', () => {
+    setNumberLocale('en-IN');
+    expect(formatMoney(1234567)).toBe('Rs 12,34,567');
+    expect(formatCount(100000)).toBe('1,00,000');
+  });
+
+  // The setting is worthless if it moves operational screens but not the
+  // financial statements. accounting-format must read this module's locale,
+  // not keep its own copy — that duplication is exactly what P1-5 cleaned up.
+  it('applies to the statement formatters too, from the same holder', () => {
+    setNumberLocale('en-IN');
+    expect(fmtAcct(1234567)).toBe('12,34,567');
+    expect(fmtPlain(1234567)).toBe('12,34,567');
+  });
+});
 
 describe('formatMoney', () => {
   it('prefixes Rs with thousands separators and no decimals by default', () => {

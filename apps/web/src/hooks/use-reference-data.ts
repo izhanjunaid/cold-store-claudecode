@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
+import type { NumberLocale } from '@/lib/format';
 
 const REFERENCE_STALE_TIME = 5 * 60_000;
 
@@ -54,6 +55,8 @@ export interface RatePlanRef {
 }
 
 export interface FacilitySettings {
+  /** Number grouping for every money/count on screen — see lib/format.ts. */
+  number_format?: NumberLocale;
   weight_dispute_threshold_kg?: number;
   chamber_capacity_warning_pct?: number;
   backdating_max_days?: number | null;

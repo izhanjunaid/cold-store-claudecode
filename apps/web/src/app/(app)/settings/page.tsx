@@ -170,8 +170,8 @@ export default function SettingsPage() {
             <div>
               <Label className="mb-2 block">Number Format</Label>
               <div className="flex gap-4 text-sm">
-                <label className="flex items-center gap-2"><input type="radio" name="numberFormat" checked={numberFormat === 'en-PK'} onChange={() => setNumberFormat('en-PK')} /> en-PK (1,00,000)</label>
-                <label className="flex items-center gap-2"><input type="radio" name="numberFormat" checked={numberFormat === 'en-IN'} onChange={() => setNumberFormat('en-IN')} /> en-IN (1,00,000)</label>
+                <label className="flex items-center gap-2"><input type="radio" name="numberFormat" checked={numberFormat === 'en-PK'} onChange={() => setNumberFormat('en-PK')} /> International <span className="tabular-nums text-muted-foreground">1,234,567</span></label>
+                <label className="flex items-center gap-2"><input type="radio" name="numberFormat" checked={numberFormat === 'en-IN'} onChange={() => setNumberFormat('en-IN')} /> Lakh / crore <span className="tabular-nums text-muted-foreground">12,34,567</span></label>
               </div>
             </div>
 

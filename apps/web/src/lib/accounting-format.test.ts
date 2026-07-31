@@ -3,13 +3,13 @@ import { fmtAcct, fmtPct, variance, fmtRatio } from './accounting-format';
 
 describe('fmtAcct', () => {
   it('renders zero as an em dash', () => {
-    expect(fmtAcct(0)).toBe('–');
-    expect(fmtAcct(0.0004)).toBe('–'); // rounds to 0 at 0dp
+    expect(fmtAcct(0)).toBe('—');
+    expect(fmtAcct(0.0004)).toBe('—'); // rounds to 0 at 0dp
   });
   it('renders null/undefined/NaN as em dash', () => {
-    expect(fmtAcct(null)).toBe('–');
-    expect(fmtAcct(undefined)).toBe('–');
-    expect(fmtAcct(Number.NaN)).toBe('–');
+    expect(fmtAcct(null)).toBe('—');
+    expect(fmtAcct(undefined)).toBe('—');
+    expect(fmtAcct(Number.NaN)).toBe('—');
   });
   it('groups thousands', () => {
     expect(fmtAcct(1234567)).toBe('1,234,567');
@@ -28,7 +28,7 @@ describe('fmtPct', () => {
     expect(fmtPct(12.34)).toBe('12.3%');
   });
   it('handles nullish', () => {
-    expect(fmtPct(null)).toBe('–');
+    expect(fmtPct(null)).toBe('—');
   });
 });
 
@@ -51,7 +51,7 @@ describe('variance', () => {
 
 describe('fmtRatio', () => {
   it('guards divide-by-zero', () => {
-    expect(fmtRatio(5, 0)).toBe('–');
+    expect(fmtRatio(5, 0)).toBe('—');
   });
   it('formats with x suffix', () => {
     expect(fmtRatio(3, 2)).toBe('1.50x');
