@@ -262,6 +262,24 @@ Check: Debits (26,000) = Credits (26,000) ✓
 
 > For cheque: the entry is created on receipt date but flagged `pending_clearance = true`. On clearance confirmation, no new entry is needed (already posted). If cheque bounces, see JE-06.
 
+> ⚠️ **Superseded — decision of 2026-07-31.** The paragraph above contradicts §364-368 below: it debits `1020` on receipt (overstating the bank) while §366 says *"Do NOT post JE-02 until the cheque clears."* The as-built code satisfies neither — `payment.service.ts:97` stamps every cheque `CLEARED` on receipt and posts straight to `1020`, and `PENDING` is never assigned.
+>
+> **The adopted model is a Cheques-in-Hand clearing account**, which satisfies both intents:
+>
+> ```
+> RECEIPT (any cheque, post-dated or not)
+>   DR  1025 Cheques in Hand      amount
+>     CR  1110-1150 <party AR>      amount     clearance_status = PENDING
+>
+> CLEARANCE (dated the clearance date)
+>   DR  1020 Bank Account         amount
+>     CR  1025 Cheques in Hand      amount     clearance_status = CLEARED
+>
+> BOUNCE — reverses out of 1025, never 1020 (see JE-06)
+> ```
+>
+> The payment is recognised when received (this section's intent) and the bank balance never includes an uncleared cheque (§366's intent). Requires new CoA account `1025`, a clearance action, and JE-02/JE-06 changes. **Not yet implemented** — tracked as P1-12 in `20_audit_backlog.md`. Rewrite §259 and §364-368 to match when it is built.
+
 ---
 
 ### JE-03: Advance Payment Received (Before Invoice)

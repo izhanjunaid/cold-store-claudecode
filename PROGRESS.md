@@ -7,7 +7,7 @@
 - **Active Task**: None — employee advances complete.
 - **Blockers**: None. Field caveat (unchanged): the F-2a installer/updater changes are verified against a scratch postgres:16 container but should be exercised once on a real box before the next client rollout. Pre-existing peshgi produce-deduction repayments recorded before the phase/19 fix (if any) carry no journal entry and need a one-time manual adjusting JE.
 - **Last Updated**: 2026-07-30
-- **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision. Rooms & Racks: partial inter-room split (child-lot move) deferred — inter-room moves are whole-lot in v1. See `docs/18` §9 for the rest of the phase/20 backlog (GST settlement, contra vouchers, cash-negative guard, `number_format` wiring, PDF money formatting, the cheque-clearing model).
+- **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision. Rooms & Racks: partial inter-room split (child-lot move) deferred — inter-room moves are whole-lot in v1. **`docs/20_audit_backlog.md` is the live register of all 40 phase/20 audit findings** — 14 fixed, 26 open, each status re-verified against source on 2026-07-31. Read it before assuming any audit item is or isn't done.
 
 ## Audit Remediation (Phase 20, 2026-07-25)
 
@@ -23,7 +23,7 @@ Third accounting audit + correctness-first remediation on `phase/20-audit-remedi
 
 **Tests (TDD)**: +9 unit, +18 integration, each written first and watched fail. Notable: the expense double-pay test returned 201/201 before the lock, and the advisory-lock suite includes a regression case for the broken idiom. **Assert the loser in concurrency tests** — the pre-existing lot-number test ("5 concurrent creates all succeed") stayed green throughout the period when locking was silently broken, because a unique constraint was carrying it.
 
-**Known open** (see docs/18 §9): cheque clearing model (spec requires it; `docs/09` §365 says do not post JE-02 until clearance — never implemented), GST settlement, contra vouchers, cash-negative guard, `number_format` wired to nothing, PDF money formatting. No web UI for the two reversal endpoints (payroll/asset).
+**Known open**: see `docs/20_audit_backlog.md` for the full register with severities and per-finding status. Headline items still open: GST settlement (2020 credited forever, never debited), the cheque-clearing model (decided 2026-07-31 — Cheques-in-Hand 1025 — but not built), contra vouchers, cash-negative guard, `number_format` wired to nothing, PDF money formatting, and no web UI for the two reversal endpoints (payroll/asset).
 
 ## Employee Advances (Phase 21, 2026-07-26 → 30)
 

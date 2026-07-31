@@ -130,7 +130,7 @@ One genuine spec inconsistency to settle when implementing: §262 says the entry
 - **No depreciation-run reversal** — `DepreciationScheduleStatus` has no `REVERSED` member; a separate change.
 - **No `2050` holding account** for payroll other-deductions — see finding 4.
 - **No cheque-clearing model** — see finding 8.
-- ~~Employee advances~~ — **built in Phase 21** (docs/19). GST settlement (2020 is credited forever and never debited), contra/cash-book vouchers, a cash-negative guard, the `number_format` setting being wired to nothing, and PDF money formatting all remain open. The full backlog with severities lives in the phase plan.
+- ~~Employee advances~~ — **built in Phase 21** (docs/19). GST settlement (2020 is credited forever and never debited), contra/cash-book vouchers, a cash-negative guard, the `number_format` setting being wired to nothing, and PDF money formatting all remain open. **The full backlog with severities lives in `20_audit_backlog.md`** — all 40 findings, each with its current status re-verified against source.
 
 ---
 
