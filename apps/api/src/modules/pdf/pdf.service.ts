@@ -5,6 +5,30 @@ import { join } from 'path';
 // Register equality helper used in the template
 Handlebars.registerHelper('eq', (a: unknown, b: unknown) => a === b);
 
+/** Facility `number_format`. en-PK groups internationally; only en-IN is lakh/crore. */
+export type PdfNumberLocale = 'en-PK' | 'en-IN';
+
+export const DEFAULT_PDF_LOCALE: PdfNumberLocale = 'en-PK';
+
+/**
+ * `{{money x}}` — the only way an amount should reach a PDF.
+ *
+ * Templates previously interpolated raw numbers, so an invoice printed
+ * `1234567.5` and a salary slip `45000`. Two decimals always: these are
+ * documents a customer or an employee is handed and reconciles against, and a
+ * dropped trailing zero reads as a different number.
+ *
+ * The locale is read from the render root rather than module state, so two
+ * facilities rendering concurrently cannot pick up each other's setting.
+ */
+Handlebars.registerHelper('money', function (value: unknown, options: Handlebars.HelperOptions) {
+  if (value === null || value === undefined || value === '') return '—';
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return '—';
+  const locale = (options?.data?.root?.numberLocale as PdfNumberLocale) ?? DEFAULT_PDF_LOCALE;
+  return n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+});
+
 export interface StorageReceiptData {
   // Facility
   facilityName: string;
@@ -108,16 +132,25 @@ function getDispatchNoteTemplate(): HandlebarsTemplateDelegate {
   return _dispatchNoteTemplate;
 }
 
-export function renderStorageReceiptHtml(data: StorageReceiptData): string {
-  return getTemplate()(data);
+export function renderStorageReceiptHtml(
+  data: StorageReceiptData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): string {
+  return getTemplate()({ ...data, numberLocale });
 }
 
-export function renderTransferAcknowledgmentHtml(data: TransferAcknowledgmentData): string {
-  return getTransferTemplate()(data);
+export function renderTransferAcknowledgmentHtml(
+  data: TransferAcknowledgmentData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): string {
+  return getTransferTemplate()({ ...data, numberLocale });
 }
 
-export async function renderStorageReceipt(data: StorageReceiptData): Promise<Buffer> {
-  const html = renderStorageReceiptHtml(data);
+export async function renderStorageReceipt(
+  data: StorageReceiptData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): Promise<Buffer> {
+  const html = renderStorageReceiptHtml(data, numberLocale);
 
   // Lazy import puppeteer so tests that mock this module don't need Chromium
   const puppeteer = await import('puppeteer');
@@ -142,8 +175,9 @@ export async function renderStorageReceipt(data: StorageReceiptData): Promise<Bu
 
 export async function renderTransferAcknowledgment(
   data: TransferAcknowledgmentData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
 ): Promise<Buffer> {
-  const html = renderTransferAcknowledgmentHtml(data);
+  const html = renderTransferAcknowledgmentHtml(data, numberLocale);
 
   const puppeteer = await import('puppeteer');
   const browser = await puppeteer.default.launch({
@@ -231,12 +265,18 @@ function getInvoiceTemplate(): HandlebarsTemplateDelegate {
   return _invoiceTemplate;
 }
 
-export function renderInvoiceHtml(data: InvoicePdfData): string {
-  return getInvoiceTemplate()(data);
+export function renderInvoiceHtml(
+  data: InvoicePdfData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): string {
+  return getInvoiceTemplate()({ ...data, numberLocale });
 }
 
-export async function renderInvoice(data: InvoicePdfData): Promise<Buffer> {
-  const html = renderInvoiceHtml(data);
+export async function renderInvoice(
+  data: InvoicePdfData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): Promise<Buffer> {
+  const html = renderInvoiceHtml(data, numberLocale);
 
   const puppeteer = await import('puppeteer');
   const browser = await puppeteer.default.launch({
@@ -295,12 +335,18 @@ function getPartyStatementTemplate(): HandlebarsTemplateDelegate {
   return _partyStatementTemplate;
 }
 
-export function renderPartyStatementHtml(data: PartyStatementData): string {
-  return getPartyStatementTemplate()(data);
+export function renderPartyStatementHtml(
+  data: PartyStatementData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): string {
+  return getPartyStatementTemplate()({ ...data, numberLocale });
 }
 
-export async function renderPartyStatement(data: PartyStatementData): Promise<Buffer> {
-  const html = renderPartyStatementHtml(data);
+export async function renderPartyStatement(
+  data: PartyStatementData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): Promise<Buffer> {
+  const html = renderPartyStatementHtml(data, numberLocale);
 
   const puppeteer = await import('puppeteer');
   const browser = await puppeteer.default.launch({
@@ -374,12 +420,18 @@ function getSalarySlipTemplate(): HandlebarsTemplateDelegate {
   return _salarySlipTemplate;
 }
 
-export function renderSalarySlipHtml(data: SalarySlipData): string {
-  return getSalarySlipTemplate()(data);
+export function renderSalarySlipHtml(
+  data: SalarySlipData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): string {
+  return getSalarySlipTemplate()({ ...data, numberLocale });
 }
 
-export async function renderSalarySlip(data: SalarySlipData): Promise<Buffer> {
-  return htmlToA5Pdf(renderSalarySlipHtml(data));
+export async function renderSalarySlip(
+  data: SalarySlipData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): Promise<Buffer> {
+  return htmlToA5Pdf(renderSalarySlipHtml(data, numberLocale));
 }
 
 export interface LoanAcknowledgmentData {
@@ -405,12 +457,18 @@ function getLoanAcknowledgmentTemplate(): HandlebarsTemplateDelegate {
   return _loanAckTemplate;
 }
 
-export function renderLoanAcknowledgmentHtml(data: LoanAcknowledgmentData): string {
-  return getLoanAcknowledgmentTemplate()(data);
+export function renderLoanAcknowledgmentHtml(
+  data: LoanAcknowledgmentData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): string {
+  return getLoanAcknowledgmentTemplate()({ ...data, numberLocale });
 }
 
-export async function renderLoanAcknowledgment(data: LoanAcknowledgmentData): Promise<Buffer> {
-  return htmlToA5Pdf(renderLoanAcknowledgmentHtml(data));
+export async function renderLoanAcknowledgment(
+  data: LoanAcknowledgmentData,
+  numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE,
+): Promise<Buffer> {
+  return htmlToA5Pdf(renderLoanAcknowledgmentHtml(data, numberLocale));
 }
 
 export interface GatePassReceiptData {

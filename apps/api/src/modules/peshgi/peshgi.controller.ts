@@ -13,6 +13,7 @@ import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 import { PeshgiService } from './peshgi.service';
 import { renderLoanAcknowledgment } from '../pdf/pdf.service';
+import { resolveFacilitySettings } from '../facility/facility.service';
 
 const IdParam = z.object({ id: z.string().uuid() });
 const FormatQuery = z.object({ format: z.enum(['json', 'pdf']).default('json') });
@@ -116,7 +117,7 @@ export async function peshgiRoutes(app: FastifyInstance) {
         const [facility, party] = await Promise.all([
           app.prisma.facility.findUnique({
             where: { id: facilityId },
-            select: { name: true, city: true },
+            select: { name: true, city: true, settings: true },
           }),
           app.prisma.party.findUnique({
             where: { id: loan.party_id },
@@ -124,6 +125,7 @@ export async function peshgiRoutes(app: FastifyInstance) {
           }),
         ]);
         if (!facility || !party) throw Errors.PARTY_NOT_FOUND();
+        const numberLocale = resolveFacilitySettings(facility.settings).number_format;
         const buf = await renderLoanAcknowledgment({
           facilityName: facility.name,
           facilityCity: facility.city,
@@ -135,7 +137,7 @@ export async function peshgiRoutes(app: FastifyInstance) {
           sourceAssetAccountCode: loan.source_asset_account_code,
           journalEntryId: loan.issue_journal_entry_id,
           notes: loan.notes,
-        });
+        }, numberLocale);
         reply
           .header('content-type', 'application/pdf')
           .header(

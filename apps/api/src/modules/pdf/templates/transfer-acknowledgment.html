@@ -191,7 +191,7 @@
         <tr><td class="label">Bags Transferred</td><td style="font-weight:700;font-size:13px">{{quantityBags}}</td></tr>
         <tr><td class="label">Commodity</td><td>{{commodityName}}{{#if varietyName}} / {{varietyName}}{{/if}}</td></tr>
         {{#if transferPricePkr}}
-        <tr><td class="label">Transfer Price</td><td>Rs. {{transferPricePkr}}</td></tr>
+        <tr><td class="label">Transfer Price</td><td>Rs. {{money transferPricePkr}}</td></tr>
         {{/if}}
         {{#if childLotNumber}}
         <tr><td class="label">New Child Lot</td><td><strong>{{childLotNumber}}</strong></td></tr>
@@ -217,7 +217,7 @@
         </tr>
         {{#if transferPricePkr}}
         <tr>
-          <td>Rs. {{transferPricePkr}}</td>
+          <td>Rs. {{money transferPricePkr}}</td>
           <td class="label" style="text-align:right">قیمت</td>
         </tr>
         {{/if}}

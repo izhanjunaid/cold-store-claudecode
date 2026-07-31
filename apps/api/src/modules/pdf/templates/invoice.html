@@ -293,8 +293,8 @@
           <td><span class="line-type-badge lt-{{lineType}}">{{lineType}}</span></td>
           <td>{{description}}</td>
           <td class="num">{{quantity}}</td>
-          <td class="num">{{unitPricePkr}}</td>
-          <td class="num"><strong>{{amountPkr}}</strong></td>
+          <td class="num">{{money unitPricePkr}}</td>
+          <td class="num"><strong>{{money amountPkr}}</strong></td>
         </tr>
         {{/each}}
       </tbody>
@@ -304,29 +304,29 @@
     <table class="totals">
       <tr>
         <td class="label">Subtotal</td>
-        <td class="value">{{subTotalPkr}}</td>
+        <td class="value">{{money subTotalPkr}}</td>
       </tr>
       {{#if discountLabel}}
       <tr>
         <td class="label">{{discountLabel}}</td>
-        <td class="value">-{{discountAmountPkr}}</td>
+        <td class="value">-{{money discountAmountPkr}}</td>
       </tr>
       {{/if}}
       <tr>
         <td class="label">GST ({{gstRate}}%)</td>
-        <td class="value">{{gstAmountPkr}}</td>
+        <td class="value">{{money gstAmountPkr}}</td>
       </tr>
       <tr class="total-row">
         <td class="label">Total</td>
-        <td class="value">{{totalPkr}}</td>
+        <td class="value">{{money totalPkr}}</td>
       </tr>
       <tr>
         <td class="label">Amount Paid</td>
-        <td class="value">{{amountPaidPkr}}</td>
+        <td class="value">{{money amountPaidPkr}}</td>
       </tr>
       <tr class="balance-row">
         <td class="label">Balance Due</td>
-        <td class="value">{{balanceDuePkr}}</td>
+        <td class="value">{{money balanceDuePkr}}</td>
       </tr>
     </table>
 

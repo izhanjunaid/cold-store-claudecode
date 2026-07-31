@@ -184,7 +184,7 @@
     <tbody>
       <tr class="opening">
         <td colspan="6">Opening Balance / ابتدائی بیلنس</td>
-        <td class="num">{{openingBalancePkr}}</td>
+        <td class="num">{{money openingBalancePkr}}</td>
       </tr>
       {{#each entries}}
       <tr>
@@ -192,20 +192,20 @@
         <td><span class="type-badge t-{{type}}">{{type}}</span></td>
         <td>{{#if reference}}{{reference}}{{else}}—{{/if}}</td>
         <td>{{description}}</td>
-        <td class="num">{{#if debitPkr}}{{debitPkr}}{{else}}—{{/if}}</td>
-        <td class="num">{{#if creditPkr}}{{creditPkr}}{{else}}—{{/if}}</td>
-        <td class="num">{{balancePkr}}</td>
+        <td class="num">{{#if debitPkr}}{{money debitPkr}}{{else}}—{{/if}}</td>
+        <td class="num">{{#if creditPkr}}{{money creditPkr}}{{else}}—{{/if}}</td>
+        <td class="num">{{money balancePkr}}</td>
       </tr>
       {{/each}}
       <tr class="total">
         <td colspan="4">Totals / کل</td>
-        <td class="num">{{totalDebitPkr}}</td>
-        <td class="num">{{totalCreditPkr}}</td>
+        <td class="num">{{money totalDebitPkr}}</td>
+        <td class="num">{{money totalCreditPkr}}</td>
         <td class="num"></td>
       </tr>
       <tr class="closing">
         <td colspan="6">Closing Balance / حتمی بیلنس</td>
-        <td class="num">{{closingBalancePkr}}</td>
+        <td class="num">{{money closingBalancePkr}}</td>
       </tr>
     </tbody>
   </table>

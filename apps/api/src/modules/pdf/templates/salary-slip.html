@@ -170,12 +170,12 @@
       </tr>
     </thead>
     <tbody>
-      <tr><td>Gross Pay / مجموعی تنخواہ</td><td class="num">{{grossPay}}</td></tr>
-      <tr><td>EOBI Employee Contribution / EOBI</td><td class="num">- {{eobiEmployee}}</td></tr>
-      {{#if incomeTax}}<tr><td>Income Tax / انکم ٹیکس</td><td class="num">- {{incomeTax}}</td></tr>{{/if}}
-      {{#if otherDeductions}}<tr><td>Other Deductions / دیگر کٹوتیاں</td><td class="num">- {{otherDeductions}}</td></tr>{{/if}}
-      {{#if advanceRecovery}}<tr><td>Advance Recovery / پیشگی کی وصولی</td><td class="num">- {{advanceRecovery}}</td></tr>{{/if}}
-      <tr class="net"><td>Net Pay / خالص تنخواہ</td><td class="num">{{netPay}}</td></tr>
+      <tr><td>Gross Pay / مجموعی تنخواہ</td><td class="num">{{money grossPay}}</td></tr>
+      <tr><td>EOBI Employee Contribution / EOBI</td><td class="num">- {{money eobiEmployee}}</td></tr>
+      {{#if incomeTax}}<tr><td>Income Tax / انکم ٹیکس</td><td class="num">- {{money incomeTax}}</td></tr>{{/if}}
+      {{#if otherDeductions}}<tr><td>Other Deductions / دیگر کٹوتیاں</td><td class="num">- {{money otherDeductions}}</td></tr>{{/if}}
+      {{#if advanceRecovery}}<tr><td>Advance Recovery / پیشگی کی وصولی</td><td class="num">- {{money advanceRecovery}}</td></tr>{{/if}}
+      <tr class="net"><td>Net Pay / خالص تنخواہ</td><td class="num">{{money netPay}}</td></tr>
     </tbody>
   </table>
 

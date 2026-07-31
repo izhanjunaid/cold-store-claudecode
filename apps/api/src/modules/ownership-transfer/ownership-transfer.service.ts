@@ -4,6 +4,7 @@ import { OwnershipTransferRepository, LOT_INCLUDE_SHAPE_TRANSFER } from './owner
 import { mirrorTransferPlacements } from '../lot/placement.service';
 import { renderTransferAcknowledgment } from '../pdf/pdf.service';
 import type { TransferAcknowledgmentData } from '../pdf/pdf.service';
+import { resolveFacilitySettings } from '../facility/facility.service';
 import { buildOwnershipTransferAccruedInvoice } from '../invoice/invoice.builder';
 
 export interface CreateTransferInput {
@@ -327,8 +328,9 @@ export class OwnershipTransferService {
 
     const facility = await this.prisma.facility.findUnique({
       where: { id: facilityId },
-      select: { name: true, city: true },
+      select: { name: true, city: true, settings: true },
     });
+    const numberLocale = resolveFacilitySettings(facility?.settings ?? null).number_format;
 
     const data: TransferAcknowledgmentData = {
       facilityName: facility?.name ?? 'ColdChain',
@@ -349,7 +351,7 @@ export class OwnershipTransferService {
       transferType: childLotNumber ? 'PARTIAL' : 'FULL',
     };
 
-    const pdfBuffer = await renderTransferAcknowledgment(data);
+    const pdfBuffer = await renderTransferAcknowledgment(data, numberLocale);
     return { lotNumber: transfer.lot.lotNumber, transferId: transfer.id, pdfBuffer };
   }
 }

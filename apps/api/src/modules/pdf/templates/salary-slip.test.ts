@@ -32,10 +32,25 @@ describe('salary-slip template', () => {
     expect(html).toContain('آصف خان');
   });
 
-  it('shows net pay and gross pay', () => {
+  // P1-8: before the `money` helper the slip printed a raw `45000`, and an
+  // invoice printed `1234567.5`. Amounts on a document somebody is handed must
+  // be grouped and carry both decimal places.
+  it('groups and 2-decimals the money fields', () => {
     const html = renderSalarySlipHtml(SAMPLE);
-    expect(html).toContain('45000');
-    expect(html).toContain('43625');
+    expect(html).toContain('45,000.00');
+    expect(html).toContain('43,625.00');
+    expect(html).not.toContain('>45000<');
+  });
+
+  it('groups by lakh/crore when the facility reads en-IN', () => {
+    const html = renderSalarySlipHtml({ ...SAMPLE, grossPay: 1234567 }, 'en-IN');
+    expect(html).toContain('12,34,567.00');
+  });
+
+  it('leaves counts alone — days worked is not money', () => {
+    const html = renderSalarySlipHtml(SAMPLE);
+    expect(html).toContain('26');
+    expect(html).not.toContain('26.00');
   });
 
   it('hides zero income tax row', () => {
@@ -46,7 +61,7 @@ describe('salary-slip template', () => {
   it('shows income tax row when non-zero', () => {
     const html = renderSalarySlipHtml({ ...SAMPLE, incomeTax: 500 });
     expect(html).toContain('Income Tax');
-    expect(html).toContain('500');
+    expect(html).toContain('500.00');
   });
 
   it('hides zero advance recovery row', () => {
@@ -57,7 +72,7 @@ describe('salary-slip template', () => {
   it('shows advance recovery row when non-zero', () => {
     const html = renderSalarySlipHtml({ ...SAMPLE, advanceRecovery: 5000 });
     expect(html).toContain('Advance Recovery');
-    expect(html).toContain('5000');
+    expect(html).toContain('5,000.00');
   });
 
   it('includes Urdu header', () => {

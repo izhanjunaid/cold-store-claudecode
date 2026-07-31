@@ -407,8 +407,9 @@ export class LotService {
     // Fetch facility separately (not in standard include)
     const facility = await this.prisma.facility.findUnique({
       where: { id: facilityId },
-      select: { name: true, city: true },
+      select: { name: true, city: true, settings: true },
     });
+    const numberLocale = resolveFacilitySettings(facility?.settings ?? null).number_format;
 
     const data: StorageReceiptData = {
       facilityName: facility?.name ?? 'ColdChain',
@@ -436,7 +437,7 @@ export class LotService {
       bookType: typedLot.bookType,
     };
 
-    const pdfBuffer = await renderStorageReceipt(data);
+    const pdfBuffer = await renderStorageReceipt(data, numberLocale);
     return { lotNumber: typedLot.lotNumber, pdfBuffer };
   }
 }

@@ -20,6 +20,7 @@ import { PeriodLockService } from '../accounting/period-lock.service';
 import { EmployeeService } from './employee.service';
 import { PayrollRunService } from './payroll-run.service';
 import { renderSalarySlip } from '../pdf/pdf.service';
+import { resolveFacilitySettings } from '../facility/facility.service';
 
 const IdParam = z.object({ id: z.string().uuid() });
 const RunLineParam = z.object({ id: z.string().uuid(), lineId: z.string().uuid() });
@@ -216,7 +217,9 @@ export async function payrollRoutes(app: FastifyInstance) {
       const { format } = request.query as z.infer<typeof FormatQuery>;
       const data = await runs.getSlipData(request.user!.facilityId, id, lineId);
       if (format === 'pdf') {
-        const buf = await renderSalarySlip(data);
+        const facility = await app.prisma.facility.findUnique({ where: { id: request.user!.facilityId } });
+        const numberLocale = resolveFacilitySettings(facility?.settings ?? null).number_format;
+        const buf = await renderSalarySlip(data, numberLocale);
         reply
           .header('content-type', 'application/pdf')
           .header(

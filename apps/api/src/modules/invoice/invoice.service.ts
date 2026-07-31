@@ -4,6 +4,7 @@ import { InvoiceRepository, type InvoiceWithRelations } from './invoice.reposito
 import { buildInvoiceFromOutbound } from './invoice.builder';
 import { generateInvoiceNumber } from './invoice-number';
 import { renderInvoice } from '../pdf/pdf.service';
+import { resolveFacilitySettings } from '../facility/facility.service';
 import type {
   InvoiceListQueryType,
   AddInvoiceLineRequestType,
@@ -353,6 +354,7 @@ export class InvoiceService {
     if (!inv) throw Errors.INVOICE_NOT_FOUND();
 
     const facility = await this.prisma.facility.findUnique({ where: { id: facilityId } });
+    const numberLocale = resolveFacilitySettings(facility?.settings ?? null).number_format;
 
     const pdf = await renderInvoice({
       facilityName: facility?.name ?? 'Cold Store',
@@ -385,7 +387,7 @@ export class InvoiceService {
         unitPricePkr: Number(l.unitPricePkr),
         amountPkr: Number(l.amountPkr),
       })),
-    });
+    }, numberLocale);
 
     return {
       filename: `${inv.invoiceNumber ?? inv.id.slice(0, 8)}.pdf`,

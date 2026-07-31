@@ -15,6 +15,7 @@ import { resolveBookTypeForRead } from '../accounting/book-gate';
 import { PaymentService } from '../payment/payment.service';
 import { PaymentRepository } from '../payment/payment.repository';
 import { renderPartyStatement } from '../pdf/pdf.service';
+import { resolveFacilitySettings } from '../facility/facility.service';
 import { AppError } from '../../common/errors';
 import { Errors } from '../../common/errors';
 import { getDashboard } from './reports/dashboard';
@@ -192,9 +193,10 @@ export async function reportingRoutes(app: FastifyInstance) {
 
       const facility = await app.prisma.facility.findFirst({
         where: { id: request.user!.facilityId },
-        select: { name: true, city: true },
+        select: { name: true, city: true, settings: true },
       });
       if (!facility) throw new AppError('FACILITY_NOT_FOUND', 'Facility does not exist', 404);
+      const numberLocale = resolveFacilitySettings(facility.settings).number_format;
 
       const party = await app.prisma.party.findFirst({
         where: { id: partyId, facilityId: request.user!.facilityId },
@@ -226,7 +228,7 @@ export async function reportingRoutes(app: FastifyInstance) {
           creditPkr: e.credit_pkr,
           balancePkr: e.balance_pkr,
         })),
-      });
+      }, numberLocale);
 
       const filename = `party-statement-${partyId}-${query.date_from ?? 'all'}-${query.date_to ?? 'all'}.pdf`;
       return reply
