@@ -72,6 +72,8 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof CommissionAssetRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.commission(request.user!.facilityId, id, body);
       return sendSuccess(reply, data);
     },
@@ -85,6 +87,8 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof DisposeAssetRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.dispose(request.user!.facilityId, request.user!.userId, id, body);
       return sendSuccess(reply.status(201), data);
     },
@@ -98,6 +102,8 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof ReverseDisposalRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.reverseDisposal(
         request.user!.facilityId,
         request.user!.userId,

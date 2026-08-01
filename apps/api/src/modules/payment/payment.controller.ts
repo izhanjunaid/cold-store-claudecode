@@ -91,6 +91,8 @@ export async function paymentRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof AllocatePaymentRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const result = await service.allocate(
         request.user!.facilityId,
         id,
@@ -110,6 +112,8 @@ export async function paymentRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof DishonourPaymentRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const result = await service.dishonour(
         request.user!.facilityId,
         id,

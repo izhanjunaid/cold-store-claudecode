@@ -151,6 +151,8 @@ export async function payrollRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id, lineId } = request.params as z.infer<typeof RunLineParam>;
       const body = request.body as z.infer<typeof UpdatePayrollLineRequest>;
+      const existing = await runs.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await runs.updateLine(request.user!.facilityId, id, lineId, body);
       return sendSuccess(reply, data);
     },
@@ -163,6 +165,8 @@ export async function payrollRoutes(app: FastifyInstance) {
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
+      const existing = await runs.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await runs.finalize(request.user!.facilityId, request.user!.userId, id);
       return sendSuccess(reply, data);
     },
@@ -176,6 +180,8 @@ export async function payrollRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof PayPayrollRequest>;
+      const existing = await runs.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await runs.pay(request.user!.facilityId, request.user!.userId, id, body);
       return sendSuccess(reply, data);
     },
@@ -189,6 +195,8 @@ export async function payrollRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof RemitGovtRequest>;
+      const existing = await runs.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await runs.remit(request.user!.facilityId, request.user!.userId, id, body);
       return sendSuccess(reply.status(201), data);
     },
@@ -202,6 +210,8 @@ export async function payrollRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof ReversePayrollRunRequest>;
+      const existing = await runs.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await runs.reverse(request.user!.facilityId, request.user!.userId, id, body);
       return sendSuccess(reply, data);
     },

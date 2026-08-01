@@ -94,6 +94,8 @@ export async function lotRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof SetLotPlacementsRequest>;
+      const existingLot = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existingLot.book_type);
       const result = await placementService.setPlacements(
         request.user!.facilityId,
         id,
@@ -113,6 +115,8 @@ export async function lotRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof MoveLotRequest>;
+      const existingLot = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existingLot.book_type);
       const result = await placementService.move(
         request.user!.facilityId,
         id,
@@ -177,6 +181,8 @@ export async function lotRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof UpdateLotRequest>;
+      const existingLot = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existingLot.book_type);
       const result = await service.update(request.user!.facilityId, id, {
         notes: body.notes,
         qualityGradeInbound: body.quality_grade_inbound,

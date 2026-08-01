@@ -666,6 +666,270 @@ describe('KATCHI source-document gates (F-9)', () => {
     });
     expect(res.statusCode).toBe(403);
   });
+
+  // Below (phase/22, P2-10 / H5): the gate above only covered create. Every
+  // later-stage mutation on an already-KATCHI record was ungated, so anyone
+  // holding the route's ordinary permission — not just OWNER — could mutate
+  // a KATCHI document. One representative later-stage route per controller,
+  // not one per route (23 near-identical tests would just get deleted later).
+
+  it('ACCOUNTANT cannot dishonour a KATCHI cheque payment', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(ownerToken),
+      payload: {
+        party_id: testParty,
+        payment_date: '2026-05-04',
+        amount_pkr: 60,
+        payment_method: 'CHEQUE',
+        cheque_date: '2026-05-04',
+        is_advance: true,
+        book_type: 'KATCHI',
+      },
+    });
+    expect(create.statusCode).toBe(201);
+    const paymentId = JSON.parse(create.body).data.id as string;
+
+    const asAccountant = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${paymentId}/dishonour`,
+      headers: authHeaders(accountantToken),
+      payload: {},
+    });
+    expect(asAccountant.statusCode).toBe(403);
+  });
+
+  it('OPERATOR cannot update a KATCHI lot', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(ownerToken),
+      payload: {
+        owner_party_id: testParty,
+        commodity_id: POTATO_ID,
+        rate_plan_id: RATE_PLAN_SEASONAL,
+        chamber_id: CHAMBER_A,
+        quantity_bags: 5,
+        accepted_weight_kg: 100,
+        inbound_date: '2026-04-03',
+        book_type: 'KATCHI',
+      },
+    });
+    expect(create.statusCode).toBe(201);
+    const lotId = JSON.parse(create.body).data.id as string;
+
+    const asOperator = await app.inject({
+      method: 'PATCH',
+      url: `/v1/lots/${lotId}`,
+      headers: authHeaders(operatorToken),
+      payload: { notes: 'attempted edit' },
+    });
+    expect(asOperator.statusCode).toBe(403);
+  });
+
+  it('ACCOUNTANT cannot update a KATCHI expense voucher', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/expense-vouchers',
+      headers: authHeaders(ownerToken),
+      payload: {
+        voucher_date: '2026-05-05',
+        expense_account_code: '6110',
+        description: 'KATCHI gate test voucher',
+        amount_pkr: 500,
+        book_type: 'KATCHI',
+      },
+    });
+    expect(create.statusCode).toBe(201);
+    const voucherId = JSON.parse(create.body).data.id as string;
+
+    const asAccountant = await app.inject({
+      method: 'PATCH',
+      url: `/v1/expense-vouchers/${voucherId}`,
+      headers: authHeaders(accountantToken),
+      payload: { description: 'attempted edit' },
+    });
+    expect(asAccountant.statusCode).toBe(403);
+  });
+
+  it('MANAGER cannot record a repayment on a KATCHI loan', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/loans/issue',
+      headers: authHeaders(ownerToken),
+      payload: {
+        party_id: testParty,
+        issue_date: '2026-05-06',
+        principal_pkr: 1000,
+        payment_method: 'CASH',
+        book_type: 'KATCHI',
+      },
+    });
+    expect(create.statusCode).toBe(201);
+    const loanId = JSON.parse(create.body).data.id as string;
+
+    const asManager = await app.inject({
+      method: 'POST',
+      url: `/v1/loans/${loanId}/repayments`,
+      headers: authHeaders(managerToken),
+      payload: {
+        repayment_date: '2026-05-10',
+        amount_pkr: 100,
+        payment_method: 'CASH',
+        asset_account_code: '1010',
+      },
+    });
+    expect(asManager.statusCode).toBe(403);
+  });
+
+  it('MANAGER cannot finalize a KATCHI payroll run', async () => {
+    const emp = await app.inject({
+      method: 'POST',
+      url: '/v1/employees',
+      headers: authHeaders(managerToken),
+      payload: {
+        name: 'KATCHI Gate Test Employee',
+        employee_type: 'SALARIED',
+        designation: 'Clerk',
+        join_date: '2026-01-01',
+        basic_salary_pkr: 30000,
+        eobi_registered: false,
+      },
+    });
+    expect(emp.statusCode).toBe(201);
+
+    const run = await app.inject({
+      method: 'POST',
+      url: '/v1/payroll-runs',
+      headers: authHeaders(ownerToken),
+      payload: {
+        payroll_type: 'MONTHLY_SALARY',
+        period_year: 2026,
+        period_month: 5,
+        period_from: '2026-05-01',
+        period_to: '2026-05-31',
+        book_type: 'KATCHI',
+      },
+    });
+    expect(run.statusCode).toBe(201);
+    const runId = JSON.parse(run.body).data.id as string;
+
+    const asManager = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${runId}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(asManager.statusCode).toBe(403);
+  });
+
+  // fixed_assets.manage defaults to OWNER but, like every non-alwaysOwner key,
+  // is owner-grantable — this is the scenario that motivated widening H5 past
+  // the original 15 routes: a facility owner CAN hand this to MANAGER, and
+  // without the gate below that MANAGER could then commission a KATCHI asset
+  // with no OWNER check anywhere in the path.
+  it('MANAGER cannot commission a KATCHI asset even when granted fixed_assets.manage', async () => {
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/fixed-assets',
+      headers: authHeaders(ownerToken),
+      payload: {
+        asset_name: 'KATCHI Gate Test Asset',
+        asset_category: 'OTHER',
+        purchase_date: '2026-05-01',
+        purchase_cost_pkr: 50000,
+        depreciation_method: 'WDV',
+        wdv_rate_percent: 10,
+        book_type: 'KATCHI',
+      },
+    });
+    expect(create.statusCode).toBe(201);
+    const assetId = JSON.parse(create.body).data.id as string;
+
+    const grant = await app.inject({
+      method: 'PUT',
+      url: '/v1/permissions',
+      headers: authHeaders(ownerToken),
+      payload: { overrides: { MANAGER: { grant: ['fixed_assets.manage'], revoke: [] } } },
+    });
+    expect(grant.statusCode).toBe(200);
+
+    try {
+      const asManager = await app.inject({
+        method: 'POST',
+        url: `/v1/fixed-assets/${assetId}/commission`,
+        headers: authHeaders(managerToken),
+        payload: { depreciation_start_date: '2026-05-01' },
+      });
+      expect(asManager.statusCode).toBe(403);
+      // Distinguish the KATCHI gate from requirePermission's own 403 (which the
+      // grant above already defeated) — otherwise this test would pass whether
+      // or not the gate below it exists.
+      expect(JSON.parse(asManager.body).error.message).toBe('Only OWNER can post KATCHI entries');
+    } finally {
+      await app.inject({ method: 'POST', url: '/v1/permissions/reset', headers: authHeaders(ownerToken) });
+    }
+  });
+
+  // Same shape as fixed_assets.manage above: employee_advances.write_off also
+  // defaults to OWNER without being locked there.
+  it('MANAGER cannot write off a KATCHI employee advance even when granted employee_advances.write_off', async () => {
+    const emp = await app.inject({
+      method: 'POST',
+      url: '/v1/employees',
+      headers: authHeaders(managerToken),
+      payload: {
+        name: 'KATCHI Gate Test Employee 2',
+        employee_type: 'SALARIED',
+        designation: 'Clerk',
+        join_date: '2026-01-01',
+        basic_salary_pkr: 30000,
+        eobi_registered: false,
+      },
+    });
+    expect(emp.statusCode).toBe(201);
+    const employeeId = JSON.parse(emp.body).data.id as string;
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/employee-advances/issue',
+      headers: authHeaders(ownerToken),
+      payload: {
+        employee_id: employeeId,
+        issue_date: '2026-05-01',
+        principal_pkr: 5000,
+        monthly_installment_pkr: 1000,
+        payment_method: 'CASH',
+        book_type: 'KATCHI',
+      },
+    });
+    expect(create.statusCode).toBe(201);
+    const advanceId = JSON.parse(create.body).data.id as string;
+
+    const grant = await app.inject({
+      method: 'PUT',
+      url: '/v1/permissions',
+      headers: authHeaders(ownerToken),
+      payload: { overrides: { MANAGER: { grant: ['employee_advances.write_off'], revoke: [] } } },
+    });
+    expect(grant.statusCode).toBe(200);
+
+    try {
+      const asManager = await app.inject({
+        method: 'POST',
+        url: `/v1/employee-advances/${advanceId}/write-off`,
+        headers: authHeaders(managerToken),
+        payload: { reason: 'test write-off attempt' },
+      });
+      expect(asManager.statusCode).toBe(403);
+      // Distinguish the KATCHI gate from requirePermission's own 403, same as
+      // the fixed-assets case above.
+      expect(JSON.parse(asManager.body).error.message).toBe('Only OWNER can post KATCHI entries');
+    } finally {
+      await app.inject({ method: 'POST', url: '/v1/permissions/reset', headers: authHeaders(ownerToken) });
+    }
+  });
 });
 
 describe('KATCHI reads default to PACCI and are MANAGER-gated (F-9)', () => {

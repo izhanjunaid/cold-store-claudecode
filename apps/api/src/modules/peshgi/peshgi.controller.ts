@@ -72,6 +72,8 @@ export async function peshgiRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof RecordRepaymentRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.recordRepayment(
         request.user!.facilityId,
         request.user!.userId,
@@ -91,6 +93,8 @@ export async function peshgiRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof WriteOffPeshgiRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.writeOff(
         request.user!.facilityId,
         request.user!.userId,

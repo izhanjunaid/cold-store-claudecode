@@ -55,6 +55,7 @@ export async function expenseRoutes(app: FastifyInstance) {
     schema: { body: PettyCashReplenishRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof PettyCashReplenishRequest>;
+      assertKatchiWriteAllowed(request.user!.role, body.book_type);
       const data = await service.pettyCashReplenish(request.user!.facilityId, request.user!.userId, body);
       return sendSuccess(reply.status(201), data);
     },
@@ -80,6 +81,8 @@ export async function expenseRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof UpdateExpenseVoucherRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.update(request.user!.facilityId, id, body);
       return sendSuccess(reply, data);
     },
@@ -92,6 +95,8 @@ export async function expenseRoutes(app: FastifyInstance) {
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.approve(request.user!.facilityId, request.user!.userId, id);
       return sendSuccess(reply, data);
     },
@@ -104,6 +109,8 @@ export async function expenseRoutes(app: FastifyInstance) {
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.accrue(request.user!.facilityId, request.user!.userId, id);
       return sendSuccess(reply.status(201), data);
     },
@@ -117,6 +124,8 @@ export async function expenseRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof PayExpenseRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.pay(request.user!.facilityId, request.user!.userId, id, body);
       return sendSuccess(reply.status(201), data);
     },
@@ -129,6 +138,8 @@ export async function expenseRoutes(app: FastifyInstance) {
     schema: { params: IdParam, body: CancelExpenseRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.cancel(request.user!.facilityId, id);
       return sendSuccess(reply, data);
     },

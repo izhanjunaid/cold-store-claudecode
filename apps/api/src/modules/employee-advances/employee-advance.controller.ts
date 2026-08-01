@@ -67,6 +67,8 @@ export async function employeeAdvanceRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof WriteOffEmployeeAdvanceRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.writeOff(request.user!.facilityId, request.user!.userId, id, body);
       return sendSuccess(reply, data);
     },
