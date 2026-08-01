@@ -14,6 +14,8 @@ import { sendSuccess } from '../../common/response';
 import { resolveBookTypeForRead } from '../accounting/book-gate';
 import { PaymentService } from '../payment/payment.service';
 import { PaymentRepository } from '../payment/payment.repository';
+import { JournalEntryService } from '../accounting/journal-entry.service';
+import { PeriodLockService } from '../accounting/period-lock.service';
 import { renderPartyStatement } from '../pdf/pdf.service';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { AppError } from '../../common/errors';
@@ -30,9 +32,14 @@ import { getPartyStatement } from './reports/party-statement';
 const PartyIdParam = z.object({ partyId: z.string().uuid() });
 
 export async function reportingRoutes(app: FastifyInstance) {
+  const periodLock = new PeriodLockService(app.prisma);
+  // Read-only here (getPartyLedger), but the constructor param is required so
+  // that a future write path through this instance can never silently skip
+  // its journal entry (see payment.service.ts's dishonour()/allocate()).
   const paymentService = new PaymentService(
     app.prisma,
     new PaymentRepository(app.prisma),
+    new JournalEntryService(app.prisma, periodLock),
   );
 
   // ==========================================================

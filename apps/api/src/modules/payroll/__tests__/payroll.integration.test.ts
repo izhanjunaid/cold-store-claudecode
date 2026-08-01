@@ -235,6 +235,19 @@ describe('Phase 8B — Payroll', () => {
     const totalD = je!.lines.reduce((s, l) => s + Number(l.debitAmount), 0);
     const totalC = je!.lines.reduce((s, l) => s + Number(l.creditAmount), 0);
     expect(totalD).toBeCloseTo(totalC);
+
+    // Invariant 16 (docs/20 §"Invariant tests"): Σ 2030 credits must equal
+    // Σ per-employee net pay. Checkable without the per-employee subledger
+    // (P2-5, deferred) — this only sums the aggregate 2030 line and the run's
+    // own reported net pay per line item.
+    const credit2030 = je!.lines
+      .filter((l) => l.accountCode === '2030')
+      .reduce((s, l) => s + Number(l.creditAmount), 0);
+    const sumNetPay = (run.line_items as { net_pay_pkr: number }[]).reduce(
+      (s, li) => s + li.net_pay_pkr,
+      0,
+    );
+    expect(credit2030).toBeCloseTo(sumNetPay);
   });
 
   it('cannot finalize already-finalized run', async () => {

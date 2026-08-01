@@ -43,6 +43,8 @@ export type AllocatePaymentRequestType = z.infer<typeof AllocatePaymentRequest>;
 // DishonourPaymentRequest
 export const DishonourPaymentRequest = z.object({
   notes: z.string().optional(),
+  /** Defaults to today when omitted — see payment.service.ts `dishonour()`. */
+  dishonour_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 export type DishonourPaymentRequestType = z.infer<typeof DishonourPaymentRequest>;
 

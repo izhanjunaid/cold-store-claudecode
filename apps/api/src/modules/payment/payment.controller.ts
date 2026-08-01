@@ -115,6 +115,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         id,
         body.notes,
         request.user!.userId,
+        body.dishonour_date,
       );
       return sendSuccess(reply, result);
     },

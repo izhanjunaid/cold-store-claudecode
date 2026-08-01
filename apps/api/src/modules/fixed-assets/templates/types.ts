@@ -23,7 +23,3 @@ export const ASSET_CATEGORY_ACCOUNT_DEFAULTS: Record<
 
 export const ACCOUNT_GAIN_ON_DISPOSAL = '4230';
 export const ACCOUNT_LOSS_ON_DISPOSAL = '6110';
-
-export function defaultsForCategory(category: keyof typeof ASSET_CATEGORY_ACCOUNT_DEFAULTS) {
-  return ASSET_CATEGORY_ACCOUNT_DEFAULTS[category];
-}

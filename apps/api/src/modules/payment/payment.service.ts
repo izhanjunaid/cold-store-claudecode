@@ -50,7 +50,7 @@ export class PaymentService {
   constructor(
     private prisma: PrismaClient,
     private repo: PaymentRepository,
-    private journalEntry?: JournalEntryService,
+    private journalEntry: JournalEntryService,
   ) {}
 
   async record(params: {
@@ -145,47 +145,45 @@ export class PaymentService {
       // Post JE-02 (regular) or JE-03 (advance) for the cash receipt — but only for the
       // invoice+unallocated portion. Loan allocations book their cash receipt via JE-19
       // inside applyLoanAllocation above; without this scaling we'd double-debit cash.
-      if (this.journalEntry) {
-        const loanAllocTotal = allocations
-          .filter((a) => a.target === 'LOAN')
-          .reduce((s, a) => s + a.allocated_amount_pkr, 0);
-        const cashReceiptAmount = round2(Number(payment.amountPkr) - loanAllocTotal);
+      const loanAllocTotal = allocations
+        .filter((a) => a.target === 'LOAN')
+        .reduce((s, a) => s + a.allocated_amount_pkr, 0);
+      const cashReceiptAmount = round2(Number(payment.amountPkr) - loanAllocTotal);
 
-        if (cashReceiptAmount > 0.005) {
-          const draft = isAdvance
-            ? buildJE03AdvanceReceived({
-                paymentId: payment.id,
-                paymentDate: payment.paymentDate,
-                amountPkr: cashReceiptAmount,
-                paymentMethod: payment.paymentMethod,
-                referenceNumber: payment.referenceNumber,
-                bookType,
-                party: { id: party.id, partyType: party.partyType, name: party.name },
-                assetAccountCode,
-              })
-            : buildJE02PaymentReceived({
-                paymentId: payment.id,
-                paymentDate: payment.paymentDate,
-                amountPkr: cashReceiptAmount,
-                paymentMethod: payment.paymentMethod,
-                referenceNumber: payment.referenceNumber,
-                bookType,
-                party: { id: party.id, partyType: party.partyType, name: party.name },
-                assetAccountCode,
-              });
+      if (cashReceiptAmount > 0.005) {
+        const draft = isAdvance
+          ? buildJE03AdvanceReceived({
+              paymentId: payment.id,
+              paymentDate: payment.paymentDate,
+              amountPkr: cashReceiptAmount,
+              paymentMethod: payment.paymentMethod,
+              referenceNumber: payment.referenceNumber,
+              bookType,
+              party: { id: party.id, partyType: party.partyType, name: party.name },
+              assetAccountCode,
+            })
+          : buildJE02PaymentReceived({
+              paymentId: payment.id,
+              paymentDate: payment.paymentDate,
+              amountPkr: cashReceiptAmount,
+              paymentMethod: payment.paymentMethod,
+              referenceNumber: payment.referenceNumber,
+              bookType,
+              party: { id: party.id, partyType: party.partyType, name: party.name },
+              assetAccountCode,
+            });
 
-          const posted = await this.journalEntry.postInTransaction(
-            tx,
-            params.facilityId,
-            params.createdBy,
-            draft,
-            { postingStatus: 'POSTED' },
-          );
-          await tx.payment.update({
-            where: { id: payment.id },
-            data: { journalEntryId: posted.id },
-          });
-        }
+        const posted = await this.journalEntry.postInTransaction(
+          tx,
+          params.facilityId,
+          params.createdBy,
+          draft,
+          { postingStatus: 'POSTED' },
+        );
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { journalEntryId: posted.id },
+        });
       }
 
       return formatPayment(payment);
@@ -314,7 +312,7 @@ export class PaymentService {
       }
 
       // ADVANCE → applying to invoices triggers JE-04 per invoice line.
-      if (this.journalEntry && previousStatus === 'ADVANCE') {
+      if (previousStatus === 'ADVANCE') {
         const partyRow = await tx.party.findFirstOrThrow({
           where: { id: paymentRow.party_id },
           select: { id: true, name: true, partyType: true },
@@ -349,7 +347,20 @@ export class PaymentService {
     });
   }
 
-  async dishonour(facilityId: string, id: string, notes?: string, userId?: string) {
+  async dishonour(
+    facilityId: string,
+    id: string,
+    notes?: string,
+    userId?: string,
+    dishonourDateInput?: string,
+  ) {
+    // The bank often notifies a bounce days after it happened. Defaulting to
+    // "now" would post it — and the period-lock check below it — against the
+    // wrong date. postInTransaction enforces the period lock on whatever date
+    // is passed here, so no separate check is needed for that. Dishonour has
+    // never had a backdating-window rule (unlike lots/outbound), so none is
+    // added here either — a caller-supplied date is simply used as given.
+    const dishonourDate = dishonourDateInput ? new Date(dishonourDateInput) : new Date();
     return this.prisma.$transaction(async (tx) => {
       const fullPayment = await tx.payment.findFirst({
         where: { id, facilityId },
@@ -446,91 +457,89 @@ export class PaymentService {
         ...(notes ? { notes } : {}),
       });
 
-      if (this.journalEntry) {
-        // JE-06 reverses only the invoice/unallocated portion of the original JE-02 —
-        // matching the scaled-down amount we originally posted (see record() for the rule).
-        const je06Amount = round2(Number(fullPayment.amountPkr) - loanReversalTotal);
-        if (je06Amount > 0.005) {
-          // An advance receipt credited 2010 (JE-03), not AR. Only allocating it to an
-          // invoice moves it to AR via JE-04, so whatever is still unallocated must be
-          // reversed against 2010 — reversing it against AR would leave the advance
-          // liability standing AND invent a receivable. record() forces `allocations = []`
-          // when isAdvance, and allocate() rejects LOAN targets, so every allocation an
-          // advance can carry is an invoice allocation that went through JE-04. Read from
-          // the in-memory `allocations` captured before they were voided above.
-          const invoiceAllocTotal = fullPayment.isAdvance
-            ? allocations
-                .filter((a) => a.invoiceId)
-                .reduce((s, a) => s + Number(a.allocatedAmountPkr), 0)
-            : 0;
-          const advanceRemainderPkr = fullPayment.isAdvance
-            ? Math.max(0, round2(je06Amount - invoiceAllocTotal))
-            : 0;
+      // JE-06 reverses only the invoice/unallocated portion of the original JE-02 —
+      // matching the scaled-down amount we originally posted (see record() for the rule).
+      const je06Amount = round2(Number(fullPayment.amountPkr) - loanReversalTotal);
+      if (je06Amount > 0.005) {
+        // An advance receipt credited 2010 (JE-03), not AR. Only allocating it to an
+        // invoice moves it to AR via JE-04, so whatever is still unallocated must be
+        // reversed against 2010 — reversing it against AR would leave the advance
+        // liability standing AND invent a receivable. record() forces `allocations = []`
+        // when isAdvance, and allocate() rejects LOAN targets, so every allocation an
+        // advance can carry is an invoice allocation that went through JE-04. Read from
+        // the in-memory `allocations` captured before they were voided above.
+        const invoiceAllocTotal = fullPayment.isAdvance
+          ? allocations
+              .filter((a) => a.invoiceId)
+              .reduce((s, a) => s + Number(a.allocatedAmountPkr), 0)
+          : 0;
+        const advanceRemainderPkr = fullPayment.isAdvance
+          ? Math.max(0, round2(je06Amount - invoiceAllocTotal))
+          : 0;
 
-          const draft = buildJE06ChequeDishonoured({
-            paymentId: id,
-            dishonourDate: new Date(),
-            amountPkr: je06Amount,
-            bookType: fullPayment.bookType as 'PACCI' | 'KATCHI',
-            party: fullPayment.party,
-            originalAssetAccountCode: fullPayment.assetAccountCode,
-            advanceRemainderPkr,
-          });
-          const posted = await this.journalEntry.postInTransaction(
-            tx,
-            facilityId,
-            userId ?? fullPayment.createdBy,
-            draft,
-            { postingStatus: 'POSTED', reversedById: fullPayment.journalEntryId ?? null },
-          );
-          if (fullPayment.journalEntryId) {
-            await this.journalEntry.markReversed(tx, fullPayment.journalEntryId, posted.id);
-          }
+        const draft = buildJE06ChequeDishonoured({
+          paymentId: id,
+          dishonourDate: dishonourDate ?? new Date(),
+          amountPkr: je06Amount,
+          bookType: fullPayment.bookType as 'PACCI' | 'KATCHI',
+          party: fullPayment.party,
+          originalAssetAccountCode: fullPayment.assetAccountCode,
+          advanceRemainderPkr,
+        });
+        const posted = await this.journalEntry.postInTransaction(
+          tx,
+          facilityId,
+          userId ?? fullPayment.createdBy,
+          draft,
+          { postingStatus: 'POSTED', reversedById: fullPayment.journalEntryId ?? null },
+        );
+        if (fullPayment.journalEntryId) {
+          await this.journalEntry.markReversed(tx, fullPayment.journalEntryId, posted.id);
         }
+      }
 
-        // For each loan portion, post a JE-19 reversal: DR 1140 / CR cash account.
-        // This unwinds the per-loan cash receipt JE-19 booked during combined settlement.
-        // Same rule as allocate(): fall back to the method's account, not a cash guess.
-        const cashAccount =
-          fullPayment.assetAccountCode ?? assetAccountForPaymentMethod(fullPayment.paymentMethod);
-        for (const lr of loanReversals) {
-          const reverseDraft = {
-            entryType: 'REVERSAL' as const,
-            bookType: lr.bookType,
-            sourceTable: 'party_loans',
-            sourceId: lr.loanId,
-            entryDate: new Date(),
-            description: `Cheque dishonour reversal — peshgi ${lr.loanNumber} (${fullPayment.party.name})`,
-            lines: [
-              {
-                accountCode: '1140',
-                debitAmount: lr.amountPkr,
-                creditAmount: 0,
-                partyId: lr.partyId,
-                description: `Restore peshgi balance — cheque dishonour ${lr.loanNumber}`,
-              },
-              {
-                accountCode: cashAccount,
-                debitAmount: 0,
-                creditAmount: lr.amountPkr,
-                partyId: lr.partyId,
-                description: `Reverse loan cash receipt — cheque dishonour ${lr.loanNumber}`,
-              },
-            ],
-          };
-          const reversedPost = await this.journalEntry.postInTransaction(
-            tx,
-            facilityId,
-            userId ?? fullPayment.createdBy,
-            reverseDraft,
+      // For each loan portion, post a JE-19 reversal: DR 1140 / CR cash account.
+      // This unwinds the per-loan cash receipt JE-19 booked during combined settlement.
+      // Same rule as allocate(): fall back to the method's account, not a cash guess.
+      const cashAccount =
+        fullPayment.assetAccountCode ?? assetAccountForPaymentMethod(fullPayment.paymentMethod);
+      for (const lr of loanReversals) {
+        const reverseDraft = {
+          entryType: 'REVERSAL' as const,
+          bookType: lr.bookType,
+          sourceTable: 'party_loans',
+          sourceId: lr.loanId,
+          entryDate: dishonourDate ?? new Date(),
+          description: `Cheque dishonour reversal — peshgi ${lr.loanNumber} (${fullPayment.party.name})`,
+          lines: [
             {
-              postingStatus: 'POSTED',
-              reversedById: lr.repaymentJournalEntryIds[0] ?? null,
+              accountCode: '1140',
+              debitAmount: lr.amountPkr,
+              creditAmount: 0,
+              partyId: lr.partyId,
+              description: `Restore peshgi balance — cheque dishonour ${lr.loanNumber}`,
             },
-          );
-          for (const originalJeId of lr.repaymentJournalEntryIds) {
-            await this.journalEntry.markReversed(tx, originalJeId, reversedPost.id);
-          }
+            {
+              accountCode: cashAccount,
+              debitAmount: 0,
+              creditAmount: lr.amountPkr,
+              partyId: lr.partyId,
+              description: `Reverse loan cash receipt — cheque dishonour ${lr.loanNumber}`,
+            },
+          ],
+        };
+        const reversedPost = await this.journalEntry.postInTransaction(
+          tx,
+          facilityId,
+          userId ?? fullPayment.createdBy,
+          reverseDraft,
+          {
+            postingStatus: 'POSTED',
+            reversedById: lr.repaymentJournalEntryIds[0] ?? null,
+          },
+        );
+        for (const originalJeId of lr.repaymentJournalEntryIds) {
+          await this.journalEntry.markReversed(tx, originalJeId, reversedPost.id);
         }
       }
 
@@ -798,30 +807,28 @@ export class PaymentService {
       },
     });
 
-    if (this.journalEntry) {
-      const draft = buildJE19PeshgiRecovered({
-        loanId: loan.id,
-        loanNumber: loan.loanNumber,
-        repaymentId: repayment.id,
-        partyId: loan.partyId,
-        partyName: loan.party.name,
-        entryDate: paymentDate,
-        amountPkr: alloc.allocated_amount_pkr,
-        toAssetAccountCode: assetAccountCode,
-        bookType: loan.bookType,
-      });
-      const posted = await this.journalEntry.postInTransaction(
-        tx,
-        facilityId,
-        userId,
-        draft,
-        { postingStatus: 'POSTED' },
-      );
-      await tx.partyLoanRepayment.update({
-        where: { id: repayment.id },
-        data: { journalEntryId: posted.id },
-      });
-    }
+    const draft = buildJE19PeshgiRecovered({
+      loanId: loan.id,
+      loanNumber: loan.loanNumber,
+      repaymentId: repayment.id,
+      partyId: loan.partyId,
+      partyName: loan.party.name,
+      entryDate: paymentDate,
+      amountPkr: alloc.allocated_amount_pkr,
+      toAssetAccountCode: assetAccountCode,
+      bookType: loan.bookType,
+    });
+    const posted = await this.journalEntry.postInTransaction(
+      tx,
+      facilityId,
+      userId,
+      draft,
+      { postingStatus: 'POSTED' },
+    );
+    await tx.partyLoanRepayment.update({
+      where: { id: repayment.id },
+      data: { journalEntryId: posted.id },
+    });
   }
 }
 

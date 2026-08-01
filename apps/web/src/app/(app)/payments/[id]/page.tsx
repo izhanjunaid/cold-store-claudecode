@@ -81,6 +81,7 @@ export default function PaymentDetailPage() {
   const [payment, setPayment] = useState<Payment | null>(null);
   const [loading, setLoading] = useState(true);
   const [dishonourNotes, setDishonourNotes] = useState('');
+  const [dishonourDate, setDishonourDate] = useState(new Date().toISOString().slice(0, 10));
   const [showDishonourForm, setShowDishonourForm] = useState(false);
   const [dishonourSubmitting, setDishonourSubmitting] = useState(false);
 
@@ -171,7 +172,7 @@ export default function PaymentDetailPage() {
     try {
       const updated = await apiClient<Payment>(`/v1/payments/${id}/dishonour`, {
         method: 'POST',
-        body: { notes: dishonourNotes || undefined },
+        body: { notes: dishonourNotes || undefined, dishonour_date: dishonourDate },
       });
       setPayment(updated);
       setShowDishonourForm(false);
@@ -380,6 +381,10 @@ export default function PaymentDetailPage() {
                 <p className="text-sm text-muted-foreground">
                   All allocations will be reversed and invoice balances restored.
                 </p>
+                <div className="space-y-1.5">
+                  <Label>Dishonour date</Label>
+                  <Input type="date" value={dishonourDate} onChange={(e) => setDishonourDate(e.target.value)} className="tabular-nums" />
+                </div>
                 <Textarea
                   value={dishonourNotes}
                   onChange={(e) => setDishonourNotes(e.target.value)}

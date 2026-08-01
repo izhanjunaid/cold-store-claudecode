@@ -357,3 +357,4 @@ async function validatePostableAccounts(tx: Tx, facilityId: string, accountCodes
     if (a.accountType === 'HEADER') throw Errors.HEADER_ACCOUNT_NOT_POSTABLE();
   }
 }
+

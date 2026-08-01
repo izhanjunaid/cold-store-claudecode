@@ -440,6 +440,164 @@ describe('draft journal entries can be posted (F-7)', () => {
 });
 
 // ============================================================
+// P1-6 — cash-class accounts cannot go negative (phase/22, invariant 14)
+// ============================================================
+//
+// SKIPPED — the guard this suite exercised (assertCashAccountsStayNonNegative
+// in journal-entry.service.ts) was reverted after it turned 57 integration
+// tests red across 9 files. Root cause: this codebase has no opening-balance
+// mechanism for any cash-class account (1010/1020/1030) — every facility,
+// test fixture included, starts those accounts at an implicit zero with
+// nothing to fund them. Loan issuance, expense payments, and every other
+// ordinary cash-out posting against that unfunded balance were rejected —
+// e.g. peshgi.integration.test.ts's issueLoan() helper returned 422 instead
+// of 201. The guard is correct in principle (a debit-normal balance below
+// zero is physically impossible) but unenforceable until the system gains a
+// way to establish an opening cash position — which is new capability
+// (out of scope for this defect-repair phase), not a bug fix. See
+// docs/20_audit_backlog.md P1-6 (DEFERRED) and invariant 14 (BLOCKED,
+// same reason as invariant 13's cheque-clearing dependency). Left in place,
+// skipped, as the spec for whichever phase adds opening balances.
+describe.skip('cash-class accounts cannot go negative (P1-6, invariant 14)', () => {
+  async function cashBalance(accountCode: string): Promise<number> {
+    const sum = await prisma.journalEntryLine.aggregate({
+      where: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode,
+        journalEntry: { facilityId: TEST_FACILITY_ID, postingStatus: 'POSTED' },
+      },
+      _sum: { debitAmount: true, creditAmount: true },
+    });
+    return Number(sum._sum.debitAmount ?? 0) - Number(sum._sum.creditAmount ?? 0);
+  }
+
+  it('rejects a manual POSTED entry that would drive 1010 below zero', async () => {
+    const current = await cashBalance('1010');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/journal-entries',
+      headers: authHeaders(managerToken),
+      payload: {
+        entry_date: '2026-03-18',
+        description: `cash-negative guard rejection ${Date.now()}`,
+        posting_status: 'POSTED',
+        lines: [
+          { account_code: '4050', debit_amount: current + 1000, credit_amount: 0 },
+          { account_code: '1010', debit_amount: 0, credit_amount: current + 1000 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error.code).toBe('CASH_ACCOUNT_WOULD_GO_NEGATIVE');
+    expect(await cashBalance('1010')).toBe(current); // rejected, so unchanged
+  });
+
+  it('allows a POSTED entry that keeps the balance non-negative', async () => {
+    const current = await cashBalance('1010');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/journal-entries',
+      headers: authHeaders(managerToken),
+      payload: {
+        entry_date: '2026-03-18',
+        description: `cash-negative guard pass-through ${Date.now()}`,
+        posting_status: 'POSTED',
+        lines: [
+          { account_code: '1010', debit_amount: 1, credit_amount: 0 },
+          { account_code: '4050', debit_amount: 0, credit_amount: 1 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(await cashBalance('1010')).toBeCloseTo(current + 1);
+  });
+
+  it('an AUTO_DRAFT that would go negative is saved (drafts do not affect the balance yet)', async () => {
+    const current = await cashBalance('1010');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/journal-entries',
+      headers: authHeaders(managerToken),
+      payload: {
+        entry_date: '2026-03-18',
+        description: `cash-negative guard draft exemption ${Date.now()}`,
+        posting_status: 'AUTO_DRAFT',
+        lines: [
+          { account_code: '4050', debit_amount: current + 1000, credit_amount: 0 },
+          { account_code: '1010', debit_amount: 0, credit_amount: current + 1000 },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    // ...but promoting that same draft to POSTED must re-check and reject.
+    const id = JSON.parse(res.body).data.id as string;
+    const promote = await app.inject({
+      method: 'POST',
+      url: `/v1/accounting/journal-entries/${id}/post`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(promote.statusCode).toBe(422);
+    expect(JSON.parse(promote.body).error.code).toBe('CASH_ACCOUNT_WOULD_GO_NEGATIVE');
+  });
+
+  // "Assert the loser" (docs/18 §1's lesson, re-applied): two concurrent posts
+  // each look safe against a stale read of the balance, but together would
+  // drive 1010 negative. Without the per-account advisoryXactLock inside
+  // assertCashAccountsStayNonNegative, both could read the same starting
+  // balance and both pass. With it, the second read happens only after the
+  // first transaction has committed, so exactly one succeeds.
+  it('serialises two concurrent posts so exactly one is rejected', async () => {
+    const post = (debitCode: string, debitAmt: number, creditCode: string, creditAmt: number) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/accounting/journal-entries',
+        headers: authHeaders(managerToken),
+        payload: {
+          entry_date: '2026-03-18',
+          description: `cash-negative guard concurrency setup ${Date.now()}-${Math.random()}`,
+          posting_status: 'POSTED',
+          lines: [
+            { account_code: debitCode, debit_amount: debitAmt, credit_amount: 0 },
+            { account_code: creditCode, debit_amount: 0, credit_amount: creditAmt },
+          ],
+        },
+      });
+
+    // The ambient 1010 balance carries whatever every other test in this
+    // shared facility has posted — unknown, and by the invariant itself
+    // already guaranteed >= 0. Rather than aim for a margin around an
+    // unknown number, drain it to exactly 0 first (a controlled, sequential
+    // boundary case: credit == balance lands on 0, which the guard permits),
+    // then fund it with a known amount. The race below then straddles a
+    // number this test fully controls, independent of suite ordering.
+    const current = await cashBalance('1010');
+    if (current > 0) {
+      const drain = await post('4050', current, '1010', current);
+      expect(drain.statusCode).toBe(201);
+    }
+    expect(await cashBalance('1010')).toBeCloseTo(0);
+
+    const fund = await post('1010', 100, '4050', 100);
+    expect(fund.statusCode).toBe(201);
+    expect(await cashBalance('1010')).toBeCloseTo(100);
+
+    // Each of these alone is safe against a balance of 100 (100 - 70 = 30);
+    // together they demand 140, which the balance cannot cover.
+    const [a, b] = await Promise.all([
+      post('4050', 70, '1010', 70),
+      post('4050', 70, '1010', 70),
+    ]);
+    const codes = [a.statusCode, b.statusCode].sort();
+    expect(codes).toEqual([201, 422]);
+
+    const rejected = a.statusCode === 422 ? a : b;
+    expect(JSON.parse(rejected.body).error.code).toBe('CASH_ACCOUNT_WOULD_GO_NEGATIVE');
+    expect(await cashBalance('1010')).toBeCloseTo(30); // exactly one 70 went through
+  });
+});
+
+// ============================================================
 // F-9 — KATCHI gates on sources and reads
 // ============================================================
 
