@@ -51,7 +51,7 @@
 | P2-7 | No partial disposal, revaluation, impairment or CWIP | **OPEN** — zero matches repo-wide |
 | P2-8 | Depreciation period ordering unconstrained — March can be run before February | **OPEN** — `fixed-asset.service.ts:308-317` guards only the same year/month |
 | P2-9 | Employee termination has no settlement / gratuity and posts no JE | **OPEN** — Phase 21 added an outstanding-debt warning to the terminate dialog, but no accounting |
-| P2-10 | **KATCHI gate applied on create only, not later stages** | **OPEN** — `assertKatchiWriteAllowed` is imported by 8 controllers but called only in create handlers, e.g. `payment.controller.ts:32` and nowhere else in that file |
+| P2-10 | **KATCHI gate applied on create only, not later stages** | **FIXED (22 of 23 routes) — Batch H part 2, phase/22.** `POST /v1/depreciation/runs` still ungated — it batches every `IN_SERVICE` asset regardless of book, so there's no single record to gate on; deferred as a product decision, see below |
 | P2-11 | Dishonour date forced to `new Date()` | **OPEN** — `payment.service.ts:472` |
 | P2-12 | Payroll duplicate-period guard ran outside its transaction | **FIXED** — Batch C |
 | P2-13 | Statement and operational formatters disagree on the zero/null glyph | **FIXED** — Batch G, phase/22 (`c162472`) |
@@ -114,6 +114,20 @@ The payment is recognised when received (§262) and the bank balance never inclu
 
 ---
 
+## Decision on record: KATCHI later-stage gate count, 15 → 23 (P2-10)
+
+The phase/22 plan enumerated 15 ungated later-stage routes and separately listed 8 more (payroll remit/reverse, fixed-assets commission/dispose/reverse-disposal/depreciation-runs, employee-advances write-off, peshgi write-off) as "confirmed not gaps, OWNER already exceeds what a KATCHI check would require." That confirmation was wrong, caught before implementing by reading `computeEffectivePermissions` in `packages/shared/src/permissions.ts` directly rather than trusting the carried-over note.
+
+`defaultMinRole: 'OWNER'` is not a floor. Only `alwaysOwner: true` is — and exactly three keys in the entire 42-key registry have it (`users.manage`, `settings.manage`, `permissions.manage`). Every other OWNER-default key, including all 8 listed above, is grantable to any role via `PUT /v1/permissions` (`computeEffectivePermissions` deletes only `alwaysOwner` keys for non-owners; `EDITABLE_ROLES` includes MANAGER down to VIEWER). So a facility owner can grant `payroll.reverse` to MANAGER — a supported, intended action — and without a gate in the route itself, that MANAGER could then reverse a KATCHI-book payroll run with no OWNER check anywhere in the path. That is exactly the drift `CLAUDE.md` says keeping KATCHI outside the owner-configurable matrix was meant to prevent: the fixed rule and the matrix disagreeing.
+
+Corrected count: **23 later-stage routes across 7 of the 8 controllers that already import `assertKatchiWriteAllowed`** (the create-only gate proved the module already has a KATCHI-bearing document; the fix doesn't spread to modules that never had the gate). `accounting.controller.ts`, the 8th, contributed zero — its journal-entry routes were already fully gated on create, post-draft, and reverse. 22 gated in Batch H part 2 — the established `const existing = await service.getById(...); assertKatchiWriteAllowed(role, existing.book_type)` shape (`accounting.controller.ts:184-185`) for 21 later-stage mutations, `body.book_type` directly for the one later-stage *create* (`petty-cash-replenish`, which has its own optional `book_type` rather than operating on an existing record).
+
+**One left open, on purpose: `POST /v1/depreciation/runs`.** `RunDepreciationRequest` carries only `period_year`/`period_month` — no `book_type` — because the run isn't scoped to one record: `runMonthlyDepreciation` (`fixed-asset.service.ts:326-353`) loops every `IN_SERVICE` asset regardless of book and posts each one's JE-13 in that asset's own `bookType`. A single run can touch both PACCI and KATCHI assets. Fetch-then-gate doesn't apply — there's no single `existing` to check. Fixing this is a product decision (reject the whole run when any IN_SERVICE asset is KATCHI and the caller isn't OWNER, vs. silently scope non-OWNER runs to PACCI-only assets, vs. something else) with real behavioral consequences, not a mechanical audit-gate insertion — so it's deferred rather than guessed at. Still ungated today; tracked here so it isn't lost.
+
+Tests: one non-OWNER-on-KATCHI-403 per controller in the existing `KATCHI source-document gates (F-9)` block (`accounting-hardening.integration.test.ts`), not one per route. Two of the seven (fixed-assets commission, employee-advances write-off) specifically grant the route's permission to MANAGER via `PUT /v1/permissions` first, then confirm the KATCHI gate still holds — proving the exact scenario that motivated the count correction, not just the default-role case.
+
+---
+
 ## Decision on record: cash-negative guard (P1-6 / invariant 14)
 
 Attempted 2026-07-31 in Batch H, reverted the same day. The guard itself (`assertCashAccountsStayNonNegative` in `journal-entry.service.ts`, deriving the cash-class set from the `1000` HEADER's children rather than a hardcoded list, locked per-account via `advisoryXactLock` against the same TOCTOU race Batch C fixed for document numbering) was correct in what it checked. It was wired into both places a line becomes `POSTED` — `postInTransaction` and the `postDraft` promotion path — and rejected with a new `CASH_ACCOUNT_WOULD_GO_NEGATIVE` (422).
@@ -130,7 +144,11 @@ Phase 22 (`Batches G/H/I`) clears the **defect** half of the open list: P1-6, P1
 
 **Batch G (presentation) shipped 2026-07-31** — `c162472` (web) + `dc08cf4` (PDF): P1-7, P1-8, P2-1, P2-3, P2-4, P2-13, P3-1. All seven verified against the running suite: 216 unit + 499 integration (api, unchanged from baseline — no regressions) + 111 unit (web, up from 99).
 
-**Batch H part 1 shipped 2026-07-31** — `e8edad8`: P2-11 (H4, dishonour date), P3-5 (H7, required JE dependency), invariant 16 (H3), P3-2 (H9, dead export). P1-6/invariant 14 (H1) attempted and reverted — see decision above. Suite unchanged (216/499+4skip/111), zero regressions. Still open: P2-2 (H2), P2-10 (H5, largest remaining item), P2-15 (H6), P2-8/P3-4 (H8), invariant 17, and Batch I (reversal UI).
+**Batch H part 1 shipped 2026-07-31** — `e8edad8`: P2-11 (H4, dishonour date), P3-5 (H7, required JE dependency), invariant 16 (H3), P3-2 (H9, dead export). P1-6/invariant 14 (H1) attempted and reverted — see decision above. Suite unchanged (216/499+4skip/111), zero regressions.
+
+**Batch H part 2 shipped 2026-08-01** — P2-10 (H5): 22 of 23 later-stage KATCHI gaps closed across 7 controllers (payment, lot, expense, payroll, peshgi, fixed-assets, employee-advances) — see decision above for the 15→23 count correction and why `POST /v1/depreciation/runs` stays open. Seven new tests in the `KATCHI source-document gates (F-9)` block, one per controller; two (fixed-assets, employee-advances) specifically grant the route's permission to MANAGER first, then confirm the gate still holds — verified as real regression tests, not tautologies, by temporarily stashing the two controller edits and watching both go `403 → 200`. Suite: 506 integration passing + 4 skipped (up from 499+4, zero regressions), 216 unit / 111 unit unchanged.
+
+Still open: P2-2 (H2, largest remaining item), P2-15 (H6), P2-8/P3-4 (H8), invariant 17, the depreciation-run KATCHI gap above, and Batch I (reversal UI).
 
 Everything else above is new capability rather than repair, and is deliberately held: P1-4, P1-10, P1-12, P1-13, P2-5, P2-6, P2-7, P2-9, P2-14, and depreciation-run reversal (`DepreciationScheduleStatus` has no `REVERSED` member — it does not exist at all). **P1-6 joined this list mid-batch**, not by original scoping — it looked like defect repair until the test suite showed it depends on opening cash balances existing first (see decision above), which is new capability.
 
