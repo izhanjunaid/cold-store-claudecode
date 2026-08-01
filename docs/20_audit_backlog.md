@@ -25,7 +25,7 @@
 | P1-3 | Payroll runs and fixed assets were terminal — no cancel, reverse or un-dispose existed | **FIXED** — Batch E, `docs/18` §5 |
 | P1-4 | **GST Payable 2020 is credited forever and never debited** — no settlement path exists | **OPEN** — `je-01-invoice-finalized.ts:137` credits it; repo-wide, nothing debits it |
 | P1-5 | One account map, four copies — two of them in the browser | **FIXED** — Batch B, `docs/18` §6 |
-| P1-6 | **No cash-negative guard** — a posted entry can drive Cash on Hand below zero | **OPEN** — `journal-entry.service.ts:346-359` checks exists/active/not-HEADER only |
+| P1-6 | **No cash-negative guard** — a posted entry can drive Cash on Hand below zero | **DEFERRED** — tried in Batch H (phase/22), reverted; see below |
 | P1-7 | **`number_format` setting is wired to nothing** | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P1-8 | **No PDF surface formats money** — invoices print `1234567.5` | **FIXED** — Batch G, phase/22 (`dc08cf4`) |
 | P1-9 | Payroll remittance was repeatable and unvalidated | **FIXED** — Batch C |
@@ -79,7 +79,7 @@ The audit proposed ten ledger invariants (11–20) and marked several "MISSING �
 | 11 | Every FINALIZED payroll run has a balanced JE | P1-1 | **Covered by construction** — `postInTransaction` rejects unbalanced entries; plus `payroll-templates.unit.test.ts:15,45` |
 | 12 | Advance liability (2010) nets to zero after an advance is dishonoured | P0-1 | **EXISTS** — `payment.integration.test.ts:397` (unallocated) and `:451` (partly allocated) |
 | 13 | No `1020` balance includes a non-`CLEARED` cheque | P0-2 / P1-12 | **BLOCKED** — becomes checkable once the clearing model below is built |
-| 14 | No cash-class account ever goes negative | P1-6 | **MISSING** |
+| 14 | No cash-class account ever goes negative | P1-6 | **BLOCKED** — becomes checkable once opening cash balances exist; see below |
 | 15 | Every payroll run has at most one remittance JE | P1-9 | **EXISTS** — guard `payroll-run.service.ts:411-412`, test `payroll.integration.test.ts:583` |
 | 16 | Σ `2030` credits = Σ per-employee net pay | P2-5 | **MISSING** — checkable today without the subledger |
 | 17 | Every JE `sourceId` resolves to a real row in `sourceTable` | P2-2 | **MISSING** |
@@ -114,12 +114,24 @@ The payment is recognised when received (§262) and the bank balance never inclu
 
 ---
 
+## Decision on record: cash-negative guard (P1-6 / invariant 14)
+
+Attempted 2026-07-31 in Batch H, reverted the same day. The guard itself (`assertCashAccountsStayNonNegative` in `journal-entry.service.ts`, deriving the cash-class set from the `1000` HEADER's children rather than a hardcoded list, locked per-account via `advisoryXactLock` against the same TOCTOU race Batch C fixed for document numbering) was correct in what it checked. It was wired into both places a line becomes `POSTED` — `postInTransaction` and the `postDraft` promotion path — and rejected with a new `CASH_ACCOUNT_WOULD_GO_NEGATIVE` (422).
+
+Running it against the integration suite turned up the real finding: **57 of 503 tests failed across 9 files**, every one a legitimate cash-out operation — loan issuance (`peshgi.integration.test.ts`'s `issueLoan()` helper going 201→422) among them — rejected because the account it debited or credited had no funded balance to draw down. The guard is not buggy; the precondition it enforces has no producer anywhere in the system. **No facility, seeded fixture or otherwise, ever establishes an opening cash position** — 1010/1020/1030 all start at an implicit zero with nothing that deposits into them except ordinary operating postings, which is exactly what the guard then blocks. Building a synthetic balance into the shared test fixture to make the suite pass would have hidden the same gap in production: a real facility's first cash payout on day one would 422 for the same reason, and nothing in the product currently prompts an owner to enter one.
+
+This is the same shape of finding as P1-1 in `docs/18` §4 — `other_deductions_pkr` had no account to post to, so the fix was to refuse honestly rather than post to the wrong place. Here the missing piece is an account **balance**, not an account, so the same discipline means: don't post through a hole, and don't force output out of a check whose input the system can't supply yet. Reverted: the function, both call sites, the error code, and the now-unused `advisoryXactLock` import. Kept, skipped, with the reasoning inline: the four tests in `accounting-hardening.integration.test.ts` under `describe.skip('cash-class accounts cannot go negative ...')` — they're the spec for whichever phase adds opening cash balances (a prerequisite this shares with invariant 13/P1-12 above; the two could plausibly land together, since both are "the ledger needs a real starting position" problems).
+
+---
+
 ## Scope note
 
 Phase 22 (`Batches G/H/I`) clears the **defect** half of the open list: P1-6, P1-7, P1-8, P2-1, P2-2, P2-3, P2-4, P2-8, P2-10, P2-11, P2-13, P2-15, P3-1, P3-2, P3-4, P3-5, invariants 14/16/17, and web UI for the two reversal endpoints that shipped with no callers.
 
-**Batch G (presentation) shipped 2026-07-31** — `c162472` (web) + `dc08cf4` (PDF): P1-7, P1-8, P2-1, P2-3, P2-4, P2-13, P3-1. All seven verified against the running suite: 216 unit + 499 integration (api, unchanged from baseline — no regressions) + 111 unit (web, up from 99). Batch H (integrity defects) and Batch I (reversal UI) remain.
+**Batch G (presentation) shipped 2026-07-31** — `c162472` (web) + `dc08cf4` (PDF): P1-7, P1-8, P2-1, P2-3, P2-4, P2-13, P3-1. All seven verified against the running suite: 216 unit + 499 integration (api, unchanged from baseline — no regressions) + 111 unit (web, up from 99).
 
-Everything else above is new capability rather than repair, and is deliberately held: P1-4, P1-10, P1-12, P1-13, P2-5, P2-6, P2-7, P2-9, P2-14, and depreciation-run reversal (`DepreciationScheduleStatus` has no `REVERSED` member — it does not exist at all).
+**Batch H part 1 shipped 2026-07-31** — `e8edad8`: P2-11 (H4, dishonour date), P3-5 (H7, required JE dependency), invariant 16 (H3), P3-2 (H9, dead export). P1-6/invariant 14 (H1) attempted and reverted — see decision above. Suite unchanged (216/499+4skip/111), zero regressions. Still open: P2-2 (H2), P2-10 (H5, largest remaining item), P2-15 (H6), P2-8/P3-4 (H8), invariant 17, and Batch I (reversal UI).
+
+Everything else above is new capability rather than repair, and is deliberately held: P1-4, P1-10, P1-12, P1-13, P2-5, P2-6, P2-7, P2-9, P2-14, and depreciation-run reversal (`DepreciationScheduleStatus` has no `REVERSED` member — it does not exist at all). **P1-6 joined this list mid-batch**, not by original scoping — it looked like defect repair until the test suite showed it depends on opening cash balances existing first (see decision above), which is new capability.
 
 **Still open for production** (`docs/18:145`): run the duplicate-invoice-number pre-check in the `0011` migration banner before deploying. Dev returned clean but holds zero invoices, which proves nothing.
