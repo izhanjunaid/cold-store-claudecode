@@ -71,7 +71,7 @@ describe('Expense JE templates', () => {
       amountPkr: 4500,
       sourceBankAccountCode: '1020',
       bookType: 'PACCI',
-      reference: 'replenish-1',
+      userId: 'user-1',
     });
     const t = totals(draft.lines);
     expect(t.d).toBe(4500);
@@ -80,6 +80,18 @@ describe('Expense JE templates', () => {
     expect(draft.lines.find((l) => l.accountCode === '1020')?.creditAmount).toBe(4500);
     // Should be exactly two lines
     expect(draft.lines.length).toBe(2);
+  });
+
+  it('JE-17C: has no source document, so it is tagged manual/acting-user, not a fabricated voucher id (P2-2)', () => {
+    const draft = buildJE17CPettyCashReplenish({
+      entryDate: new Date('2026-04-30'),
+      amountPkr: 4500,
+      sourceBankAccountCode: '1020',
+      bookType: 'PACCI',
+      userId: 'user-42',
+    });
+    expect(draft.sourceTable).toBe('manual');
+    expect(draft.sourceId).toBe('user-42');
   });
 
   it('JE-17A handles small petty-cash voucher posting to 1010', () => {

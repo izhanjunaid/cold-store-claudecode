@@ -22,12 +22,18 @@ async function cleanupInner() {
     data: { accrualJournalEntryId: null, paymentJournalEntryId: null },
   });
   await prisma.expenseVoucher.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+  // JE-17C (petty-cash-replenish) is tagged sourceTable 'manual' (P2-2 — it has
+  // no source document to point at), entryType 'EXPENSE' — a combination no
+  // other template produces, so this stays specific to petty-cash JEs and
+  // doesn't sweep up unrelated manual entries other test files may have left.
+  const pettyCashJeFilter = {
+    facilityId: TEST_FACILITY_ID,
+    OR: [{ sourceTable: 'expense_vouchers' }, { sourceTable: 'manual', entryType: 'EXPENSE' as const }],
+  };
   await prisma.journalEntryLine.deleteMany({
-    where: { facilityId: TEST_FACILITY_ID, journalEntry: { sourceTable: 'expense_vouchers' } },
+    where: { facilityId: TEST_FACILITY_ID, journalEntry: pettyCashJeFilter },
   });
-  await prisma.journalEntry.deleteMany({
-    where: { facilityId: TEST_FACILITY_ID, sourceTable: 'expense_vouchers' },
-  });
+  await prisma.journalEntry.deleteMany({ where: pettyCashJeFilter });
   await prisma.periodLock.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
 }
 
@@ -209,7 +215,7 @@ describe('Phase 8B — Expense Vouchers', () => {
     expect(upd.statusCode).toBe(409);
   });
 
-  it('cancel a DRAFT voucher', async () => {
+  it('cancel a DRAFT voucher, persisting the reason', async () => {
     await cleanup();
     const v = await createDraft();
     const cancel = await app.inject({
@@ -220,6 +226,37 @@ describe('Phase 8B — Expense Vouchers', () => {
     });
     expect(cancel.statusCode).toBe(200);
     expect(JSON.parse(cancel.body).data.status).toBe('CANCELLED');
+
+    const get = await app.inject({
+      method: 'GET',
+      url: `/v1/expense-vouchers/${v.id}`,
+      headers: authHeaders(managerToken),
+    });
+    expect(JSON.parse(get.body).data.notes).toContain('duplicate');
+  });
+
+  it('voucher creator cannot approve their own voucher', async () => {
+    await cleanup();
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/expense-vouchers',
+      headers: authHeaders(managerToken),
+      payload: {
+        voucher_date: '2026-04-15',
+        expense_account_code: '5010',
+        description: 'Self-approval attempt',
+        amount_pkr: 5000,
+      },
+    });
+    const v = JSON.parse(create.body).data;
+    const approve = await app.inject({
+      method: 'POST',
+      url: `/v1/expense-vouchers/${v.id}/approve`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(approve.statusCode).toBe(422);
+    expect(JSON.parse(approve.body).error.code).toBe('EXPENSE_VOUCHER_SELF_APPROVAL');
   });
 
   it('petty-cash-replenish posts a single JE: DR 1010 / CR 1020', async () => {

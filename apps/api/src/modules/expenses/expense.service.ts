@@ -7,7 +7,6 @@ import { buildJE17AExpensePaid } from './templates/je-17a-expense-paid';
 import { buildJE17BExpenseAccrued } from './templates/je-17b-expense-accrued';
 import { buildJE17BPayAccruedExpense } from './templates/je-17b-pay-accrued-payment';
 import { buildJE17CPettyCashReplenish } from './templates/je-17c-petty-cash-replenish';
-import { randomUUID } from 'node:crypto';
 
 type Tx = Prisma.TransactionClient;
 
@@ -90,6 +89,9 @@ export class ExpenseService {
     if (v.status !== 'DRAFT') {
       throw Errors.EXPENSE_VOUCHER_INVALID_STATUS(`Cannot approve voucher in status ${v.status}`);
     }
+    if (v.createdBy === userId) {
+      throw Errors.EXPENSE_VOUCHER_SELF_APPROVAL();
+    }
     const updated = await this.prisma.expenseVoucher.update({
       where: { id },
       data: { status: 'APPROVED', approvedBy: userId, approvedAt: new Date() },
@@ -97,15 +99,25 @@ export class ExpenseService {
     return formatVoucher(updated);
   }
 
-  async cancel(facilityId: string, id: string) {
+  async cancel(facilityId: string, id: string, reason?: string) {
     const v = await this.prisma.expenseVoucher.findFirst({ where: { facilityId, id } });
     if (!v) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
     if (v.status === 'PAID' || v.status === 'ACCRUED') {
       throw Errors.EXPENSE_VOUCHER_INVALID_STATUS(`Cannot cancel voucher in status ${v.status}`);
     }
+    const today = new Date().toISOString().slice(0, 10);
     const updated = await this.prisma.expenseVoucher.update({
       where: { id },
-      data: { status: 'CANCELLED' },
+      data: {
+        status: 'CANCELLED',
+        ...(reason
+          ? {
+              notes: v.notes
+                ? `${v.notes}\n[CANCELLED ${today}]: ${reason}`
+                : `[CANCELLED ${today}]: ${reason}`,
+            }
+          : {}),
+      },
     });
     return formatVoucher(updated);
   }
@@ -200,14 +212,13 @@ export class ExpenseService {
   }
 
   async pettyCashReplenish(facilityId: string, userId: string, body: any) {
-    const ref = randomUUID();
     return this.prisma.$transaction(async (tx) => {
       const draft = buildJE17CPettyCashReplenish({
         entryDate: new Date(body.replenishment_date),
         amountPkr: body.amount_pkr,
         sourceBankAccountCode: body.source_bank_account_code ?? DEFAULT_BANK_ACCOUNT_CODE,
         bookType: body.book_type ?? 'PACCI',
-        reference: ref,
+        userId,
       });
       const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
         postingStatus: 'POSTED',

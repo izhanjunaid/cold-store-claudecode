@@ -5,7 +5,7 @@ type Input = {
   amountPkr: number;
   sourceBankAccountCode: string;
   bookType: 'PACCI' | 'KATCHI';
-  reference: string; // identifier to use as sourceId
+  userId: string; // acting user — a petty-cash transfer has no source document
 };
 
 /**
@@ -16,14 +16,21 @@ type Input = {
  *
  *   DR  1010  Cash on Hand        amount
  *     CR  1020  Bank Account        amount
+ *
+ * This is a cash transfer, not a voucher — there is no ExpenseVoucher row to
+ * point at (P2-2: it used to stamp a fabricated uuid as one). Tagged
+ * 'manual' with the acting user as sourceId instead, matching the one other
+ * source-document-less template (accounting.controller.ts's manual-JE
+ * handler, sourceId = request.user.userId) rather than inventing a new
+ * convention. That also makes it reversible, which it should be.
  */
 export function buildJE17CPettyCashReplenish(input: Input): JournalEntryDraft {
   const amount = round2(input.amountPkr);
   return {
     entryType: 'EXPENSE',
     bookType: input.bookType,
-    sourceTable: 'expense_vouchers',
-    sourceId: input.reference,
+    sourceTable: 'manual',
+    sourceId: input.userId,
     entryDate: input.entryDate,
     description: `Petty cash replenishment Rs. ${amount.toLocaleString()}`,
     lines: [

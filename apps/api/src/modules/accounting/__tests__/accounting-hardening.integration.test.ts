@@ -138,6 +138,24 @@ async function cleanup() {
     await prisma.creditNoteLineItem.deleteMany({ where: { creditNote: { facilityId: TEST_FACILITY_ID } } });
     await prisma.creditNote.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.paymentAllocation.deleteMany({ where: { payment: { facilityId: TEST_FACILITY_ID } } });
+    // The H5 (KATCHI later-stage gate) tests below create a payroll run —
+    // period+type is unique per facility, so a leftover run from an earlier
+    // pass of this file collides with a 409 on the next one. Null the JE refs
+    // before the blanket journalEntry delete below, matching the FK order
+    // payroll.integration.test.ts already uses for the same tables.
+    await prisma.payrollLineItem.deleteMany({ where: { payrollRun: { facilityId: TEST_FACILITY_ID } } });
+    await prisma.payrollRun.updateMany({
+      where: { facilityId: TEST_FACILITY_ID },
+      data: { payrollJournalEntryId: null, paymentJournalEntryId: null, remittanceJournalEntryId: null },
+    });
+    await prisma.payrollRun.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    // Deliberately NOT deleting employee/employeeAdvance rows here: this file's
+    // employee_advances test creates its own employee per run (no unique
+    // constraint to collide on), and payroll.integration.test.ts /
+    // employee-advance.integration.test.ts create long-lived employees on the
+    // same shared TEST_FACILITY_ID — a blanket deleteMany in this file's
+    // beforeAll/afterAll would race and delete rows those files are mid-use of
+    // when vitest runs files in parallel.
     await prisma.journalEntryLine.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.journalEntry.updateMany({
       where: { facilityId: TEST_FACILITY_ID },
@@ -1435,5 +1453,69 @@ describe('credit notes are bounded by the invoice balance due (F-5)', () => {
     });
     expect(res.statusCode).toBe(201);
     expect(JSON.parse(res.body).data.status).toBe('APPLIED');
+  });
+});
+
+// ============================================================
+// P2-2 — every JE's sourceId resolves to a live row (invariant 17)
+// ============================================================
+
+describe('every JE sourceId resolves to a live row in its sourceTable (invariant 17)', () => {
+  // Document-backed sourceTable values are the real table name, matching
+  // Prisma's own @@map for each model — checked against schema.prisma, not
+  // assumed. Two values have no backing document at all, by design, so
+  // sourceId means something else there: 'manual' (accounting.controller.ts's
+  // manual-JE handler, and now JE-17C petty-cash-replenish — P2-2) stamps the
+  // acting user's id; 'opening_balances' (opening-balance.service.ts) stamps
+  // the facility's own id. Both predate this test.
+  const resolvableTables: Record<string, (id: string) => Promise<boolean>> = {
+    manual: async (id) => (await prisma.user.count({ where: { id } })) > 0,
+    opening_balances: async (id) => (await prisma.facility.count({ where: { id } })) > 0,
+    expense_vouchers: async (id) => (await prisma.expenseVoucher.count({ where: { id } })) > 0,
+    party_loans: async (id) => (await prisma.partyLoan.count({ where: { id } })) > 0,
+    party_loan_repayments: async (id) => (await prisma.partyLoanRepayment.count({ where: { id } })) > 0,
+    employee_advances: async (id) => (await prisma.employeeAdvance.count({ where: { id } })) > 0,
+    invoices: async (id) => (await prisma.invoice.count({ where: { id } })) > 0,
+    fixed_assets: async (id) => (await prisma.fixedAsset.count({ where: { id } })) > 0,
+    payroll_runs: async (id) => (await prisma.payrollRun.count({ where: { id } })) > 0,
+    payments: async (id) => (await prisma.payment.count({ where: { id } })) > 0,
+    journal_entries: async (id) => (await prisma.journalEntry.count({ where: { id } })) > 0,
+    credit_notes: async (id) => (await prisma.creditNote.count({ where: { id } })) > 0,
+  };
+
+  // P3-3 (docs/20_audit_backlog.md): je-21-late-payment-surcharge.ts and its
+  // callers stamp sourceTable 'invoice_surcharge', but no invoice_surcharges
+  // table exists in schema.prisma on this branch — confirmed absent, not
+  // assumed. There is nothing to resolve against. Named here as a known gap
+  // rather than silently excluded or left to throw on a missing table/model.
+  const knownGapTables = new Set(['invoice_surcharge']);
+
+  // Self-verifying (the point of this test over just checking today's known
+  // values): a sourceTable this facility's journal_entries actually carries
+  // but that isn't in either bucket above fails loudly, so a template added
+  // in a future phase can't silently go unchecked the way JE-17C did.
+  it('every sourceTable value present is either resolvable or a documented gap', async () => {
+    const distinct = await prisma.journalEntry.findMany({
+      where: { facilityId: TEST_FACILITY_ID },
+      select: { sourceTable: true },
+      distinct: ['sourceTable'],
+    });
+    for (const { sourceTable } of distinct) {
+      const known = sourceTable in resolvableTables || knownGapTables.has(sourceTable);
+      expect(known, `unmapped sourceTable "${sourceTable}" — add it to the invariant-17 resolver map`).toBe(true);
+    }
+  });
+
+  it('every resolvable-table sourceId points at a row that actually exists', async () => {
+    const entries = await prisma.journalEntry.findMany({
+      where: { facilityId: TEST_FACILITY_ID, sourceTable: { in: Object.keys(resolvableTables) } },
+      select: { entryNumber: true, sourceTable: true, sourceId: true },
+    });
+    const dangling: string[] = [];
+    for (const e of entries) {
+      const exists = await resolvableTables[e.sourceTable]!(e.sourceId);
+      if (!exists) dangling.push(`${e.entryNumber} -> ${e.sourceTable}:${e.sourceId}`);
+    }
+    expect(dangling).toEqual([]);
   });
 });

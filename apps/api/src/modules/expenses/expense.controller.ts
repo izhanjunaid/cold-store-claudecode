@@ -138,9 +138,10 @@ export async function expenseRoutes(app: FastifyInstance) {
     schema: { params: IdParam, body: CancelExpenseRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof CancelExpenseRequest>;
       const existing = await service.getById(request.user!.facilityId, id);
       assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.cancel(request.user!.facilityId, id);
+      const data = await service.cancel(request.user!.facilityId, id, body.reason);
       return sendSuccess(reply, data);
     },
   });

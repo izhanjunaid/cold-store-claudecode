@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { withGuardsDisabled } from '../../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
@@ -222,6 +222,62 @@ describe('Phase 8B — Fixed Assets', () => {
     });
     expect(repeat.statusCode).toBe(409);
     expect(JSON.parse(repeat.body).error.code).toBe('DEPRECIATION_ALREADY_POSTED');
+  });
+
+  it('runs the depreciation batch with an explicit transaction timeout', async () => {
+    await cleanup();
+    const { id } = await createCompressor();
+    await commission(id, '2026-02-01');
+
+    const spy = vi.spyOn(app.prisma, '$transaction');
+    const run = await app.inject({
+      method: 'POST',
+      url: '/v1/depreciation/runs',
+      headers: authHeaders(ownerToken),
+      payload: { period_year: 2026, period_month: 2 },
+    });
+    expect(run.statusCode).toBe(201);
+    expect(spy).toHaveBeenCalledWith(expect.any(Function), { timeout: 30_000, maxWait: 10_000 });
+    spy.mockRestore();
+  });
+
+  it('rejects an out-of-order period run: skipping February to run March', async () => {
+    await cleanup();
+    const { id } = await createCompressor();
+    await commission(id, '2026-01-01');
+
+    const jan = await app.inject({
+      method: 'POST',
+      url: '/v1/depreciation/runs',
+      headers: authHeaders(ownerToken),
+      payload: { period_year: 2026, period_month: 1 },
+    });
+    expect(jan.statusCode).toBe(201);
+
+    const march = await app.inject({
+      method: 'POST',
+      url: '/v1/depreciation/runs',
+      headers: authHeaders(ownerToken),
+      payload: { period_year: 2026, period_month: 3 },
+    });
+    expect(march.statusCode).toBe(409);
+    expect(JSON.parse(march.body).error.code).toBe('DEPRECIATION_PRIOR_PERIOD_NOT_POSTED');
+
+    const feb = await app.inject({
+      method: 'POST',
+      url: '/v1/depreciation/runs',
+      headers: authHeaders(ownerToken),
+      payload: { period_year: 2026, period_month: 2 },
+    });
+    expect(feb.statusCode).toBe(201);
+
+    const marchAgain = await app.inject({
+      method: 'POST',
+      url: '/v1/depreciation/runs',
+      headers: authHeaders(ownerToken),
+      payload: { period_year: 2026, period_month: 3 },
+    });
+    expect(marchAgain.statusCode).toBe(201);
   });
 
   it('disposes asset above book value (gain) and posts JE-14 with 4230 line', async () => {

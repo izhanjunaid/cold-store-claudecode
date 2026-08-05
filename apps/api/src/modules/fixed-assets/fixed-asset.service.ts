@@ -296,7 +296,8 @@ export class FixedAssetService {
   async runMonthlyDepreciation(facilityId: string, userId: string, body: RunDepreciationInput) {
     const { period_year: year, period_month: month } = body;
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(
+      async (tx) => {
       const assets = await tx.fixedAsset.findMany({
         where: { facilityId, status: 'IN_SERVICE' },
         orderBy: { assetNumber: 'asc' },
@@ -314,6 +315,46 @@ export class FixedAssetService {
       });
       if (existing.some((e) => e.status === 'POSTED')) {
         throw Errors.DEPRECIATION_ALREADY_POSTED();
+      }
+
+      // Reject running out of order: any asset that would have produced a
+      // nonzero depreciation row last period must have a POSTED row for it
+      // first. Scoped to per-asset eligibility (not "facility's last posted
+      // period + 1") so a calendar gap with zero IN_SERVICE assets — which
+      // can never be posted at all, see DEPRECIATION_NOTHING_TO_RUN above —
+      // doesn't permanently block the next real run.
+      const prevMonth = month === 1 ? 12 : month - 1;
+      const prevYear = month === 1 ? year - 1 : year;
+      const eligibleLastPeriod = assets.filter((a) => {
+        if (!a.depreciationStartDate) return false;
+        const opening = Number(a.purchaseCostPkr) - Number(a.accumulatedDepreciationPkr);
+        const row = computeMonthlyDepreciation({
+          method: a.depreciationMethod,
+          costPkr: Number(a.purchaseCostPkr),
+          residualValuePkr: Number(a.residualValuePkr),
+          usefulLifeYears: a.usefulLifeYears ? Number(a.usefulLifeYears) : null,
+          wdvRatePercent: a.wdvRatePercent ? Number(a.wdvRatePercent) : null,
+          depreciationStartDate: a.depreciationStartDate,
+          periodYear: prevYear,
+          periodMonth: prevMonth,
+          openingNbvPkr: opening,
+        });
+        return row.depreciationAmountPkr > 0;
+      });
+      if (eligibleLastPeriod.length > 0) {
+        const prevPosted = await tx.depreciationSchedule.findMany({
+          where: {
+            fixedAssetId: { in: eligibleLastPeriod.map((a) => a.id) },
+            periodYear: prevYear,
+            periodMonth: prevMonth,
+            status: 'POSTED',
+          },
+          select: { fixedAssetId: true },
+        });
+        const postedIds = new Set(prevPosted.map((p) => p.fixedAssetId));
+        if (eligibleLastPeriod.some((a) => !postedIds.has(a.id))) {
+          throw Errors.DEPRECIATION_PRIOR_PERIOD_NOT_POSTED();
+        }
       }
 
       const results: Array<{
@@ -412,7 +453,9 @@ export class FixedAssetService {
         ),
         entries: results,
       };
-    });
+      },
+      { timeout: 30_000, maxWait: 10_000 },
+    );
   }
 
   async listRuns(facilityId: string) {

@@ -145,6 +145,12 @@ export const Errors = {
     new AppError('DEPRECIATION_ALREADY_POSTED', 'Depreciation already posted for this period', 409),
   DEPRECIATION_NOTHING_TO_RUN: () =>
     new AppError('DEPRECIATION_NOTHING_TO_RUN', 'No assets eligible for depreciation in this period', 422),
+  DEPRECIATION_PRIOR_PERIOD_NOT_POSTED: () =>
+    new AppError(
+      'DEPRECIATION_PRIOR_PERIOD_NOT_POSTED',
+      'The immediately preceding period has not been posted for one or more assets in this run',
+      409,
+    ),
   EMPLOYEE_NOT_FOUND: () => new AppError('EMPLOYEE_NOT_FOUND', 'Employee does not exist', 404),
   PAYROLL_RUN_NOT_FOUND: () => new AppError('PAYROLL_RUN_NOT_FOUND', 'Payroll run does not exist', 404),
   PAYROLL_RUN_INVALID_STATUS: (msg: string) =>
@@ -170,6 +176,12 @@ export const Errors = {
     new AppError('EXPENSE_VOUCHER_NOT_FOUND', 'Expense voucher does not exist', 404),
   EXPENSE_VOUCHER_INVALID_STATUS: (msg: string) =>
     new AppError('EXPENSE_VOUCHER_INVALID_STATUS', msg, 409),
+  EXPENSE_VOUCHER_SELF_APPROVAL: () =>
+    new AppError(
+      'EXPENSE_VOUCHER_SELF_APPROVAL',
+      'The voucher creator cannot approve their own voucher',
+      422,
+    ),
   PESHGI_NOT_FOUND: () => new AppError('PESHGI_NOT_FOUND', 'Peshgi loan does not exist', 404),
   PESHGI_OVER_REPAYMENT: () =>
     new AppError('PESHGI_OVER_REPAYMENT', 'Repayment amount exceeds outstanding loan balance', 422),
