@@ -43,20 +43,20 @@
 | P2-0b | `expense-number` used local time, not UTC | **FIXED** — Batch D |
 | P2-0c | Invoices numbered from the wall clock, not the invoice's own date | **FIXED** — Batch D |
 | P2-1 | **Money inputs are scroll-mutable** — a stray wheel over a focused number input silently changes an amount | **FIXED** — Batch G, phase/22 (`c162472`) |
-| P2-2 | **Petty-cash JE points at a voucher row that does not exist** — the audit trail asserts a source document that was never created | **OPEN** — `expense.service.ts:203` mints `randomUUID()`; `je-17c-petty-cash-replenish.ts:25-26` stamps it as `sourceTable: 'expense_vouchers'` |
+| P2-2 | **Petty-cash JE points at a voucher row that does not exist** — the audit trail asserts a source document that was never created | **FIXED** — Batch H part 3, phase/22. Retagged `sourceTable: 'manual'`, `sourceId: <acting user>`, matching the one other source-document-less template rather than fabricating a voucher row |
 | P2-3 | Account picker is a plain `<select>` over 84 accounts; `ComboboxField` ships and is used elsewhere | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P2-4 | Voucher running totals bypass the shared formatter | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P2-5 | No per-employee subledger — payroll posts a single aggregate `2030` line | **OPEN** — `je-15:55`, `je-15b:58`, `je-16:29` |
 | P2-6 | `PLANNED` / `WRITTEN_OFF` asset statuses have no writer | **OPEN** — `fixed-asset.service.ts:165` reads `WRITTEN_OFF`; nothing sets it for an asset |
 | P2-7 | No partial disposal, revaluation, impairment or CWIP | **OPEN** — zero matches repo-wide |
-| P2-8 | Depreciation period ordering unconstrained — March can be run before February | **OPEN** — `fixed-asset.service.ts:308-317` guards only the same year/month |
+| P2-8 | Depreciation period ordering unconstrained — March can be run before February | **FIXED** — Batch H part 3, phase/22. Per-asset "eligible last period" guard using the same `computeMonthlyDepreciation` calc the run itself uses, so a calendar gap with zero `IN_SERVICE` assets can't permanently deadlock a later run |
 | P2-9 | Employee termination has no settlement / gratuity and posts no JE | **OPEN** — Phase 21 added an outstanding-debt warning to the terminate dialog, but no accounting |
 | P2-10 | **KATCHI gate applied on create only, not later stages** | **FIXED (22 of 23 routes) — Batch H part 2, phase/22.** `POST /v1/depreciation/runs` still ungated — it batches every `IN_SERVICE` asset regardless of book, so there's no single record to gate on; deferred as a product decision, see below |
 | P2-11 | Dishonour date forced to `new Date()` | **OPEN** — `payment.service.ts:472` |
 | P2-12 | Payroll duplicate-period guard ran outside its transaction | **FIXED** — Batch C |
 | P2-13 | Statement and operational formatters disagree on the zero/null glyph | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P2-14 | Payments have no document / receipt number at all | **OPEN** — zero matches for `payment_number` / `receipt_number` |
-| P2-15 | Voucher creator can approve their own voucher; cancel reason silently discarded | **OPEN** — `expense.service.ts:95` sets `approvedBy: userId` with no separation-of-duties check |
+| P2-15 | Voucher creator can approve their own voucher; cancel reason silently discarded | **FIXED** — Batch H part 3, phase/22. `approve()` rejects same-user (`EXPENSE_VOUCHER_SELF_APPROVAL`); cancel reason now read from the request body and appended to `notes` |
 
 ## P3
 
@@ -64,8 +64,8 @@
 |---|---|---|
 | P3-1 | Grouped amount input yields a silent zero — typing `40,00,000` posts `0` | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P3-2 | Dead export `defaultsForCategory` | **OPEN** — `fixed-assets/templates/types.ts:27`, zero callers repo-wide |
-| P3-3 | Dev-DB drift: `invoice_surcharges` exists in the live dev database but not in this branch's schema | **OPEN** — ops check, not code. Confirmed absent from the Prisma schema |
-| P3-4 | Depreciation batch runs in one transaction on Prisma's 5 s default timeout | **OPEN** — `fixed-asset.service.ts:299` opens the transaction; `:326` loops every in-service asset doing a `postInTransaction` (`:354`) and an upsert (`:358`) inside it |
+| P3-3 | Dev-DB drift: `invoice_surcharges` exists in the live dev database but not in this branch's schema | **OPEN** — ops check, not code. Confirmed absent from the Prisma schema (`schema.prisma` has no `invoice_surcharge`/`invoice_surcharges` model at all). **Now also confirmed live**: `je-21-late-payment-surcharge.ts:34`, `invoice.service.ts:300`, `payment.service.ts:646`, `reporting/reports/receivables-aging.ts:204` all stamp `sourceTable: 'invoice_surcharge'` on posted JEs — the audit trail asserts a document type with no backing table anywhere on this branch, the same shape as P2-2, found by the invariant-17 test rather than by reading. Not restructuring JE-21 in this batch; invariant 17 carries it as a named, documented gap so it isn't silently skipped or a crash risk |
+| P3-4 | Depreciation batch runs in one transaction on Prisma's 5 s default timeout | **FIXED** — Batch H part 3, phase/22. Explicit `{ timeout: 30_000, maxWait: 10_000 }` — the first explicit Prisma transaction timeout anywhere in this codebase (confirmed via full-repo grep before choosing the shape) |
 | P3-5 | `PaymentService` constructed without its journal-entry dependency in reporting | **OPEN** — `reporting.controller.ts:32-35` passes 2 args vs `payment.controller.ts:22`'s 3; `payment.service.ts:449` then guards with `if (this.journalEntry)`, so a future write path would silently skip its JE |
 
 ---
@@ -82,7 +82,7 @@ The audit proposed ten ledger invariants (11–20) and marked several "MISSING �
 | 14 | No cash-class account ever goes negative | P1-6 | **BLOCKED** — becomes checkable once opening cash balances exist; see below |
 | 15 | Every payroll run has at most one remittance JE | P1-9 | **EXISTS** — guard `payroll-run.service.ts:411-412`, test `payroll.integration.test.ts:583` |
 | 16 | Σ `2030` credits = Σ per-employee net pay | P2-5 | **MISSING** — checkable today without the subledger |
-| 17 | Every JE `sourceId` resolves to a real row in `sourceTable` | P2-2 | **MISSING** |
+| 17 | Every JE `sourceId` resolves to a real row in `sourceTable` | P2-2 | **EXISTS** — `accounting-hardening.integration.test.ts`, "every JE sourceId resolves to a live row" (self-verifying: an unmapped `sourceTable` fails loudly rather than being silently skipped). Surfaced P3-3 as a second instance of the same defect shape — see below |
 | 18 | One expense voucher never has more than one payment JE | P1-11 | **EXISTS** — `expense.integration.test.ts:339-344` |
 | 19 | `invoice_number` is unique per facility | P2-0a | **EXISTS** — as a DB constraint, migration `0011` |
 | 20 | No production code inserts journal rows outside `postInTransaction` | core guarantee | **EXISTS** — CI grep gate in `.github/workflows/ci.yml` |
@@ -148,7 +148,9 @@ Phase 22 (`Batches G/H/I`) clears the **defect** half of the open list: P1-6, P1
 
 **Batch H part 2 shipped 2026-08-01** — P2-10 (H5): 22 of 23 later-stage KATCHI gaps closed across 7 controllers (payment, lot, expense, payroll, peshgi, fixed-assets, employee-advances) — see decision above for the 15→23 count correction and why `POST /v1/depreciation/runs` stays open. Seven new tests in the `KATCHI source-document gates (F-9)` block, one per controller; two (fixed-assets, employee-advances) specifically grant the route's permission to MANAGER first, then confirm the gate still holds — verified as real regression tests, not tautologies, by temporarily stashing the two controller edits and watching both go `403 → 200`. Suite: 506 integration passing + 4 skipped (up from 499+4, zero regressions), 216 unit / 111 unit unchanged.
 
-Still open: P2-2 (H2, largest remaining item), P2-15 (H6), P2-8/P3-4 (H8), invariant 17, the depreciation-run KATCHI gap above, and Batch I (reversal UI).
+**Batch H part 3 shipped 2026-08-01** (`f56f8b8`) — P2-2 (H2), P2-15 (H6), P2-8/P3-4 (H8), invariant 17. JE-17C (petty-cash-replenish) retagged `sourceTable: 'manual'` / `sourceId: <acting user>`, matching the one other source-document-less template instead of the fabricated-uuid-into-`expense_vouchers` it used before; also makes it reversible, which the audit called correct. Invariant 17 lands as a self-verifying resolver map (12 document tables + the `manual`/`opening_balances` acting-user/facility convention), asserting every `sourceTable` value actually present is either resolvable or a named gap — which is what caught P3-3 as a live code defect, not just dev-DB drift, on the first run. Expense `approve()` gained a same-user rejection and `cancel` now actually reads and persists its reason (both req'd only a controller/service fix, no schema change — the request schema already validated the field). Depreciation runs gained an explicit 30 s transaction timeout (the codebase's first — grepped every `$transaction(` call site first to confirm) and a per-asset "prior period must be posted" guard that reuses the run's own eligibility calc rather than a facility-wide sequential rule, so a calendar gap with zero `IN_SERVICE` assets can't deadlock a later run. Test-hygiene fix alongside it: this file's shared-facility fixtures for H5 (payroll runs, employees) had no cleanup, so a second run of the file 409'd on a duplicate payroll period — fixed by extending `cleanup()` to the specific collision (payroll-run period uniqueness), then narrowed again after review flagged that the broader employee/employeeAdvance deletion it was bundled with risked deleting rows out from under other integration files sharing the same facility. Also root-caused (not fixed — out of this batch's scope) a shared dev-DB test-infra defect found while verifying: `backdating_max_days` can get stuck non-null forever if a test run mutating it is interrupted mid-flight, because the seed/setup upsert only applies its "unlimited" override on `create`, never `update`.
+
+Still open: the depreciation-run KATCHI gap (`POST /v1/depreciation/runs`, deferred product decision, see P2-10 above), and Batch I (reversal UI).
 
 Everything else above is new capability rather than repair, and is deliberately held: P1-4, P1-10, P1-12, P1-13, P2-5, P2-6, P2-7, P2-9, P2-14, and depreciation-run reversal (`DepreciationScheduleStatus` has no `REVERSED` member — it does not exist at all). **P1-6 joined this list mid-batch**, not by original scoping — it looked like defect repair until the test suite showed it depends on opening cash balances existing first (see decision above), which is new capability.
 
