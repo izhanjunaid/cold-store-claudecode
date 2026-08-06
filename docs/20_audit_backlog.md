@@ -2,7 +2,7 @@
 
 **Purpose:** the durable register of all 40 findings raised by the phase/20 audit (`docs/18`), with severity and current status. `docs/18:133` previously pointed at a phase plan file for this list; that file was overwritten and the backlog existed nowhere in the repo. This document replaces that reference.
 
-**Last reconciled:** 2026-07-31, against HEAD `67a5d18` on `phase/20-audit-remediation`. Every `OPEN` row below was re-verified against source on that date — the `file:line` in the status column is the evidence, not a memory.
+**Last reconciled:** 2026-08-05, against HEAD `f56f8b8` on `phase/22-audit-backlog`. Every `OPEN` row below was re-verified against source on that date — the `file:line` in the status column is the evidence, not a memory.
 
 **Legend** — `FIXED — <batch>`: shipped, see the linked doc section. `OPEN`: verified still present. `DEFERRED`: decided, deliberately not built yet.
 
@@ -56,7 +56,7 @@
 | P2-12 | Payroll duplicate-period guard ran outside its transaction | **FIXED** — Batch C |
 | P2-13 | Statement and operational formatters disagree on the zero/null glyph | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P2-14 | Payments have no document / receipt number at all | **OPEN** — zero matches for `payment_number` / `receipt_number` |
-| P2-15 | Voucher creator can approve their own voucher; cancel reason silently discarded | **FIXED** — Batch H part 3, phase/22. `approve()` rejects same-user (`EXPENSE_VOUCHER_SELF_APPROVAL`); cancel reason now read from the request body and appended to `notes` |
+| P2-15 | Voucher creator can approve their own voucher; cancel reason silently discarded | **FIXED** — Batch H part 3, phase/22. `approve()` rejects same-user (`EXPENSE_VOUCHER_SELF_APPROVAL`); cancel reason now read from the request body and appended to `notes`. Backend-only: `formatVoucher()` doesn't return `created_by`, so the web Approve button isn't hidden for the creator — clicking it now correctly 422s with a toast instead of silently succeeding, same as any other permission rejection on this screen. Not a bug; a client-side hide is a follow-on, not part of this fix |
 
 ## P3
 
@@ -150,7 +150,9 @@ Phase 22 (`Batches G/H/I`) clears the **defect** half of the open list: P1-6, P1
 
 **Batch H part 3 shipped 2026-08-01** (`f56f8b8`) — P2-2 (H2), P2-15 (H6), P2-8/P3-4 (H8), invariant 17. JE-17C (petty-cash-replenish) retagged `sourceTable: 'manual'` / `sourceId: <acting user>`, matching the one other source-document-less template instead of the fabricated-uuid-into-`expense_vouchers` it used before; also makes it reversible, which the audit called correct. Invariant 17 lands as a self-verifying resolver map (12 document tables + the `manual`/`opening_balances` acting-user/facility convention), asserting every `sourceTable` value actually present is either resolvable or a named gap — which is what caught P3-3 as a live code defect, not just dev-DB drift, on the first run. Expense `approve()` gained a same-user rejection and `cancel` now actually reads and persists its reason (both req'd only a controller/service fix, no schema change — the request schema already validated the field). Depreciation runs gained an explicit 30 s transaction timeout (the codebase's first — grepped every `$transaction(` call site first to confirm) and a per-asset "prior period must be posted" guard that reuses the run's own eligibility calc rather than a facility-wide sequential rule, so a calendar gap with zero `IN_SERVICE` assets can't deadlock a later run. Test-hygiene fix alongside it: this file's shared-facility fixtures for H5 (payroll runs, employees) had no cleanup, so a second run of the file 409'd on a duplicate payroll period — fixed by extending `cleanup()` to the specific collision (payroll-run period uniqueness), then narrowed again after review flagged that the broader employee/employeeAdvance deletion it was bundled with risked deleting rows out from under other integration files sharing the same facility. Also root-caused (not fixed — out of this batch's scope) a shared dev-DB test-infra defect found while verifying: `backdating_max_days` can get stuck non-null forever if a test run mutating it is interrupted mid-flight, because the seed/setup upsert only applies its "unlimited" override on `create`, never `update`.
 
-Still open: the depreciation-run KATCHI gap (`POST /v1/depreciation/runs`, deferred product decision, see P2-10 above), and Batch I (reversal UI).
+**Batch I shipped 2026-08-06** — `POST /v1/payroll-runs/:id/reverse` and `POST /v1/fixed-assets/:id/reverse-disposal` (Batch E) had zero web callers; the only way to reach an owner-only correction path was curl. Both permission keys (`payroll.reverse`, `fixed_assets.reverse`) already existed in the matrix with no gap to fix — this was UI wiring only. Added a "Reverse…" action to the payroll-run and fixed-asset detail pages, following the mandatory-reason `Dialog` pattern already used for JE reversal, gated on status (`FINALIZED`/`PAID` and not `REVERSED` for a run; `DISPOSED` for an asset) matching each service's own guard.
+
+Batch H and Batch I are now both closed. Still open: the depreciation-run KATCHI gap (`POST /v1/depreciation/runs`, deferred product decision, see P2-10 above) and everything under Deferred below.
 
 Everything else above is new capability rather than repair, and is deliberately held: P1-4, P1-10, P1-12, P1-13, P2-5, P2-6, P2-7, P2-9, P2-14, and depreciation-run reversal (`DepreciationScheduleStatus` has no `REVERSED` member — it does not exist at all). **P1-6 joined this list mid-batch**, not by original scoping — it looked like defect repair until the test suite showed it depends on opening cash balances existing first (see decision above), which is new capability.
 
