@@ -6,39 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **ColdChain** is an operational management platform for agricultural cold storage facilities integrated into Pakistan's mandi (wholesale market) supply chain. MVP targets a single facility in Lahore. The system is **fully implemented and in production-hardening**: 13 development phases have shipped (party/chamber, inbound/lots, ownership transfer, outbound/dispatch, billing, financial ledger, full accounting, gate pass/peshgi, reporting, admin/polish, configurability, production deployment + accounting audit remediation). `docs/01-15` are the original design spec and remain the reference for intent; `docs/16` is a post-implementation audit. **`PROGRESS.md` is the live source of truth for current phase, active task, and blockers — read it before assuming what is or isn't built. `TESTING.md` has test strategy and live pass counts.**
 
-## Tech Stack (as built)
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 14 (App Router) + React + shadcn/ui + Tailwind CSS, Zustand + TanStack Query |
-| Backend | Node.js 20 + Fastify 5 + TypeScript, Zod validation on all request/response boundaries (`fastify-type-provider-zod`) |
-| Database | PostgreSQL 15 + Prisma ORM, versioned migrations, DB-level audit/integrity triggers |
-| PDF | Puppeteer + Handlebars templates |
-| Auth | Custom JWT (access + refresh) + bcrypt, role-based guards |
-| Monorepo | Turborepo + pnpm workspaces |
-| Testing | Vitest (unit/integration), Playwright (E2E), React Testing Library |
-| Deployment | Docker Compose (postgres, migrate, api, web) behind Caddy — see `docker-compose.yml`, `Caddyfile`, `INSTALL.md` |
-
-## Commands
-
-```bash
-pnpm install                 # install all workspace deps
-pnpm dev                     # turbo dev — api on :3001, web on :3000
-pnpm build                   # turbo build
-pnpm typecheck               # turbo typecheck
-pnpm lint                    # turbo lint
-
-pnpm test                    # turbo test (unit + integration, all packages)
-pnpm test:unit
-pnpm test:integration
-pnpm e2e                     # Playwright; auto-spawns both dev servers with ALLOW_TEST_RESET=1
-pnpm e2e:ui                  # Playwright inspector
-
-pnpm --filter @coldchain/db db:migrate   # prisma migrate dev
-pnpm --filter @coldchain/db db:seed
-pnpm --filter @coldchain/db db:studio
-```
-
 ## Architecture (as built)
 
 - **Monorepo layout**: `apps/api` (Fastify, port 3001), `apps/web` (Next.js, port 3000), `packages/db` (Prisma schema + migrations), `packages/shared` (Zod schemas/types shared by api+web), `packages/ui` (shared shadcn component library, ~126 components)
