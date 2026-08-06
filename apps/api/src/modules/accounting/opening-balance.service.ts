@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@coldchain/db';
 import type { EnterOpeningBalancesRequestType } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
+import { advisoryXactLock } from '../../common/advisory-lock';
 import { arAccountForParty, type JournalEntryLineDraft } from './templates/types';
 import type { JournalEntryService } from './journal-entry.service';
 
@@ -59,6 +60,14 @@ export class OpeningBalanceService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      // Serialize concurrent entries for this facility before checking. Without
+      // this, two concurrent enter() calls both see no POSTED entry and both
+      // post — and the result is immutable by trigger, so every opening balance
+      // is permanently doubled. No unique constraint backs this check
+      // (@@index([sourceTable, sourceId]) is not unique), so the lock is the
+      // only guard.
+      await advisoryXactLock(tx, `${facilityId}:opening-balances`);
+
       const existing = await tx.journalEntry.findFirst({
         where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED' },
       });

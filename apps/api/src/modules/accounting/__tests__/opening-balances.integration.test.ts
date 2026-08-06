@@ -273,4 +273,29 @@ describe('Gap 1 · opening balances', () => {
     const again = await enter(managerToken, FULL_BODY());
     expect(again.statusCode).toBe(201);
   });
+
+  // The one-shot check is a read-then-write with no unique constraint behind it
+  // (@@index([sourceTable, sourceId]) is not unique), so only the advisory lock
+  // stops two concurrent entries. Both would post, both would be immutable by
+  // trigger, and every opening balance would be permanently doubled.
+  //
+  // Assert the LOSER: "both succeeded" is exactly what let the lot-number
+  // concurrency test stay green for years while its lock did nothing.
+  it('serialises concurrent entries — exactly one wins, the other 409s', async () => {
+    await cleanup();
+    expect(JSON.parse((await status(accountantToken)).body).data.entered).toBe(false);
+
+    const results = await Promise.all([
+      enter(managerToken, FULL_BODY()),
+      enter(managerToken, FULL_BODY()),
+    ]);
+    const codes = results.map((r) => r.statusCode).sort();
+    expect(codes).toEqual([201, 409]);
+
+    // The assertion that actually matters: one entry on the ledger, not two.
+    const posted = await prisma.journalEntry.count({
+      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'opening_balances', postingStatus: 'POSTED' },
+    });
+    expect(posted).toBe(1);
+  });
 });
