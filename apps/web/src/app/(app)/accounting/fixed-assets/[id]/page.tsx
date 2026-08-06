@@ -63,14 +63,18 @@ export default function FixedAssetDetailPage() {
   const id = params['id'] as string;
   const { user } = useAuthStore();
   const isOwner = can(user, 'fixed_assets.manage');
+  const canReverseDisposal = can(user, 'fixed_assets.reverse');
 
   const [asset, setAsset] = useState<FixedAsset | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCommission, setShowCommission] = useState(false);
   const [showDispose, setShowDispose] = useState(false);
+  const [showReverse, setShowReverse] = useState(false);
   const [commissionDate, setCommissionDate] = useState(new Date().toISOString().slice(0, 10));
   const [disposalDate, setDisposalDate] = useState(new Date().toISOString().slice(0, 10));
   const [disposalProceeds, setDisposalProceeds] = useState('');
+  const [reverseReason, setReverseReason] = useState('');
+  const [reversing, setReversing] = useState(false);
 
   const fetchAsset = useCallback(async () => {
     setLoading(true);
@@ -107,6 +111,24 @@ export default function FixedAssetDetailPage() {
     }
   }
 
+  async function reverseDisposal() {
+    if (!reverseReason.trim()) return;
+    setReversing(true);
+    try {
+      await apiClient(`/v1/fixed-assets/${id}/reverse-disposal`, {
+        method: 'POST',
+        body: { reason: reverseReason.trim() },
+      });
+      setShowReverse(false);
+      toast.success('Disposal reversed');
+      fetchAsset();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Reversal failed');
+    } finally {
+      setReversing(false);
+    }
+  }
+
   if (loading) return <PageSkeleton />;
   if (!asset) return <p className="text-destructive">Asset not found</p>;
 
@@ -121,6 +143,11 @@ export default function FixedAssetDetailPage() {
             {isOwner && asset.status === 'PURCHASED' && <Button onClick={() => setShowCommission(true)}>Commission</Button>}
             {isOwner && (asset.status === 'PURCHASED' || asset.status === 'IN_SERVICE') && (
               <Button variant="outline" className="text-destructive" onClick={() => setShowDispose(true)}>Dispose</Button>
+            )}
+            {canReverseDisposal && asset.status === 'DISPOSED' && (
+              <Button variant="outline" className="text-destructive" onClick={() => { setReverseReason(''); setShowReverse(true); }}>
+                Reverse disposal…
+              </Button>
             )}
           </>
         }
@@ -218,6 +245,34 @@ export default function FixedAssetDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDispose(false)}>Cancel</Button>
             <Button className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={dispose}>Dispose</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showReverse} onOpenChange={setShowReverse}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Reverse Disposal</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Reverses JE-14 and returns the asset to service. Both the original and reversal stay on
+            the ledger permanently — nothing is deleted.
+          </p>
+          <div className="space-y-1.5">
+            <Label>Reason (required)</Label>
+            <Input
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+              placeholder="e.g. Disposed in error"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReverse(false)}>Cancel</Button>
+            <Button
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={reverseDisposal}
+              disabled={reversing || !reverseReason.trim()}
+            >
+              {reversing ? 'Reversing…' : 'Reverse disposal'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

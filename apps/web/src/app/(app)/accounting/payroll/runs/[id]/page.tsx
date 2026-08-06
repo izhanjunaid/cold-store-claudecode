@@ -63,13 +63,17 @@ export default function PayrollRunDetailPage() {
   const isOwner = can(user, 'payroll.remit');
   const isAccountant = can(user, 'payroll.view');
   const canDraft = can(user, 'payroll.draft');
+  const canReverse = can(user, 'payroll.reverse');
 
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPay, setShowPay] = useState(false);
   const [showRemit, setShowRemit] = useState(false);
+  const [showReverse, setShowReverse] = useState(false);
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [remitDate, setRemitDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reverseReason, setReverseReason] = useState('');
+  const [reversing, setReversing] = useState(false);
 
   // Line editing. Until now nothing in the web app called
   // PATCH /v1/payroll-runs/:id/lines/:lineId, so income tax and advance recovery
@@ -162,6 +166,24 @@ export default function PayrollRunDetailPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Remittance failed'); }
   }
 
+  async function reverseRun() {
+    if (!reverseReason.trim()) return;
+    setReversing(true);
+    try {
+      await apiClient(`/v1/payroll-runs/${id}/reverse`, {
+        method: 'POST',
+        body: { reason: reverseReason.trim() },
+      });
+      setShowReverse(false);
+      toast.success('Payroll run reversed');
+      fetchRun();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Reversal failed');
+    } finally {
+      setReversing(false);
+    }
+  }
+
   async function viewSlip(lineId: string) {
     try {
       const token = localStorage.getItem('access_token');
@@ -196,6 +218,11 @@ export default function PayrollRunDetailPage() {
             {isOwner && run.status !== 'DRAFT' && !run.remittance_journal_entry_id && (
               <Button variant="outline" onClick={() => setShowRemit(true)}>Remit EOBI/Tax (JE-16B)</Button>
             )}
+            {canReverse && run.status !== 'DRAFT' && run.status !== 'REVERSED' && (
+              <Button variant="outline" className="text-destructive" onClick={() => { setReverseReason(''); setShowReverse(true); }}>
+                Reverse run…
+              </Button>
+            )}
           </>
         }
       />
@@ -204,7 +231,7 @@ export default function PayrollRunDetailPage() {
         <CardContent className="pt-6">
           <div className="mb-4 flex items-center gap-2">
             <span className="font-mono text-sm text-muted-foreground">{run.run_number}</span>
-            <StatusBadge status={run.status} />
+            <StatusBadge status={run.status} tone={run.status === 'REVERSED' ? 'danger' : undefined} />
           </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Total Gross</div><div className="text-lg font-semibold tabular-nums">{formatMoney(run.total_gross_pkr)}</div></div>
@@ -325,6 +352,34 @@ export default function PayrollRunDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowRemit(false)}>Cancel</Button>
             <Button onClick={remit}>Remit</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showReverse} onOpenChange={setShowReverse}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Reverse Payroll Run</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Posts reversing entries for every JE this run created and marks it REVERSED. Both the
+            original and reversal stay on the ledger permanently — nothing is deleted.
+          </p>
+          <div className="space-y-1.5">
+            <Label>Reason (required)</Label>
+            <Input
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+              placeholder="e.g. Wrong period finalized"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReverse(false)}>Cancel</Button>
+            <Button
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={reverseRun}
+              disabled={reversing || !reverseReason.trim()}
+            >
+              {reversing ? 'Reversing…' : 'Reverse run'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
