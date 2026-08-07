@@ -154,8 +154,12 @@ but the statements don't walk it generically, so a custom header's children fall
 `unclassified_*` bucket.
 
 Not closed, for four reasons: the gap has **zero current victims** (the UI cannot create a
-header, so nobody has hit it); the failure mode is **cosmetic, not numeric** — the F-6b
-fallback keeps the sheet complete and `is_balanced` true; the current/non-current split is
+header, so nobody has hit it); the failure mode is **presentational, not a misstatement** —
+the F-6b fallback still adds unclassified accounts into `total_assets_pkr` /
+`total_liabilities_pkr`, so the sheet is complete and `is_balanced` holds (note the narrower
+real effect: such an account is excluded from `total_current_assets_pkr`, so a current-ratio
+or working-capital figure read off the subtotals would be off until it is placed); the
+current/non-current split is
 a **genuine accounting judgement** that cannot be inferred from a parent link and is already
 made correctly once; and it would be the **highest-risk change** in the set — a migration
 on a trigger-guarded table altering the statement every audit tie-out depends on — bought
