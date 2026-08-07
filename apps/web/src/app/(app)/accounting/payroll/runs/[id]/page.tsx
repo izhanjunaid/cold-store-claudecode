@@ -3,9 +3,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { toast } from 'sonner';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
+import { useAccounts, isCashOrBank } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -17,6 +19,8 @@ import { PageHeader } from '@/components/layout/page-header';
 
 import { formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
+
+const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 interface LineItem {
   id: string;
   employee_id: string;
@@ -72,6 +76,14 @@ export default function PayrollRunDetailPage() {
   const [showReverse, setShowReverse] = useState(false);
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [remitDate, setRemitDate] = useState(new Date().toISOString().slice(0, 10));
+  // Both default to 1020 (bank) so an untouched dialog posts exactly as it did
+  // when these were bare literals in the request body.
+  const [payFrom, setPayFrom] = useState(DEFAULT_BANK_ACCOUNT_CODE);
+  const [remitFrom, setRemitFrom] = useState(DEFAULT_BANK_ACCOUNT_CODE);
+  // Salaries and statutory remittances come out of cash or bank only — never an
+  // arbitrary detail account.
+  const { data: accounts = [] } = useAccounts();
+  const cashAccounts = accounts.filter(isCashOrBank);
   const [reverseReason, setReverseReason] = useState('');
   const [reversing, setReversing] = useState(false);
 
@@ -139,7 +151,7 @@ export default function PayrollRunDetailPage() {
     try {
       await apiClient(`/v1/payroll-runs/${id}/pay`, {
         method: 'POST',
-        body: { payment_date: paymentDate, from_asset_account_code: '1020' },
+        body: { payment_date: paymentDate, from_asset_account_code: payFrom },
       });
       setShowPay(false);
       toast.success('Salaries paid');
@@ -154,7 +166,7 @@ export default function PayrollRunDetailPage() {
         method: 'POST',
         body: {
           remittance_date: remitDate,
-          from_asset_account_code: '1020',
+          from_asset_account_code: remitFrom,
           remit_employee_eobi_pkr: run.line_items.reduce((s, l) => s + l.eobi_employee_pkr, 0),
           remit_employer_eobi_pkr: run.total_employer_eobi_pkr,
           remit_income_tax_pkr: run.line_items.reduce((s, l) => s + l.income_tax_pkr, 0),
@@ -329,10 +341,18 @@ export default function PayrollRunDetailPage() {
       <Dialog open={showPay} onOpenChange={setShowPay}>
         <DialogContent>
           <DialogHeader><DialogTitle>Pay Salaries</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Posts JE-16: DR 2030 {formatMoney(run.total_net_payable_pkr)} / CR 1020.</p>
+          <p className="text-sm text-muted-foreground">Posts JE-16: DR 2030 {formatMoney(run.total_net_payable_pkr)} / CR {payFrom}.</p>
           <div className="space-y-1.5">
             <Label>Payment Date</Label>
             <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="tabular-nums" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Pay From</Label>
+            <select value={payFrom} onChange={(e) => setPayFrom(e.target.value)} className={SELECT_CLASS}>
+              {cashAccounts.map((a) => (
+                <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.account_name}</option>
+              ))}
+            </select>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowPay(false)}>Cancel</Button>
@@ -344,10 +364,18 @@ export default function PayrollRunDetailPage() {
       <Dialog open={showRemit} onOpenChange={setShowRemit}>
         <DialogContent>
           <DialogHeader><DialogTitle>Remit EOBI / Tax</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Posts JE-16B clearing 2060/2061/2070 against 1020.</p>
+          <p className="text-sm text-muted-foreground">Posts JE-16B clearing 2060/2061/2070 against {remitFrom}.</p>
           <div className="space-y-1.5">
             <Label>Remittance Date</Label>
             <Input type="date" value={remitDate} onChange={(e) => setRemitDate(e.target.value)} className="tabular-nums" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Remit From</Label>
+            <select value={remitFrom} onChange={(e) => setRemitFrom(e.target.value)} className={SELECT_CLASS}>
+              {cashAccounts.map((a) => (
+                <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.account_name}</option>
+              ))}
+            </select>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowRemit(false)}>Cancel</Button>

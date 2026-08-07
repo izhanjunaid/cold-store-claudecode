@@ -128,6 +128,42 @@ export function useRatePlans() {
   });
 }
 
+export interface AccountRef {
+  account_code: string;
+  account_name: string;
+  account_class: string;
+  account_type: 'HEADER' | 'DETAIL';
+  parent_account_code: string | null;
+  is_active: boolean;
+}
+
+/**
+ * Active, postable (DETAIL) GL accounts — the source for every account picker.
+ * Header accounts are excluded because posting to one is rejected server-side
+ * (HEADER_ACCOUNT_NOT_POSTABLE).
+ *
+ * Pickers must read this rather than hold a literal account list: an account
+ * added through the Chart of Accounts screen has to show up where it is spent
+ * from, or the create path has no matching read path.
+ */
+export function useAccounts() {
+  return useQuery({
+    queryKey: qk.reference.accounts,
+    queryFn: () =>
+      apiClient<AccountRef[]>('/v1/accounting/accounts?is_active=true').then((all) =>
+        all.filter((a) => a.account_type === 'DETAIL' && a.is_active),
+      ),
+    staleTime: REFERENCE_STALE_TIME,
+  });
+}
+
+/** Cash & bank accounts — the children of header 1000. Money is paid out of these. */
+export const isCashOrBank = (a: AccountRef) => a.parent_account_code === '1000';
+
+/** Accounts a spend can be booked to — overheads (6xxx) and direct costs (5xxx). */
+export const isExpenseAccount = (a: AccountRef) =>
+  a.account_class === 'EXPENSE' || a.account_class === 'COST_OF_SERVICE';
+
 /** Facility profile + settings (thresholds, GST, backdating limits). */
 export function useFacility() {
   return useQuery({

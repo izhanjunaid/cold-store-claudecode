@@ -53,12 +53,14 @@ const DEBIT_NORMAL = new Set(['ASSET', 'EXPENSE', 'COST_OF_SERVICE']);
 const SELECT_CLASS =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
-const emptyDraft = () => ({
+// Opens on the class the table is filtered to — adding an expense account from
+// the Expenses view should not start you on Assets.
+const emptyDraft = (cls = 'ASSET') => ({
   code: '',
   name: '',
-  cls: 'ASSET' as string,
+  cls,
   parent: '',
-  normal: 'DEBIT' as 'DEBIT' | 'CREDIT',
+  normal: (DEBIT_NORMAL.has(cls) ? 'DEBIT' : 'CREDIT') as 'DEBIT' | 'CREDIT',
 });
 
 export default function ChartOfAccountsPage() {
@@ -68,6 +70,8 @@ export default function ChartOfAccountsPage() {
   const canManage = useCan('accounting.manage_accounts');
 
   const [accounts, setAccounts] = useState<Account[]>([]);
+  // Unfiltered copy, so the Add dialog's parent list never depends on the table filter.
+  const [allAccounts, setAllAccounts] = useState<Account[]>([]);
   const [classFilter, setClassFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -82,7 +86,16 @@ export default function ChartOfAccountsPage() {
     try {
       const params = new URLSearchParams();
       if (classFilter) params.set('account_class', classFilter);
-      setAccounts(await apiClient<Account[]>(`/v1/accounting/accounts?${params}`));
+      const [filtered, all] = await Promise.all([
+        apiClient<Account[]>(`/v1/accounting/accounts?${params}`),
+        // The Add-account dialog needs every header, not just the filtered
+        // class: sharing the filtered list left the parent dropdown empty
+        // whenever the draft's class differed from the table filter, which
+        // disabled the submit button with nothing on screen explaining why.
+        classFilter ? apiClient<Account[]>('/v1/accounting/accounts') : Promise.resolve(null),
+      ]);
+      setAccounts(filtered);
+      setAllAccounts(all ?? filtered);
     } finally {
       setLoading(false);
     }
@@ -93,8 +106,8 @@ export default function ChartOfAccountsPage() {
   }, [fetchAccounts]);
 
   const headerOptions = useMemo(
-    () => accounts.filter((a) => a.account_type === 'HEADER' && a.account_class === draft.cls),
-    [accounts, draft.cls],
+    () => allAccounts.filter((a) => a.account_type === 'HEADER' && a.account_class === draft.cls),
+    [allAccounts, draft.cls],
   );
   // Equity accounts sit at the root (built by class on the balance sheet);
   // every other class needs a header for the statements to place it.
@@ -116,7 +129,7 @@ export default function ChartOfAccountsPage() {
       });
       toast.success(`Account ${draft.code} — ${draft.name} created`);
       setShowAdd(false);
-      setDraft(emptyDraft());
+      setDraft(emptyDraft(classFilter || 'ASSET'));
       await fetchAccounts();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to create account');
@@ -184,7 +197,7 @@ export default function ChartOfAccountsPage() {
             </select>
             <span className="text-sm text-muted-foreground">{accounts.length} accounts</span>
             {canManage && (
-              <Button size="sm" onClick={() => { setDraft(emptyDraft()); setShowAdd(true); }}>
+              <Button size="sm" onClick={() => { setDraft(emptyDraft(classFilter || 'ASSET')); setShowAdd(true); }}>
                 <Plus className="mr-1.5 h-4 w-4" aria-hidden /> Add account
               </Button>
             )}

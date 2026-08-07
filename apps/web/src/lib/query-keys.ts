@@ -62,6 +62,7 @@ export const qk = {
     varieties: ['ref', 'varieties'] as const,
     chambers: ['ref', 'chambers'] as const,
     ratePlans: ['ref', 'rate-plans'] as const,
+    accounts: ['ref', 'accounts'] as const,
   },
   facility: {
     me: ['facility', 'me'] as const,

@@ -3,10 +3,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { toast } from 'sonner';
-import { assetAccountForPaymentMethod } from '@coldchain/shared';
+import { assetAccountForPaymentMethod, DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
+import { useAccounts, isCashOrBank } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -51,7 +52,11 @@ export default function ExpenseVoucherDetailPage() {
   const [showPay, setShowPay] = useState(false);
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CHEQUE' | 'BANK_TRANSFER'>('BANK_TRANSFER');
-  const [assetAccount, setAssetAccount] = useState('1020');
+  // Default stays 1020 (bank) so an untouched dialog pays exactly as it did
+  // before this picker read the live chart.
+  const [assetAccount, setAssetAccount] = useState(DEFAULT_BANK_ACCOUNT_CODE);
+  const { data: accounts = [] } = useAccounts();
+  const cashAccounts = accounts.filter(isCashOrBank);
 
   const fetchV = useCallback(async () => {
     setLoading(true);
@@ -165,8 +170,9 @@ export default function ExpenseVoucherDetailPage() {
             <div className="space-y-1.5">
               <Label>Asset Account</Label>
               <select value={assetAccount} onChange={(e) => setAssetAccount(e.target.value)} className={SELECT_CLASS}>
-                <option value="1010">1010 — Cash on Hand</option>
-                <option value="1020">1020 — Bank Account — Main</option>
+                {cashAccounts.map((a) => (
+                  <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.account_name}</option>
+                ))}
               </select>
             </div>
           </div>

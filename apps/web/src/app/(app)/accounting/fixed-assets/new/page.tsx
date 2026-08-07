@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
+import { useAccounts, isCashOrBank } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -28,10 +30,19 @@ export default function NewFixedAssetPage() {
   const [method, setMethod] = useState<'SLM' | 'WDV'>('WDV');
   const [usefulLife, setUsefulLife] = useState('');
   const [wdvRate, setWdvRate] = useState('20');
-  const [paidFrom, setPaidFrom] = useState('1020');
+  // Default stays 1020 (bank) so an untouched form posts as it did before.
+  const [paidFrom, setPaidFrom] = useState(DEFAULT_BANK_ACCOUNT_CODE);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // An asset is funded either out of cash/bank or by taking on a long-term
+  // liability (2100's children — equipment finance, director's loan). Both were
+  // hardcoded here before; keep both, read from the live chart.
+  const { data: accounts = [] } = useAccounts();
+  const fundingAccounts = accounts.filter(
+    (a) => isCashOrBank(a) || a.parent_account_code === '2100',
+  );
 
   if (!canCreate) {
     return (
@@ -124,9 +135,9 @@ export default function NewFixedAssetPage() {
             <div className="space-y-1.5">
               <Label>Paid From Account</Label>
               <select value={paidFrom} onChange={(e) => setPaidFrom(e.target.value)} className={SELECT_CLASS}>
-                <option value="1020">1020 — Bank Account — Main</option>
-                <option value="1010">1010 — Cash on Hand</option>
-                <option value="2110">2110 — Bank Loan — Equipment Finance</option>
+                {fundingAccounts.map((a) => (
+                  <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.account_name}</option>
+                ))}
               </select>
             </div>
             <div className="space-y-1.5">

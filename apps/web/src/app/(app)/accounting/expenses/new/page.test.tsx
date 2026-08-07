@@ -25,6 +25,22 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+// Stub only the query hook — the real isExpenseAccount predicate still runs, so
+// the class filter under test is the shipped one. Stubbing also keeps
+// useAccounts' own fetch out of the apiClient call counts asserted below.
+const ACCOUNTS = [
+  { account_code: '5010', account_name: 'Electricity — Refrigeration', account_class: 'COST_OF_SERVICE', account_type: 'DETAIL', parent_account_code: '5000', is_active: true },
+  { account_code: '6100', account_name: 'Miscellaneous', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true },
+  // Added through the Chart of Accounts screen after ship — must appear here.
+  { account_code: '6160', account_name: 'Generator Fuel', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true },
+  // Not an expense — must not appear.
+  { account_code: '1020', account_name: 'Bank Account — Main', account_class: 'ASSET', account_type: 'DETAIL', parent_account_code: '1000', is_active: true },
+];
+vi.mock('@/hooks/use-reference-data', async (importActual) => ({
+  ...(await importActual<typeof import('@/hooks/use-reference-data')>()),
+  useAccounts: () => ({ data: ACCOUNTS }),
+}));
+
 import NewExpenseVoucherPage from './page';
 
 function fillRequiredFields() {
@@ -76,5 +92,49 @@ describe('NewExpenseVoucherPage — double-submit guard', () => {
     fireEvent.click(submitBtn);
     await waitFor(() => expect(push).toHaveBeenCalledWith('/accounting/expenses/voucher-2'));
     expect(apiClient).toHaveBeenCalledTimes(2);
+  });
+});
+
+// The picker used to hold a literal 12-entry account list, so an account created
+// in the Chart of Accounts never showed up here — a create path with no matching
+// read path.
+describe('NewExpenseVoucherPage — expense account picker', () => {
+  beforeEach(() => {
+    push.mockReset();
+    apiClient.mockReset();
+  });
+
+  it('offers every expense/cost account from the chart, including newly added ones', () => {
+    render(<NewExpenseVoucherPage />);
+    const codes = Array.from(
+      document.querySelectorAll<HTMLOptionElement>('select option'),
+    ).map((o) => o.value);
+
+    expect(codes).toContain('6160'); // added after ship
+    expect(codes).toContain('5010');
+    expect(codes).toContain('6100');
+  });
+
+  it('excludes accounts that are not expense or cost-of-service', () => {
+    render(<NewExpenseVoucherPage />);
+    const codes = Array.from(
+      document.querySelectorAll<HTMLOptionElement>('select option'),
+    ).map((o) => o.value);
+
+    expect(codes).not.toContain('1020');
+  });
+
+  it('posts the selected account code', async () => {
+    apiClient.mockResolvedValue({ id: 'voucher-3' });
+    const { container } = render(<NewExpenseVoucherPage />);
+    fillRequiredFields();
+
+    fireEvent.change(container.querySelector('select') as HTMLSelectElement, {
+      target: { value: '6160' },
+    });
+    fireEvent.click(container.querySelector('button[type="submit"]') as HTMLButtonElement);
+
+    await waitFor(() => expect(apiClient).toHaveBeenCalledTimes(1));
+    expect(apiClient.mock.calls[0]![1].body.expense_account_code).toBe('6160');
   });
 });

@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
+import { useAccounts, isExpenseAccount } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { Input } from '@/components/ui/input';
@@ -15,28 +16,19 @@ import { PageHeader } from '@/components/layout/page-header';
 
 const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
-const EXPENSE_ACCOUNTS = [
-  { code: '5010', name: 'Electricity — Refrigeration' },
-  { code: '5020', name: 'Electricity — Facility (Non-Refrig.)' },
-  { code: '5050', name: 'Refrigerant & Consumables' },
-  { code: '5060', name: 'Packaging & Materials' },
-  { code: '6020', name: 'Rent' },
-  { code: '6030', name: 'Maintenance & Repairs' },
-  { code: '6040', name: 'Fuel & Vehicle' },
-  { code: '6050', name: 'Insurance' },
-  { code: '6060', name: 'Communication' },
-  { code: '6070', name: 'Computer & Software' },
-  { code: '6090', name: 'Bank Charges' },
-  { code: '6100', name: 'Miscellaneous' },
-];
-
 export default function NewExpenseVoucherPage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const canCreate = can(user, 'expenses.record');
 
+  const { data: accounts = [] } = useAccounts();
+  const expenseAccounts = accounts.filter(isExpenseAccount);
+
   const [voucherDate, setVoucherDate] = useState(new Date().toISOString().slice(0, 10));
-  const [accountCode, setAccountCode] = useState('5010');
+  // Empty until the chart loads, then the first expense account stands in as the
+  // default. Deriving it beats seeding a literal code, which goes stale the moment
+  // that account is deactivated.
+  const [accountCode, setAccountCode] = useState('');
   const [description, setDescription] = useState('');
   const [vendor, setVendor] = useState('');
   const [refNumber, setRefNumber] = useState('');
@@ -48,6 +40,8 @@ export default function NewExpenseVoucherPage() {
   // drafts) and a burst of navigations that crashes the dev render worker.
   const submittingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+
+  const effectiveAccountCode = accountCode || expenseAccounts[0]?.account_code || '';
 
   if (!canCreate) {
     return (
@@ -69,7 +63,7 @@ export default function NewExpenseVoucherPage() {
         method: 'POST',
         body: {
           voucher_date: voucherDate,
-          expense_account_code: accountCode,
+          expense_account_code: effectiveAccountCode,
           description,
           vendor_name: vendor || null,
           reference_number: refNumber || null,
@@ -103,8 +97,10 @@ export default function NewExpenseVoucherPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Expense account <span className="text-destructive">*</span></Label>
-              <select value={accountCode} onChange={(e) => setAccountCode(e.target.value)} className={SELECT_CLASS}>
-                {EXPENSE_ACCOUNTS.map((a) => <option key={a.code} value={a.code}>{a.code} — {a.name}</option>)}
+              <select value={effectiveAccountCode} onChange={(e) => setAccountCode(e.target.value)} className={SELECT_CLASS}>
+                {expenseAccounts.map((a) => (
+                  <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.account_name}</option>
+                ))}
               </select>
             </div>
             <div className="space-y-1.5 sm:col-span-2">
