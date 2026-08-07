@@ -44,12 +44,21 @@ interface OtherRow {
   credit: string;
   description: string;
 }
+interface PeriodLock {
+  period_year: number;
+  period_month: number;
+  is_locked: boolean;
+}
 
 const SELECT_CLASS =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 // Per-party receivables go through the rows above; peshgi through its module.
-const BLOCKED_OTHER_CODES = new Set(['1110', '1120', '1130', '1140', '1150', '3010']);
+// The three cash-class accounts have dedicated fields in Cash & Bank, so they
+// are excluded here too — otherwise the same balance could be entered twice.
+const BLOCKED_OTHER_CODES = new Set(['1110', '1120', '1130', '1140', '1150', '3010', '1010', '1020', '1030']);
+
+const WALLET_ACCOUNT = '1030';
 
 export default function OpeningBalancesPage() {
   const router = useRouter();
@@ -66,18 +75,37 @@ export default function OpeningBalancesPage() {
   const [receivables, setReceivables] = useState<ReceivableRow[]>([]);
   const [cash, setCash] = useState('');
   const [bank, setBank] = useState('');
+  // 1030 has no dedicated field in the request shape (only cash_pkr -> 1010 and
+  // bank_pkr -> 1020), so it rides in as an other_line. Giving it a labelled box
+  // here rather than leaving it buried in the "Other" dropdown, where nobody
+  // looking for their wallet balance would think to find it.
+  const [wallet, setWallet] = useState('');
   const [others, setOthers] = useState<OtherRow[]>([]);
+  const [lockedThrough, setLockedThrough] = useState<{ year: number; month: number } | null>(null);
 
   useEffect(() => {
     Promise.all([
       apiClient<OpeningStatus>('/v1/accounting/opening-balances'),
       apiClientList<Party>('/v1/parties?page_size=200&is_active=true').then((r) => r.data),
       apiClient<Account[]>('/v1/accounting/accounts?is_active=true'),
+      apiClient<PeriodLock[]>('/v1/accounting/period-locks'),
     ])
-      .then(([st, ps, accs]) => {
+      .then(([st, ps, accs, locks]) => {
         setStatus(st);
         setParties(ps);
         setAccounts(accs);
+        // The watermark: the highest still-locked period closes everything at or
+        // below it, months nobody explicitly locked included.
+        const active = locks.filter((l) => l.is_locked);
+        if (active.length > 0) {
+          const top = active.reduce((a, b) =>
+            b.period_year > a.period_year ||
+            (b.period_year === a.period_year && b.period_month > a.period_month)
+              ? b
+              : a,
+          );
+          setLockedThrough({ year: top.period_year, month: top.period_month });
+        }
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
@@ -106,13 +134,26 @@ export default function OpeningBalancesPage() {
     for (const r of receivables) debit += parseFloat(r.amount) || 0;
     debit += parseFloat(cash) || 0;
     debit += parseFloat(bank) || 0;
+    debit += parseFloat(wallet) || 0;
     for (const o of others) {
       debit += parseFloat(o.debit) || 0;
       credit += parseFloat(o.credit) || 0;
     }
     const plug = Math.round((debit - credit) * 100) / 100;
     return { debit, credit, plug };
-  }, [receivables, cash, bank, others]);
+  }, [receivables, cash, bank, wallet, others]);
+
+  // Opening balances are backdated by nature, and postInTransaction asserts the
+  // period lock against a closed-through watermark: once any period at or above
+  // the as-of month is actively locked, this POST is rejected until an OWNER
+  // reopens it. Say so before the form is filled in, not after.
+  const blockedByLock =
+    lockedThrough !== null &&
+    (() => {
+      const [y, m] = asOfDate.split('-').map(Number);
+      if (!y || !m) return false;
+      return y < lockedThrough.year || (y === lockedThrough.year && m <= lockedThrough.month);
+    })();
 
   const hasAnything = totals.debit > 0 || totals.credit > 0;
 
@@ -130,14 +171,24 @@ export default function OpeningBalancesPage() {
               .map((r) => ({ party_id: r.party_id, amount_pkr: parseFloat(r.amount) })),
             cash_pkr: parseFloat(cash) || 0,
             bank_pkr: parseFloat(bank) || 0,
-            other_lines: others
-              .filter((o) => o.account_code && ((parseFloat(o.debit) || 0) > 0 || (parseFloat(o.credit) || 0) > 0))
-              .map((o) => ({
-                account_code: o.account_code,
-                debit_pkr: parseFloat(o.debit) || 0,
-                credit_pkr: parseFloat(o.credit) || 0,
-                description: o.description.trim() || undefined,
-              })),
+            other_lines: [
+              ...((parseFloat(wallet) || 0) > 0
+                ? [{
+                    account_code: WALLET_ACCOUNT,
+                    debit_pkr: parseFloat(wallet),
+                    credit_pkr: 0,
+                    description: 'Opening mobile wallet balance',
+                  }]
+                : []),
+              ...others
+                .filter((o) => o.account_code && ((parseFloat(o.debit) || 0) > 0 || (parseFloat(o.credit) || 0) > 0))
+                .map((o) => ({
+                  account_code: o.account_code,
+                  debit_pkr: parseFloat(o.debit) || 0,
+                  credit_pkr: parseFloat(o.credit) || 0,
+                  description: o.description.trim() || undefined,
+                })),
+            ],
           },
         },
       );
@@ -208,6 +259,14 @@ export default function OpeningBalancesPage() {
         </p>
       )}
 
+      {blockedByLock && (
+        <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          Accounting is closed through {String(lockedThrough!.month).padStart(2, '0')}/
+          {lockedThrough!.year}, so an entry dated {asOfDate} will be rejected. The owner must
+          reopen that period first, or you can date the entry after the close.
+        </p>
+      )}
+
       <div className="space-y-4">
         <Card>
           <CardHeader><CardTitle className="text-base">As-of Date</CardTitle></CardHeader>
@@ -267,6 +326,10 @@ export default function OpeningBalancesPage() {
             <div className="space-y-1.5">
               <Label>Bank balance (1020), Rs</Label>
               <Input type="number" min="0" value={bank} onChange={(e) => setBank(e.target.value)} className="text-right tabular-nums" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Mobile wallet (1030), Rs</Label>
+              <Input type="number" min="0" value={wallet} onChange={(e) => setWallet(e.target.value)} className="text-right tabular-nums" />
             </div>
           </CardContent>
         </Card>

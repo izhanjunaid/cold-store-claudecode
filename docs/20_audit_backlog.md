@@ -52,7 +52,7 @@
 | P2-8 | Depreciation period ordering unconstrained — March can be run before February | **FIXED** — Batch H part 3, phase/22. Per-asset "eligible last period" guard using the same `computeMonthlyDepreciation` calc the run itself uses, so a calendar gap with zero `IN_SERVICE` assets can't permanently deadlock a later run |
 | P2-9 | Employee termination has no settlement / gratuity and posts no JE | **OPEN** — Phase 21 added an outstanding-debt warning to the terminate dialog, but no accounting |
 | P2-10 | **KATCHI gate applied on create only, not later stages** | **FIXED (22 of 23 routes) — Batch H part 2, phase/22.** `POST /v1/depreciation/runs` still ungated — it batches every `IN_SERVICE` asset regardless of book, so there's no single record to gate on; deferred as a product decision, see below |
-| P2-11 | Dishonour date forced to `new Date()` | **OPEN** — `payment.service.ts:472` |
+| P2-11 | Dishonour date forced to `new Date()` | **FIXED** (Batch H1, `e8edad8`) — `payment.service.ts:355,363` takes `dishonourDateInput`; re-verified 2026-08-07 |
 | P2-12 | Payroll duplicate-period guard ran outside its transaction | **FIXED** — Batch C |
 | P2-13 | Statement and operational formatters disagree on the zero/null glyph | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P2-14 | Payments have no document / receipt number at all | **OPEN** — zero matches for `payment_number` / `receipt_number` |
@@ -63,10 +63,10 @@
 | ID | Finding | Status |
 |---|---|---|
 | P3-1 | Grouped amount input yields a silent zero — typing `40,00,000` posts `0` | **FIXED** — Batch G, phase/22 (`c162472`) |
-| P3-2 | Dead export `defaultsForCategory` | **OPEN** — `fixed-assets/templates/types.ts:27`, zero callers repo-wide |
+| P3-2 | Dead export `defaultsForCategory` | **FIXED** (Batch H1, `e8edad8`) — removed; zero hits repo-wide, re-verified 2026-08-07 |
 | P3-3 | Dev-DB drift: `invoice_surcharges` exists in the live dev database but not in this branch's schema | **OPEN** — ops check, not code. Confirmed absent from the Prisma schema (`schema.prisma` has no `invoice_surcharge`/`invoice_surcharges` model at all). **Now also confirmed live**: `je-21-late-payment-surcharge.ts:34`, `invoice.service.ts:300`, `payment.service.ts:646`, `reporting/reports/receivables-aging.ts:204` all stamp `sourceTable: 'invoice_surcharge'` on posted JEs — the audit trail asserts a document type with no backing table anywhere on this branch, the same shape as P2-2, found by the invariant-17 test rather than by reading. Not restructuring JE-21 in this batch; invariant 17 carries it as a named, documented gap so it isn't silently skipped or a crash risk |
 | P3-4 | Depreciation batch runs in one transaction on Prisma's 5 s default timeout | **FIXED** — Batch H part 3, phase/22. Explicit `{ timeout: 30_000, maxWait: 10_000 }` — the first explicit Prisma transaction timeout anywhere in this codebase (confirmed via full-repo grep before choosing the shape) |
-| P3-5 | `PaymentService` constructed without its journal-entry dependency in reporting | **OPEN** — `reporting.controller.ts:32-35` passes 2 args vs `payment.controller.ts:22`'s 3; `payment.service.ts:449` then guards with `if (this.journalEntry)`, so a future write path would silently skip its JE |
+| P3-5 | `PaymentService` constructed without its journal-entry dependency in reporting | **FIXED** (Batch H1, `e8edad8`) — `reporting.controller.ts:39-43` passes the `JournalEntryService`; the constructor param is now required, no `if (this.journalEntry)` guard remains. Re-verified 2026-08-07 |
 
 ---
 
@@ -135,6 +135,22 @@ Attempted 2026-07-31 in Batch H, reverted the same day. The guard itself (`asser
 Running it against the integration suite turned up the real finding: **57 of 503 tests failed across 9 files**, every one a legitimate cash-out operation — loan issuance (`peshgi.integration.test.ts`'s `issueLoan()` helper going 201→422) among them — rejected because the account it debited or credited had no funded balance to draw down. The guard is not buggy; the precondition it enforces has no producer anywhere in the system. **No facility, seeded fixture or otherwise, ever establishes an opening cash position** — 1010/1020/1030 all start at an implicit zero with nothing that deposits into them except ordinary operating postings, which is exactly what the guard then blocks. Building a synthetic balance into the shared test fixture to make the suite pass would have hidden the same gap in production: a real facility's first cash payout on day one would 422 for the same reason, and nothing in the product currently prompts an owner to enter one.
 
 This is the same shape of finding as P1-1 in `docs/18` §4 — `other_deductions_pkr` had no account to post to, so the fix was to refuse honestly rather than post to the wrong place. Here the missing piece is an account **balance**, not an account, so the same discipline means: don't post through a hole, and don't force output out of a check whose input the system can't supply yet. Reverted: the function, both call sites, the error code, and the now-unused `advisoryXactLock` import. Kept, skipped, with the reasoning inline: the four tests in `accounting-hardening.integration.test.ts` under `describe.skip('cash-class accounts cannot go negative ...')` — they're the spec for whichever phase adds opening cash balances (a prerequisite this shares with invariant 13/P1-12 above; the two could plausibly land together, since both are "the ledger needs a real starting position" problems).
+
+> **Correction (phase/23).** The sentence above — "no facility ever establishes an
+> opening cash position" — is **operationally true but literally false**, and the
+> distinction is what P1-6 actually hinges on. `POST /v1/accounting/opening-balances`
+> has accepted `cash_pkr` → 1010 and `bank_pkr` → 1020 since Gap 1 shipped, and
+> phase/23 added 1030 to the same screen. What is true is that the flow is
+> **optional, one-shot and human-driven**: no fixture, no provisioning path and no
+> onboarding step invokes it, which is why the integration suite starts every cash
+> account at zero.
+>
+> So the blocker is narrower than recorded. P1-6 does not need a new capability —
+> it needs (a) the shared test fixture to post a real opening cash position, and
+> (b) a decision about facilities that never enter one. **Still DEFERRED**: the
+> 57-test blast radius is unchanged, and re-opening it is a scoping decision, not
+> a mechanical fix. Recorded here so the next session starts from the accurate
+> constraint rather than re-deriving a false one.
 
 ---
 

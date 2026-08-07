@@ -53,6 +53,46 @@ The CoA is designed for a cold storage business: every account name and number r
 6XXX  =  Operating Expenses (Indirect)
 ```
 
+Leading digits **0, 7, 8 and 9 are unassigned and stay legal** — an owner may open
+a custom head outside the seeded ranges. `coa.service.ts` rejects only a code whose
+leading digit belongs to *another* class's assigned range (an EXPENSE numbered 1999).
+Accounts under a custom head surface in the statements' "unclassified" bucket.
+
+**Codes are permanent.** Once an account carries a posting, `guard_chart_of_accounts`
+and the journal-entry-line FK's `ON UPDATE RESTRICT` block any change to its code,
+class, type, parent or normal balance. There is no renumber or merge tooling, and
+none is planned — reclassifying means opening a new account. The Add Account form
+therefore *prefills* a suggested code from the parent's block but leaves it editable;
+it never auto-assigns.
+
+### Statement Structure Is Fixed (phase/23 decision)
+
+The balance sheet's sections are a hardcoded list of header codes in
+`financial-statements.service.ts`, **not** a generic walk of the `parent_account_code`
+hierarchy:
+
+| Section | Headers |
+|---|---|
+| Current assets | 1000, 1100, 1200 |
+| Non-current assets | 1300 |
+| Current liabilities | 2000 |
+| Non-current liabilities | 2100 |
+
+Detail accounts under any *other* header fall into `unclassified_asset_lines` /
+`unclassified_liability_lines`. The sheet stays complete and `is_balanced` still
+holds — this is the deliberate F-6b fallback, not a failure mode.
+
+Consequently **the UI does not expose HEADER creation** (the Add Account dialog
+always posts `account_type: 'DETAIL'`). The API will accept a HEADER, but a custom
+one gets no statement section, so its children land in the unclassified bucket.
+
+This is a considered trade, not an oversight: the current/non-current split is an
+accounting judgement that cannot be inferred from a parent link, and it is already
+made correctly once for a cold-storage business. Making it configurable (a
+`statement_section` column on headers) is an additive, nullable migration that can
+be done later — **revisit when** an owner needs a balance-sheet section that does
+not exist, or a second facility needs a materially different chart.
+
 ---
 
 ### CLASS 1: ASSETS
@@ -575,6 +615,16 @@ Auto-draft entries are created the moment the operational trigger fires but are 
 
 **Immutability**: Posted journal entries cannot be modified or deleted. Corrections are made via reversal entries (debit/credit swapped) plus new correcting entries — always maintaining the audit trail.
 
+> **Naming hazard — "opening balance" means two different things.** Both ship in
+> the same API surface, so read the context before trusting the name:
+>
+> 1. **The go-live entry** — the guided one-shot journal entry with
+>    `source_table = 'opening_balances'` (§7.4). Exists only if someone entered it.
+> 2. **A period carry-forward** — `opening_balance_pkr` / `opening_debit_pkr` /
+>    `opening_credit_pkr` in the general ledger, trial balance and party statement.
+>    This is the computed net of everything posted *before* `date_from`, and it
+>    exists whether or not (1) was ever entered.
+
 ---
 
 ## 5. Financial Statement Outputs
@@ -864,6 +914,18 @@ Not yet automated — verify manually from the general ledger when needed.
 - Once locked: no new journal entries can be posted with `entry_date` in that period
 - Correction after lock: requires OWNER override; generates a correction entry in the current open period
 - Locked periods can still be viewed and reported on — read-only
+
+**As built it is a closed-through watermark, not per-month flags.** The highest
+still-locked period closes every period at or below it, including months nobody
+explicitly locked. A month below the watermark is open only while it carries an
+explicit unlock row (an OWNER-created reopen exception). Enforcement is in
+`postInTransaction`, so it covers *every* posted entry in the system.
+
+> **Trap — opening balances.** Opening balances are backdated by nature, so once a
+> first month-end close exists, both *entering* and *reversing* them fail with
+> `PERIOD_LOCKED` (409) until an OWNER reopens the period. Enter opening balances
+> before the first close. The opening-balances screen warns when the chosen as-of
+> date falls at or below the watermark.
 
 ---
 
