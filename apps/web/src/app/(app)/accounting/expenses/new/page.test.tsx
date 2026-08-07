@@ -35,6 +35,10 @@ const ACCOUNTS = [
   { account_code: '6160', account_name: 'Generator Fuel', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true },
   // Not an expense — must not appear.
   { account_code: '1020', account_name: 'Bank Account — Main', account_class: 'ASSET', account_type: 'DETAIL', parent_account_code: '1000', is_active: true },
+  // Posted by the payroll run and the depreciation run respectively — a manual
+  // voucher against either would double-count.
+  { account_code: '6010', account_name: 'Salaries — Management & Office', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true },
+  { account_code: '6120', account_name: 'Depreciation — Building', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true },
 ];
 vi.mock('@/hooks/use-reference-data', async (importActual) => ({
   ...(await importActual<typeof import('@/hooks/use-reference-data')>()),
@@ -122,6 +126,19 @@ describe('NewExpenseVoucherPage — expense account picker', () => {
     ).map((o) => o.value);
 
     expect(codes).not.toContain('1020');
+  });
+
+  // Caught by running the app, not by a test: widening the picker to "every
+  // EXPENSE/COST_OF_SERVICE account" re-exposed accounts the old hardcoded list
+  // had deliberately left out, each of which is posted by an automated flow.
+  it('excludes cost accounts that have their own posting flow', () => {
+    render(<NewExpenseVoucherPage />);
+    const codes = Array.from(
+      document.querySelectorAll<HTMLOptionElement>('select option'),
+    ).map((o) => o.value);
+
+    expect(codes).not.toContain('6010'); // payroll run
+    expect(codes).not.toContain('6120'); // depreciation run
   });
 
   it('posts the selected account code', async () => {

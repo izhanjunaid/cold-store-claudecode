@@ -245,20 +245,13 @@ export default function ChartOfAccountsPage() {
         description="The facility's general-ledger account structure"
         actions={
           <div className="flex items-center gap-2">
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search code or name…"
-              className="h-9 w-52"
-              aria-label="Search accounts"
-            />
             <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)} className={SELECT_CLASS}>
               <option value="">All Classes</option>
               {ACCOUNT_CLASSES.map((c) => (
                 <option key={c} value={c}>{CLASS_LABEL[c]}</option>
               ))}
             </select>
-            <span className="text-sm text-muted-foreground">{visibleAccounts.length} accounts</span>
+            <span className="whitespace-nowrap text-sm text-muted-foreground">{visibleAccounts.length} accounts</span>
             {canManage && (
               <Button size="sm" onClick={() => { setDraft(emptyDraft(classFilter || 'ASSET')); setShowAdd(true); }}>
                 <Plus className="mr-1.5 h-4 w-4" aria-hidden /> Add account
@@ -266,6 +259,16 @@ export default function ChartOfAccountsPage() {
             )}
           </div>
         }
+      />
+
+      {/* Sits with the table it filters — the header row is already full at
+          laptop widths with the class filter, the count and the add button. */}
+      <Input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search code or name…"
+        className="mb-3 h-9 max-w-xs"
+        aria-label="Search accounts"
       />
 
       <Card>
