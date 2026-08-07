@@ -81,6 +81,17 @@ matching read path:
 All four now read a shared `useAccounts()` hook (added beside the existing
 `useParties`/`useChambers` reference-data hooks), returning active DETAIL accounts.
 
+> **The hardcoded list was half right, and only running the app showed which half.**
+> Replacing it with "every EXPENSE/COST_OF_SERVICE account" re-exposed 11 accounts the
+> old list had deliberately omitted — 5030/5035/6010/6015 (posted by the payroll run),
+> 5040/6120/6130/6140 (depreciation run), 6110 (asset disposal), 6080 (JE-08), 6150
+> (spoilage). A manual expense voucher against any of them double-counts against the
+> automated entry. What was worth keeping was the **policy** (which accounts a human may
+> book to), not the **inventory** (what the chart contains). `AUTOMATED_COST_ACCOUNTS`
+> now encodes that policy, so the picker shows the original 12 plus anything added later.
+> The stubbed unit test could not have caught this — it asserted the filter did what it
+> was written to do.
+
 Behaviour is preserved where money moves: every cash/bank picker still defaults to
 `DEFAULT_BANK_ACCOUNT_CODE`, so an untouched payroll run or expense payment posts
 exactly as before. Payroll is additionally constrained to children of `1000` — salaries
