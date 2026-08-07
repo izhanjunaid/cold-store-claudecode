@@ -21,6 +21,7 @@ import {
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
+import { suggestNextCode } from './next-code';
 
 import { DataTableSkeleton } from '@/components/data-table';
 interface Account {
@@ -46,9 +47,28 @@ const CLASS_TONE: Record<string, 'info' | 'warning' | 'success' | 'danger' | 'ne
 
 const ACCOUNT_CLASSES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'COST_OF_SERVICE', 'EXPENSE'] as const;
 
+// One label set for both the filter and the dialog — they used to disagree
+// ("Cost of Service" vs "COST OF SERVICE") because each hand-wrote its own.
+const CLASS_LABEL: Record<string, string> = {
+  ASSET: 'Assets',
+  LIABILITY: 'Liabilities',
+  EQUITY: 'Equity',
+  REVENUE: 'Revenue',
+  COST_OF_SERVICE: 'Cost of Service',
+  EXPENSE: 'Expenses',
+};
+
 // Debit-normal classes; the rest default to credit. Overridable in the form
 // for contra accounts (e.g. accumulated depreciation is ASSET / CREDIT).
 const DEBIT_NORMAL = new Set(['ASSET', 'EXPENSE', 'COST_OF_SERVICE']);
+
+// Mirrors CLASS_CODE_PREFIX in coa.service.ts. Leading digits 0/7/8/9 stay
+// legal — owners open custom heads there and the statements surface them in the
+// unclassified bucket (F-6b).
+const CLASS_LEAD_DIGIT: Record<string, string> = {
+  ASSET: '1', LIABILITY: '2', EQUITY: '3', REVENUE: '4', COST_OF_SERVICE: '5', EXPENSE: '6',
+};
+const ASSIGNED_LEAD_DIGITS = new Set(Object.values(CLASS_LEAD_DIGIT));
 
 const SELECT_CLASS =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
@@ -73,6 +93,7 @@ export default function ChartOfAccountsPage() {
   // Unfiltered copy, so the Add dialog's parent list never depends on the table filter.
   const [allAccounts, setAllAccounts] = useState<Account[]>([]);
   const [classFilter, setClassFilter] = useState('');
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -105,6 +126,16 @@ export default function ChartOfAccountsPage() {
     fetchAccounts();
   }, [fetchAccounts]);
 
+  // Client-side: the list is small and already loaded, so a round trip per
+  // keystroke would buy nothing.
+  const visibleAccounts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return accounts;
+    return accounts.filter(
+      (a) => a.account_code.includes(q) || a.account_name.toLowerCase().includes(q),
+    );
+  }, [accounts, search]);
+
   const headerOptions = useMemo(
     () => allAccounts.filter((a) => a.account_type === 'HEADER' && a.account_class === draft.cls),
     [allAccounts, draft.cls],
@@ -112,6 +143,34 @@ export default function ChartOfAccountsPage() {
   // Equity accounts sit at the root (built by class on the balance sheet);
   // every other class needs a header for the statements to place it.
   const parentRequired = draft.cls !== 'EQUITY';
+
+  // Prefill only — never auto-assign. A code is permanent once the account has
+  // postings (guard_chart_of_accounts + the JE-line FK's ON UPDATE RESTRICT),
+  // so a silently-wrong code cannot be corrected later.
+  const selectParent = (parent: string) =>
+    setDraft((d) => ({ ...d, parent, code: parent ? suggestNextCode(allAccounts, parent) : '' }));
+
+  // Mirrors the server's rules (shared CreateAccountRequest + coa.service) so
+  // the failure arrives next to the field rather than as a toast after a POST.
+  const codeError = (() => {
+    if (!draft.code) return null;
+    if (draft.code.length < 2) return 'At least 2 digits.';
+    if (allAccounts.some((a) => a.account_code === draft.code)) {
+      return `${draft.code} is already in use.`;
+    }
+    const expected = CLASS_LEAD_DIGIT[draft.cls];
+    const lead = draft.code.charAt(0);
+    if (expected && lead !== expected && ASSIGNED_LEAD_DIGITS.has(lead)) {
+      return `Codes starting with ${lead} belong to another class; ${CLASS_LABEL[draft.cls]} use ${expected}.`;
+    }
+    return null;
+  })();
+
+  const validationError =
+    codeError ??
+    (!draft.code ? 'Enter an account code.' : null) ??
+    (!draft.name.trim() ? 'Enter an account name.' : null) ??
+    (parentRequired && !draft.parent ? 'Select a parent header.' : null);
 
   const createAccount = async () => {
     setSaving(true);
@@ -186,16 +245,20 @@ export default function ChartOfAccountsPage() {
         description="The facility's general-ledger account structure"
         actions={
           <div className="flex items-center gap-2">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search code or name…"
+              className="h-9 w-52"
+              aria-label="Search accounts"
+            />
             <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)} className={SELECT_CLASS}>
               <option value="">All Classes</option>
-              <option value="ASSET">Assets</option>
-              <option value="LIABILITY">Liabilities</option>
-              <option value="EQUITY">Equity</option>
-              <option value="REVENUE">Revenue</option>
-              <option value="COST_OF_SERVICE">Cost of Service</option>
-              <option value="EXPENSE">Expenses</option>
+              {ACCOUNT_CLASSES.map((c) => (
+                <option key={c} value={c}>{CLASS_LABEL[c]}</option>
+              ))}
             </select>
-            <span className="text-sm text-muted-foreground">{accounts.length} accounts</span>
+            <span className="text-sm text-muted-foreground">{visibleAccounts.length} accounts</span>
             {canManage && (
               <Button size="sm" onClick={() => { setDraft(emptyDraft(classFilter || 'ASSET')); setShowAdd(true); }}>
                 <Plus className="mr-1.5 h-4 w-4" aria-hidden /> Add account
@@ -221,12 +284,12 @@ export default function ChartOfAccountsPage() {
           <TableBody>
             {loading ? (
               <DataTableSkeleton columns={canManage ? 7 : 6} rows={5} />
-            ) : accounts.length === 0 ? (
+            ) : visibleAccounts.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={canManage ? 7 : 6} className="h-24 text-center text-muted-foreground">No accounts</TableCell>
               </TableRow>
             ) : (
-              accounts.map((a) => (
+              visibleAccounts.map((a) => (
                 <TableRow key={a.id} className={a.account_type === 'HEADER' ? 'bg-muted/40 font-semibold' : ''}>
                   <TableCell className="font-mono">{a.account_code}</TableCell>
                   <TableCell>
@@ -287,41 +350,60 @@ export default function ChartOfAccountsPage() {
               account has postings.
             </DialogDescription>
           </DialogHeader>
+          {/* Ordered by dependency: class decides the valid parents, the parent
+              decides the code block. Asking for the code first (as this form
+              used to) asks for the derived value before its inputs. */}
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="coa-code">Account code</Label>
-                <Input
-                  id="coa-code"
-                  value={draft.code}
-                  onChange={(e) => setDraft((d) => ({ ...d, code: e.target.value.replace(/[^0-9]/g, '') }))}
-                  placeholder="e.g. 6095"
-                  className="font-mono"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="coa-class">Class</Label>
-                <select
-                  id="coa-class"
-                  value={draft.cls}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      cls: e.target.value,
-                      parent: '',
-                      normal: DEBIT_NORMAL.has(e.target.value) ? 'DEBIT' : 'CREDIT',
-                    }))
-                  }
-                  className={SELECT_CLASS}
-                >
-                  {ACCOUNT_CLASSES.map((c) => (
-                    <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>
-                  ))}
-                </select>
-              </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="coa-class">Class</Label>
+              <select
+                id="coa-class"
+                value={draft.cls}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    cls: e.target.value,
+                    parent: '',
+                    code: '',
+                    normal: DEBIT_NORMAL.has(e.target.value) ? 'DEBIT' : 'CREDIT',
+                  }))
+                }
+                className={SELECT_CLASS}
+              >
+                {ACCOUNT_CLASSES.map((c) => (
+                  <option key={c} value={c}>{CLASS_LABEL[c]}</option>
+                ))}
+              </select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="coa-name">Account name</Label>
+              <Label htmlFor="coa-parent">
+                Parent (header){parentRequired && <span className="text-destructive"> *</span>}
+              </Label>
+              <select
+                id="coa-parent"
+                value={draft.parent}
+                onChange={(e) => selectParent(e.target.value)}
+                className={SELECT_CLASS}
+              >
+                {parentRequired ? (
+                  <option value="" disabled>Select header…</option>
+                ) : (
+                  <option value="">— none —</option>
+                )}
+                {headerOptions.map((h) => (
+                  <option key={h.account_code} value={h.account_code}>
+                    {h.account_code} — {h.account_name}
+                  </option>
+                ))}
+              </select>
+              {parentRequired && headerOptions.length === 0 && (
+                <p className="text-xs text-destructive">
+                  No header accounts exist for {CLASS_LABEL[draft.cls] ?? draft.cls}.
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="coa-name">Account name <span className="text-destructive">*</span></Label>
               <Input
                 id="coa-name"
                 value={draft.name}
@@ -329,28 +411,28 @@ export default function ChartOfAccountsPage() {
                 placeholder="e.g. Generator Fuel"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="coa-parent">Parent (header)</Label>
-                <select
-                  id="coa-parent"
-                  value={draft.parent}
-                  onChange={(e) => setDraft((d) => ({ ...d, parent: e.target.value }))}
-                  className={SELECT_CLASS}
-                >
-                  {parentRequired ? (
-                    <option value="" disabled>Select header…</option>
-                  ) : (
-                    <option value="">— none —</option>
-                  )}
-                  {headerOptions.map((h) => (
-                    <option key={h.account_code} value={h.account_code}>
-                      {h.account_code} — {h.account_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
+            <div className="space-y-1.5">
+              <Label htmlFor="coa-code">Account code <span className="text-destructive">*</span></Label>
+              <Input
+                id="coa-code"
+                value={draft.code}
+                onChange={(e) => setDraft((d) => ({ ...d, code: e.target.value.replace(/[^0-9]/g, '').slice(0, 10) }))}
+                placeholder="e.g. 6095"
+                className="font-mono"
+                inputMode="numeric"
+              />
+              {codeError ? (
+                <p className="text-xs text-destructive">{codeError}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Suggested from the parent&rsquo;s range. Editable now — permanent once the
+                  account has postings.
+                </p>
+              )}
+            </div>
+            <details className="rounded-md border px-3 py-2">
+              <summary className="cursor-pointer text-sm text-muted-foreground">Advanced</summary>
+              <div className="mt-2 space-y-1.5">
                 <Label htmlFor="coa-normal">Normal balance</Label>
                 <select
                   id="coa-normal"
@@ -361,15 +443,24 @@ export default function ChartOfAccountsPage() {
                   <option value="DEBIT">DEBIT</option>
                   <option value="CREDIT">CREDIT</option>
                 </select>
+                <p className="text-xs text-muted-foreground">
+                  Set from the class. Change it only for a contra account — accumulated
+                  depreciation is an asset with a credit balance.
+                </p>
               </div>
-            </div>
+            </details>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-            <Button onClick={createAccount} disabled={saving || draft.code.length < 2 || !draft.name.trim() || (parentRequired && !draft.parent)}>
+            <Button onClick={createAccount} disabled={saving || !!validationError}>
               {saving ? 'Creating…' : 'Create account'}
             </Button>
           </DialogFooter>
+          {/* The code error already has its own slot under that field — only
+              surface the remaining "what's still missing" prompt here. */}
+          {validationError && validationError !== codeError && !saving && (
+            <p className="text-right text-xs text-muted-foreground">{validationError}</p>
+          )}
         </DialogContent>
       </Dialog>
 

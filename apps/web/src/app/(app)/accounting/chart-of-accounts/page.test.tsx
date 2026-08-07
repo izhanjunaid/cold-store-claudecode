@@ -107,10 +107,13 @@ describe('ChartOfAccountsPage — owner management', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /add account/i }));
 
-    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '6095' } });
-    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Generator Fuel' } });
+    // Fields are filled in dependency order: class decides the parents, the
+    // parent decides the code block.
     fireEvent.change(screen.getByLabelText(/class/i), { target: { value: 'EXPENSE' } });
     fireEvent.change(screen.getByLabelText(/parent/i), { target: { value: '6000' } });
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Generator Fuel' } });
+    // Override the suggestion — the field stays editable on purpose.
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '6095' } });
 
     apiClient.mockClear();
     apiClient.mockResolvedValue(ACCOUNTS);
@@ -131,6 +134,77 @@ describe('ChartOfAccountsPage — owner management', () => {
     );
     // List refetched after create.
     await waitFor(() => expect(apiClient.mock.calls.some(([url]) => String(url).startsWith('/v1/accounting/accounts?'))).toBe(true));
+  });
+
+  it('prefills the account code from the chosen parent, and clears it when the class changes', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+
+    const code = screen.getByLabelText(/account code/i) as HTMLInputElement;
+    expect(code.value).toBe('');
+
+    // 6000's highest child is 6090, so the next round slot in its block is 6100.
+    fireEvent.change(screen.getByLabelText(/class/i), { target: { value: 'EXPENSE' } });
+    fireEvent.change(screen.getByLabelText(/parent/i), { target: { value: '6000' } });
+    expect(code.value).toBe('6100');
+
+    // Changing class invalidates the parent, so the code it produced must go too
+    // rather than linger under a heading it no longer belongs to.
+    fireEvent.change(screen.getByLabelText(/class/i), { target: { value: 'ASSET' } });
+    expect(code.value).toBe('');
+  });
+
+  it('rejects a code from another class range before it reaches the server', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+
+    fireEvent.change(screen.getByLabelText(/class/i), { target: { value: 'EXPENSE' } });
+    fireEvent.change(screen.getByLabelText(/parent/i), { target: { value: '6000' } });
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Generator Fuel' } });
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '1999' } });
+
+    expect(screen.getByText(/belong to another class/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /create account/i })).toHaveProperty('disabled', true);
+  });
+
+  it('flags a duplicate code without a round trip', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '1010' } });
+    expect(screen.getByText(/already in use/i)).toBeTruthy();
+  });
+
+  // Filtering the table used to leave the dialog on ASSET with an empty parent
+  // list, disabling the submit button with nothing on screen explaining why.
+  it('opens Add account on the filtered class with its headers available', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+
+    fireEvent.change(screen.getByDisplayValue(/all classes/i), { target: { value: 'EXPENSE' } });
+    await waitFor(() =>
+      expect(apiClient.mock.calls.some(([u]) => String(u).includes('account_class=EXPENSE'))).toBe(true),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+    expect((screen.getByLabelText(/class/i) as HTMLSelectElement).value).toBe('EXPENSE');
+    expect(screen.getByRole('option', { name: /6000 — Operating Expenses/ })).toBeTruthy();
+  });
+
+  it('filters the table by code or name', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/search accounts/i), { target: { value: 'cash' } });
+    expect(screen.getByText(/Cash on Hand/)).toBeTruthy();
+    expect(screen.queryByText(/Misc Expense/)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/search accounts/i), { target: { value: '6090' } });
+    expect(screen.getByText(/Misc Expense/)).toBeTruthy();
+    expect(screen.queryByText(/Cash on Hand/)).toBeNull();
   });
 
   it('renames a non-system account via PATCH', async () => {
