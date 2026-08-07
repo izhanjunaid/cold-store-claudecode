@@ -109,6 +109,10 @@ const FULL_BODY = () => ({
   bank_pkr: 88000,
   other_lines: [
     { account_code: '1310', debit_pkr: 200000, credit_pkr: 0, description: 'Plant at book value' },
+    // 1030 has no dedicated request field (only cash_pkr -> 1010, bank_pkr -> 1020),
+    // so the web routes an opening mobile-wallet balance through other_lines.
+    // Covering that path here rather than trusting a read of the validation code.
+    { account_code: '1030', debit_pkr: 5000, credit_pkr: 0, description: 'Opening mobile wallet balance' },
   ],
 });
 
@@ -171,8 +175,8 @@ describe('Gap 1 · opening balances', () => {
     expect(je.book_type).toBe('PACCI');
     expect(je.source_table).toBe('opening_balances');
     expect(je.entry_date).toBe('2026-01-01');
-    expect(je.total_debit_pkr).toBe(365000);
-    expect(je.total_credit_pkr).toBe(365000);
+    expect(je.total_debit_pkr).toBe(370000);
+    expect(je.total_credit_pkr).toBe(370000);
 
     const farmerLine = je.lines.find((l: any) => l.party_id === farmerId);
     expect(farmerLine.account_code).toBe('1110');
@@ -181,8 +185,14 @@ describe('Gap 1 · opening balances', () => {
     expect(traderLine.account_code).toBe('1120');
     expect(traderLine.debit_amount).toBe(25000);
 
+    // All three cash-class accounts can carry an opening balance: 1010/1020 via
+    // their own request fields, 1030 through other_lines.
+    expect(je.lines.find((l: any) => l.account_code === '1010').debit_amount).toBe(12000);
+    expect(je.lines.find((l: any) => l.account_code === '1020').debit_amount).toBe(88000);
+    expect(je.lines.find((l: any) => l.account_code === '1030').debit_amount).toBe(5000);
+
     const plug = je.lines.find((l: any) => l.account_code === '3010');
-    expect(plug.credit_amount).toBe(365000);
+    expect(plug.credit_amount).toBe(370000);
   });
 
   it('status flips to entered with the entry reference', async () => {

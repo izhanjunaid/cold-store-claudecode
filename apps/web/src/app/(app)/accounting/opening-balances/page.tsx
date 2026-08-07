@@ -88,7 +88,8 @@ export default function OpeningBalancesPage() {
       apiClient<OpeningStatus>('/v1/accounting/opening-balances'),
       apiClientList<Party>('/v1/parties?page_size=200&is_active=true').then((r) => r.data),
       apiClient<Account[]>('/v1/accounting/accounts?is_active=true'),
-      apiClient<PeriodLock[]>('/v1/accounting/period-locks'),
+      // Advisory only — never let it take the screen down with it.
+      apiClient<PeriodLock[]>('/v1/accounting/period-locks').catch(() => [] as PeriodLock[]),
     ])
       .then(([st, ps, accs, locks]) => {
         setStatus(st);
