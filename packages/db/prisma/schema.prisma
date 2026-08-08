@@ -173,6 +173,23 @@ enum NormalBalance {
   CREDIT
 }
 
+// Which face-of-statement section a HEADER account's children roll up into.
+// Null on a header means "no section" — its children fall into the
+// statements' unclassified bucket (F-6b), same as before this enum existed.
+// Never set on a DETAIL account (only headers define statement structure) or
+// on an EQUITY header (equity aggregates by class, not by header — phase/19).
+enum StatementSection {
+  CURRENT_ASSET
+  NON_CURRENT_ASSET
+  CURRENT_LIABILITY
+  NON_CURRENT_LIABILITY
+  REVENUE
+  CONTRA_REVENUE
+  OTHER_INCOME
+  COST_OF_SERVICE
+  OPERATING_EXPENSE
+}
+
 enum EntryType {
   INVOICE
   PAYMENT
@@ -875,6 +892,7 @@ model ChartOfAccounts {
   accountType       AccountType   @map("account_type")
   parentAccountCode String?       @map("parent_account_code") @db.VarChar(10)
   normalBalance     NormalBalance @map("normal_balance")
+  statementSection  StatementSection? @map("statement_section")
   isSystemAccount   Boolean       @default(false) @map("is_system_account")
   isActive          Boolean       @default(true) @map("is_active")
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz()

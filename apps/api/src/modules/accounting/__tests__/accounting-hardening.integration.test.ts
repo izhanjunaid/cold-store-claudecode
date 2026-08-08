@@ -174,7 +174,7 @@ async function cleanup() {
     await prisma.chartOfAccounts.deleteMany({
       where: {
         facilityId: TEST_FACILITY_ID,
-        accountCode: { in: ['1999', '4995', '7000', '7010', '7020', '7030', '7900', '7910', '9902', '9903', '9904', '9905', '9906', '3910'] },
+        accountCode: { in: ['1999', '4995', '7000', '7010', '7020', '7030', '7040', '7041', '7900', '7910', '9902', '9903', '9904', '9905', '9906', '9907', '9908', '3910', '3920'] },
       },
     });
     await prisma.chartOfAccounts.updateMany({
@@ -1355,6 +1355,172 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
     expect(pl.operating_profit_pkr).toBe(800);
     expect(pl.ebitda_pkr).toBe(800);
     expect(pl.net_profit_pkr).toBe(800);
+  });
+});
+
+// ============================================================
+// statement_section — data-driven statement grouping (phase/24)
+// ============================================================
+
+describe('statement_section validation', () => {
+  it('rejects statement_section on a DETAIL account', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '7041',
+        account_name: 'Rejected — section on a detail account',
+        account_class: 'EXPENSE',
+        account_type: 'DETAIL',
+        parent_account_code: '6000',
+        normal_balance: 'DEBIT',
+        statement_section: 'OPERATING_EXPENSE',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects a section that does not match the header\'s class', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '7040',
+        account_name: 'Rejected — wrong section for class',
+        account_class: 'EXPENSE',
+        account_type: 'HEADER',
+        normal_balance: 'DEBIT',
+        statement_section: 'CURRENT_ASSET',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects any section on an EQUITY header — equity aggregates by class, not by header', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '3920',
+        account_name: 'Rejected — equity header with a section',
+        account_class: 'EQUITY',
+        account_type: 'HEADER',
+        normal_balance: 'CREDIT',
+        statement_section: 'REVENUE',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('a seeded header\'s section stays editable even though its structural fields are locked once posted', async () => {
+    // 6000 has posted DETAIL children (every EXPENSE test above posts through
+    // it), so guard_chart_of_accounts would reject a change to its code,
+    // class, type, parent, or normal_balance. statement_section is outside
+    // that guarded set on purpose (migration 0015). Prove it by actually
+    // changing the value — setting it to what it already is (the migration's
+    // own backfill) would pass even if the column were locked. Restore it
+    // afterward: 6000 backs statements every other test in this suite reads.
+    const clear = await app.inject({
+      method: 'PATCH',
+      url: '/v1/accounting/accounts/6000',
+      headers: authHeaders(ownerToken),
+      payload: { statement_section: null },
+    });
+    expect(clear.statusCode).toBe(200);
+    expect(JSON.parse(clear.body).data.statement_section).toBeNull();
+
+    const restore = await app.inject({
+      method: 'PATCH',
+      url: '/v1/accounting/accounts/6000',
+      headers: authHeaders(ownerToken),
+      payload: { statement_section: 'OPERATING_EXPENSE' },
+    });
+    expect(restore.statusCode).toBe(200);
+    expect(JSON.parse(restore.body).data.statement_section).toBe('OPERATING_EXPENSE');
+  });
+});
+
+describe('a custom header with a section lands in the right statement section, not unclassified', () => {
+  it('balance sheet places a custom CURRENT_ASSET header and its child in current_asset_groups', async () => {
+    const header = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '9907',
+        account_name: 'Prepaid Insurance (custom, sectioned)',
+        account_class: 'ASSET',
+        account_type: 'HEADER',
+        normal_balance: 'DEBIT',
+        statement_section: 'CURRENT_ASSET',
+      },
+    });
+    expect(header.statusCode).toBe(201);
+    expect(JSON.parse(header.body).data.statement_section).toBe('CURRENT_ASSET');
+
+    const detail = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '9908',
+        account_name: 'Prepaid Insurance — Warehouse',
+        account_class: 'ASSET',
+        account_type: 'DETAIL',
+        parent_account_code: '9907',
+        normal_balance: 'DEBIT',
+      },
+    });
+    expect(detail.statusCode).toBe(201);
+
+    const je = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/journal-entries',
+      headers: authHeaders(managerToken),
+      payload: {
+        entry_date: '2026-02-13',
+        description: 'sectioned custom header test',
+        posting_status: 'POSTED',
+        // Funded from equity, not 1010 — 1010 is itself CURRENT_ASSET, so
+        // crediting it would net this section to zero by construction (an
+        // asset reclassification, correctly asset-neutral) and prove nothing
+        // about total_current_assets_pkr actually moving.
+        lines: [
+          { account_code: '9908', debit_amount: 900, credit_amount: 0 },
+          { account_code: '3010', debit_amount: 0, credit_amount: 900 },
+        ],
+      },
+    });
+    expect(je.statusCode).toBe(201);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/accounting/balance-sheet?as_of_date=2026-02-28',
+      headers: authHeaders(accountantToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const bs = JSON.parse(res.body).data;
+
+    // Placed in the real section — NOT in unclassified, unlike an account
+    // under a header with no section (the F-6b tests above).
+    const group = (bs.current_asset_groups as { code: string; lines: { account_code: string; amount_pkr: number }[] }[])
+      .find((g) => g.code === '9907');
+    expect(group).toBeTruthy();
+    const line = group!.lines.find((l) => l.account_code === '9908');
+    expect(line).toBeTruthy();
+    expect(line!.amount_pkr).toBe(900);
+    expect(
+      (bs.unclassified_asset_lines as { account_code: string }[]).some((l) => l.account_code === '9908'),
+    ).toBe(false);
+
+    expect(bs.total_current_assets_pkr).toBeGreaterThanOrEqual(900);
+    expect(bs.is_balanced).toBe(true);
   });
 });
 

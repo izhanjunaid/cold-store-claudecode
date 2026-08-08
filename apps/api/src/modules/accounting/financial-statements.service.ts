@@ -5,7 +5,7 @@ import { fiscalYearStart } from './fiscal-year';
 
 type Sums = { debit: number; credit: number };
 type SumMap = Map<string, Sums>;
-type Account = { accountCode: string; accountName: string; accountClass: string; accountType: string; parentAccountCode: string | null; normalBalance: 'DEBIT' | 'CREDIT' };
+type Account = { accountCode: string; accountName: string; accountClass: string; accountType: string; parentAccountCode: string | null; normalBalance: 'DEBIT' | 'CREDIT'; statementSection: string | null };
 
 interface StatementLine {
   account_code: string;
@@ -45,21 +45,22 @@ export class FinancialStatementsService {
     const credit = (s: Sums) => s.credit - s.debit;
     const debit = (s: Sums) => s.debit - s.credit;
 
-    // Operating revenue streams: header 4000 (Storage), 4100 (Handling/Service)
-    const revenue_groups = buildGroups(accounts, sums, ['4000', '4100'], credit);
+    // Section membership is data-driven (phase/24): headers 4000/4100 are the
+    // seeded REVENUE section, but any header an owner tags REVENUE joins them.
+    const revenue_groups = buildGroups(accounts, sums, sectionHeaders(accounts, 'REVENUE'), credit);
 
-    // Contra revenue (Discounts Allowed, header 4900) — presented as a deduction
-    const contra_revenue_lines = buildLines(accounts, sums, ['4900'], debit);
+    // Contra revenue — presented as a deduction
+    const contra_revenue_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'CONTRA_REVENUE'), debit);
     const total_contra_revenue_pkr = sumLines(contra_revenue_lines);
 
-    // Cost of service (header 5000)
-    const cost_of_service_lines = buildLines(accounts, sums, ['5000'], debit);
+    // Cost of service
+    const cost_of_service_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'COST_OF_SERVICE'), debit);
 
-    // Operating expenses (header 6000)
-    const operating_expense_lines = buildLines(accounts, sums, ['6000'], debit);
+    // Operating expenses
+    const operating_expense_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'OPERATING_EXPENSE'), debit);
 
-    // Other income (header 4200), below the line
-    const other_income_lines = buildLines(accounts, sums, ['4200'], credit);
+    // Other income, below the line
+    const other_income_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'OTHER_INCOME'), credit);
     const total_other_income_pkr = sumLines(other_income_lines);
 
     // Completeness (F-6b): any P&L-class DETAIL account with activity that the
@@ -212,16 +213,17 @@ export class FinancialStatementsService {
     const assetAmt = (s: Sums) => s.debit - s.credit; // contra (accum deprec) naturally negative → net book value
     const crAmt = (s: Sums) => s.credit - s.debit;
 
-    // Assets
-    const current_asset_groups = buildGroups(accounts, sums, ['1000', '1100', '1200'], assetAmt);
+    // Assets — section membership is data-driven (phase/24); any header an
+    // owner tags CURRENT_ASSET (etc.) joins the seeded 1000/1100/1200 set.
+    const current_asset_groups = buildGroups(accounts, sums, sectionHeaders(accounts, 'CURRENT_ASSET'), assetAmt);
     const total_current_assets_pkr = round2(sumGroups(current_asset_groups));
-    const non_current_asset_groups = buildGroups(accounts, sums, ['1300'], assetAmt);
+    const non_current_asset_groups = buildGroups(accounts, sums, sectionHeaders(accounts, 'NON_CURRENT_ASSET'), assetAmt);
     const total_non_current_assets_pkr = round2(sumGroups(non_current_asset_groups));
 
     // Liabilities
-    const current_liability_groups = buildGroups(accounts, sums, ['2000'], crAmt);
+    const current_liability_groups = buildGroups(accounts, sums, sectionHeaders(accounts, 'CURRENT_LIABILITY'), crAmt);
     const total_current_liabilities_pkr = round2(sumGroups(current_liability_groups));
-    const non_current_liability_groups = buildGroups(accounts, sums, ['2100'], crAmt);
+    const non_current_liability_groups = buildGroups(accounts, sums, sectionHeaders(accounts, 'NON_CURRENT_LIABILITY'), crAmt);
     const total_non_current_liabilities_pkr = round2(sumGroups(non_current_liability_groups));
 
     // Completeness (F-6b): asset/liability DETAIL accounts the hardcoded
@@ -335,7 +337,7 @@ export class FinancialStatementsService {
     return this.prisma.chartOfAccounts.findMany({
       where: { facilityId },
       orderBy: { accountCode: 'asc' },
-      select: { accountCode: true, accountName: true, accountClass: true, accountType: true, parentAccountCode: true, normalBalance: true },
+      select: { accountCode: true, accountName: true, accountClass: true, accountType: true, parentAccountCode: true, normalBalance: true, statementSection: true },
     }) as unknown as Promise<Account[]>;
   }
 
@@ -378,6 +380,21 @@ function aggregate(lines: { accountCode: string; debitAmount: unknown; creditAmo
 function line(a: Account, sums: SumMap, amt: (s: Sums) => number): StatementLine {
   const s = sums.get(a.accountCode);
   return { account_code: a.accountCode, account_name: a.accountName, amount_pkr: round2(s ? amt(s) : 0) };
+}
+
+/**
+ * Header codes carrying a given statement_section (phase/24), ascending by
+ * account code — the same order the nine hardcoded arrays this replaced were
+ * written in, so group order in every response is unchanged. A header with no
+ * section (the default for anything an owner creates through the API today)
+ * is simply absent from every section's list, same as before this column
+ * existed — its children fall into the unclassified bucket (F-6b).
+ */
+function sectionHeaders(accounts: Account[], section: string): string[] {
+  return accounts
+    .filter((a) => a.accountType === 'HEADER' && a.statementSection === section)
+    .map((a) => a.accountCode)
+    .sort();
 }
 
 /** Detail lines under one or more header codes (flattened, non-zero only). */

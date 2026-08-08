@@ -22,6 +22,37 @@ const CLASS_CODE_PREFIX: Record<string, string> = {
 };
 const ASSIGNED_CLASS_PREFIXES = new Set(Object.values(CLASS_CODE_PREFIX));
 
+// Which statement_section values a HEADER of a given class may take
+// (phase/24). EQUITY has no entry on purpose: equity aggregates by class, not
+// by header — 3010/3020/3030 sit at the root and the balance sheet places
+// equity lines directly off accountClass (financial-statements.service.ts).
+const CLASS_SECTIONS: Record<string, Set<string>> = {
+  ASSET: new Set(['CURRENT_ASSET', 'NON_CURRENT_ASSET']),
+  LIABILITY: new Set(['CURRENT_LIABILITY', 'NON_CURRENT_LIABILITY']),
+  REVENUE: new Set(['REVENUE', 'CONTRA_REVENUE', 'OTHER_INCOME']),
+  COST_OF_SERVICE: new Set(['COST_OF_SERVICE']),
+  EXPENSE: new Set(['OPERATING_EXPENSE']),
+};
+
+function validateStatementSection(
+  accountType: string,
+  accountClass: string,
+  section: string | null | undefined,
+): void {
+  if (section === undefined || section === null) return;
+  if (accountType !== 'HEADER') {
+    throw Errors.VALIDATION_ERROR('statement_section can only be set on a HEADER account', 'statement_section');
+  }
+  const allowed = CLASS_SECTIONS[accountClass];
+  if (!allowed || !allowed.has(section)) {
+    const equityNote = accountClass === 'EQUITY' ? ' — equity aggregates by class, not by header' : '';
+    throw Errors.VALIDATION_ERROR(
+      `${section} is not a valid statement section for ${accountClass}${equityNote}`,
+      'statement_section',
+    );
+  }
+}
+
 function format(a: Prisma.ChartOfAccountsGetPayload<{}>) {
   return {
     id: a.id,
@@ -32,6 +63,7 @@ function format(a: Prisma.ChartOfAccountsGetPayload<{}>) {
     account_type: a.accountType,
     parent_account_code: a.parentAccountCode,
     normal_balance: a.normalBalance,
+    statement_section: a.statementSection,
     is_system_account: a.isSystemAccount,
     is_active: a.isActive,
     created_at: a.createdAt.toISOString(),
@@ -97,6 +129,7 @@ export class CoaService {
       if (body.account_type === 'HEADER' && body.parent_account_code) {
         throw Errors.INVALID_PARENT_ACCOUNT('Header accounts cannot have a parent — headers are always root-level');
       }
+      validateStatementSection(body.account_type, body.account_class, body.statement_section);
       if (body.parent_account_code) {
         const parent = await tx.chartOfAccounts.findUnique({
           where: {
@@ -122,6 +155,7 @@ export class CoaService {
           accountType: body.account_type,
           parentAccountCode: body.parent_account_code ?? null,
           normalBalance: body.normal_balance,
+          statementSection: body.statement_section ?? null,
           isSystemAccount: false,
         },
       });
@@ -143,6 +177,10 @@ export class CoaService {
       if (a.isSystemAccount && (body.is_active === false || isRename)) {
         throw Errors.SYSTEM_ACCOUNT_PROTECTED();
       }
+      // Section is presentation, not structure (unlike code/class/type/parent/
+      // normal_balance), so it stays outside the system-account protection
+      // above — a seeded header's section is meant to be editable.
+      validateStatementSection(a.accountType, a.accountClass, body.statement_section);
       // Deactivating an account that still carries a balance would freeze that
       // balance behind an inactive account; require it be zeroed first. Zero
       // net with history is fine (a fully-settled account may be retired).
@@ -162,6 +200,7 @@ export class CoaService {
         data: {
           ...(body.account_name !== undefined ? { accountName: body.account_name } : {}),
           ...(body.is_active !== undefined ? { isActive: body.is_active } : {}),
+          ...(body.statement_section !== undefined ? { statementSection: body.statement_section } : {}),
         },
       });
       return format(updated);

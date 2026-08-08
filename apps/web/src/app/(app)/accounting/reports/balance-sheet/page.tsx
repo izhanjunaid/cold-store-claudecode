@@ -226,8 +226,13 @@ export default function BalanceSheetPage() {
 
             {data.has_unclassified && (
               <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                Unclassified amounts are included in the totals. Move these accounts under a
-                standard header (Chart of Accounts) to place them in a named section.
+                Unclassified amounts are included in Total Assets / Total Liabilities above, but
+                <strong> not</strong> in Total Current Assets, Total Non-current Assets, Total
+                Current Liabilities, or Total Non-current Liabilities — placing an account under
+                current vs. non-current is an accounting judgement this report does not guess at.
+                A current ratio or working-capital figure read off those subtotals will
+                understate them until the account is placed. Move these accounts under a standard
+                header (Chart of Accounts) to place them in a named section.
               </p>
             )}
 

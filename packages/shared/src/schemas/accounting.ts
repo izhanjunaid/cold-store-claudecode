@@ -3,6 +3,7 @@ import {
   AccountClass,
   AccountType,
   NormalBalance,
+  StatementSection,
   JournalEntryType,
   PostingStatus,
   BookType,
@@ -24,6 +25,7 @@ export const ChartOfAccountsResponse = z.object({
   account_type: AccountType,
   parent_account_code: z.string().nullable(),
   normal_balance: NormalBalance,
+  statement_section: StatementSection.nullable(),
   is_system_account: z.boolean(),
   is_active: z.boolean(),
   created_at: z.string(),
@@ -37,12 +39,21 @@ export const CreateAccountRequest = z.object({
   account_type: AccountType,
   parent_account_code: z.string().max(10).nullable().optional(),
   normal_balance: NormalBalance,
+  // HEADER only — which statement section its children roll up into. Absent
+  // routes to the unclassified bucket, same as every header before phase/24.
+  statement_section: StatementSection.optional(),
 });
 export type CreateAccountRequestType = z.infer<typeof CreateAccountRequest>;
 
 export const UpdateAccountRequest = z.object({
   account_name: z.string().min(1).max(200).optional(),
   is_active: z.boolean().optional(),
+  // A header's section is presentation, not structure — it stays editable
+  // even once the header has DETAIL children with postings (unlike code,
+  // class, type, parent and normal_balance, which guard_chart_of_accounts
+  // locks the moment the account carries activity). null clears it back to
+  // unclassified.
+  statement_section: StatementSection.nullable().optional(),
 });
 export type UpdateAccountRequestType = z.infer<typeof UpdateAccountRequest>;
 

@@ -106,6 +106,21 @@ export type AccountType = z.infer<typeof AccountType>;
 export const NormalBalance = z.enum(['DEBIT', 'CREDIT']);
 export type NormalBalance = z.infer<typeof NormalBalance>;
 
+// Which face-of-statement section a HEADER account's children roll up into
+// (phase/24). Null/absent = the statements' unclassified bucket (F-6b).
+export const StatementSection = z.enum([
+  'CURRENT_ASSET',
+  'NON_CURRENT_ASSET',
+  'CURRENT_LIABILITY',
+  'NON_CURRENT_LIABILITY',
+  'REVENUE',
+  'CONTRA_REVENUE',
+  'OTHER_INCOME',
+  'COST_OF_SERVICE',
+  'OPERATING_EXPENSE',
+]);
+export type StatementSection = z.infer<typeof StatementSection>;
+
 export const JournalEntryType = z.enum([
   'INVOICE',
   'PAYMENT',

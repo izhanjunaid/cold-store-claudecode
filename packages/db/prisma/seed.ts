@@ -391,6 +391,7 @@ async function main() {
         parentAccountCode: a.parent,
         normalBalance: a.normal,
         isSystemAccount: a.system ?? false,
+        statementSection: a.section ?? null,
       },
       create: {
         facilityId: facility.id,
@@ -401,6 +402,7 @@ async function main() {
         parentAccountCode: a.parent,
         normalBalance: a.normal,
         isSystemAccount: a.system ?? false,
+        statementSection: a.section ?? null,
       },
     });
   }
