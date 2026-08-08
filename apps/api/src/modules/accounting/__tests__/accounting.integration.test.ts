@@ -601,9 +601,23 @@ describe('Phase 8 — Trial balance & financial statements', () => {
     expect(body.is_balanced).toBe(true);
     expect(body.total_assets_pkr).toBeCloseTo(body.total_liabilities_and_equity_pkr);
 
-    // Classified subtotals roll up to the section totals
-    expect(body.total_current_assets_pkr + body.total_non_current_assets_pkr).toBeCloseTo(body.total_assets_pkr);
-    expect(body.total_current_liabilities_pkr + body.total_non_current_liabilities_pkr).toBeCloseTo(body.total_liabilities_pkr);
+    // Classified subtotals roll up to the section totals ONLY once unclassified
+    // lines are added back in — total_assets_pkr/total_liabilities_pkr include
+    // them (F-6b completeness), but current/non-current placement is a real
+    // accounting judgement (which this repo does not auto-guess), so an
+    // unclassified account is excluded from those two subtotals specifically.
+    // Asserting the sum without the unclassified term (pre-phase-24) was an
+    // assertion that happened to hold only because this fixture has none.
+    const unclassifiedAssetsPkr = (body.unclassified_asset_lines as { amount_pkr: number }[]).reduce(
+      (s, l) => s + l.amount_pkr, 0,
+    );
+    const unclassifiedLiabilitiesPkr = (body.unclassified_liability_lines as { amount_pkr: number }[]).reduce(
+      (s, l) => s + l.amount_pkr, 0,
+    );
+    expect(body.total_current_assets_pkr + body.total_non_current_assets_pkr + unclassifiedAssetsPkr)
+      .toBeCloseTo(body.total_assets_pkr);
+    expect(body.total_current_liabilities_pkr + body.total_non_current_liabilities_pkr + unclassifiedLiabilitiesPkr)
+      .toBeCloseTo(body.total_liabilities_pkr);
     expect(body.total_liabilities_pkr + body.total_equity_pkr).toBeCloseTo(body.total_liabilities_and_equity_pkr);
     expect(Array.isArray(body.current_asset_groups)).toBe(true);
   });

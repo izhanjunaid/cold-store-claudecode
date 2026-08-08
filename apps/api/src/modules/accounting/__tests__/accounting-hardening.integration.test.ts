@@ -174,7 +174,7 @@ async function cleanup() {
     await prisma.chartOfAccounts.deleteMany({
       where: {
         facilityId: TEST_FACILITY_ID,
-        accountCode: { in: ['1999', '4995', '7000', '7010', '7900', '7910', '9902', '9903', '9904', '9905', '3910'] },
+        accountCode: { in: ['1999', '4995', '7000', '7010', '7020', '7030', '7900', '7910', '9902', '9903', '9904', '9905', '9906', '3910'] },
       },
     });
     await prisma.chartOfAccounts.updateMany({
@@ -1105,6 +1105,27 @@ describe('account creation validates the parent (F-6a)', () => {
     expect(JSON.parse(res.body).error.code).toBe('INVALID_PARENT_ACCOUNT');
   });
 
+  it('rejects a HEADER given a parent — buildGroups is one level deep, a nested header would orphan its own children (phase/24)', async () => {
+    // 9902 is already claimed by 'accepts a HEADER parent of the same class'
+    // above — use an unused code so this asserts the nested-header rejection,
+    // not an incidental duplicate-code collision.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '9906',
+        account_name: 'Nested Header (rejected)',
+        account_class: 'EXPENSE',
+        account_type: 'HEADER',
+        parent_account_code: '6000',
+        normal_balance: 'DEBIT',
+      },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error.code).toBe('INVALID_PARENT_ACCOUNT');
+  });
+
   it('accepts a parentless EQUITY DETAIL account — equity sits at the root by design', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -1188,6 +1209,18 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
     // Signed as contribution to net profit: an expense reduces it.
     expect(stray!.amount_pkr).toBe(-500);
     expect(pl.net_profit_pkr).toBe(-500);
+
+    // phase/24: the unclassified expense must fold into operating_profit_pkr
+    // and ebitda_pkr too, not just net_profit_pkr. Pre-fix, this window had no
+    // header-placed activity, so operating_profit_pkr and ebitda_pkr would
+    // both have been 0 — correct-looking net_profit_pkr, wrong everything
+    // above it, and no test caught it because none asserted these two fields
+    // in the presence of unclassified activity.
+    expect(pl.operating_profit_pkr).toBe(-500);
+    expect(pl.ebitda_pkr).toBe(-500);
+    expect(pl.total_operating_expense_pkr).toBe(500);
+    // The chain of identities must hold exactly, not just net_profit_pkr in isolation.
+    expect(pl.net_profit_pkr).toBeCloseTo(pl.operating_profit_pkr + pl.total_other_income_pkr);
   });
 
   it('Balance sheet includes custom-header asset balances and still balances', async () => {
@@ -1250,6 +1283,78 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
     expect(stray).toBeTruthy();
     expect(stray!.amount_pkr).toBe(300);
     expect(bs.is_balanced).toBe(true);
+  });
+
+  // phase/24: the two expense-side tests above never exercised the REVENUE
+  // branch of the fold — a separate code path (credit-normal, added straight
+  // to total_operating_revenue_pkr rather than subtracted as a magnitude).
+  it('P&L includes custom-header revenue activity, folded into net_revenue and every subtotal above it', async () => {
+    const header = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '7020',
+        account_name: 'Ancillary Revenue (custom)',
+        account_class: 'REVENUE',
+        account_type: 'HEADER',
+        normal_balance: 'CREDIT',
+      },
+    });
+    expect(header.statusCode).toBe(201);
+    const detail = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/accounts',
+      headers: authHeaders(ownerToken),
+      payload: {
+        account_code: '7030',
+        account_name: 'Weighbridge Fee Income (custom)',
+        account_class: 'REVENUE',
+        account_type: 'DETAIL',
+        parent_account_code: '7020',
+        normal_balance: 'CREDIT',
+      },
+    });
+    expect(detail.statusCode).toBe(201);
+
+    const je = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/journal-entries',
+      headers: authHeaders(managerToken),
+      payload: {
+        entry_date: '2026-02-12',
+        description: 'unclassified revenue test',
+        posting_status: 'POSTED',
+        lines: [
+          { account_code: '1010', debit_amount: 800, credit_amount: 0 },
+          { account_code: '7030', debit_amount: 0, credit_amount: 800 },
+        ],
+      },
+    });
+    expect(je.statusCode).toBe(201);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/accounting/profit-loss?date_from=2026-02-12&date_to=2026-02-12',
+      headers: authHeaders(accountantToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const pl = JSON.parse(res.body).data;
+
+    expect(pl.has_unclassified).toBe(true);
+    const stray = (pl.unclassified_lines as { account_code: string; amount_pkr: number }[]).find(
+      (l) => l.account_code === '7030',
+    );
+    expect(stray).toBeTruthy();
+    expect(stray!.amount_pkr).toBe(800); // credit-normal revenue: positive contribution
+
+    // Every subtotal from net_revenue upward must include it — not just net_profit.
+    expect(pl.total_operating_revenue_pkr).toBe(800);
+    expect(pl.net_revenue_pkr).toBe(800);
+    expect(pl.gross_profit_pkr).toBe(800);
+    expect(pl.operating_profit_pkr).toBe(800);
+    expect(pl.ebitda_pkr).toBe(800);
+    expect(pl.net_profit_pkr).toBe(800);
   });
 });
 

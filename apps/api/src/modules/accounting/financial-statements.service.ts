@@ -32,6 +32,10 @@ export class FinancialStatementsService {
    *   − Operating expenses = Operating profit (EBIT)
    *   + Other income = Net profit
    *   EBITDA = Operating profit + depreciation/amortisation
+   *
+   * Every stage folds in unclassified accounts of the matching class (F-6b) —
+   * accountClass maps 1:1 onto a P&L subtotal, so there is no judgement call
+   * in placing them, unlike the balance sheet's current/non-current split.
    */
   async getProfitLoss(facilityId: string, query: ProfitLossQueryType) {
     const lines = await this.fetchLines(facilityId, query.date_from, query.date_to, query.book_type);
@@ -43,34 +47,31 @@ export class FinancialStatementsService {
 
     // Operating revenue streams: header 4000 (Storage), 4100 (Handling/Service)
     const revenue_groups = buildGroups(accounts, sums, ['4000', '4100'], credit);
-    const total_operating_revenue_pkr = sumGroups(revenue_groups);
 
     // Contra revenue (Discounts Allowed, header 4900) — presented as a deduction
     const contra_revenue_lines = buildLines(accounts, sums, ['4900'], debit);
     const total_contra_revenue_pkr = sumLines(contra_revenue_lines);
 
-    const net_revenue_pkr = round2(total_operating_revenue_pkr - total_contra_revenue_pkr);
-
     // Cost of service (header 5000)
     const cost_of_service_lines = buildLines(accounts, sums, ['5000'], debit);
-    const total_cost_of_service_pkr = sumLines(cost_of_service_lines);
-
-    const gross_profit_pkr = round2(net_revenue_pkr - total_cost_of_service_pkr);
 
     // Operating expenses (header 6000)
     const operating_expense_lines = buildLines(accounts, sums, ['6000'], debit);
-    const total_operating_expense_pkr = sumLines(operating_expense_lines);
-
-    const operating_profit_pkr = round2(gross_profit_pkr - total_operating_expense_pkr);
 
     // Other income (header 4200), below the line
     const other_income_lines = buildLines(accounts, sums, ['4200'], credit);
     const total_other_income_pkr = sumLines(other_income_lines);
 
-    // Completeness (F-6b): any P&L-class DETAIL account with activity that
-    // the hardcoded header rollups above did not place would silently drop
-    // out of the statement (while remaining in the trial balance). Surface
-    // it instead, signed as its contribution to net profit.
+    // Completeness (F-6b): any P&L-class DETAIL account with activity that the
+    // hardcoded header rollups above did not place would otherwise silently
+    // drop out of every subtotal (while remaining in the trial balance).
+    // Unlike the balance sheet's current/non-current split, there is no
+    // judgement call here — accountClass maps 1:1 onto a P&L subtotal, so an
+    // unclassified account is folded straight into the total its class
+    // belongs to, not just tacked onto the bottom line. Pre-phase-24 this
+    // only reached net_profit_pkr, which left operating_profit_pkr,
+    // ebitda_pkr and every margin percentage wrong under a reachable
+    // condition — net_profit_pkr was the one figure that was already right.
     const placed = new Set<string>();
     for (const g of revenue_groups) for (const l of g.lines) placed.add(l.account_code);
     for (const l of contra_revenue_lines) placed.add(l.account_code);
@@ -79,18 +80,44 @@ export class FinancialStatementsService {
     for (const l of other_income_lines) placed.add(l.account_code);
 
     const unclassified_lines: StatementLine[] = [];
+    let unclassifiedRevenuePkr = 0; // additional revenue
+    let unclassifiedCostOfServicePkr = 0; // additional cost (positive magnitude)
+    let unclassifiedExpensePkr = 0; // additional expense (positive magnitude)
     for (const a of accounts) {
       if (a.accountType !== 'DETAIL' || placed.has(a.accountCode)) continue;
       if (a.accountClass !== 'REVENUE' && a.accountClass !== 'COST_OF_SERVICE' && a.accountClass !== 'EXPENSE') continue;
       const s = sums.get(a.accountCode);
       if (!s) continue;
-      const signed = round2(a.accountClass === 'REVENUE' ? credit(s) : -debit(s));
-      if (signed === 0) continue;
-      unclassified_lines.push({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: signed });
+      if (a.accountClass === 'REVENUE') {
+        const amt = round2(credit(s));
+        if (amt === 0) continue;
+        unclassified_lines.push({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: amt });
+        unclassifiedRevenuePkr += amt;
+      } else {
+        const magnitude = round2(debit(s));
+        if (magnitude === 0) continue;
+        // Signed as its contribution to net profit — a cost/expense reduces it.
+        unclassified_lines.push({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: -magnitude });
+        if (a.accountClass === 'COST_OF_SERVICE') unclassifiedCostOfServicePkr += magnitude;
+        else unclassifiedExpensePkr += magnitude;
+      }
     }
     const total_unclassified_pkr = round2(unclassified_lines.reduce((s, l) => s + l.amount_pkr, 0));
 
-    const net_profit_pkr = round2(operating_profit_pkr + total_other_income_pkr + total_unclassified_pkr);
+    // Every subtotal below now includes its unclassified share, so the chain
+    // of identities (net_revenue = revenue − contra, gross = net_revenue −
+    // COGS, operating = gross − opex, net = operating + other income) holds
+    // exactly whether or not any account is unclassified.
+    const total_operating_revenue_pkr = round2(sumGroups(revenue_groups) + unclassifiedRevenuePkr);
+    const net_revenue_pkr = round2(total_operating_revenue_pkr - total_contra_revenue_pkr);
+
+    const total_cost_of_service_pkr = round2(sumLines(cost_of_service_lines) + unclassifiedCostOfServicePkr);
+    const gross_profit_pkr = round2(net_revenue_pkr - total_cost_of_service_pkr);
+
+    const total_operating_expense_pkr = round2(sumLines(operating_expense_lines) + unclassifiedExpensePkr);
+    const operating_profit_pkr = round2(gross_profit_pkr - total_operating_expense_pkr);
+
+    const net_profit_pkr = round2(operating_profit_pkr + total_other_income_pkr);
 
     // Depreciation & amortisation add-back for EBITDA
     let da = 0;
@@ -117,18 +144,18 @@ export class FinancialStatementsService {
       date_to: query.date_to,
 
       revenue_groups,
-      total_operating_revenue_pkr: round2(total_operating_revenue_pkr),
+      total_operating_revenue_pkr,
       contra_revenue_lines,
       total_contra_revenue_pkr: round2(total_contra_revenue_pkr),
       net_revenue_pkr,
 
       cost_of_service_lines,
-      total_cost_of_service_pkr: round2(total_cost_of_service_pkr),
+      total_cost_of_service_pkr,
       gross_profit_pkr,
       gross_profit_pct: pct(gross_profit_pkr),
 
       operating_expense_lines,
-      total_operating_expense_pkr: round2(total_operating_expense_pkr),
+      total_operating_expense_pkr,
       operating_profit_pkr,
       operating_profit_pct: pct(operating_profit_pkr),
 
@@ -150,7 +177,7 @@ export class FinancialStatementsService {
       revenue_lines,
       total_revenue_pkr: net_revenue_pkr,
       expense_lines: operating_expense_lines,
-      total_expense_pkr: round2(total_operating_expense_pkr),
+      total_expense_pkr: total_operating_expense_pkr,
     };
   }
 

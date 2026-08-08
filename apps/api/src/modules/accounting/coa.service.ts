@@ -89,6 +89,14 @@ export class CoaService {
       if (body.account_type === 'DETAIL' && body.account_class !== 'EQUITY' && !body.parent_account_code) {
         throw Errors.INVALID_PARENT_ACCOUNT('Detail accounts must sit under a header account (equity excepted)');
       }
+      // buildGroups/buildLines match exactly one level (parentAccountCode ===
+      // headerCode); a HEADER-under-a-HEADER would orphan its own children
+      // into the unclassified bucket even when its grandparent is a seeded
+      // section header. Headers stay root-level so the one-level assumption
+      // holds everywhere it's relied on, not just at report time (phase/24).
+      if (body.account_type === 'HEADER' && body.parent_account_code) {
+        throw Errors.INVALID_PARENT_ACCOUNT('Header accounts cannot have a parent — headers are always root-level');
+      }
       if (body.parent_account_code) {
         const parent = await tx.chartOfAccounts.findUnique({
           where: {
