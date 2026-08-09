@@ -5,6 +5,7 @@ import {
   LotAgingReportQuery,
   ReceivablesAgingReportQuery,
   CommodityInventoryReportQuery,
+  CashExceptionsReportQuery,
   WeightVarianceReportQuery,
   SeasonalSummaryReportQuery,
   OwnershipTransfersReportQuery,
@@ -24,6 +25,7 @@ import { getDashboard } from './reports/dashboard';
 import { getLotAging } from './reports/lot-aging';
 import { getReceivablesAging } from './reports/receivables-aging';
 import { getCommodityInventory } from './reports/commodity-inventory';
+import { getCashExceptions } from './reports/cash-exceptions';
 import { getWeightVariance } from './reports/weight-variance';
 import { getSeasonalSummary } from './reports/seasonal-summary';
 import { getOwnershipTransfers } from './reports/ownership-transfers';
@@ -92,6 +94,21 @@ export async function reportingRoutes(app: FastifyInstance) {
       );
       const { meta, ...payload } = result;
       return sendSuccess(reply, payload, meta);
+    },
+  });
+
+  // ==========================================================
+  // GET /v1/reports/cash-exceptions — ACCOUNTANT+
+  // ==========================================================
+  app.route({
+    method: 'GET',
+    url: '/v1/reports/cash-exceptions',
+    preHandler: [app.authenticate, app.requirePermission('reports.financial')],
+    schema: { querystring: CashExceptionsReportQuery },
+    handler: async (request, reply) => {
+      const query = request.query as z.infer<typeof CashExceptionsReportQuery>;
+      const result = await getCashExceptions(app.prisma, request.user!.facilityId, query);
+      return sendSuccess(reply, result);
     },
   });
 

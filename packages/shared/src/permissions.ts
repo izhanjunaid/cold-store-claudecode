@@ -109,7 +109,7 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
   // Reports
   { key: 'reports.operational', group: 'Reports', label: 'Operational dashboard', description: 'View the operational dashboard.', defaultMinRole: 'OPERATOR' },
   { key: 'reports.inventory', group: 'Reports', label: 'Inventory reports', description: 'Lot aging, commodity inventory, weight variance, ownership transfers.', defaultMinRole: 'MANAGER' },
-  { key: 'reports.financial', group: 'Reports', label: 'Financial reports', description: 'Receivables aging and party statements.', defaultMinRole: 'ACCOUNTANT' },
+  { key: 'reports.financial', group: 'Reports', label: 'Financial reports', description: 'Receivables aging, party statements, and cash exceptions.', defaultMinRole: 'ACCOUNTANT' },
   { key: 'reports.seasonal', group: 'Reports', label: 'Seasonal summary', description: 'View the seasonal summary report.', defaultMinRole: 'OWNER' },
 
   // Administration

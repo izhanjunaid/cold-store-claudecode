@@ -560,6 +560,66 @@ describe('GET /v1/reports/weight-variance', () => {
 });
 
 // ============================================================
+// Cash Exceptions (phase/24) — replaces the reverted P1-6 posting-time guard
+// ============================================================
+describe('GET /v1/reports/cash-exceptions', () => {
+  it('lists every cash-class account (1000\'s children) with a balance', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/reports/cash-exceptions',
+      headers: authHeaders(accountantToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body).data;
+    expect(body.as_of_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const codes = body.rows.map((r: { account_code: string }) => r.account_code);
+    expect(codes).toEqual(expect.arrayContaining(['1010', '1020', '1030']));
+  });
+
+  it('OPERATOR is denied — reports.financial is ACCOUNTANT+', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/reports/cash-exceptions',
+      headers: authHeaders(operatorToken),
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('flags a negative cash balance without ever rejecting the posting that caused it', async () => {
+    // This is the behavioural point of the whole report: P1-6's reverted
+    // guard would have 422'd this post outright. Nothing here blocks it —
+    // the report surfaces the exception after the fact instead.
+    const je = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/journal-entries',
+      headers: authHeaders(managerToken),
+      payload: {
+        entry_date: '2026-03-01',
+        description: 'cash-exceptions test — drive 1030 negative',
+        posting_status: 'POSTED',
+        lines: [
+          { account_code: '6100', debit_amount: 500, credit_amount: 0 },
+          { account_code: '1030', debit_amount: 0, credit_amount: 500 },
+        ],
+      },
+    });
+    expect(je.statusCode).toBe(201);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/reports/cash-exceptions?as_of_date=2026-03-01',
+      headers: authHeaders(accountantToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body).data;
+    const wallet = body.rows.find((r: { account_code: string }) => r.account_code === '1030');
+    expect(wallet.balance_pkr).toBeLessThan(0);
+    expect(wallet.is_negative).toBe(true);
+    expect(body.has_exceptions).toBe(true);
+  });
+});
+
+// ============================================================
 // Seasonal Summary
 // ============================================================
 describe('GET /v1/reports/seasonal-summary', () => {

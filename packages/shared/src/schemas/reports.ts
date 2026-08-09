@@ -34,6 +34,11 @@ export const CommodityInventoryReportQuery = z.object({
 });
 export type CommodityInventoryReportQueryType = z.infer<typeof CommodityInventoryReportQuery>;
 
+export const CashExceptionsReportQuery = z.object({
+  as_of_date: dateOnly.optional(),
+});
+export type CashExceptionsReportQueryType = z.infer<typeof CashExceptionsReportQuery>;
+
 export const WeightVarianceReportQuery = z.object({
   date_from: dateOnly.optional(),
   date_to: dateOnly.optional(),
@@ -181,6 +186,22 @@ export const ReceivablesAgingResponse = z.object({
   parties: z.array(ReceivablesAgingPartyRow),
 });
 export type ReceivablesAgingResponseType = z.infer<typeof ReceivablesAgingResponse>;
+
+export const CashExceptionsRow = z.object({
+  account_code: z.string(),
+  account_name: z.string(),
+  is_active: z.boolean(),
+  balance_pkr: z.number(),
+  is_negative: z.boolean(),
+});
+export type CashExceptionsRowType = z.infer<typeof CashExceptionsRow>;
+
+export const CashExceptionsResponse = z.object({
+  as_of_date: z.string(),
+  rows: z.array(CashExceptionsRow),
+  has_exceptions: z.boolean(),
+});
+export type CashExceptionsResponseType = z.infer<typeof CashExceptionsResponse>;
 
 export const CommodityInventoryPerChamber = z.object({
   chamber_id: z.string().uuid(),
