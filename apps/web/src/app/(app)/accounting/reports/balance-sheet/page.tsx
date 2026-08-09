@@ -225,14 +225,17 @@ export default function BalanceSheetPage() {
             </StatementTable>
 
             {data.has_unclassified && (
+              // Deliberately doesn't repeat the row labels above verbatim
+              // ("Total Assets" etc.) — a screen-reader or test query landing
+              // on this paragraph by that text would mean it collided with
+              // the actual total row, not just a stray coincidence.
               <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                Unclassified amounts are included in Total Assets / Total Liabilities above, but
-                <strong> not</strong> in Total Current Assets, Total Non-current Assets, Total
-                Current Liabilities, or Total Non-current Liabilities — placing an account under
-                current vs. non-current is an accounting judgement this report does not guess at.
-                A current ratio or working-capital figure read off those subtotals will
-                understate them until the account is placed. Move these accounts under a standard
-                header (Chart of Accounts) to place them in a named section.
+                Unclassified amounts count toward the grand totals above, but
+                <strong> not</strong> toward the current / non-current subtotals — placing an
+                account under current vs. non-current is an accounting judgement this report does
+                not guess at. A current ratio or working-capital figure read off those subtotals
+                will understate them until the account is placed. Move these accounts under a
+                standard header (Chart of Accounts) to place them in a named section.
               </p>
             )}
 

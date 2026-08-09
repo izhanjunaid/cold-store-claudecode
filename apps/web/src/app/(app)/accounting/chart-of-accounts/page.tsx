@@ -32,6 +32,7 @@ interface Account {
   account_type: 'HEADER' | 'DETAIL';
   parent_account_code: string | null;
   normal_balance: 'DEBIT' | 'CREDIT';
+  statement_section: string | null;
   is_system_account: boolean;
   is_active: boolean;
 }
@@ -70,6 +71,29 @@ const CLASS_LEAD_DIGIT: Record<string, string> = {
 };
 const ASSIGNED_LEAD_DIGITS = new Set(Object.values(CLASS_LEAD_DIGIT));
 
+// Mirrors CLASS_SECTIONS in coa.service.ts. EQUITY has no entry on purpose —
+// equity aggregates by class, not by header (phase/19), so the section field
+// doesn't apply to an EQUITY header at all.
+const CLASS_SECTIONS: Record<string, string[]> = {
+  ASSET: ['CURRENT_ASSET', 'NON_CURRENT_ASSET'],
+  LIABILITY: ['CURRENT_LIABILITY', 'NON_CURRENT_LIABILITY'],
+  REVENUE: ['REVENUE', 'CONTRA_REVENUE', 'OTHER_INCOME'],
+  COST_OF_SERVICE: ['COST_OF_SERVICE'],
+  EXPENSE: ['OPERATING_EXPENSE'],
+};
+
+const SECTION_LABEL: Record<string, string> = {
+  CURRENT_ASSET: 'Current Assets',
+  NON_CURRENT_ASSET: 'Non-current Assets',
+  CURRENT_LIABILITY: 'Current Liabilities',
+  NON_CURRENT_LIABILITY: 'Non-current Liabilities',
+  REVENUE: 'Revenue',
+  CONTRA_REVENUE: 'Contra Revenue',
+  OTHER_INCOME: 'Other Income',
+  COST_OF_SERVICE: 'Cost of Service',
+  OPERATING_EXPENSE: 'Operating Expenses',
+};
+
 const SELECT_CLASS =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
@@ -79,7 +103,9 @@ const emptyDraft = (cls = 'ASSET') => ({
   code: '',
   name: '',
   cls,
+  type: 'DETAIL' as 'HEADER' | 'DETAIL',
   parent: '',
+  section: '',
   normal: (DEBIT_NORMAL.has(cls) ? 'DEBIT' : 'CREDIT') as 'DEBIT' | 'CREDIT',
 });
 
@@ -141,12 +167,17 @@ export default function ChartOfAccountsPage() {
     [allAccounts, draft.cls],
   );
   // Equity accounts sit at the root (built by class on the balance sheet);
-  // every other class needs a header for the statements to place it.
-  const parentRequired = draft.cls !== 'EQUITY';
+  // every other DETAIL class needs a header for the statements to place it. A
+  // HEADER never takes a parent — coa.service.ts rejects one outright, since
+  // buildGroups/buildLines are one level deep and a nested header would
+  // orphan its own children (phase/24).
+  const parentRequired = draft.type === 'DETAIL' && draft.cls !== 'EQUITY';
+  const sectionOptions = CLASS_SECTIONS[draft.cls] ?? [];
 
   // Prefill only — never auto-assign. A code is permanent once the account has
   // postings (guard_chart_of_accounts + the JE-line FK's ON UPDATE RESTRICT),
-  // so a silently-wrong code cannot be corrected later.
+  // so a silently-wrong code cannot be corrected later. A HEADER has no parent
+  // to derive a slot from, so its code is typed, not suggested.
   const selectParent = (parent: string) =>
     setDraft((d) => ({ ...d, parent, code: parent ? suggestNextCode(allAccounts, parent) : '' }));
 
@@ -181,9 +212,13 @@ export default function ChartOfAccountsPage() {
           account_code: draft.code.trim(),
           account_name: draft.name.trim(),
           account_class: draft.cls,
-          account_type: 'DETAIL',
-          parent_account_code: draft.parent || null,
+          account_type: draft.type,
+          parent_account_code: draft.type === 'DETAIL' ? draft.parent || null : null,
           normal_balance: draft.normal,
+          // Absent (not null) — CreateAccountRequest treats the key as
+          // optional and coa.service.ts defaults an absent section to
+          // unclassified, same as every header before this field existed.
+          ...(draft.type === 'HEADER' && draft.section ? { statement_section: draft.section } : {}),
         },
       });
       toast.success(`Account ${draft.code} — ${draft.name} created`);
@@ -348,14 +383,14 @@ export default function ChartOfAccountsPage() {
           <DialogHeader>
             <DialogTitle>Add account</DialogTitle>
             <DialogDescription>
-              Accounts under a standard header appear in that statement section; anything else
-              shows under &ldquo;Unclassified&rdquo;. Code, class, and parent are permanent once the
-              account has postings.
+              A detail account sits under a header and can be posted to. A header groups detail
+              accounts and defines where they land on the statements — it never holds a balance
+              itself. Code, class, type, and parent are permanent once the account has postings.
             </DialogDescription>
           </DialogHeader>
-          {/* Ordered by dependency: class decides the valid parents, the parent
-              decides the code block. Asking for the code first (as this form
-              used to) asks for the derived value before its inputs. */}
+          {/* Ordered by dependency: class decides the valid parents/sections,
+              the parent decides the code block. Asking for the code first (as
+              this form used to) asks for the derived value before its inputs. */}
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="coa-class">Class</Label>
@@ -368,6 +403,7 @@ export default function ChartOfAccountsPage() {
                     cls: e.target.value,
                     parent: '',
                     code: '',
+                    section: '',
                     normal: DEBIT_NORMAL.has(e.target.value) ? 'DEBIT' : 'CREDIT',
                   }))
                 }
@@ -379,32 +415,77 @@ export default function ChartOfAccountsPage() {
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="coa-parent">
-                Parent (header){parentRequired && <span className="text-destructive"> *</span>}
-              </Label>
+              <Label htmlFor="coa-type">Type</Label>
               <select
-                id="coa-parent"
-                value={draft.parent}
-                onChange={(e) => selectParent(e.target.value)}
+                id="coa-type"
+                value={draft.type}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    type: e.target.value as 'HEADER' | 'DETAIL',
+                    parent: '',
+                    code: '',
+                    section: '',
+                  }))
+                }
                 className={SELECT_CLASS}
               >
-                {parentRequired ? (
-                  <option value="" disabled>Select header…</option>
-                ) : (
-                  <option value="">— none —</option>
-                )}
-                {headerOptions.map((h) => (
-                  <option key={h.account_code} value={h.account_code}>
-                    {h.account_code} — {h.account_name}
-                  </option>
-                ))}
+                <option value="DETAIL">Detail — posts transactions</option>
+                <option value="HEADER">Header — groups detail accounts</option>
               </select>
-              {parentRequired && headerOptions.length === 0 && (
-                <p className="text-xs text-destructive">
-                  No header accounts exist for {CLASS_LABEL[draft.cls] ?? draft.cls}.
-                </p>
-              )}
             </div>
+            {draft.type === 'DETAIL' ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="coa-parent">
+                  Parent (header){parentRequired && <span className="text-destructive"> *</span>}
+                </Label>
+                <select
+                  id="coa-parent"
+                  value={draft.parent}
+                  onChange={(e) => selectParent(e.target.value)}
+                  className={SELECT_CLASS}
+                >
+                  {parentRequired ? (
+                    <option value="" disabled>Select header…</option>
+                  ) : (
+                    <option value="">— none —</option>
+                  )}
+                  {headerOptions.map((h) => (
+                    <option key={h.account_code} value={h.account_code}>
+                      {h.account_code} — {h.account_name}
+                    </option>
+                  ))}
+                </select>
+                {parentRequired && headerOptions.length === 0 && (
+                  <p className="text-xs text-destructive">
+                    No header accounts exist for {CLASS_LABEL[draft.cls] ?? draft.cls}.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="coa-section">Statement section</Label>
+                <select
+                  id="coa-section"
+                  value={draft.section}
+                  onChange={(e) => setDraft((d) => ({ ...d, section: e.target.value }))}
+                  className={SELECT_CLASS}
+                  disabled={sectionOptions.length === 0}
+                >
+                  <option value="">
+                    {sectionOptions.length === 0 ? 'Not applicable to Equity' : 'Unclassified (choose later)'}
+                  </option>
+                  {sectionOptions.map((s) => (
+                    <option key={s} value={s}>{SECTION_LABEL[s]}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  {sectionOptions.length === 0
+                    ? 'Equity accounts are placed by class, not by header — this header groups them on the Chart of Accounts screen only.'
+                    : 'Where this header’s detail accounts appear on the P&L or balance sheet. Leave unset and they show under "Unclassified" until you place it — editable later.'}
+                </p>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="coa-name">Account name <span className="text-destructive">*</span></Label>
               <Input
@@ -428,8 +509,9 @@ export default function ChartOfAccountsPage() {
                 <p className="text-xs text-destructive">{codeError}</p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Suggested from the parent&rsquo;s range. Editable now — permanent once the
-                  account has postings.
+                  {draft.type === 'DETAIL'
+                    ? 'Suggested from the parent’s range. Editable now — permanent once the account has postings.'
+                    : 'A header has no parent to suggest from — pick a code in this class’s range. Permanent once the account has postings.'}
                 </p>
               )}
             </div>

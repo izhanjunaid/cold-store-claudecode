@@ -136,6 +136,99 @@ describe('ChartOfAccountsPage — owner management', () => {
     await waitFor(() => expect(apiClient.mock.calls.some(([url]) => String(url).startsWith('/v1/accounting/accounts?'))).toBe(true));
   });
 
+  it('creates a HEADER account with a statement section and no parent (phase/24)', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+
+    fireEvent.change(screen.getByLabelText(/^class$/i), { target: { value: 'ASSET' } });
+    fireEvent.change(screen.getByLabelText(/^type$/i), { target: { value: 'HEADER' } });
+    // Switching to HEADER swaps the Parent select for a Statement section
+    // select — asserting the parent field is gone, not just that the section
+    // field appeared, is what actually proves the swap happened.
+    expect(screen.queryByLabelText(/parent \(header\)/i)).toBeNull();
+    fireEvent.change(screen.getByLabelText(/statement section/i), { target: { value: 'NON_CURRENT_ASSET' } });
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Security Deposits' } });
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '1400' } });
+
+    apiClient.mockClear();
+    apiClient.mockResolvedValue(ACCOUNTS);
+    fireEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() =>
+      expect(apiClient).toHaveBeenCalledWith('/v1/accounting/accounts', {
+        method: 'POST',
+        body: {
+          account_code: '1400',
+          account_name: 'Security Deposits',
+          account_class: 'ASSET',
+          account_type: 'HEADER',
+          parent_account_code: null,
+          normal_balance: 'DEBIT',
+          statement_section: 'NON_CURRENT_ASSET',
+        },
+      }),
+    );
+  });
+
+  it('omits statement_section for a HEADER left unset — the account still creates, into the unclassified bucket', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+
+    fireEvent.change(screen.getByLabelText(/^type$/i), { target: { value: 'HEADER' } });
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Custom Head' } });
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '7500' } });
+
+    apiClient.mockClear();
+    apiClient.mockResolvedValue(ACCOUNTS);
+    fireEvent.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() =>
+      expect(apiClient).toHaveBeenCalledWith('/v1/accounting/accounts', {
+        method: 'POST',
+        body: {
+          account_code: '7500',
+          account_name: 'Custom Head',
+          account_class: 'ASSET',
+          account_type: 'HEADER',
+          parent_account_code: null,
+          normal_balance: 'DEBIT',
+          // No statement_section key at all — omitted, not null, matching
+          // CreateAccountRequest treating it as optional.
+        },
+      }),
+    );
+  });
+
+  it('disables the section field for an EQUITY header — equity is placed by class, not by header', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+
+    fireEvent.change(screen.getByLabelText(/^class$/i), { target: { value: 'EQUITY' } });
+    fireEvent.change(screen.getByLabelText(/^type$/i), { target: { value: 'HEADER' } });
+
+    const section = screen.getByLabelText(/statement section/i) as HTMLSelectElement;
+    expect(section.disabled).toBe(true);
+    expect(screen.getByText(/not applicable to equity/i)).toBeTruthy();
+  });
+
+  it('does not require a parent for a HEADER account, even outside EQUITY', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+
+    fireEvent.change(screen.getByLabelText(/^class$/i), { target: { value: 'EXPENSE' } });
+    fireEvent.change(screen.getByLabelText(/^type$/i), { target: { value: 'HEADER' } });
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'New Overhead Group' } });
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '6200' } });
+
+    // A DETAIL of the same class with the same fields would still be blocked
+    // (no parent chosen) — a HEADER must not be, since headers never take one.
+    expect(screen.getByRole('button', { name: /create account/i })).toHaveProperty('disabled', false);
+  });
+
   it('prefills the account code from the chosen parent, and clears it when the class changes', async () => {
     render(<ChartOfAccountsPage />);
     await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
