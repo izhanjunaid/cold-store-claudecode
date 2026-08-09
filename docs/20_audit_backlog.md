@@ -25,7 +25,7 @@
 | P1-3 | Payroll runs and fixed assets were terminal — no cancel, reverse or un-dispose existed | **FIXED** — Batch E, `docs/18` §5 |
 | P1-4 | **GST Payable 2020 is credited forever and never debited** — no settlement path exists | **OPEN** — `je-01-invoice-finalized.ts:137` credits it; repo-wide, nothing debits it |
 | P1-5 | One account map, four copies — two of them in the browser | **FIXED** — Batch B, `docs/18` §6 |
-| P1-6 | **No cash-negative guard** — a posted entry can drive Cash on Hand below zero | **DEFERRED** — tried in Batch H (phase/22), reverted; see below |
+| P1-6 | **No cash-negative guard** — a posted entry can drive Cash on Hand below zero | **RESOLVED, by detection instead of prevention** — `GET /v1/reports/cash-exceptions` (phase/24); the posting-time guard itself stays un-built, deliberately; see below |
 | P1-7 | **`number_format` setting is wired to nothing** | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P1-8 | **No PDF surface formats money** — invoices print `1234567.5` | **FIXED** — Batch G, phase/22 (`dc08cf4`) |
 | P1-9 | Payroll remittance was repeatable and unvalidated | **FIXED** — Batch C |
@@ -79,7 +79,7 @@ The audit proposed ten ledger invariants (11–20) and marked several "MISSING �
 | 11 | Every FINALIZED payroll run has a balanced JE | P1-1 | **Covered by construction** — `postInTransaction` rejects unbalanced entries; plus `payroll-templates.unit.test.ts:15,45` |
 | 12 | Advance liability (2010) nets to zero after an advance is dishonoured | P0-1 | **EXISTS** — `payment.integration.test.ts:397` (unallocated) and `:451` (partly allocated) |
 | 13 | No `1020` balance includes a non-`CLEARED` cheque | P0-2 / P1-12 | **BLOCKED** — becomes checkable once the clearing model below is built |
-| 14 | No cash-class account ever goes negative | P1-6 | **BLOCKED** — becomes checkable once opening cash balances exist; see below |
+| 14 | No cash-class account ever goes negative | P1-6 | **NOT ENFORCED, by decision** — a negative balance is still possible and is meant to be: `GET /v1/reports/cash-exceptions` (phase/24) surfaces it instead of blocking the posting that caused it; see below |
 | 15 | Every payroll run has at most one remittance JE | P1-9 | **EXISTS** — guard `payroll-run.service.ts:411-412`, test `payroll.integration.test.ts:583` |
 | 16 | Σ `2030` credits = Σ per-employee net pay | P2-5 | **MISSING** — checkable today without the subledger |
 | 17 | Every JE `sourceId` resolves to a real row in `sourceTable` | P2-2 | **EXISTS** — `accounting-hardening.integration.test.ts`, "every JE sourceId resolves to a live row" (self-verifying: an unmapped `sourceTable` fails loudly rather than being silently skipped). Surfaced P3-3 as a second instance of the same defect shape — see below |
@@ -151,6 +151,38 @@ This is the same shape of finding as P1-1 in `docs/18` §4 — `other_deductions
 > 57-test blast radius is unchanged, and re-opening it is a scoping decision, not
 > a mechanical fix. Recorded here so the next session starts from the accurate
 > constraint rather than re-deriving a false one.
+
+> **Resolution (phase/24) — not a guard, and the guard's premise turned out to be
+> wrong.** Re-examining P1-6 surfaced a second, more basic problem than the fixture
+> gap above: **no overdraft facility is modelled anywhere in this system** —
+> nothing in `schema.prisma`, facility settings, or the accounting module. A bank
+> *running-finance* facility is standard for Pakistani agri businesses, and a
+> negative `1020` under one is legitimate, not an error. The skipped tests'
+> premise — *"a debit-normal balance below zero is physically impossible"* — holds
+> for `1010` (physical cash) and `1030` (wallet), and is simply **false** for
+> `1020`.
+>
+> That reframes the finding: even with the fixture gap fixed, a hard 422 on 1020
+> would be *wrong*, not just untested. And a hard block is the wrong enforcement
+> in general for this failure mode — if the ledger says zero but there is real
+> cash in the drawer (the fixture-gap scenario), refusing the entry means the
+> operator cannot record a transaction that genuinely happened. An unrecorded
+> transaction is a worse outcome than a visible negative balance: the ledger
+> diverges from reality either way, and only one of the two paths hides it.
+>
+> **Shipped instead: `GET /v1/reports/cash-exceptions`** — every cash-class
+> account (the children of header 1000, derived from the chart, never a
+> hardcoded code list) with its balance as of a date, flagging negatives. It
+> catches the identical control failure (an unrecorded deposit, or a payment
+> that never happened) without ever touching the posting path. No fixture
+> surgery required, no opening-balance dependency, and the 57-test blast radius
+> from the original attempt never applies — nothing is rejected.
+>
+> **The four `describe.skip` tests in `accounting-hardening.integration.test.ts`
+> stay skipped, and their premise needs revisiting, not just their fixture.** A
+> future guard, if ever built, would need to exclude `1020` (or gate it on a
+> configured overdraft limit once that concept exists) rather than apply
+> uniformly to all three cash accounts as originally written.
 
 ---
 

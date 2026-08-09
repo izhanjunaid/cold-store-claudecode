@@ -65,33 +65,63 @@ none is planned — reclassifying means opening a new account. The Add Account f
 therefore *prefills* a suggested code from the parent's block but leaves it editable;
 it never auto-assigns.
 
-### Statement Structure Is Fixed (phase/23 decision)
+### Statement Structure Is Data-Driven (phase/24)
 
-The balance sheet's sections are a hardcoded list of header codes in
-`financial-statements.service.ts`, **not** a generic walk of the `parent_account_code`
-hierarchy:
+Every HEADER account carries a nullable `statement_section` column (migration `0015`).
+`financial-statements.service.ts` places accounts by querying headers with a matching
+section — `sectionHeaders(accounts, 'CURRENT_ASSET')` — not by a hardcoded array of
+codes. The nine sections:
 
-| Section | Headers |
-|---|---|
-| Current assets | 1000, 1100, 1200 |
-| Non-current assets | 1300 |
-| Current liabilities | 2000 |
-| Non-current liabilities | 2100 |
+| Section | Statement | Seeded headers |
+|---|---|---|
+| `CURRENT_ASSET` | Balance sheet | 1000, 1100, 1200 |
+| `NON_CURRENT_ASSET` | Balance sheet | 1300 |
+| `CURRENT_LIABILITY` | Balance sheet | 2000 |
+| `NON_CURRENT_LIABILITY` | Balance sheet | 2100 |
+| `REVENUE` | P&L | 4000, 4100 |
+| `CONTRA_REVENUE` | P&L | 4900 |
+| `OTHER_INCOME` | P&L | 4200 |
+| `COST_OF_SERVICE` | P&L | 5000 |
+| `OPERATING_EXPENSE` | P&L | 6000 |
 
-Detail accounts under any *other* header fall into `unclassified_asset_lines` /
-`unclassified_liability_lines`. The sheet stays complete and `is_balanced` still
-holds — this is the deliberate F-6b fallback, not a failure mode.
+**A header with no section** — the default for anything the API accepted before this
+column existed, and still the default for a header an owner creates without picking
+one — routes its children into `unclassified_asset_lines` / `unclassified_liability_lines`
+(balance sheet) or `unclassified_lines` (P&L). This is the F-6b fallback, unchanged from
+phase/19: the statement stays complete and `is_balanced` still holds.
 
-Consequently **the UI does not expose HEADER creation** (the Add Account dialog
-always posts `account_type: 'DETAIL'`). The API will accept a HEADER, but a custom
-one gets no statement section, so its children land in the unclassified bucket.
+**EQUITY headers take no section, by validation, not by omission.** Equity aggregates
+by `accountClass` directly (`equity_lines` in `financial-statements.service.ts`), not by
+header — 3010/3020/3030 sit at the root with no parent. `coa.service.ts` rejects a
+`statement_section` on an EQUITY header outright.
 
-This is a considered trade, not an oversight: the current/non-current split is an
-accounting judgement that cannot be inferred from a parent link, and it is already
-made correctly once for a cold-storage business. Making it configurable (a
-`statement_section` column on headers) is an additive, nullable migration that can
-be done later — **revisit when** an owner needs a balance-sheet section that does
-not exist, or a second facility needs a materially different chart.
+**On the P&L, unclassified activity folds into the matching class subtotal, not just
+`net_profit_pkr`.** `accountClass` maps 1:1 onto a P&L subtotal (REVENUE → operating
+revenue, COST_OF_SERVICE → cost of service, EXPENSE → operating expense), so there is no
+judgement call to defer the way there is on the balance sheet — an unclassified expense
+account correctly reduces `operating_profit_pkr` and `ebitda_pkr`, not only the bottom
+line. (Phase 24 also fixed a real defect here: before this, unclassified activity
+reached `net_profit_pkr` only, leaving every subtotal above it wrong whenever an
+unclassified account had activity.)
+
+**On the balance sheet, current vs. non-current is not inferred.** That split is a real
+accounting judgement a parent link cannot answer, so an unclassified asset or liability
+is still added to the grand total (`total_assets_pkr` / `total_liabilities_pkr`) but
+**excluded** from the current/non-current subtotals. A current ratio or working-capital
+figure read off those subtotals will understate them until the account is given a
+section — the balance-sheet screen shows this disclosure whenever `has_unclassified`.
+
+**Section is presentation, not structure.** Unlike `account_code` / `account_class` /
+`account_type` / `parent_account_code` / `normal_balance` — locked by
+`guard_chart_of_accounts` the moment an account carries a posting — `statement_section`
+stays editable on a header at any time, including one whose DETAIL children already have
+postings. `PATCH /v1/accounting/accounts/:code` accepts it.
+
+**A header never takes a parent.** `coa.service.ts` rejects `account_type: 'HEADER'`
+with a `parent_account_code` set. `buildGroups`/`buildLines` match exactly one level
+(`parentAccountCode === headerCode`); a header nested under another header would orphan
+its own children into the unclassified bucket even though its grandparent has a section —
+so nesting is refused at creation rather than silently mis-placed at report time.
 
 ---
 
