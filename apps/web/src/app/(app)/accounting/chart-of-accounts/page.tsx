@@ -79,7 +79,7 @@ const CLASS_SECTIONS: Record<string, string[]> = {
   LIABILITY: ['CURRENT_LIABILITY', 'NON_CURRENT_LIABILITY'],
   REVENUE: ['REVENUE', 'CONTRA_REVENUE', 'OTHER_INCOME'],
   COST_OF_SERVICE: ['COST_OF_SERVICE'],
-  EXPENSE: ['OPERATING_EXPENSE'],
+  EXPENSE: ['OPERATING_EXPENSE', 'OTHER_EXPENSE'],
 };
 
 const SECTION_LABEL: Record<string, string> = {
@@ -92,6 +92,7 @@ const SECTION_LABEL: Record<string, string> = {
   OTHER_INCOME: 'Other Income',
   COST_OF_SERVICE: 'Cost of Service',
   OPERATING_EXPENSE: 'Operating Expenses',
+  OTHER_EXPENSE: 'Non-Operating Expenses',
 };
 
 const SELECT_CLASS =

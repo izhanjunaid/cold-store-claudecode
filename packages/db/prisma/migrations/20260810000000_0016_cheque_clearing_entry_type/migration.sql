@@ -1,0 +1,30 @@
+-- ============================================================================
+-- 0016 — EntryType value for cheque clearing (Phase 25)
+--
+-- ERP benchmark against ERPNext/Odoo (docs/09 §2) surfaced a real defect: a
+-- CHEQUE payment posted JE-02/JE-03 straight to 1020 Bank Account — Main and
+-- clearance_status was set to CLEARED at creation (payment.service.ts). Every
+-- uncleared cheque overstated the bank balance — the ClearanceStatus.PENDING
+-- value and Payment.chequeDate column already existed but were dead.
+--
+-- Fix: cheques received now post to new account 1025 "Cheques in Hand (Under
+-- Collection)" and start PENDING. A new endpoint, POST /v1/payments/:id/clear,
+-- posts JE-24 (DR 1020 / CR 1025) and moves the payment to CLEARED. JE-24 needs
+-- its own entryType, same reasoning as 0014's EMPLOYEE_ADVANCE_ISSUE/WRITE_OFF.
+--
+-- Own migration file, not bundled with 0017's StatementSection change: 0014's
+-- comment established why — PostgreSQL forbids using a new enum value in the
+-- same transaction that adds it, and Prisma applies each migration file as one
+-- transaction. Splitting one enum family per file keeps that rule trivially
+-- satisfied regardless of what a later migration or release does.
+--
+-- Additive only. The shared PAYMENT_METHOD_ASSET_ACCOUNT map (CHEQUE -> 1020)
+-- is deliberately NOT changed by this phase — it also routes peshgi issuance,
+-- employee-advance issuance and expense payments (disbursements, where a
+-- cheque the facility writes is still an immediate bank movement, not money
+-- awaiting clearance). Only the receipt path (payment.service.ts) resolves
+-- CHEQUE to 1025, via a new receiptAssetAccountForPaymentMethod() in
+-- packages/shared — see accounting-accounts.ts.
+-- ============================================================================
+
+ALTER TYPE "EntryType" ADD VALUE 'CHEQUE_CLEARED';

@@ -13,7 +13,7 @@
 | ID | Finding | Status |
 |---|---|---|
 | P0-1 | Advance-cheque dishonour posted the wrong reversal — `JE-06` had no advance branch, so dishonouring an unapplied advance left the 2010 liability standing **and** invented a receivable: a misstatement of twice the cheque that still balanced | **FIXED** — Batch A, `docs/18` §2 |
-| P0-2 | Cheques booked as cleared bank funds on receipt; post-dated cheques inflate today's bank balance | **DEFERRED** — merged into P1-12; model now decided, see below |
+| P0-2 | Cheques booked as cleared bank funds on receipt; post-dated cheques inflate today's bank balance | **FIXED** — Phase 25, per the decided model below |
 | P0-3 | **Every advisory lock in the system acquired nothing** — `... OR TRUE` was constant-folded, so all ten document-number generators serialised on nothing. Found during implementation, not in the audit | **FIXED** — Batch C, `docs/18` §1 |
 
 ## P1
@@ -31,7 +31,7 @@
 | P1-9 | Payroll remittance was repeatable and unvalidated | **FIXED** — Batch C |
 | P1-10 | No contra / cash-book voucher; petty-cash replenishment is one-way and has no UI | **OPEN** |
 | P1-11 | Expenses was the only financial module taking no row lock — two concurrent `pay()` calls both posted | **FIXED** — Batch A, `docs/18` §3 |
-| P1-12 | Cheque clearance never implemented — `clearance_status` is stamped `CLEARED` on receipt, `PENDING` is never assigned, `cheque_date` is never read. **Not a policy**: `docs/09` §258/§364-366/§372 require the opposite | **DEFERRED** — model decided, see below. Still live at `payment.service.ts:97` |
+| P1-12 | Cheque clearance never implemented — `clearance_status` is stamped `CLEARED` on receipt, `PENDING` is never assigned, `cheque_date` is never read. **Not a policy**: `docs/09` §258/§364-366/§372 require the opposite | **FIXED** — Phase 25, `docs/09` §JE-24, `payment.service.ts:clear()` |
 | P1-13 | JE-09/JE-09B spoilage path absent while `2080`/`6150` are seeded and postable | **OPEN** — no `je-09*` template exists |
 
 ## P2
@@ -67,6 +67,7 @@
 | P3-3 | Dev-DB drift: `invoice_surcharges` exists in the live dev database but not in this branch's schema | **OPEN** — ops check, not code. Confirmed absent from the Prisma schema (`schema.prisma` has no `invoice_surcharge`/`invoice_surcharges` model at all). **Now also confirmed live**: `je-21-late-payment-surcharge.ts:34`, `invoice.service.ts:300`, `payment.service.ts:646`, `reporting/reports/receivables-aging.ts:204` all stamp `sourceTable: 'invoice_surcharge'` on posted JEs — the audit trail asserts a document type with no backing table anywhere on this branch, the same shape as P2-2, found by the invariant-17 test rather than by reading. Not restructuring JE-21 in this batch; invariant 17 carries it as a named, documented gap so it isn't silently skipped or a crash risk |
 | P3-4 | Depreciation batch runs in one transaction on Prisma's 5 s default timeout | **FIXED** — Batch H part 3, phase/22. Explicit `{ timeout: 30_000, maxWait: 10_000 }` — the first explicit Prisma transaction timeout anywhere in this codebase (confirmed via full-repo grep before choosing the shape) |
 | P3-5 | `PaymentService` constructed without its journal-entry dependency in reporting | **FIXED** (Batch H1, `e8edad8`) — `reporting.controller.ts:39-43` passes the `JournalEntryService`; the constructor param is now required, no `if (this.journalEntry)` guard remains. Re-verified 2026-08-07 |
+| P3-6 | No account for income tax withheld *from* the facility (s.153, when the billing party is a prescribed/withholding-agent payer) — a short payment today has to be cleared via credit note, and `CreditNoteLineItem.revenueAccountCode` is non-nullable, so the workaround debits revenue instead of a receivable. Found in the phase/25 ERPNext/Odoo benchmark (`docs/09` §2) | **DEFERRED** — genuinely low-frequency today: most billing parties (farmers, traders, arhtis) are not prescribed withholding agents. Build when the facility onboards its first corporate/institutional billing party. Shape: seed `1240 Tax Withheld at Source — Receivable`, add `Payment.taxWithheldPkr`, JE-02 splits into `DR cash/bank (net) + DR 1240 (withheld) / CR AR (gross)` |
 
 ---
 
@@ -78,7 +79,7 @@ The audit proposed ten ledger invariants (11–20) and marked several "MISSING �
 |---|---|---|---|
 | 11 | Every FINALIZED payroll run has a balanced JE | P1-1 | **Covered by construction** — `postInTransaction` rejects unbalanced entries; plus `payroll-templates.unit.test.ts:15,45` |
 | 12 | Advance liability (2010) nets to zero after an advance is dishonoured | P0-1 | **EXISTS** — `payment.integration.test.ts:397` (unallocated) and `:451` (partly allocated) |
-| 13 | No `1020` balance includes a non-`CLEARED` cheque | P0-2 / P1-12 | **BLOCKED** — becomes checkable once the clearing model below is built |
+| 13 | No `1020` balance includes a non-`CLEARED` cheque | P0-2 / P1-12 | **EXISTS** — Phase 25; `1025` holds every PENDING cheque, `payment.integration.test.ts` "clears a PENDING cheque" et al. |
 | 14 | No cash-class account ever goes negative | P1-6 | **NOT ENFORCED, by decision** — a negative balance is still possible and is meant to be: `GET /v1/reports/cash-exceptions` (phase/24) surfaces it instead of blocking the posting that caused it; see below |
 | 15 | Every payroll run has at most one remittance JE | P1-9 | **EXISTS** — guard `payroll-run.service.ts:411-412`, test `payroll.integration.test.ts:583` |
 | 16 | Σ `2030` credits = Σ per-employee net pay | P2-5 | **MISSING** — checkable today without the subledger |
@@ -110,7 +111,7 @@ BOUNCE
 
 The payment is recognised when received (§262) and the bank balance never includes an uncleared cheque (§258/§365). Requires a new CoA account `1025`, a clearance endpoint and UI, and changes to JE-02/JE-06. Unblocks invariant 13.
 
-**Not yet built** — recorded here so the next session starts from the decision rather than re-litigating the spec contradiction.
+**Built — Phase 25.** `1025 Cheques in Hand (Under Collection)`, `POST /v1/payments/:id/clear` (JE-24), and the receipt-side account resolution in `receiptAssetAccountForPaymentMethod()` — the account code and posting shape here matched what shipped exactly. `docs/09` §JE-24 has the full write-up.
 
 ---
 
@@ -202,6 +203,6 @@ Phase 22 (`Batches G/H/I`) clears the **defect** half of the open list: P1-6, P1
 
 Batch H and Batch I are now both closed. Still open: the depreciation-run KATCHI gap (`POST /v1/depreciation/runs`, deferred product decision, see P2-10 above) and everything under Deferred below.
 
-Everything else above is new capability rather than repair, and is deliberately held: P1-4, P1-10, P1-12, P1-13, P2-5, P2-6, P2-7, P2-9, P2-14, and depreciation-run reversal (`DepreciationScheduleStatus` has no `REVERSED` member — it does not exist at all). **P1-6 joined this list mid-batch**, not by original scoping — it looked like defect repair until the test suite showed it depends on opening cash balances existing first (see decision above), which is new capability.
+Everything else above is new capability rather than repair, and is deliberately held: P1-4, P1-10, P1-13, P2-5, P2-6, P2-7, P2-9, P2-14, and depreciation-run reversal (`DepreciationScheduleStatus` has no `REVERSED` member — it does not exist at all). **P1-6 joined this list mid-batch**, not by original scoping — it looked like defect repair until the test suite showed it depends on opening cash balances existing first (see decision above), which is new capability. **P1-12 left this list in Phase 25** — built, see the decision-on-record above.
 
 **Still open for production** (`docs/18:145`): run the duplicate-invoice-number pre-check in the `0011` migration banner before deploying. Dev returned clean but holds zero invoices, which proves nothing.

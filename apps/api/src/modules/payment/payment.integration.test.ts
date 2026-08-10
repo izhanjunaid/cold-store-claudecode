@@ -236,7 +236,10 @@ describe('Payment — Financial Ledger', () => {
     expect(payment.allocations).toHaveLength(0);
   });
 
-  it('4. Cheque payment → clearance_status=CLEARED', async () => {
+  // Phase 25 (ERP benchmark, docs/09 §2): a cheque is not bank funds the moment
+  // it's handed over — it can still bounce. clearance_status starts PENDING,
+  // not CLEARED, and the receipt JE debits 1025 (clearing), not 1020 (Bank).
+  it('4. Cheque payment → clearance_status=PENDING, JE debits 1025 not 1020', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/payments',
@@ -253,10 +256,18 @@ describe('Payment — Financial Ledger', () => {
     expect(res.statusCode).toBe(201);
     const payment = JSON.parse(res.body).data;
     expect(payment.payment_method).toBe('CHEQUE');
-    expect(payment.clearance_status).toBe('CLEARED');
+    expect(payment.clearance_status).toBe('PENDING');
     expect(payment.reference_number).toBe('CHQ-12345');
     expect(payment.cheque_date).toBe('2026-04-10');
     expect(payment.status).toBe('RECORDED');
+
+    const je = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceId: payment.id, entryType: 'PAYMENT' },
+      include: { lines: true },
+    });
+    expect(je).toBeTruthy();
+    expect(je!.lines.find((l) => l.accountCode === '1025' && Number(l.debitAmount) === 5000)).toBeTruthy();
+    expect(je!.lines.find((l) => l.accountCode === '1020')).toBeUndefined();
   });
 
   it('5. Over-allocation → 422 PAYMENT_OVER_ALLOCATED', async () => {
@@ -619,6 +630,136 @@ describe('Payment — Financial Ledger', () => {
   });
 });
 
+// Phase 25 (ERP benchmark, docs/09 §2): a received cheque parks in 1025 until
+// the bank actually processes it. POST /v1/payments/:id/clear posts JE-24
+// (DR 1020 / CR 1025) and moves clearance_status to CLEARED.
+describe('POST /v1/payments/:id/clear — cheque clearing (phase/25)', () => {
+  async function createChequePayment(overrides: Partial<{ amount_pkr: number; reference_number: string }> = {}) {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: ownerPartyId,
+        payment_date: '2026-05-01',
+        amount_pkr: overrides.amount_pkr ?? 3000,
+        payment_method: 'CHEQUE',
+        reference_number: overrides.reference_number ?? 'CHQ-CLEAR-001',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    return JSON.parse(res.body).data;
+  }
+
+  it('clears a PENDING cheque: 1020 debited, 1025 credited, status→CLEARED', async () => {
+    const payment = await createChequePayment({ amount_pkr: 3000, reference_number: 'CHQ-CLEAR-A' });
+
+    const clearRes = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${payment.id}/clear`,
+      headers: authHeaders(accountantToken),
+      payload: {},
+    });
+    expect(clearRes.statusCode).toBe(200);
+    const cleared = JSON.parse(clearRes.body).data;
+    expect(cleared.clearance_status).toBe('CLEARED');
+
+    const je24 = await prisma.journalEntry.findFirst({
+      where: { facilityId: TEST_FACILITY_ID, sourceId: payment.id, entryType: 'CHEQUE_CLEARED' },
+      include: { lines: true },
+    });
+    expect(je24).toBeTruthy();
+    const bankDebit = je24!.lines.find((l) => l.accountCode === '1020');
+    const clearingCredit = je24!.lines.find((l) => l.accountCode === '1025');
+    expect(Number(bankDebit!.debitAmount)).toBe(3000);
+    expect(Number(clearingCredit!.creditAmount)).toBe(3000);
+  });
+
+  it('rejects clearing a payment that is already CLEARED', async () => {
+    const payment = await createChequePayment({ reference_number: 'CHQ-CLEAR-B' });
+    const first = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${payment.id}/clear`,
+      headers: authHeaders(accountantToken),
+      payload: {},
+    });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${payment.id}/clear`,
+      headers: authHeaders(accountantToken),
+      payload: {},
+    });
+    expect(second.statusCode).toBe(409);
+    expect(JSON.parse(second.body).error.code).toBe('PAYMENT_NOT_PENDING_CLEARANCE');
+  });
+
+  it('rejects clearing a CASH payment (only cheques carry a clearance lifecycle)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/payments',
+      headers: authHeaders(accountantToken),
+      payload: {
+        party_id: ownerPartyId,
+        payment_date: '2026-05-01',
+        amount_pkr: 1000,
+        payment_method: 'CASH',
+      },
+    });
+    const paymentId = JSON.parse(res.body).data.id;
+
+    const clearRes = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${paymentId}/clear`,
+      headers: authHeaders(accountantToken),
+      payload: {},
+    });
+    expect(clearRes.statusCode).toBe(409);
+    expect(JSON.parse(clearRes.body).error.code).toBe('PAYMENT_NOT_CHEQUE');
+  });
+
+  it('rejects clearing a cheque that has already been dishonoured', async () => {
+    const payment = await createChequePayment({ reference_number: 'CHQ-CLEAR-BOUNCED' });
+    const dishonourRes = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${payment.id}/dishonour`,
+      headers: authHeaders(accountantToken),
+      payload: {},
+    });
+    expect(dishonourRes.statusCode).toBe(200);
+
+    const clearRes = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${payment.id}/clear`,
+      headers: authHeaders(accountantToken),
+      payload: {},
+    });
+    expect(clearRes.statusCode).toBe(409);
+    expect(JSON.parse(clearRes.body).error.code).toBe('PAYMENT_NOT_PENDING_CLEARANCE');
+  });
+
+  it('role gating: OPERATOR → 403; ACCOUNTANT → 200', async () => {
+    const payment = await createChequePayment({ reference_number: 'CHQ-CLEAR-ROLE' });
+
+    const asOperator = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${payment.id}/clear`,
+      headers: authHeaders(operatorToken),
+      payload: {},
+    });
+    expect(asOperator.statusCode).toBe(403);
+
+    const asAccountant = await app.inject({
+      method: 'POST',
+      url: `/v1/payments/${payment.id}/clear`,
+      headers: authHeaders(accountantToken),
+      payload: {},
+    });
+    expect(asAccountant.statusCode).toBe(200);
+  });
+});
+
 describe('Phase 9 — Combined settlement (invoice + loan)', () => {
   async function issueLoan(partyId: string, amount: number, date: string) {
     const ownerLogin = await loginAsRole(app, 'OWNER');
@@ -865,8 +1006,9 @@ describe('Phase 9 — Combined settlement (invoice + loan)', () => {
       include: { lines: true },
     });
     expect(je06).toBeTruthy();
-    const je06CashCredit = je06!.lines.find((l) => l.accountCode === '1020');
-    // CHEQUE asset account is 1020 per PAYMENT_METHOD_ASSET_ACCOUNT
+    const je06CashCredit = je06!.lines.find((l) => l.accountCode === '1025');
+    // A received CHEQUE routes to 1025 (clearing), not 1020, until it clears
+    // (phase/25) — the reversal follows the same account the receipt used.
     expect(je06CashCredit).toBeTruthy();
     expect(Number(je06CashCredit!.creditAmount)).toBe(invoiceTotal);
 
@@ -876,7 +1018,9 @@ describe('Phase 9 — Combined settlement (invoice + loan)', () => {
     });
     expect(originalJe02Refreshed?.postingStatus).toBe('REVERSED');
 
-    // Per-loan REVERSAL JE: sourceTable='party_loans', sourceId=loan.id, DR 1140 / CR 1020
+    // Per-loan REVERSAL JE: sourceTable='party_loans', sourceId=loan.id, DR 1140 / CR 1025
+    // (the loan side used the payment's own assetAccountCode, same as the
+    // invoice side — a CHEQUE payment routes to 1025 throughout, phase/25).
     const loanReversal = await prisma.journalEntry.findFirst({
       where: {
         facilityId: TEST_FACILITY_ID,
@@ -887,7 +1031,7 @@ describe('Phase 9 — Combined settlement (invoice + loan)', () => {
       include: { lines: true },
     });
     expect(loanReversal).toBeTruthy();
-    const loanReversalCashCredit = loanReversal!.lines.find((l) => l.accountCode === '1020');
+    const loanReversalCashCredit = loanReversal!.lines.find((l) => l.accountCode === '1025');
     const loanReversalPeshgiDebit = loanReversal!.lines.find((l) => l.accountCode === '1140');
     expect(Number(loanReversalCashCredit!.creditAmount)).toBe(loanPrincipal);
     expect(Number(loanReversalPeshgiDebit!.debitAmount)).toBe(loanPrincipal);
@@ -898,12 +1042,12 @@ describe('Phase 9 — Combined settlement (invoice + loan)', () => {
     });
     expect(originalJe19Refreshed?.postingStatus).toBe('REVERSED');
 
-    // Net cash on 1020 across all four JEs must be zero:
+    // Net on 1025 (cheque clearing) across all four JEs must be zero:
     // +invoiceTotal (JE-02) + loanPrincipal (JE-19) − invoiceTotal (JE-06) − loanPrincipal (loan reversal).
     const cashLines = await prisma.journalEntryLine.findMany({
       where: {
         facilityId: TEST_FACILITY_ID,
-        accountCode: '1020',
+        accountCode: '1025',
         journalEntry: {
           OR: [
             { id: originalJe02!.id },

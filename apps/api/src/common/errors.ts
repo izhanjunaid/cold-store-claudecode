@@ -115,7 +115,9 @@ export const Errors = {
   PAYMENT_ALREADY_DISHONOURED: () =>
     new AppError('PAYMENT_ALREADY_DISHONOURED', 'Payment has already been dishonoured', 409),
   PAYMENT_NOT_CHEQUE: () =>
-    new AppError('PAYMENT_NOT_CHEQUE', 'Only cheque payments can be dishonoured', 409),
+    new AppError('PAYMENT_NOT_CHEQUE', 'Only cheque payments carry a clearance/dishonour lifecycle', 409),
+  PAYMENT_NOT_PENDING_CLEARANCE: () =>
+    new AppError('PAYMENT_NOT_PENDING_CLEARANCE', 'Payment is not awaiting clearance', 409),
   CREDIT_NOTE_NOT_FOUND: () =>
     new AppError('CREDIT_NOTE_NOT_FOUND', 'Credit note does not exist', 404),
   INVOICE_NOT_FINALIZED: () =>

@@ -6,7 +6,8 @@ import { buildJE02PaymentReceived } from '../accounting/templates/je-02-payment-
 import { buildJE03AdvanceReceived } from '../accounting/templates/je-03-advance-received';
 import { buildJE04AdvanceApplied } from '../accounting/templates/je-04-advance-applied';
 import { buildJE06ChequeDishonoured } from '../accounting/templates/je-06-cheque-dishonoured';
-import { assetAccountForPaymentMethod } from '../accounting/templates/types';
+import { buildJE24ChequeCleared } from '../accounting/templates/je-24-cheque-cleared';
+import { receiptAssetAccountForPaymentMethod } from '../accounting/templates/types';
 import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recovered';
 
 // Internal allocation shape used by service. Controller normalises legacy
@@ -94,8 +95,12 @@ export class PaymentService {
       if (isAdvance) status = 'ADVANCE';
       else if (allocations.length > 0) status = 'ALLOCATED';
 
-      const clearanceStatus = params.paymentMethod === 'CHEQUE' ? 'CLEARED' : 'NA';
-      const assetAccountCode = assetAccountForPaymentMethod(params.paymentMethod);
+      // A cheque is not bank funds the moment it's handed over — it can still
+      // bounce. It starts PENDING and posts to 1025 (clearing), not 1020;
+      // POST /v1/payments/:id/clear moves it once the bank actually
+      // processes it (phase/25, docs/09 §2).
+      const clearanceStatus = params.paymentMethod === 'CHEQUE' ? 'PENDING' : 'NA';
+      const assetAccountCode = receiptAssetAccountForPaymentMethod(params.paymentMethod);
       const bookType = ((params.bookType as 'PACCI' | 'KATCHI' | undefined) ?? 'PACCI');
 
       const payment = await this.repo.create(tx, {
@@ -280,10 +285,11 @@ export class PaymentService {
       const paymentDate = new Date(paymentRow.payment_date);
       const bookType = (paymentRow.book_type ?? 'PACCI') as 'PACCI' | 'KATCHI';
       // Derive the fallback from the payment's own method rather than assuming cash:
-      // a legacy row with a null asset_account_code paid by cheque belongs to 1020, and
-      // hardcoding '1010' here diverged from PAYMENT_METHOD_ASSET_ACCOUNT.
+      // a legacy row with a null asset_account_code paid by cheque belongs to 1025 (the
+      // receipt-side clearing account, phase/25), and hardcoding '1010' here diverged
+      // from PAYMENT_METHOD_ASSET_ACCOUNT.
       const assetAccountCode =
-        paymentRow.asset_account_code ?? assetAccountForPaymentMethod(paymentRow.payment_method);
+        paymentRow.asset_account_code ?? receiptAssetAccountForPaymentMethod(paymentRow.payment_method);
 
       for (const alloc of allocations) {
         if (alloc.target === 'INVOICE') {
@@ -502,7 +508,7 @@ export class PaymentService {
       // This unwinds the per-loan cash receipt JE-19 booked during combined settlement.
       // Same rule as allocate(): fall back to the method's account, not a cash guess.
       const cashAccount =
-        fullPayment.assetAccountCode ?? assetAccountForPaymentMethod(fullPayment.paymentMethod);
+        fullPayment.assetAccountCode ?? receiptAssetAccountForPaymentMethod(fullPayment.paymentMethod);
       for (const lr of loanReversals) {
         const reverseDraft = {
           entryType: 'REVERSAL' as const,
@@ -543,6 +549,59 @@ export class PaymentService {
         }
       }
 
+      return formatPayment(updated);
+    });
+  }
+
+  /**
+   * Mark a PENDING cheque cleared: posts JE-24 (DR 1020 Bank / CR 1025 Cheques
+   * in Hand) for the FULL payment amount and moves clearance_status to
+   * CLEARED. The full amount, not any loan-scaled figure, because 1025 is
+   * what the physical cheque debited across every JE that used
+   * assetAccountCode — the invoice/advance portion (JE-02/JE-03) and any loan
+   * portion (JE-19, via applyLoanAllocation) both used it (phase/25).
+   */
+  async clear(
+    facilityId: string,
+    id: string,
+    userId?: string,
+    clearDateInput?: string,
+  ) {
+    const clearDate = clearDateInput ? new Date(clearDateInput) : new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const fullPayment = await tx.payment.findFirst({
+        where: { id, facilityId },
+        include: {
+          party: { select: { id: true, name: true, partyType: true } },
+        },
+      });
+      if (!fullPayment) throw Errors.PAYMENT_NOT_FOUND();
+      if (fullPayment.paymentMethod !== 'CHEQUE') throw Errors.PAYMENT_NOT_CHEQUE();
+      if (fullPayment.clearanceStatus !== 'PENDING') throw Errors.PAYMENT_NOT_PENDING_CLEARANCE();
+
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+        id,
+        facilityId,
+      );
+
+      const draft = buildJE24ChequeCleared({
+        paymentId: id,
+        clearedDate: clearDate,
+        amountPkr: Number(fullPayment.amountPkr),
+        bookType: fullPayment.bookType as 'PACCI' | 'KATCHI',
+        party: fullPayment.party,
+        referenceNumber: fullPayment.referenceNumber,
+      });
+      await this.journalEntry.postInTransaction(
+        tx,
+        facilityId,
+        userId ?? fullPayment.createdBy,
+        draft,
+        { postingStatus: 'POSTED' },
+      );
+
+      const updated = await this.repo.update(tx, id, { clearanceStatus: 'CLEARED' });
       return formatPayment(updated);
     });
   }

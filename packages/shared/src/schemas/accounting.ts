@@ -326,6 +326,9 @@ export const ProfitLossResponse = z.object({
   other_income_lines: z.array(StatementLine),
   total_other_income_pkr: z.number(),
 
+  other_expense_lines: z.array(StatementLine),
+  total_other_expense_pkr: z.number(),
+
   depreciation_amortisation_pkr: z.number(),
   ebitda_pkr: z.number(),
   ebitda_pct: z.number().nullable(),

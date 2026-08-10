@@ -63,6 +63,14 @@ export class FinancialStatementsService {
     const other_income_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'OTHER_INCOME'), credit);
     const total_other_income_pkr = sumLines(other_income_lines);
 
+    // Other (non-operating) expense, below the line — symmetric with other
+    // income above. Without this, a loss (6110) had nowhere to go but
+    // OPERATING_EXPENSE while the matching gain (4230) already sat in
+    // OTHER_INCOME: the same kind of event landed on opposite sides of
+    // operating profit (phase/25).
+    const other_expense_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'OTHER_EXPENSE'), debit);
+    const total_other_expense_pkr = sumLines(other_expense_lines);
+
     // Completeness (F-6b): any P&L-class DETAIL account with activity that the
     // hardcoded header rollups above did not place would otherwise silently
     // drop out of every subtotal (while remaining in the trial balance).
@@ -79,6 +87,7 @@ export class FinancialStatementsService {
     for (const l of cost_of_service_lines) placed.add(l.account_code);
     for (const l of operating_expense_lines) placed.add(l.account_code);
     for (const l of other_income_lines) placed.add(l.account_code);
+    for (const l of other_expense_lines) placed.add(l.account_code);
 
     const unclassified_lines: StatementLine[] = [];
     let unclassifiedRevenuePkr = 0; // additional revenue
@@ -118,7 +127,7 @@ export class FinancialStatementsService {
     const total_operating_expense_pkr = round2(sumLines(operating_expense_lines) + unclassifiedExpensePkr);
     const operating_profit_pkr = round2(gross_profit_pkr - total_operating_expense_pkr);
 
-    const net_profit_pkr = round2(operating_profit_pkr + total_other_income_pkr);
+    const net_profit_pkr = round2(operating_profit_pkr + total_other_income_pkr - total_other_expense_pkr);
 
     // Depreciation & amortisation add-back for EBITDA
     let da = 0;
@@ -162,6 +171,9 @@ export class FinancialStatementsService {
 
       other_income_lines,
       total_other_income_pkr: round2(total_other_income_pkr),
+
+      other_expense_lines,
+      total_other_expense_pkr: round2(total_other_expense_pkr),
 
       depreciation_amortisation_pkr,
       ebitda_pkr,

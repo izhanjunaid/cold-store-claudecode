@@ -37,6 +37,7 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   // CLASS 1: ASSETS
   { code: '1000', name: 'Cash & Bank', cls: 'ASSET', type: 'HEADER', parent: null, normal: 'DEBIT', system: true, section: 'CURRENT_ASSET' },
   { code: '1010', name: 'Cash on Hand', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true },
+  { code: '1025', name: 'Cheques in Hand (Under Collection)', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true },
   { code: '1020', name: 'Bank Account — Main', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true },
   { code: '1030', name: 'Mobile Wallet Receipts', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true },
   { code: '1100', name: 'Trade Receivables', cls: 'ASSET', type: 'HEADER', parent: null, normal: 'DEBIT', system: true, section: 'CURRENT_ASSET' },
@@ -124,11 +125,15 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   { code: '6080', name: 'Bad Debt Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
   { code: '6090', name: 'Bank Charges', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
   { code: '6100', name: 'Miscellaneous', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
-  { code: '6110', name: 'Loss on Disposal of Asset', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
   { code: '6120', name: 'Depreciation — Building', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
   { code: '6130', name: 'Depreciation — Vehicles', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
   { code: '6140', name: 'Amortisation — Software', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
   { code: '6150', name: 'Spoilage / Damage Compensation Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+
+  // CLASS 6 (continued): NON-OPERATING EXPENSES — below operating profit,
+  // same idea as 4200 Other Income on the revenue side (phase/25).
+  { code: '6900', name: 'Non-Operating Expenses', cls: 'EXPENSE', type: 'HEADER', parent: null, normal: 'DEBIT', system: true, section: 'OTHER_EXPENSE' },
+  { code: '6110', name: 'Loss on Disposal of Asset', cls: 'EXPENSE', type: 'DETAIL', parent: '6900', normal: 'DEBIT', system: true },
 ];
 
 /** Upsert the standard chart of accounts for a facility. Returns the number of accounts. */

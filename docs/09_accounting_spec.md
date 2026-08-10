@@ -83,6 +83,17 @@ codes. The nine sections:
 | `OTHER_INCOME` | P&L | 4200 |
 | `COST_OF_SERVICE` | P&L | 5000 |
 | `OPERATING_EXPENSE` | P&L | 6000 |
+| `OTHER_EXPENSE` | P&L | 6900 |
+
+**`OTHER_EXPENSE` (phase/25)**: symmetric with `OTHER_INCOME` — non-operating losses
+sit below operating profit, same as non-operating gains. Before this, `4230 Gain on
+Disposal of Asset` (under 4200/`OTHER_INCOME`) landed below operating profit while
+`6110 Loss on Disposal of Asset` had nowhere to go but 6000/`OPERATING_EXPENSE` and
+landed above it — the same kind of event on opposite sides of the line. `6110` now
+sits under the new `6900 Non-Operating Expenses` header. Existing facilities keep
+`6110` under `6000` if it already carries postings (`guard_chart_of_accounts` blocks
+the re-parent); `backfill-6900.ts` logs those as skipped rather than restating a
+posted period.
 
 **A header with no section** — the default for anything the API accepted before this
 column existed, and still the default for a header an owner creates without picking
@@ -131,6 +142,7 @@ so nesting is refused at creation rather than silently mis-placed at report time
 |---|---|---|---|
 | **1000** | **Cash & Bank** | Header | |
 | 1010 | Cash on Hand | Detail | Physical petty cash at facility |
+| 1025 | Cheques in Hand (Under Collection) | Detail | Received cheques, PENDING until JE-24 clears them (phase/25) |
 | 1020 | Bank Account — Main | Detail | Primary operating account |
 | 1030 | Mobile Wallet Receipts | Detail | JazzCash / EasyPaisa collections |
 | **1100** | **Trade Receivables** | Header | |
@@ -243,11 +255,12 @@ so nesting is refused at creation rather than silently mis-placed at report time
 | 6080 | Bad Debt Expense | Detail | Uncollectable receivables written off |
 | 6090 | Bank Charges | Detail | Transaction fees, cheque charges |
 | 6100 | Miscellaneous | Detail | Petty cash unclassified |
-| 6110 | Loss on Disposal of Asset | Detail | Net book value above disposal proceeds |
 | 6120 | Depreciation — Building | Detail | Non-plant depreciation (P&L; added back for EBITDA) |
 | 6130 | Depreciation — Vehicles | Detail | P&L; added back for EBITDA |
 | 6140 | Amortisation — Software | Detail | P&L; added back for EBITDA |
 | 6150 | Spoilage / Damage Compensation Expense | Detail | Cold store liability for spoilage (JE-09) |
+| **6900** | **Non-Operating Expenses** | Header | Below operating profit — symmetric with 4200 Other Income (phase/25) |
+| 6110 | Loss on Disposal of Asset | Detail | Net book value above disposal proceeds; parented under 6900, not 6000 |
 
 ---
 
@@ -612,6 +625,45 @@ Mechanics:
 
 ---
 
+### JE-24: Cheque Cleared (implemented phase/25)
+
+**Operational trigger**: Accountant confirms the bank has processed a cheque
+whose `clearance_status` is `PENDING`. `POST /v1/payments/:id/clear`, requires
+`payments.record`.
+**Decided model**: `docs/20_audit_backlog.md` §"Decision on record: cheque
+recognition" (P0-2 / P1-12), taken 2026-07-31, built here.
+
+```
+RECEIPT (JE-02/JE-03, unchanged trigger — a cheque is still recognised on receipt)
+  DEBIT   1025  Cheques in Hand (Under Collection)   amount_pkr
+    CREDIT  1110-1150 / 2010  <as before>              amount_pkr
+  clearance_status = PENDING
+
+CLEARANCE (JE-24, new)
+  DEBIT   1020  Bank Account — Main                  amount_pkr
+    CREDIT  1025  Cheques in Hand (Under Collection)   amount_pkr
+  clearance_status = CLEARED
+
+BOUNCE (JE-06, unchanged shape — reverses whatever the receipt used)
+  reverses out of 1025, not 1020
+```
+
+Mechanics:
+- The payment is recognised when received; the bank balance never includes an
+  uncleared cheque — reconciling the two `docs/09` clauses the audit found in
+  conflict (§262 vs §258/§365).
+- `PAYMENT_METHOD_ASSET_ACCOUNT` (disbursements — peshgi issuance, employee-
+  advance issuance, expense payments) is unchanged: `CHEQUE → 1020`. A cheque
+  the facility *writes* is still an immediate bank movement. Only the receipt
+  path resolves `CHEQUE → 1025`, via `receiptAssetAccountForPaymentMethod()`.
+- Clearing is rejected with `PAYMENT_NOT_PENDING_CLEARANCE` unless
+  `clearance_status = PENDING` — covers double-clearing and clearing an
+  already-dishonoured cheque with one check.
+- Unblocks ledger invariant 13 (`docs/20_audit_backlog.md`): no `1020` balance
+  can include a non-`CLEARED` cheque.
+
+---
+
 ### Invoice Void (implemented phase/19, no dedicated template)
 
 **Operational trigger**: An invoice was finalized in error and has not been paid,
@@ -834,7 +886,7 @@ These tables are **added to** (not replacements of) the existing `data_model.md`
 | Value | Used By |
 |---|---|
 | `invoices` | JE-01 (Invoice), JE-04 (Advance Applied) |
-| `payments` | JE-02 (Payment), JE-03 (Advance), JE-06 (Cheque Bounce), JE-07 (Overpayment) |
+| `payments` | JE-02 (Payment), JE-03 (Advance), JE-06 (Cheque Bounce), JE-07 (Overpayment), JE-24 (Cheque Cleared) |
 | `credit_notes` | JE-05 (Credit Note) |
 | `spoilage_records` | JE-09 (Spoilage), JE-09B (Settlement) |
 | `fixed_assets` | JE-12 (Purchase), JE-14 (Disposal) |

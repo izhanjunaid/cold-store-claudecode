@@ -188,6 +188,7 @@ enum StatementSection {
   OTHER_INCOME
   COST_OF_SERVICE
   OPERATING_EXPENSE
+  OTHER_EXPENSE
 }
 
 enum EntryType {
@@ -214,6 +215,7 @@ enum EntryType {
   PESHGI_WRITE_OFF
   EMPLOYEE_ADVANCE_ISSUE
   EMPLOYEE_ADVANCE_WRITE_OFF
+  CHEQUE_CLEARED
 }
 
 enum PostingStatus {

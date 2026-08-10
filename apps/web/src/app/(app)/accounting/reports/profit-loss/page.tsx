@@ -41,6 +41,8 @@ interface PL {
   operating_profit_pct: number | null;
   other_income_lines: Line[];
   total_other_income_pkr: number;
+  other_expense_lines: Line[];
+  total_other_expense_pkr: number;
   depreciation_amortisation_pkr: number;
   ebitda_pkr: number;
   ebitda_pct: number | null;
@@ -60,6 +62,7 @@ function lineMap(pl: PL | null): Map<string, number> {
     ...pl.cost_of_service_lines,
     ...pl.operating_expense_lines,
     ...pl.other_income_lines,
+    ...pl.other_expense_lines,
     ...pl.unclassified_lines,
   ]) {
     m.set(l.account_code, l.amount_pkr);
@@ -105,6 +108,7 @@ export default function ProfitLossPage() {
     for (const l of data.cost_of_service_lines) rows.push({ section: 'Cost of Service', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     for (const l of data.operating_expense_lines) rows.push({ section: 'Operating Expenses', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     for (const l of data.other_income_lines) rows.push({ section: 'Other Income', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
+    for (const l of data.other_expense_lines) rows.push({ section: 'Other Expense', code: l.account_code, account: l.account_name, amount: -l.amount_pkr });
     for (const l of data.unclassified_lines) rows.push({ section: 'Unclassified', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     const csv = buildCsv(rows, [
       { header: 'Section', value: (r) => r.section },
@@ -178,6 +182,16 @@ export default function ProfitLossPage() {
                   <SectionHeading>Other Income</SectionHeading>
                   {data.other_income_lines.map((l) => (
                     <StatementRow key={l.account_code} depth={1} code={l.account_code} label={l.account_name} amount={l.amount_pkr} prior={pl(l.account_code)} href={glHref(l.account_code)} />
+                  ))}
+                </>
+              )}
+
+              {data.other_expense_lines.length > 0 && (
+                <>
+                  <SpacerRow />
+                  <SectionHeading>Other Expense</SectionHeading>
+                  {data.other_expense_lines.map((l) => (
+                    <StatementRow key={l.account_code} depth={1} code={l.account_code} label={l.account_name} amount={-l.amount_pkr} prior={cmp ? -(priorLines.get(l.account_code) ?? 0) : undefined} href={glHref(l.account_code)} />
                   ))}
                 </>
               )}

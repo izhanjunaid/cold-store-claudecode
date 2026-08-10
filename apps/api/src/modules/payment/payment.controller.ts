@@ -4,6 +4,7 @@ import {
   CreatePaymentRequest,
   AllocatePaymentRequest,
   DishonourPaymentRequest,
+  ClearPaymentRequest,
   PaymentListQuery,
 } from '@coldchain/shared';
 import { PaymentService } from './payment.service';
@@ -120,6 +121,27 @@ export async function paymentRoutes(app: FastifyInstance) {
         body.notes,
         request.user!.userId,
         body.dishonour_date,
+      );
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/payments/:id/clear — ACCOUNTANT+ (phase/25)
+  app.route({
+    method: 'POST',
+    url: '/v1/payments/:id/clear',
+    preHandler: [app.authenticate, app.requirePermission('payments.record')],
+    schema: { params: IdParam, body: ClearPaymentRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof ClearPaymentRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
+      const result = await service.clear(
+        request.user!.facilityId,
+        id,
+        request.user!.userId,
+        body.clear_date,
       );
       return sendSuccess(reply, result);
     },

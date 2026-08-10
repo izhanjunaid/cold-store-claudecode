@@ -153,7 +153,11 @@ afterAll(async () => {
 });
 
 describe('Phase 8 — Chart of Accounts', () => {
-  it('lists 84 seeded accounts (73 from 8A + 8 from 8B + 2 from Phase 12 + 1 from Phase 21)', async () => {
+  // >= not === (phase/25): the shared dev facility accumulates manually-created
+  // custom accounts from real Add Account UI testing — this must not be brittle
+  // against a human's own accounts on the same facility. Spot-check the two new
+  // seeded codes instead of an exact total.
+  it('lists at least the 86 seeded accounts (73 from 8A + 8 from 8B + 2 from Phase 12 + 1 from Phase 21 + 2 from Phase 25)', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/accounting/accounts',
@@ -162,7 +166,10 @@ describe('Phase 8 — Chart of Accounts', () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.success).toBe(true);
-    expect(body.data.length).toBe(84);
+    expect(body.data.length).toBeGreaterThanOrEqual(86);
+    const codes = new Set(body.data.map((a: { account_code: string }) => a.account_code));
+    expect(codes.has('1025')).toBe(true); // Cheques in Hand (Under Collection)
+    expect(codes.has('6900')).toBe(true); // Non-Operating Expenses header
   });
 
   it('filters by account_class', async () => {
@@ -295,7 +302,9 @@ describe('Phase 8 — Journal entries (forward path)', () => {
     });
     expect(reversal?.entryType).toBe('REVERSAL');
     const dr = reversal!.lines.find((l) => l.accountCode === '1110');
-    const cr = reversal!.lines.find((l) => l.accountCode === '1020');
+    // A received CHEQUE routes to 1025 (clearing), not 1020, until it clears
+    // (phase/25) — the reversal follows the same account the receipt used.
+    const cr = reversal!.lines.find((l) => l.accountCode === '1025');
     expect(Number(dr!.debitAmount)).toBeCloseTo(totalPkr);
     expect(Number(cr!.creditAmount)).toBeCloseTo(totalPkr);
   });

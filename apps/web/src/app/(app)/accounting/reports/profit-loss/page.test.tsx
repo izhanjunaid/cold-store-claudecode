@@ -56,6 +56,8 @@ const BASE_PL = {
   operating_profit_pct: 0,
   other_income_lines: [],
   total_other_income_pkr: 0,
+  other_expense_lines: [],
+  total_other_expense_pkr: 0,
   depreciation_amortisation_pkr: 0,
   ebitda_pkr: 0,
   ebitda_pct: 0,

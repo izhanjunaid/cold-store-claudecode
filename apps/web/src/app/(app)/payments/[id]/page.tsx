@@ -84,6 +84,8 @@ export default function PaymentDetailPage() {
   const [dishonourDate, setDishonourDate] = useState(new Date().toISOString().slice(0, 10));
   const [showDishonourForm, setShowDishonourForm] = useState(false);
   const [dishonourSubmitting, setDishonourSubmitting] = useState(false);
+  const [clearDate, setClearDate] = useState(new Date().toISOString().slice(0, 10));
+  const [clearSubmitting, setClearSubmitting] = useState(false);
 
   const isAccountant = can(user, 'payments.record');
 
@@ -157,6 +159,22 @@ export default function PaymentDetailPage() {
       setApplyError(err instanceof Error ? err.message : 'Failed to apply advance');
       applyingRef.current = false;
       setApplying(false);
+    }
+  };
+
+  const handleClear = async () => {
+    setClearSubmitting(true);
+    try {
+      const updated = await apiClient<Payment>(`/v1/payments/${id}/clear`, {
+        method: 'POST',
+        body: { clear_date: clearDate },
+      });
+      setPayment(updated);
+      toast.success('Cheque marked cleared');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to clear payment');
+    } finally {
+      setClearSubmitting(false);
     }
   };
 
@@ -362,6 +380,29 @@ export default function PaymentDetailPage() {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {isAccountant && payment.payment_method === 'CHEQUE' && payment.clearance_status === 'PENDING' && (
+        <Card className="mb-4 border-l-4 border-l-green-500">
+          <CardHeader>
+            <CardTitle className="text-sm">Cheque Clearing</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              This cheque is parked in 1025 (Cheques in Hand) until the bank processes it. Marking it
+              cleared moves the amount into Bank Account — Main.
+            </p>
+            <div className="flex items-end gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Cleared date</Label>
+                <Input type="date" value={clearDate} onChange={(e) => setClearDate(e.target.value)} className="tabular-nums" />
+              </div>
+              <Button onClick={handleClear} disabled={clearSubmitting}>
+                {clearSubmitting ? 'Processing…' : 'Mark Cleared'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

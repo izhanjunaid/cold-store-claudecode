@@ -34,6 +34,7 @@ export {
   PAYMENT_METHOD_ASSET_ACCOUNT,
   DEFAULT_BANK_ACCOUNT_CODE,
   assetAccountForPaymentMethod,
+  receiptAssetAccountForPaymentMethod,
 } from '@coldchain/shared';
 
 export const COMMODITY_REVENUE_ACCOUNT: Record<string, string> = {

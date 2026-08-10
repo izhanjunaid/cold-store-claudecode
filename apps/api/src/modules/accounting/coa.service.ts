@@ -31,7 +31,7 @@ const CLASS_SECTIONS: Record<string, Set<string>> = {
   LIABILITY: new Set(['CURRENT_LIABILITY', 'NON_CURRENT_LIABILITY']),
   REVENUE: new Set(['REVENUE', 'CONTRA_REVENUE', 'OTHER_INCOME']),
   COST_OF_SERVICE: new Set(['COST_OF_SERVICE']),
-  EXPENSE: new Set(['OPERATING_EXPENSE']),
+  EXPENSE: new Set(['OPERATING_EXPENSE', 'OTHER_EXPENSE']),
 };
 
 function validateStatementSection(

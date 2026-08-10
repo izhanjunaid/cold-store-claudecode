@@ -34,3 +34,19 @@ export function assetAccountForPaymentMethod(method: string): string {
   if (!account) throw new Error(`No asset account mapping for payment method '${method}'`);
   return account;
 }
+
+/**
+ * Where a *received* payment lands, by payment method (phase/25).
+ *
+ * Deliberately separate from assetAccountForPaymentMethod/PAYMENT_METHOD_ASSET_ACCOUNT,
+ * which is shared by disbursement flows too (peshgi issuance, employee-advance issuance,
+ * expense payments) where a cheque the facility *writes* is still an immediate bank
+ * movement. A cheque the facility *receives* is not yet bank funds — it can still bounce —
+ * so it parks in 1025 "Cheques in Hand (Under Collection)" until POST
+ * /v1/payments/:id/clear moves it to 1020. Every other payment method is unaffected and
+ * simply delegates to the shared mapping.
+ */
+export function receiptAssetAccountForPaymentMethod(method: string): string {
+  if (method === 'CHEQUE') return '1025';
+  return assetAccountForPaymentMethod(method);
+}

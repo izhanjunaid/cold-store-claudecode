@@ -48,6 +48,13 @@ export const DishonourPaymentRequest = z.object({
 });
 export type DishonourPaymentRequestType = z.infer<typeof DishonourPaymentRequest>;
 
+// ClearPaymentRequest — mark a PENDING cheque as cleared (phase/25)
+export const ClearPaymentRequest = z.object({
+  /** Defaults to today when omitted — see payment.service.ts `clear()`. */
+  clear_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+export type ClearPaymentRequestType = z.infer<typeof ClearPaymentRequest>;
+
 // PaymentListQuery
 export const PaymentListQuery = z.object({
   party_id: z.string().uuid().optional(),

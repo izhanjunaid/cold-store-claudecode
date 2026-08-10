@@ -1,0 +1,25 @@
+-- ============================================================================
+-- 0017 — StatementSection.OTHER_EXPENSE (Phase 25)
+--
+-- ERP benchmark against Odoo (docs/09 §2) surfaced a real P&L defect: our nine
+-- statement_section values (migration 0015) have OTHER_INCOME but no
+-- OTHER_EXPENSE, so financial-statements.service.ts had no non-operating-
+-- expense stage. 4230 Gain on Disposal of Asset sits under 4200 (OTHER_INCOME)
+-- and correctly lands below operating profit; 6110 Loss on Disposal of Asset
+-- had nowhere to go but 6000 (OPERATING_EXPENSE) and landed above it. Selling
+-- an asset at a gain vs. a loss hit opposite sides of the operating-profit
+-- line — indefensible under any presentation convention.
+--
+-- This adds the tenth section. A new header 6900 "Non-Operating Expenses"
+-- (EXPENSE/HEADER/OTHER_EXPENSE) is seeded via CHART_OF_ACCOUNTS + a per-
+-- facility backfill script (backfill-6900.ts, mirroring 1230's precedent) —
+-- not raw SQL here, consistent with how new system accounts are introduced.
+-- The backfill also re-parents 6110 under 6900 where it carries no postings;
+-- guard_chart_of_accounts (migration 0002) blocks that on any facility where
+-- it does, and the backfill logs those as skipped rather than failing.
+--
+-- Own migration file — see 0016's comment for why a new enum value cannot
+-- share a transaction with anything that might use it.
+-- ============================================================================
+
+ALTER TYPE "StatementSection" ADD VALUE 'OTHER_EXPENSE';

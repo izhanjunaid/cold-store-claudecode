@@ -1525,6 +1525,65 @@ describe('a custom header with a section lands in the right statement section, n
 });
 
 // ============================================================
+// Phase 25 — ERP benchmark (docs/09 §2): OTHER_EXPENSE statement section.
+// 4230 Gain on Disposal sits under 4200 (OTHER_INCOME) and correctly lands
+// below operating profit; 6110 Loss on Disposal had nowhere to go but 6000
+// (OPERATING_EXPENSE) and landed above it — a gain and a loss on the same
+// kind of event hit opposite sides of operating profit. 6110 now sits under
+// a new 6900 (OTHER_EXPENSE) header, symmetric with 4230/4200.
+// ============================================================
+describe('other_expense_lines (phase/25) — non-operating losses stay below operating profit', () => {
+  it('a loss booked to 6110 reduces net_profit but leaves operating_profit untouched', async () => {
+    const je = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/journal-entries',
+      headers: authHeaders(managerToken),
+      payload: {
+        entry_date: '2026-02-13',
+        description: 'other-expense stage test — asset disposal loss',
+        posting_status: 'POSTED',
+        // Funded from equity so it doesn't touch any other P&L account.
+        lines: [
+          { account_code: '6110', debit_amount: 400, credit_amount: 0 },
+          { account_code: '3010', debit_amount: 0, credit_amount: 400 },
+        ],
+      },
+    });
+    expect(je.statusCode).toBe(201);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/accounting/profit-loss?date_from=2026-02-01&date_to=2026-02-28',
+      headers: authHeaders(accountantToken),
+    });
+    expect(res.statusCode).toBe(200);
+    const pl = JSON.parse(res.body).data;
+
+    const line = (pl.other_expense_lines as { account_code: string; amount_pkr: number }[]).find(
+      (l) => l.account_code === '6110',
+    );
+    expect(line).toBeTruthy();
+    expect(line!.amount_pkr).toBe(400);
+    expect(pl.total_other_expense_pkr).toBeGreaterThanOrEqual(400);
+
+    // Must NOT double-count in operating_expense_lines — 6110 sits under 6900
+    // now, not 6000.
+    expect(
+      (pl.operating_expense_lines as { account_code: string }[]).some((l) => l.account_code === '6110'),
+    ).toBe(false);
+    // Nor in unclassified — 6900 carries a real section.
+    expect(
+      (pl.unclassified_lines as { account_code: string }[]).some((l) => l.account_code === '6110'),
+    ).toBe(false);
+
+    // The identity must hold exactly, symmetric with other_income's + above.
+    expect(pl.net_profit_pkr).toBeCloseTo(
+      pl.operating_profit_pkr + pl.total_other_income_pkr - pl.total_other_expense_pkr,
+    );
+  });
+});
+
+// ============================================================
 // Phase 19 audit — CoA guardrails
 // ============================================================
 

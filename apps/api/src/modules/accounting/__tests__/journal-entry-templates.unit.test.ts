@@ -6,7 +6,9 @@ import { buildJE04AdvanceApplied } from '../templates/je-04-advance-applied';
 import { buildJE05CreditNote } from '../templates/je-05-credit-note';
 import { buildJE06ChequeDishonoured } from '../templates/je-06-cheque-dishonoured';
 import { buildJE08BadDebtWriteOff } from '../templates/je-08-bad-debt-writeoff';
+import { buildJE24ChequeCleared } from '../templates/je-24-cheque-cleared';
 import { arAccountForParty, assetAccountForPaymentMethod, revenueAccountForCommodity } from '../templates/types';
+import { receiptAssetAccountForPaymentMethod } from '@coldchain/shared';
 
 function totals(lines: { debitAmount: number; creditAmount: number }[]) {
   return {
@@ -288,6 +290,27 @@ describe('JE template balance enforcement', () => {
     expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1110');
   });
 
+  // Phase 25 — cheque clearing (docs/09 §2, ERP benchmark). A received cheque
+  // parks in 1025 until the bank actually processes it; JE-24 moves it to 1020.
+  it('JE-24 cheque cleared: debits 1020 Bank, credits 1025 Cheques in Hand', () => {
+    const draft = buildJE24ChequeCleared({
+      paymentId: 'pay1',
+      clearedDate: new Date('2026-04-10'),
+      amountPkr: 5000,
+      bookType: 'PACCI',
+      party: farmerParty,
+      referenceNumber: 'CHQ-12345',
+    });
+    const t = totals(draft.lines);
+    expect(t.d).toBe(5000);
+    expect(t.c).toBe(5000);
+    expect(draft.lines.find((l) => l.debitAmount > 0)?.accountCode).toBe('1020');
+    expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1025');
+    expect(draft.entryType).toBe('CHEQUE_CLEARED');
+    expect(draft.sourceTable).toBe('payments');
+    expect(draft.sourceId).toBe('pay1');
+  });
+
   // JE-07 (overpayment) and JE-10 (ownership-transfer AR shift) were removed in
   // phase/19: both had zero production callers. Overpayment is prevented by
   // allocation guards (PAYMENT_OVER_ALLOCATED); FULL-transfer accrued billing
@@ -314,6 +337,23 @@ describe('Account-mapping helpers', () => {
     expect(assetAccountForPaymentMethod('BANK_TRANSFER')).toBe('1020');
     expect(assetAccountForPaymentMethod('MOBILE_WALLET')).toBe('1030');
     expect(() => assetAccountForPaymentMethod('CRYPTO')).toThrow(/no asset account mapping/i);
+  });
+
+  // Phase 25 (ERP benchmark, docs/09 §2): a cheque *received* is not yet bank
+  // funds — it parks in 1025 until POST /v1/payments/:id/clear moves it to
+  // 1020. This resolver is receipt-only and deliberately separate from
+  // assetAccountForPaymentMethod, which still returns 1020 for CHEQUE because
+  // peshgi issuance, employee-advance issuance and expense payments (all
+  // disbursements — money the facility writes a cheque FOR, not receives)
+  // depend on that unchanged mapping.
+  it('routes a received CHEQUE to 1025 (clearing) but leaves every other method unchanged (phase/25)', () => {
+    expect(receiptAssetAccountForPaymentMethod('CHEQUE')).toBe('1025');
+    expect(receiptAssetAccountForPaymentMethod('CASH')).toBe('1010');
+    expect(receiptAssetAccountForPaymentMethod('BANK_TRANSFER')).toBe('1020');
+    expect(receiptAssetAccountForPaymentMethod('MOBILE_WALLET')).toBe('1030');
+    expect(() => receiptAssetAccountForPaymentMethod('CRYPTO')).toThrow(/no asset account mapping/i);
+    // The disbursement-side mapping must stay untouched by this change.
+    expect(assetAccountForPaymentMethod('CHEQUE')).toBe('1020');
   });
 
   it('maps commodities to revenue accounts and falls back to 4050', () => {
