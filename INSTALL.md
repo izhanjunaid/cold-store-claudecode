@@ -128,6 +128,24 @@ Two things worth knowing:
 - Boxes running Linux instead of Windows use `./scripts/update.sh v0.3.0`, which does exactly the
   same thing from cron.
 
+**What's new in v0.4.0**:
+- **ColdChain now updates itself.** It checks nightly and installs new versions on its own —
+  including database changes — after taking a full backup. If anything fails it puts the previous
+  version straight back and keeps running, so an update can never take the cold store offline.
+  (Needs `install.bat` run once as administrator; see the section above.)
+- **Cheques no longer overstate your bank balance.** A cheque you receive now sits in *Cheques in
+  Hand (Under Collection)* and shows as **PENDING**. Open the payment and click **Mark Cleared**
+  when it clears, and only then does it reach the bank account. Cheques recorded before this update
+  are unchanged.
+- **Losses on selling an asset** now appear below operating profit, alongside the gains — previously
+  a gain and a loss on the same kind of sale landed on opposite sides of that line.
+- **Staff advances**: record an advance to an employee and have it recovered automatically from
+  their payroll, with the balance tracked until it is cleared.
+- **Who can do what is now yours to set** — an owner-configurable permissions screen, plus
+  two-factor login, password reset by email, and a daily summary email.
+- Plus month close, invoice void, late-payment surcharge, and a long list of billing and reporting
+  fixes.
+
 **What's new in v0.3.0**:
 - **Rooms & Racks** — chambers are now shown as Rooms containing Racks. Place a lot's bags across
   racks, move stock between racks or rooms with a permanent movement log, print placement slips and
