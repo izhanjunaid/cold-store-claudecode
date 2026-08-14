@@ -24,6 +24,8 @@ import { withGuardsDisabled } from '../../../test/financial-guards';
 const prisma = new PrismaClient();
 const SCRATCH_FACILITY_ID = '00000000-0000-0000-0000-0000000009c0';
 
+// The suite's only guards-disabled call, and only because audit_log is append-only.
+// Kept to afterAll, where every other file does it, for the reason spelled out below.
 afterAll(async () => {
   await withGuardsDisabled(prisma, async () => {
     // chart_of_accounts_facility_id_fkey is ON DELETE RESTRICT, so the accounts must
@@ -50,14 +52,20 @@ describe('syncChartOfAccounts (runs on every client update)', () => {
     // it is `system: false` in the seed, and it is exactly the account
     // backfill-1230.ts was written for, so a sync that only handled system
     // accounts would not fix the case it exists for.
-    await withGuardsDisabled(prisma, async () => {
-      await prisma.chartOfAccounts.update({
-        where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '6020' } },
-        data: { accountName: 'Godown Rent (Ali Khan)' },
-      });
-      await prisma.chartOfAccounts.delete({
-        where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '1230' } },
-      });
+    //
+    // No withGuardsDisabled here, deliberately: guard_chart_of_accounts is BEFORE
+    // UPDATE and only locks structural fields once an account carries postings, and
+    // these scratch accounts carry none. That matters beyond tidiness —
+    // financial_guards_set() is ALTER TABLE ... DISABLE TRIGGER across twelve tables,
+    // so every call takes ACCESS EXCLUSIVE locks database-wide. Calling it mid-suite
+    // stalled every other connection: it timed out opening-balances' beforeAll, broke
+    // an outbound create, and nearly doubled the whole suite's runtime.
+    await prisma.chartOfAccounts.update({
+      where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '6020' } },
+      data: { accountName: 'Godown Rent (Ali Khan)' },
+    });
+    await prisma.chartOfAccounts.delete({
+      where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '1230' } },
     });
 
     const added = await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID);
@@ -94,22 +102,18 @@ describe('syncChartOfAccounts (runs on every client update)', () => {
       )?.parentAccountCode;
 
     // A box one release behind still has 6110 under 6000.
-    await withGuardsDisabled(prisma, async () => {
-      await prisma.chartOfAccounts.update({
-        where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '6110' } },
-        data: { parentAccountCode: '6000' },
-      });
+    await prisma.chartOfAccounts.update({
+      where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '6110' } },
+      data: { parentAccountCode: '6000' },
     });
     await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID);
     expect(await parentOf()).toBe('6900');
 
     // An owner who filed it somewhere of their own keeps it there — the move is scoped
     // to the exact old parent, not "anything that isn't 6900".
-    await withGuardsDisabled(prisma, async () => {
-      await prisma.chartOfAccounts.update({
-        where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '6110' } },
-        data: { parentAccountCode: '6100' },
-      });
+    await prisma.chartOfAccounts.update({
+      where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '6110' } },
+      data: { parentAccountCode: '6100' },
     });
     await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID);
     expect(await parentOf()).toBe('6100');
