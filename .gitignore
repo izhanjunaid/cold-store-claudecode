@@ -10,6 +10,11 @@ dist/
 
 # Production deploy (Phase 13) — secrets, client PII, local artifacts
 backups/
+logs/
+# update.ps1 keeps the previous release's deploy files next to the live ones so a
+# failed update can put the pair back together (see phases/phase-26-update-pipeline.md).
+*.prev
+update.ps1.new
 /client-config.json
 /client-config.*.json
 test-results/
@@ -25,3 +30,6 @@ packages/db/prisma/seed.js
 packages/db/prisma/seed.d.ts
 packages/db/prisma/seed.js.map
 packages/db/prisma/seed.d.ts.map
+
+# graphify knowledge-graph output (generated; rebuild with `graphify update .`)
+graphify-out/

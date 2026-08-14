@@ -20,7 +20,7 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { randomInt } from 'crypto';
 import { readFileSync } from 'fs';
-import { seedChartOfAccounts } from './chart-of-accounts';
+import { seedChartOfAccounts } from '../src/chart-of-accounts';
 
 const VALID_ROLES = ['OWNER', 'MANAGER', 'ACCOUNTANT', 'OPERATOR', 'SECURITY', 'VIEWER'] as const;
 type Role = (typeof VALID_ROLES)[number];

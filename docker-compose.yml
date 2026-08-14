@@ -42,13 +42,26 @@ services:
       timeout: 5s
       retries: 10
 
-  # One-shot: applies pending Prisma migrations, then exits. Gates the API start.
+  # One-shot: brings the database up to this release, then exits. Gates the API start.
   # Reuses the API image (it bundles the Prisma CLI, schema, and migrations), so the box
   # only ever pulls two app images.
+  #
+  # `db:deploy` is NOT plain `prisma migrate deploy` — it also repairs a migration
+  # history that a failed or pre-rebaseline migration would otherwise wedge forever,
+  # and adds chart-of-accounts entries the release introduced. See packages/db/prisma/deploy.ts.
+  # The updaters run it explicitly with `compose run --rm migrate` BEFORE recreating
+  # api/web, so a database that cannot be updated leaves the old version running.
   migrate:
     image: ${IMAGE_REGISTRY:-ghcr.io/izhanjunaid}/coldchain-api:${COLDCHAIN_TAG:-latest}
     restart: "no"
-    command: ["pnpm", "--filter", "@coldchain/db", "exec", "prisma", "migrate", "deploy"]
+    # Not in the default set: `up -d` must never start this. The updaters invoke it
+    # explicitly with `compose run --rm migrate` and check its exit code, which is what
+    # makes "database first, app second" deterministic. Leaving it in the default set
+    # meant `up -d` decided for itself whether an exited one-shot needed re-running —
+    # version-dependent behaviour in the one place that must not be guessy. `run`
+    # activates the profile on its own, so nothing else has to opt in.
+    profiles: ["deploy"]
+    command: ["pnpm", "--filter", "@coldchain/db", "run", "db:deploy"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
     depends_on:
@@ -78,11 +91,15 @@ services:
       # Requests are same-origin behind Caddy, so CORS rarely fires; set to the public origin anyway.
       CORS_ORIGIN: ${PUBLIC_ORIGIN:-http://coldchain.local}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    # No `depends_on: migrate` any more. That gate is what turned a failed migration
+    # into a total outage — the api would never start, so a bad update took the cold
+    # store offline instead of just not installing. The updaters now run the migration
+    # first and abort before they ever get here, so the gate bought nothing. If someone
+    # bypasses the updater and starts an unmigrated stack by hand, the api simply fails
+    # its healthcheck, which is visible and harmless.
     depends_on:
       postgres:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3001/health"]
       interval: 30s

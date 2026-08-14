@@ -2,8 +2,12 @@
 # ColdChain API — Fastify + Prisma + Puppeteer/Chromium (bilingual EN/Urdu PDFs).
 #
 # Multi-stage: base -> deps -> build -> runtime.
-# The `build` stage is ALSO reused by the compose `migrate` one-shot service,
-# because it retains the Prisma CLI (a devDependency), the schema, and migrations.
+# The `runtime` stage is ALSO what the compose `migrate` one-shot service runs, because
+# line ~83 copies the whole built workspace across — so it retains the Prisma CLI (a
+# devDependency), the schema, and the migrations. It likewise carries the deploy files
+# (docker-compose.yml, Caddyfile, scripts/app-role.sql, update.ps1), which the updaters
+# extract with `docker cp` so a release can change them without shipping a new folder.
+# Both facts constrain the "slim it with pnpm deploy" note further down.
 #
 # Build from the REPO ROOT (the monorepo), not from apps/api:
 #   docker build -f apps/api/Dockerfile -t coldchain-api .

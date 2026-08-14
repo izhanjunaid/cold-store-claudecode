@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { CHART_OF_ACCOUNTS } from './chart-of-accounts';
+import { CHART_OF_ACCOUNTS } from '../src/chart-of-accounts';
 
 // bcryptjs hash of 'admin123' with 10 rounds
 // Pre-computed to avoid needing bcryptjs as a seed dependency

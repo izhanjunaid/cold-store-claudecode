@@ -102,21 +102,31 @@ Any device on the **same Wi‑Fi / network** can use ColdChain:
 
 ## Updating to a new version
 
-When your provider releases a new version, they will either send you a new installer folder or a new
-**version tag**. To update without losing data, run the installer pointing at the new version — for
-example:
+**You don't have to do anything.** ColdChain checks for a new version every night at 3am and
+installs it by itself — app changes, database changes, all of it. Leave the PC and Docker Desktop
+on and it stays current. If the PC was switched off at 3am, it catches up shortly after you next
+log in.
+
+Your data is never touched by an update. Before anything changes, ColdChain takes a full database
+backup into the `backups` folder, then updates the database *before* switching to the new version.
+If any part of that fails, it puts the previous version straight back and carries on running — the
+cold store keeps working and you'll usually never know it happened. Every attempt is written to
+`logs\update.log`; that's the file to send your provider if you think something is wrong.
+
+To check what you're running, or to move to a specific version by hand:
 
 ```
-install.bat -Tag v0.3.0
+install.bat                 (re-runs setup safely; also switches on automatic updates)
+powershell -ExecutionPolicy Bypass -File update.ps1 -Tag v0.3.0
 ```
 
-(Double‑clicking always uses the version it shipped with; the line above is only needed to jump to a
-newer one. Your data and settings are kept.)
+Two things worth knowing:
 
-Boxes with Git Bash/WSL can instead run `./scripts/update.sh v0.3.0` — it takes a database backup
-first, health‑checks the new version, and automatically rolls back to the previous one if anything
-fails. Either way, the first start after an update can take a minute longer than usual — that's the
-database upgrading itself; don't close Docker while it runs.
+- **Automatic updates need administrator rights to switch on.** If you didn't right-click
+  `install.bat` → **Run as administrator** the first time, updates won't be automatic. Re-run it as
+  administrator once and they will be.
+- Boxes running Linux instead of Windows use `./scripts/update.sh v0.3.0`, which does exactly the
+  same thing from cron.
 
 **What's new in v0.3.0**:
 - **Rooms & Racks** — chambers are now shown as Rooms containing Racks. Place a lot's bags across

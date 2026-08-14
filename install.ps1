@@ -24,7 +24,7 @@ param(
   [string]$City = "Lahore",
   [string]$OwnerName,
   [string]$OwnerEmail,
-  [string]$Tag = "latest",
+  [string]$Tag = "stable",
   [string]$Registry = "ghcr.io/izhanjunaid",
   [switch]$SkipPull,
   [switch]$NonInteractive
@@ -94,14 +94,12 @@ if (-not (Test-Path $EnvFile)) {
   Say "   OK - using existing settings ($EnvFile)." Green
 }
 
-# Make the requested version the one the stack actually runs, even on an EXISTING box — so
-# `install.bat -Tag vX.Y.Z` truly updates it (the .env above is only written on first install).
+# NOTE: COLDCHAIN_TAG is deliberately NOT written here. update.ps1 reads the value
+# still in the file as the version to fall back to, and writes the new one itself.
+# Setting it here first would make prevTag == newTag and silently turn every rollback
+# into a no-op — which is exactly how scripts/update.sh's rollback came to be dead code
+# on any box left on the default tag.
 $envText = Get-Content $EnvFile -Raw
-if ($envText -match '(?m)^COLDCHAIN_TAG=') {
-  $envText = [regex]::Replace($envText, '(?m)^COLDCHAIN_TAG=.*$', "COLDCHAIN_TAG=$Tag")
-} else {
-  $envText = $envText.TrimEnd() + "`nCOLDCHAIN_TAG=$Tag`n"
-}
 # Boxes installed before the F-2a hardening lack the app-role credentials — add them.
 if ($envText -notmatch '(?m)^APP_DB_PASSWORD=') {
   $envText = $envText.TrimEnd() + "`nAPP_DB_USER=coldchain_app`nAPP_DB_PASSWORD=$(New-Secret 24)`n"
@@ -109,56 +107,21 @@ if ($envText -notmatch '(?m)^APP_DB_PASSWORD=') {
 [System.IO.File]::WriteAllText((Join-Path (Get-Location) $EnvFile), $envText, (New-Object System.Text.ASCIIEncoding))
 Say "   Version: $Tag" Green
 
-# ---------------------------------------------------------------- 3) Download images
-if (-not $SkipPull) {
-  Step "Downloading ColdChain (the first time can take several minutes)..."
-  Compose pull
-  if ($LASTEXITCODE -ne 0) { Say "   Could not download (no internet?). Will try local copies..." Yellow }
-}
+# ------------------------------------------------- 3-5) Download, prepare DB, start
+# Delegated to update.ps1 so a first install and a later update take exactly the same
+# path: pull -> refresh deploy files -> back up -> update the database -> start the
+# app -> health-check, rolling back if any step fails. Nothing about that sequence is
+# specific to updating, and having one copy of it means the install path cannot rot.
+Step "Downloading and starting ColdChain (the first time can take several minutes)..."
+$updater = Join-Path $PSScriptRoot "update.ps1"
+if (-not (Test-Path $updater)) { Fail "update.ps1 is missing from this folder - ask your ColdChain provider for a complete installer." }
 
-docker image inspect "$Registry/coldchain-api:$Tag" *> $null
+$updateArgs = @('-Tag', $Tag)
+if ($SkipPull) { $updateArgs += '-SkipPull' }
+& powershell -ExecutionPolicy Bypass -File $updater @updateArgs
 if ($LASTEXITCODE -ne 0) {
-  Fail "ColdChain has not been downloaded yet. Connect this computer to the internet and run the installer again (only the first install needs internet)."
+  Fail "ColdChain could not be started. Send logs\update.log to your ColdChain provider."
 }
-
-# ---------------------------------------------------------------- 4) Start
-# Postgres first: the least-privilege role the api connects as (F-2a) must exist
-# before the api container starts, and its default-privilege setup must run
-# before migrations create the tables.
-Step "Preparing the database..."
-Compose up -d postgres
-if ($LASTEXITCODE -ne 0) { Fail "Database failed to start. Open Docker Desktop to see the error, then try again." }
-$pgReady = $false
-for ($i = 0; $i -lt 30; $i++) {
-  docker compose --env-file $EnvFile exec -T postgres pg_isready -U coldchain -d coldchain *> $null
-  if ($LASTEXITCODE -eq 0) { $pgReady = $true; break }
-  Start-Sleep -Seconds 2
-}
-if (-not $pgReady) { Fail "Database did not become ready. Open Docker Desktop to check the postgres container, then try again." }
-
-$appPw = ([regex]::Match((Get-Content $EnvFile -Raw), '(?m)^APP_DB_PASSWORD=(.*)$')).Groups[1].Value.Trim()
-if (-not $appPw) { Fail "APP_DB_PASSWORD missing from $EnvFile - delete the file and run the installer again." }
-Get-Content (Join-Path $PSScriptRoot "scripts\app-role.sql") -Raw |
-  docker compose --env-file $EnvFile exec -T postgres psql -U coldchain -d coldchain -v ON_ERROR_STOP=1 -v app_password=$appPw -f -
-if ($LASTEXITCODE -ne 0) { Fail "Could not set up the database role. Please contact your ColdChain provider with a photo of this screen." }
-Say "   OK - database role ready." Green
-
-Step "Starting ColdChain..."
-Compose up -d
-if ($LASTEXITCODE -ne 0) { Fail "ColdChain failed to start. Open Docker Desktop to see the error, then try again." }
-
-# ---------------------------------------------------------------- 5) Wait until ready
-Step "Waiting for ColdChain to be ready..."
-$ready = $false
-for ($i = 0; $i -lt 60; $i++) {
-  try {
-    if ((Invoke-WebRequest -UseBasicParsing -TimeoutSec 4 "http://localhost/health").StatusCode -eq 200) { $ready = $true; break }
-  } catch { }
-  Write-Host -NoNewline "."
-  Start-Sleep -Seconds 3
-}
-Write-Host ""
-if (-not $ready) { Fail "ColdChain did not come up in time. Open Docker Desktop to check the containers, then run the installer again." }
 Say "   OK - ColdChain is running." Green
 
 # ---------------------------------------------------------------- 6) Set up the facility (only if empty)
@@ -211,7 +174,35 @@ else {
   Say "   Everyone is asked to set their own new password the first time they log in." Yellow
 }
 
-# ---------------------------------------------------------------- 7) Done - show how to open it
+# ------------------------------------------------- 7) Automatic updates from now on
+# Best-effort: registering a Scheduled Task needs elevation. If it fails the box still
+# works perfectly, it just won't update itself — so warn, never Fail. Making the
+# install fragile to buy auto-update would be a bad trade.
+#
+# Registered in THIS user's context, not SYSTEM: Docker Desktop runs in a user session,
+# so a SYSTEM task at 3am with nobody logged in would find no Docker and quietly do
+# nothing forever. -StartWhenAvailable catches boxes that were switched off overnight
+# and runs the update shortly after the next logon instead.
+Step "Setting up automatic updates..."
+try {
+  $taskName = "ColdChain Auto Update"
+  $action   = New-ScheduledTaskAction -Execute "powershell.exe" `
+                -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'update.ps1')`" -Tag stable" `
+                -WorkingDirectory $PSScriptRoot
+  $trigger  = New-ScheduledTaskTrigger -Daily -At 3am
+  $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries `
+                -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings `
+    -Description "Downloads and installs ColdChain updates, including database changes." `
+    -User $env:USERNAME -RunLevel Highest -Force -ErrorAction Stop | Out-Null
+  Say "   OK - ColdChain will update itself automatically (checked nightly)." Green
+} catch {
+  Say "   Could not schedule automatic updates (this needs 'Run as administrator')." Yellow
+  Say "   ColdChain works fine without it. To enable later, right-click install.bat" Yellow
+  Say "   and choose 'Run as administrator'." Yellow
+}
+
+# ---------------------------------------------------------------- 8) Done - show how to open it
 # Real LAN IP = the adapter that has a default gateway (the Wi-Fi / Ethernet NIC).
 # This deliberately skips Docker/WSL virtual adapters (e.g. 172.17.x on "vEthernet (WSL)")
 # and link-local 169.254.x - none of which a phone on the facility Wi-Fi can reach.

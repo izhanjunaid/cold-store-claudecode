@@ -25,6 +25,12 @@ playwright-report
 .env
 .env.*
 client-config*.json
+# A facility box builds locally via bootstrap.sh, so its own database dumps, update
+# logs and saved previous-release deploy files must not enter the build context.
+backups
+logs
+*.prev
+update.ps1.new
 
 # Docs aren't needed at build time
 docs

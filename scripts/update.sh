@@ -45,6 +45,17 @@ set_tag() {
 
 heartbeat() { [ -n "${HEALTHCHECK_URL:-}" ] && curl -fsS -m 10 "$1" >/dev/null 2>&1 || true; }
 
+# Put the version tag AND the deploy files back together. Reverting one without the
+# other is worse than reverting neither: the new compose file's `db:deploy` command
+# does not exist in the old api image, so the migrate one-shot would never complete
+# and `service_completed_successfully` would keep the api from ever starting.
+revert_all() {
+  set_tag "$PREV_TAG"
+  for f in "${DEPLOY_FILES[@]:-}"; do [ -f "$f.prev" ] && mv -f "$f.prev" "$f"; done
+  compose pull >/dev/null 2>&1 || true
+  compose up -d || log "WARNING: could not bring '$PREV_TAG' back up."
+}
+
 # Create/sync the least-privilege runtime role (F-2a). Idempotent; safe to run
 # against a live stack. Run before recreating containers (so the api's new
 # credentials work immediately) and again after migrations (so tables granted
@@ -87,22 +98,58 @@ if ! compose pull; then
   exit 1
 fi
 
-# Brings up the one-shot migrate (prisma migrate deploy), then recreates api/web/caddy.
-compose up -d
+# The deploy files ride along inside the api image, so a release that changes compose,
+# Caddy or the app-role grants reaches the box without anyone shipping a new folder.
+# The files and the image are a matched pair — revert_all() puts both back together,
+# because this release's compose file calls `db:deploy`, which an older api image has
+# no script for.
+DEPLOY_FILES=(docker-compose.yml Caddyfile scripts/app-role.sql)
+for f in "${DEPLOY_FILES[@]}"; do [ -f "$f" ] && cp -f "$f" "$f.prev"; done
+if docker create --name coldchain-bundle "${IMAGE_REGISTRY:-ghcr.io/izhanjunaid}/coldchain-api:$NEW_TAG" >/dev/null 2>&1; then
+  for f in "${DEPLOY_FILES[@]}"; do docker cp "coldchain-bundle:/app/$f" "$f" >/dev/null 2>&1 || true; done
+  docker rm -f coldchain-bundle >/dev/null 2>&1 || true
+  log "deploy files refreshed from the '$NEW_TAG' image."
+  compose pull || { log "ERROR: refreshed compose file references unpullable images."; revert_all; exit 1; }
+else
+  log "WARNING: could not read deploy files from the image — keeping the current ones."
+fi
+
+# Ensure the role exists before migrations, so ALTER DEFAULT PRIVILEGES covers the
+# tables they create.
+sync_app_role
+
+# Database FIRST, explicitly — api/web are still on the OLD images, so a failure here
+# costs nothing but a log line. `run --rm` rather than letting `up -d` decide whether
+# the exited one-shot needs re-running.
+#
+# db:deploy is not plain `prisma migrate deploy`: it also repairs a migration history
+# that a failed or pre-rebaseline migration would otherwise wedge permanently, and adds
+# chart-of-accounts entries the release introduced. See packages/db/prisma/deploy.ts.
+if ! compose run --rm migrate; then
+  log "ERROR: database update failed. '$PREV_TAG' is still running and the data is untouched."
+  revert_all
+  exit 1
+fi
 
 # Re-sync grants now that this release's migrations have run.
 sync_app_role
 
+# Now swap api/web/caddy onto the new images.
+if ! compose up -d; then
+  log "ERROR: '$NEW_TAG' failed to start. Rolling back to '$PREV_TAG'."
+  revert_all
+  exit 1
+fi
+
 if api_healthy; then
   log "SUCCESS: '$NEW_TAG' is healthy."
+  for f in "${DEPLOY_FILES[@]}"; do rm -f "$f.prev"; done
   heartbeat "${HEALTHCHECK_URL:-}"
   exit 0
 fi
 
 log "FAILED: '$NEW_TAG' did not become healthy. Rolling back to '$PREV_TAG'."
-set_tag "$PREV_TAG"
-compose pull >/dev/null 2>&1 || true
-compose up -d
+revert_all
 if api_healthy; then
   log "Rolled back to '$PREV_TAG' (healthy)."
 else

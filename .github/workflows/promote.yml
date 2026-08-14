@@ -1,0 +1,45 @@
+name: Promote to stable
+
+# Facility boxes auto-update to :stable, never to :latest.
+#
+# release.yml moves :latest on every v* tag, so pointing client boxes at it would push
+# every CI build straight into a live cold store the same night — the single most likely
+# way to reintroduce the update failures this exists to prevent. :stable moves only when
+# a human runs this workflow, after the release has actually been checked.
+#
+# Retags the already-published images by digest (docker buildx imagetools create). No
+# rebuild, so :stable is bit-identical to the version tag it was promoted from.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Released version tag to promote (e.g. v1.2.3)'
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Retag api + web as stable
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          version="${{ inputs.version }}"
+          for image in coldchain-api coldchain-web; do
+            src="ghcr.io/$owner/$image:$version"
+            # Fails loudly if the version was never published, rather than silently
+            # promoting nothing.
+            docker buildx imagetools inspect "$src" > /dev/null
+            docker buildx imagetools create --tag "ghcr.io/$owner/$image:stable" "$src"
+            echo "promoted $src -> :stable"
+          done

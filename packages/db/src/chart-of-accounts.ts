@@ -19,7 +19,8 @@ export type StatementSectionSeed =
   | 'CONTRA_REVENUE'
   | 'OTHER_INCOME'
   | 'COST_OF_SERVICE'
-  | 'OPERATING_EXPENSE';
+  | 'OPERATING_EXPENSE'
+  | 'OTHER_EXPENSE';
 
 export type CoaSeed = {
   code: string;
@@ -167,4 +168,69 @@ export async function seedChartOfAccounts(
     });
   }
   return CHART_OF_ACCOUNTS.length;
+}
+
+/**
+ * Add accounts this release introduced to an EXISTING facility. Returns how many
+ * were added. Safe to run on every update — that is the point.
+ *
+ * INSERT-only, unlike seedChartOfAccounts above. An owner may rename or re-parent
+ * their own accounts, so upserting the whole array against a live facility would
+ * clobber those edits — the reason accounts 1230, 1025 and 6900 each shipped as a
+ * separate hand-run backfill script instead. An account that is *missing* cannot
+ * carry any edits, so adding it is always safe, and one rule covers every future
+ * account with no new script.
+ *
+ * ponytail: an owner who deleted an unused non-system account will see it return on
+ * the next update. Cosmetic; the alternative — an account missing that the posting
+ * engine writes to — is a hard runtime failure. Add a tombstone column if a client
+ * ever complains.
+ */
+export async function syncChartOfAccounts(
+  prisma: PrismaClient,
+  facilityId: string,
+): Promise<number> {
+  const present = new Set(
+    (
+      await prisma.chartOfAccounts.findMany({
+        where: { facilityId },
+        select: { accountCode: true },
+      })
+    ).map((a) => a.accountCode),
+  );
+
+  const missing = CHART_OF_ACCOUNTS.filter((a) => !present.has(a.code));
+  for (const a of missing) {
+    await prisma.chartOfAccounts.create({
+      data: {
+        facilityId,
+        accountCode: a.code,
+        accountName: a.name,
+        accountClass: a.cls,
+        accountType: a.type,
+        parentAccountCode: a.parent,
+        normalBalance: a.normal,
+        isSystemAccount: a.system ?? false,
+        statementSection: a.section ?? null,
+      },
+    });
+  }
+
+  // The one structural fixup that is not an insert: 6110 Loss on Disposal moved from
+  // 6000 (operating) to 6900 (non-operating) in phase/25, so that disposing of an
+  // asset at a loss lands on the same side of the operating-profit line as disposing
+  // at a gain. Scoped to accounts still at the exact old parent, so an owner who
+  // moved it themselves is left alone; guard_chart_of_accounts (migration 0002)
+  // rejects the change where 6110 already carries postings, which is the correct
+  // outcome — no silent restatement of a closed period.
+  try {
+    await prisma.chartOfAccounts.updateMany({
+      where: { facilityId, accountCode: '6110', parentAccountCode: '6000' },
+      data: { parentAccountCode: '6900' },
+    });
+  } catch {
+    // 6110 has postings — it stays under 6000, exactly as before phase/25.
+  }
+
+  return missing.length;
 }

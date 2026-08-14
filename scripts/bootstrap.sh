@@ -64,7 +64,14 @@ docker compose --env-file "$ENV_FILE" exec -T postgres \
 echo "    App role ready."
 
 echo "==> Building images and starting the stack (this is slow the first time)..."
-docker compose --env-file "$ENV_FILE" up -d --build
+docker compose --env-file "$ENV_FILE" build
+
+# Database first, explicitly: the `migrate` service sits behind a compose profile so
+# `up -d` never starts it, which is what keeps "database, then app" deterministic.
+echo "==> Preparing the database..."
+docker compose --env-file "$ENV_FILE" run --rm migrate
+
+docker compose --env-file "$ENV_FILE" up -d
 
 echo "==> Waiting for the API to become healthy..."
 for i in $(seq 1 40); do
