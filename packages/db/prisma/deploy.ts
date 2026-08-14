@@ -14,8 +14,10 @@ import { syncChartOfAccounts } from '../src/chart-of-accounts';
  *     single `20260101000000_baseline` (phases/phase-13-production-deploy.md,
  *     "Rebaseline impact"). A box installed before that has the OLD migration
  *     names in `_prisma_migrations` and no baseline row, so `migrate deploy`
- *     runs the baseline's `CREATE TABLE`s against tables that already exist ->
- *     42P07 -> the baseline is recorded FAILED.
+ *     replays the baseline against a schema that already has it. Reproduced on a
+ *     scratch postgres:16: it dies on the first statement that collides, which is
+ *     an enum rather than a table — `P3018 / 42710: type "UserRole" already
+ *     exists` — and the baseline is recorded FAILED.
  *
  *  2. **A failed migration is permanent.** From then on every `migrate deploy`
  *     aborts with P3009 before touching anything, so the box can never be

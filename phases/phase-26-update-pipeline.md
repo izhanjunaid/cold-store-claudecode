@@ -109,6 +109,36 @@ catches the likely regression: someone "simplifying" the sync into an upsert. Cl
 runs inside `withGuardsDisabled()` and clears `audit_log` before the facility
 (`ON DELETE RESTRICT`).
 
+## Verification (done, 2026-08-13, scratch `postgres:16-alpine`)
+
+The client's box was rebuilt exactly: baseline SQL applied by hand, then a
+`_prisma_migrations` table holding only legacy pre-rebaseline names
+(`0001_foundation`, `0002_parties_chambers`, `0003_lots_billing_config`) and no
+baseline row.
+
+1. **Old path, attempt 1** → `P3018`, `42710: type "UserRole" already exists`,
+   baseline recorded `finished_at = NULL`. (The collision is an enum, not a table —
+   the baseline creates types first — so it is 42710, not the 42P07 predicted from
+   reading the file.)
+2. **Old path, attempt 2** → `P3009 … The 20260101000000_baseline migration started
+   at … failed`. Permanently stuck, exactly as reported.
+3. **`db:deploy`** → adopted the baseline, applied all 16 real migrations
+   (0002–0017), exit 0. History: 20 rows, **0 unfinished**; the three legacy rows
+   left untouched.
+4. **`db:deploy` again** → `No pending migrations to apply` / `already up to date`.
+   Clean no-op.
+5. **Account sync against a facility one release behind** (full chart seeded, then
+   1025/1230/6900 removed and 6110 re-parented to 6000, plus an owner rename of 6020
+   to "Godown Kiraya"): `3 account(s) added`, 83 → 86; 6110 moved to 6900; **the
+   rename survived untouched.**
+6. **Compose**: `config --services` returns `postgres api web caddy` — `migrate` is
+   absent from the default set, so `up -d` can never start it; `--profile deploy`
+   brings it back for `run`. `api depends_on` is `["postgres"]` only.
+
+Not exercised: a full image build, so `update.ps1` end-to-end (pull → `docker cp`
+bundle → backup → swap → health gate) is still only reasoned-through. The database
+half — the part that was actually broken — is proven.
+
 ## Known limits
 
 - The first hop still needs one manual step: the client's current `docker-compose.yml`
