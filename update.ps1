@@ -65,6 +65,20 @@ function Set-EnvValue([string]$key, [string]$val) {
 
 if (-not (Test-Path $EnvFile)) { Log "No $EnvFile - run install.bat first."; exit 1 }
 
+# A box provisioned before the F-2a hardening has no app-role credentials, and the api
+# now connects as that role. Without this, Sync-AppRole below would skip, the api would
+# try to log in with a blank password, the health gate would fail, and the update would
+# roll back — silently, every night. install.ps1, bootstrap.sh and update.sh all add it
+# when missing; this updater is reached without any of them (the Scheduled Task calls it
+# directly), so it has to do the same.
+if ((Get-Content $EnvFile -Raw) -notmatch '(?m)^APP_DB_PASSWORD=') {
+  Log "adding least-privilege app-role credentials to $EnvFile (pre-F-2a box)."
+  $bytes = New-Object 'System.Byte[]' 24
+  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+  Set-EnvValue 'APP_DB_USER' 'coldchain_app'
+  Set-EnvValue 'APP_DB_PASSWORD' (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
+}
+
 $prevTag  = Get-EnvValue 'COLDCHAIN_TAG'
 $registry = Get-EnvValue 'IMAGE_REGISTRY'
 $pgUser   = Get-EnvValue 'POSTGRES_USER'
