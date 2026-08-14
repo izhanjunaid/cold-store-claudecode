@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAmount } from './page';
+import { parseAmount } from './parse-amount';
 
 describe('parseAmount (P3-1 — grouped amount must not become a silent zero)', () => {
   it('accepts a grouped amount, in either grouping convention', () => {

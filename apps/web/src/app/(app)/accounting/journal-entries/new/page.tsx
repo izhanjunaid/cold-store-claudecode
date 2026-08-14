@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 import { fmtPlain } from '@/lib/accounting-format';
+import { parseAmount } from './parse-amount';
 
 interface Account {
   account_code: string;
@@ -31,22 +32,6 @@ interface Line {
 const SELECT_CLASS = 'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyLine = (): Line => ({ account_code: '', debit_amount: '', credit_amount: '', description: '' });
-
-/**
- * Parse an amount cell. Returns `null` for a non-empty value that is not a
- * valid amount, so the caller can refuse rather than post a wrong number.
- *
- * Group separators are stripped first: a facility set to lakh/crore reads and
- * types "40,00,000", and `parseFloat` would silently return **40** for that —
- * a wrong figure, not an obvious one. Empty stays 0, which is how a blank
- * debit-or-credit cell is meant to read.
- */
-export function parseAmount(raw: string): number | null {
-  const s = raw.replace(/[,\s ]/g, '');
-  if (s === '') return 0;
-  const n = Number(s);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
 
 export default function NewJournalEntryPage() {
   const router = useRouter();
