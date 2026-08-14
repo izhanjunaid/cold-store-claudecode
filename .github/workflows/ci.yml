@@ -87,8 +87,37 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # `next build` is the only thing that enforces the App Router's export rules —
+      # plain tsc does not. A helper exported from a page.tsx kept this step red from
+      # phase/22 to phase/26 while typecheck and the unit tests stayed green, and it
+      # would have made the v0.4.0 release publish nothing at all.
       - name: Build
         run: pnpm build
 
-      - name: Test
+      # Unit only: apps/api/vitest.config.ts excludes *.integration.test.ts.
+      - name: Test (unit)
         run: pnpm test
+
+      # The integration suite had never run in CI — 530 tests covering the whole
+      # accounting engine gated nothing and ran on one laptop. db:deploy (not a bare
+      # `migrate deploy`) so that the client update path is exercised on every run too;
+      # seed.ts creates facility 00000000-…0001 with the full chart of accounts, which
+      # is the TEST_FACILITY_ID the suite expects.
+      - name: Apply migrations + seed
+        run: |
+          pnpm --filter @coldchain/db run db:deploy
+          pnpm --filter @coldchain/db run db:seed
+
+      - name: Test (integration)
+        run: pnpm --filter @coldchain/api run test:integration
+
+      # The repair path in deploy.ts only runs against a migration history that cannot
+      # exist on a healthy database, so nothing else covers it. Reproduces the client's
+      # wedged box, then proves the repair.
+      - name: Migration-repair regression
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: bash scripts/verify-migration-repair.sh

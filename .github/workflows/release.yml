@@ -91,3 +91,92 @@ jobs:
             ghcr.io/${{ steps.meta.outputs.owner }}/coldchain-web:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Boot what was just published, exactly the way a facility box boots it. The image
+  # path went unexercised until v0.4.0 was verified by hand after the fact: a build that
+  # succeeds proves the code compiles, not that the stack starts. This is also what
+  # guards the two things that made a bad update take the store offline — `migrate`
+  # being reachable from `up -d`, and `api` gating on it.
+  #
+  # If this job is red, DO NOT run the Promote to stable workflow. Client boxes track
+  # :stable, so an unpromoted release reaches nobody.
+  smoke:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose an .env.production the way the installer does
+        run: |
+          cat > .env.production <<EOF
+          POSTGRES_USER=coldchain
+          POSTGRES_PASSWORD=$(openssl rand -hex 24)
+          POSTGRES_DB=coldchain
+          APP_DB_USER=coldchain_app
+          APP_DB_PASSWORD=$(openssl rand -hex 24)
+          JWT_SECRET=$(openssl rand -hex 48)
+          JWT_REFRESH_SECRET=$(openssl rand -hex 48)
+          PUBLIC_ORIGIN=http://localhost
+          LOG_LEVEL=info
+          IMAGE_REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}
+          COLDCHAIN_TAG=${GITHUB_REF_NAME}
+          EOF
+
+      - name: The deploy files must be inside the image
+        run: |
+          # update.ps1 extracts these with `docker cp` on every client update, and
+          # degrades to "keeping the current ones" if they are absent — silently. That
+          # would strand every box on whatever compose file it already had.
+          docker create --name bundle "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/coldchain-api:${GITHUB_REF_NAME}"
+          for f in docker-compose.yml Caddyfile update.ps1 scripts/app-role.sql; do
+            docker cp "bundle:/app/$f" "/tmp/$(basename "$f")"
+            diff -q <(tr -d '\r' < "/tmp/$(basename "$f")") <(tr -d '\r' < "$f") \
+              || { echo "::error::$f in the image differs from the tagged source"; exit 1; }
+            echo "  ok — $f"
+          done
+          docker rm -f bundle
+
+      - name: Database first, then the app
+        run: |
+          set -e
+          docker compose --env-file .env.production up -d postgres
+          for _ in $(seq 1 40); do
+            docker compose --env-file .env.production exec -T postgres pg_isready -U coldchain -d coldchain && break
+            sleep 2
+          done
+          APP_PW=$(grep '^APP_DB_PASSWORD=' .env.production | cut -d= -f2)
+          docker compose --env-file .env.production exec -T postgres \
+            psql -U coldchain -d coldchain -v ON_ERROR_STOP=1 -v app_password="$APP_PW" -f - < scripts/app-role.sql
+          docker compose --env-file .env.production run --rm migrate
+          docker compose --env-file .env.production up -d
+
+      - name: Health check through Caddy
+        run: |
+          for i in $(seq 1 40); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://localhost/health || true)
+            [ "$code" = "200" ] && { echo "healthy after ~$((i*3))s"; exit 0; }
+            sleep 3
+          done
+          echo "::error::stack never became healthy"
+          docker compose --env-file .env.production logs --tail=60 api
+          exit 1
+
+      - name: The runtime role must stay least-privilege (F-2a)
+        run: |
+          APP_PW=$(grep '^APP_DB_PASSWORD=' .env.production | cut -d= -f2)
+          # It can read what the migrations just created…
+          docker compose --env-file .env.production exec -T -e PGPASSWORD="$APP_PW" postgres \
+            psql -U coldchain_app -d coldchain -tAc "select count(*) from employee_advances;" > /dev/null
+          # …but must not be able to run DDL or disable the financial guards.
+          if docker compose --env-file .env.production exec -T -e PGPASSWORD="$APP_PW" postgres \
+               psql -U coldchain_app -d coldchain -tAc "create table must_not_exist(x int);" 2>/dev/null; then
+            echo "::error::the runtime role can run DDL — F-2a hardening has regressed"; exit 1
+          fi
+          guards=$(docker compose --env-file .env.production exec -T postgres \
+            psql -U coldchain -d coldchain -tAc "select has_function_privilege('coldchain_app','financial_guards_set(boolean)','EXECUTE');" | tr -d '[:space:]')
+          [ "$guards" = "f" ] || { echo "::error::the runtime role can disable the financial guards"; exit 1; }
+          echo "  ok — app role is read/write only"
+
+      - name: Tear down
+        if: always()
+        run: docker compose --env-file .env.production down -v || true
