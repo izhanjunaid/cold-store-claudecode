@@ -6,9 +6,18 @@
  * POST /v1/_test/reset truncates operational rows for the E2E facility
  * and reseeds the standard fixture set so each Playwright spec starts
  * from a known state.
+ *
+ * POST /v1/_test/backdate-invoice ages an invoice so overdue behaviour
+ * (WF-08 late payment surcharge) is testable without waiting real days.
  */
+import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { sendSuccess } from '../../common/response';
+
+const BackdateInvoiceBody = z.object({
+  invoice_id: z.string().uuid(),
+  days_overdue: z.number().int().positive(),
+});
 
 const E2E_FACILITY_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -82,6 +91,28 @@ export async function testRoutes(app: FastifyInstance) {
       }
 
       return sendSuccess(reply, { status: 'reset', facility_id: E2E_FACILITY_ID });
+    },
+  });
+
+  // Surcharge eligibility is a function of how overdue an invoice is, so testing it
+  // otherwise means either waiting 100 days or mocking the clock. Moving the invoice
+  // date is the honest equivalent and leaves every other code path real.
+  app.route({
+    method: 'POST',
+    url: '/v1/_test/backdate-invoice',
+    schema: { body: BackdateInvoiceBody },
+    handler: async (request, reply) => {
+      const { invoice_id, days_overdue } = request.body as z.infer<typeof BackdateInvoiceBody>;
+      const invoiceDate = new Date(Date.now() - days_overdue * 24 * 60 * 60 * 1000);
+      invoiceDate.setHours(0, 0, 0, 0);
+      await app.prisma.invoice.update({
+        where: { id: invoice_id },
+        data: { invoiceDate },
+      });
+      return sendSuccess(reply, {
+        invoice_id,
+        invoice_date: invoiceDate.toISOString().slice(0, 10),
+      });
     },
   });
 }

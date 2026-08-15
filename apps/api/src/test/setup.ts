@@ -8,10 +8,21 @@ export const TEST_USER_PASSWORD = 'admin123';
 const prisma = new PrismaClient();
 
 beforeAll(async () => {
-  // Ensure test facility and user exist
+  // Every upsert below sets `update` to the same shape as `create`, deliberately.
+  //
+  // These fixture IDs are ALSO used by packages/db/prisma/seed.ts with different
+  // values — rate plan …550 is "Potato Seasonal 2026" there, restricted to POTATO and
+  // open only 2026-03-01 → 09-30, versus the unrestricted full-year plan this suite
+  // needs. An `update: {}` (or `update: { isActive: true }`) leaves the seeded values
+  // in place, so the suite silently inherits whichever definition happened to be
+  // written first. That passed for months on a laptop where setup.ts had won the race,
+  // and failed the moment CI ran `db:seed` before the tests: eleven payment tests
+  // rejecting lots as outside the season window.
+  //
+  // A fixture must assert its own preconditions, not hope the row is absent.
   await prisma.facility.upsert({
     where: { id: TEST_FACILITY_ID },
-    update: {},
+    update: { name: 'Test Facility', city: 'Lahore', settings: { backdating_max_days: null } },
     create: {
       id: TEST_FACILITY_ID,
       name: 'Test Facility',
@@ -44,14 +55,14 @@ beforeAll(async () => {
   // Seed commodities for tests
   await prisma.commodity.upsert({
     where: { id: '00000000-0000-0000-0000-000000000100' },
-    update: {},
+    update: { name: 'POTATO', unitLabel: 'Bags', defaultStorageDaysAlert: 180 },
     create: { id: '00000000-0000-0000-0000-000000000100', name: 'POTATO', unitLabel: 'Bags', defaultStorageDaysAlert: 180 },
   });
 
   // Seed a second commodity for restriction tests
   await prisma.commodity.upsert({
     where: { id: '00000000-0000-0000-0000-000000000101' },
-    update: {},
+    update: { name: 'APPLE', unitLabel: 'Bags', defaultStorageDaysAlert: 120 },
     create: { id: '00000000-0000-0000-0000-000000000101', name: 'APPLE', unitLabel: 'Bags', defaultStorageDaysAlert: 120 },
   });
 
@@ -60,7 +71,7 @@ beforeAll(async () => {
   // Test chamber (unrestricted, 1000-bag capacity)
   await prisma.chamber.upsert({
     where: { id: '00000000-0000-0000-0000-000000000200' },
-    update: { isActive: true },
+    update: { facilityId: TEST_FACILITY_ID, name: 'Test Chamber A', maxCapacityBags: 1000, commodityRestrictionId: null, isActive: true },
     create: {
       id: '00000000-0000-0000-0000-000000000200',
       facilityId: TEST_FACILITY_ID,
@@ -73,7 +84,7 @@ beforeAll(async () => {
   // Test chamber restricted to POTATO (for restriction mismatch test)
   await prisma.chamber.upsert({
     where: { id: '00000000-0000-0000-0000-000000000201' },
-    update: { isActive: true },
+    update: { facilityId: TEST_FACILITY_ID, name: 'Test Chamber B (POTATO only)', maxCapacityBags: 500, commodityRestrictionId: '00000000-0000-0000-0000-000000000100', isActive: true },
     create: {
       id: '00000000-0000-0000-0000-000000000201',
       facilityId: TEST_FACILITY_ID,
@@ -87,7 +98,7 @@ beforeAll(async () => {
   // Small chamber for capacity overflow test
   await prisma.chamber.upsert({
     where: { id: '00000000-0000-0000-0000-000000000202' },
-    update: { isActive: true },
+    update: { facilityId: TEST_FACILITY_ID, name: 'Test Chamber C (tiny)', maxCapacityBags: 10, commodityRestrictionId: null, isActive: true },
     create: {
       id: '00000000-0000-0000-0000-000000000202',
       facilityId: TEST_FACILITY_ID,
@@ -108,7 +119,7 @@ beforeAll(async () => {
   for (const r of testRacks) {
     await prisma.rack.upsert({
       where: { id: r.id },
-      update: { isActive: r.isActive },
+      update: { ...r, facilityId: TEST_FACILITY_ID },
       create: { ...r, facilityId: TEST_FACILITY_ID },
     });
   }
@@ -118,7 +129,7 @@ beforeAll(async () => {
   // neither, so seed them here rather than relying on leftover rows.
   await prisma.chamber.upsert({
     where: { id: '00000000-0000-0000-0000-000000000300' },
-    update: { isActive: true },
+    update: { facilityId: TEST_FACILITY_ID, name: 'Chamber A', maxCapacityBags: 10000, commodityRestrictionId: null, isActive: true },
     create: {
       id: '00000000-0000-0000-0000-000000000300',
       facilityId: TEST_FACILITY_ID,
@@ -129,7 +140,19 @@ beforeAll(async () => {
   });
   await prisma.ratePlan.upsert({
     where: { id: '00000000-0000-0000-0000-000000000550' },
-    update: { isActive: true },
+    update: {
+      facilityId: TEST_FACILITY_ID,
+      name: 'Accounting Seasonal Rate',
+      rateType: 'SEASONAL_PER_BAG',
+      rateAmountPkr: 50,
+      minBillingDays: 1,
+      // seed.ts claims this id for a POTATO-only plan open 2026-03-01..09-30.
+      // Widen it back, or every historically-dated fixture lot is rejected.
+      commodityId: null,
+      seasonStartDate: new Date('2026-01-01'),
+      seasonEndDate: new Date('2026-12-31'),
+      isActive: true,
+    },
     create: {
       id: '00000000-0000-0000-0000-000000000550',
       facilityId: TEST_FACILITY_ID,
@@ -146,7 +169,7 @@ beforeAll(async () => {
   // Test rate plan (MONTHLY_PER_BAG, no commodity restriction)
   await prisma.ratePlan.upsert({
     where: { id: '00000000-0000-0000-0000-000000000500' },
-    update: { isActive: true },
+    update: { facilityId: TEST_FACILITY_ID, name: 'Test Monthly Rate', rateType: 'MONTHLY_PER_BAG', rateAmountPkr: 100, minBillingDays: 1, commodityId: null, seasonStartDate: null, seasonEndDate: null, isActive: true },
     create: {
       id: '00000000-0000-0000-0000-000000000500',
       facilityId: TEST_FACILITY_ID,
@@ -158,10 +181,31 @@ beforeAll(async () => {
     },
   });
 
+  // Test seasonal rate plan. Referenced as RATE_PLAN_SEASONAL by the payment, invoice
+  // and gate-pass suites — and, until this was added, created by nothing at all: it
+  // survived only as leftover data on the one machine the integration suite ever ran
+  // on. On a freshly seeded database every lot built with it was rejected 400, which
+  // is what the first CI run of this suite found.
+  await prisma.ratePlan.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000501' },
+    update: { facilityId: TEST_FACILITY_ID, name: 'Test Seasonal Rate', rateType: 'SEASONAL_PER_BAG', rateAmountPkr: 50, minBillingDays: 1, commodityId: null, seasonStartDate: new Date('2026-01-01'), seasonEndDate: new Date('2026-12-31'), isActive: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000501',
+      facilityId: TEST_FACILITY_ID,
+      name: 'Test Seasonal Rate',
+      rateType: 'SEASONAL_PER_BAG',
+      rateAmountPkr: 50,
+      minBillingDays: 1,
+      seasonStartDate: new Date('2026-01-01'),
+      seasonEndDate: new Date('2026-12-31'),
+      isActive: true,
+    },
+  });
+
   // Test service charge
   await prisma.serviceCharge.upsert({
     where: { id: '00000000-0000-0000-0000-000000000600' },
-    update: { isActive: true },
+    update: { facilityId: TEST_FACILITY_ID, name: 'Test Loading Charge', unitType: 'PER_BAG', unitPricePkr: 10, isActive: true },
     create: {
       id: '00000000-0000-0000-0000-000000000600',
       facilityId: TEST_FACILITY_ID,
