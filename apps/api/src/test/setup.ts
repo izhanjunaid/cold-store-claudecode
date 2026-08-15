@@ -181,6 +181,27 @@ beforeAll(async () => {
     },
   });
 
+  // Test seasonal rate plan. Referenced as RATE_PLAN_SEASONAL by the payment, invoice
+  // and gate-pass suites — and, until this was added, created by nothing at all: it
+  // survived only as leftover data on the one machine the integration suite ever ran
+  // on. On a freshly seeded database every lot built with it was rejected 400, which
+  // is what the first CI run of this suite found.
+  await prisma.ratePlan.upsert({
+    where: { id: '00000000-0000-0000-0000-000000000501' },
+    update: { facilityId: TEST_FACILITY_ID, name: 'Test Seasonal Rate', rateType: 'SEASONAL_PER_BAG', rateAmountPkr: 50, minBillingDays: 1, commodityId: null, seasonStartDate: new Date('2026-01-01'), seasonEndDate: new Date('2026-12-31'), isActive: true },
+    create: {
+      id: '00000000-0000-0000-0000-000000000501',
+      facilityId: TEST_FACILITY_ID,
+      name: 'Test Seasonal Rate',
+      rateType: 'SEASONAL_PER_BAG',
+      rateAmountPkr: 50,
+      minBillingDays: 1,
+      seasonStartDate: new Date('2026-01-01'),
+      seasonEndDate: new Date('2026-12-31'),
+      isActive: true,
+    },
+  });
+
   // Test service charge
   await prisma.serviceCharge.upsert({
     where: { id: '00000000-0000-0000-0000-000000000600' },
