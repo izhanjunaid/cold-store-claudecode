@@ -3,7 +3,8 @@ name: Release
 # Publish versioned container images to GHCR on each v* tag, after tests pass.
 # Cut a release by tagging a tested commit:
 #   git tag v1.0.0 && git push origin v1.0.0
-# The facility box then rolls forward with scripts/update.sh (pull + migrate + health-gated rollback).
+# The facility box then rolls forward with update.ps1 (pull + migrate + health-gated rollback),
+# run nightly by a Scheduled Task once the Promote to stable workflow moves :stable.
 
 on:
   push:

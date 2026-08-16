@@ -97,8 +97,8 @@ if (-not (Test-Path $EnvFile)) {
 # NOTE: COLDCHAIN_TAG is deliberately NOT written here. update.ps1 reads the value
 # still in the file as the version to fall back to, and writes the new one itself.
 # Setting it here first would make prevTag == newTag and silently turn every rollback
-# into a no-op — which is exactly how scripts/update.sh's rollback came to be dead code
-# on any box left on the default tag.
+# into a no-op. The since-deleted scripts/update.sh had exactly this bug: its rollback was
+# dead code on any box left on the default tag, because PREV_TAG always equalled NEW_TAG.
 $envText = Get-Content $EnvFile -Raw
 # Boxes installed before the F-2a hardening lack the app-role credentials — add them.
 if ($envText -notmatch '(?m)^APP_DB_PASSWORD=') {

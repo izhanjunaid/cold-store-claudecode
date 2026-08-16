@@ -125,8 +125,9 @@ Two things worth knowing:
 - **Automatic updates need administrator rights to switch on.** If you didn't right-click
   `install.bat` → **Run as administrator** the first time, updates won't be automatic. Re-run it as
   administrator once and they will be.
-- Boxes running Linux instead of Windows use `./scripts/update.sh v0.3.0`, which does exactly the
-  same thing from cron.
+- Need a backup right now, outside the automatic one? Double-click **`backup.bat`**. It writes a
+  dated file into the `backups` folder. (Restoring one is `restore.ps1`, and is a last resort —
+  ask your provider first.)
 
 **What's new in v0.4.0**:
 - **ColdChain now updates itself.** It checks nightly and installs new versions on its own —
@@ -192,12 +193,12 @@ The API runs as `coldchain_app`, a least‑privilege Postgres role that can read
 cannot run DDL or call `financial_guards_set()` — the function that would disable the financial
 audit/immutability triggers (docs/16, finding F‑2a). Only the database owner (used solely by the
 one‑shot `migrate` service) keeps that ability. `scripts/app-role.sql` creates and re‑syncs the
-role; the installer and `scripts/update.sh` run it automatically at the right points, so:
+role; `install.ps1` and `update.ps1` run it automatically at the right points, so:
 
-- **Always update a box via `install.bat -Tag vX.Y.Z` or `scripts/update.sh`** — a bare
+- **Always update a box via the nightly task, or `install.bat -Tag vX.Y.Z`** — a bare
   `docker compose up -d` on a box whose `.env.production` predates this hardening will start the
   API with empty app‑role credentials and it will crash‑loop until either script is run once.
-- **Restoring a backup onto a brand‑new box:** run the installer first, then `scripts/restore.sh`.
+- **Restoring a backup onto a brand‑new box:** run the installer first, then `restore.ps1 -File <backup>`.
   Dumps contain `GRANT … TO coldchain_app` statements, and the restore aborts if the role doesn't
   exist yet (the installer creates it).
 - To verify the hardening on a box:
@@ -214,7 +215,7 @@ Useful flags: `-Tag v0.1.1` (version), `-SkipPull` (use already‑downloaded ima
 
 ### Rolling out updates centrally
 Tag a release (`git tag v0.1.1 && git push origin v0.1.1`) → CI publishes new images to GHCR →
-each box runs `install.bat -Tag v0.1.1` (or `scripts/update.sh v0.1.1`, which also health‑checks and
+each box runs `install.bat -Tag v0.1.1` (or `update.ps1 -Tag v0.1.1`, which also health‑checks and
 auto‑rolls‑back). See `phases/phase-13-production-deploy.md` for the full pipeline.
 
 </details>
