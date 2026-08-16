@@ -68,9 +68,8 @@ if (-not (Test-Path $EnvFile)) { Log "No $EnvFile - run install.bat first."; exi
 # A box provisioned before the F-2a hardening has no app-role credentials, and the api
 # now connects as that role. Without this, Sync-AppRole below would skip, the api would
 # try to log in with a blank password, the health gate would fail, and the update would
-# roll back — silently, every night. install.ps1, bootstrap.sh and update.sh all add it
-# when missing; this updater is reached without any of them (the Scheduled Task calls it
-# directly), so it has to do the same.
+# roll back — silently, every night. install.ps1 adds it when missing, but the Scheduled
+# Task calls this updater directly without going through the installer, so it has to too.
 if ((Get-Content $EnvFile -Raw) -notmatch '(?m)^APP_DB_PASSWORD=') {
   Log "adding least-privilege app-role credentials to $EnvFile (pre-F-2a box)."
   $bytes = New-Object 'System.Byte[]' 24
@@ -258,7 +257,7 @@ if (-not (Test-Healthy)) {
   # code starts using them), which is the standing rule for this repo - the previous
   # image keeps working against the newer schema. A release that breaks that rule
   # cannot be rolled back by this script; restore backups\coldchain-preupdate-*.sql.gz
-  # with scripts/restore.sh instead. Not automated deliberately: an automatic restore
+  # with restore.ps1 instead. Not automated deliberately: an automatic restore
   # would silently discard everything entered since the dump.
   Log "ERROR: '$Tag' did not become healthy - rolling back to '$prevTag'."
   Log "       The database was already updated; it stays updated (expand-only migrations)."

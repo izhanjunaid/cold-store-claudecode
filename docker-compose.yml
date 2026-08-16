@@ -5,7 +5,7 @@
 #   * Pull pre-built images (CI rollout): set COLDCHAIN_TAG in .env.production, then
 #                                         docker compose --env-file .env.production pull && up -d
 #     (Images are published to GHCR by .github/workflows/release.yml on each `v*` tag;
-#      scripts/update.sh does the pull + migrate + health-check + rollback automatically.)
+#      update.ps1 does the pull + migrate + health-check + rollback automatically.)
 #
 # Access from any device on the facility LAN:
 #   http://<box-ip>/    (single origin — Caddy routes /v1, /docs, /health to the API,
@@ -83,7 +83,7 @@ services:
       # Least-privilege runtime role (F-2a): DML only, cannot run DDL or call
       # financial_guards_set() to disable the financial integrity triggers.
       # Created/updated idempotently by scripts/app-role.sql (installers and
-      # update.sh run it). Only the one-shot `migrate` service above uses the
+      # update.ps1 runs it). Only the one-shot `migrate` service above uses the
       # owner credentials.
       DATABASE_URL: postgresql://${APP_DB_USER:-coldchain_app}:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       JWT_SECRET: ${JWT_SECRET}

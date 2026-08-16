@@ -25,8 +25,9 @@ one command and makes a change of mind possible):
 
 ```
 cd <their existing ColdChain folder>
-bash scripts/backup.sh          # writes backups\coldchain-<timestamp>.sql.gz
+powershell -ExecutionPolicy Bypass -File backup.ps1
 ```
+(or just double-click `backup.bat`) - writes `backups\coldchain-<timestamp>.sql.gz`.
 Copy that file somewhere off the box before continuing.
 
 ---
