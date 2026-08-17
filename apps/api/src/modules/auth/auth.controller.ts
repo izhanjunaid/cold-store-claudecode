@@ -36,6 +36,13 @@ const FORGOT_PASSWORD_MESSAGE = 'If an account with that email exists, a code ha
  * facility is the only thing the caller could have meant. Zero or several stays an
  * error — genuinely ambiguous, and the caller has to say which.
  *
+ * It must go through `sole_facility_id()` rather than querying `facilities`
+ * directly: that table is under row-level security keyed on the `app.facility_id`
+ * GUC, which is unset before authentication, so a plain read returns ZERO rows for
+ * the least-privilege runtime role. A plain `findMany` here passed every
+ * integration test — those connect as the database owner, who bypasses RLS — and
+ * failed on the first real box. See migration 0018.
+ *
  * This resolves *which facility*, nothing more. Credentials are still checked
  * exactly as before.
  */
@@ -43,8 +50,10 @@ async function resolveFacilityId(app: FastifyInstance, request: FastifyRequest):
   const header = request.headers['x-facility-id'];
   if (typeof header === 'string' && header) return header;
 
-  const facilities = await app.prisma.facility.findMany({ select: { id: true }, take: 2 });
-  if (facilities.length === 1) return facilities[0]!.id;
+  const rows =
+    await app.prisma.$queryRaw<{ id: string | null }[]>`SELECT sole_facility_id() AS id`;
+  const sole = rows[0]?.id;
+  if (sole) return sole;
 
   throw Errors.VALIDATION_ERROR('X-Facility-ID header is required');
 }
