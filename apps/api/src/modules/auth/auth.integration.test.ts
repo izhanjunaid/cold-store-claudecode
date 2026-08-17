@@ -63,15 +63,24 @@ describe('Auth API Integration', () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it('rejects missing X-Facility-ID', async () => {
+    // This assertion used to demand a 400 for a missing X-Facility-ID, and in doing
+    // so it locked the requirement in: a browser cannot know the facility id before
+    // its first login (the auth store writes it to localStorage only *after* one
+    // succeeds), so requiring the header made a freshly installed box impossible to
+    // log into — with the password never even compared. The test was green the whole
+    // time because every test supplies the header by hand.
+    //
+    // A single-facility box now falls back to its only facility. The rejection that
+    // matters — an ambiguous facility — is asserted in
+    // first-login.integration.test.ts, which also covers the fresh-browser path.
+    it('falls back to the only facility when X-Facility-ID is absent', async () => {
       const res = await app.inject({
         method: 'POST',
         url: '/v1/auth/login',
         payload: { email: 'admin@coldchain.pk', password: 'admin123' },
       });
-      expect(res.statusCode).toBe(400);
-      const body = JSON.parse(res.body);
-      expect(body.error.code).toBe('VALIDATION_ERROR');
+      expect(res.statusCode, res.body).toBe(200);
+      expect(JSON.parse(res.body).data.user.facility_id).toBe(TEST_FACILITY_ID);
     });
 
     it('rejects invalid email format', async () => {

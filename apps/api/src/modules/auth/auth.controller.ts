@@ -21,6 +21,34 @@ import { Errors } from '../../common/errors';
 // an account exists or whether an email actually went out.
 const FORGOT_PASSWORD_MESSAGE = 'If an account with that email exists, a code has been sent.';
 
+/**
+ * Resolve the facility for an UNAUTHENTICATED request.
+ *
+ * A browser cannot know the facility id before its first successful login: the web
+ * client reads it from localStorage, and the only writer is the auth store, which
+ * runs *after* a login succeeds. Requiring the header on these routes therefore
+ * deadlocked every first login on a freshly installed box — and, because
+ * forgot-password required it too, left no way out. The password was never even
+ * compared; the request was refused before it reached bcrypt, which is exactly why
+ * correct credentials looked broken.
+ *
+ * A facility box runs exactly one facility, so when the header is absent that
+ * facility is the only thing the caller could have meant. Zero or several stays an
+ * error — genuinely ambiguous, and the caller has to say which.
+ *
+ * This resolves *which facility*, nothing more. Credentials are still checked
+ * exactly as before.
+ */
+async function resolveFacilityId(app: FastifyInstance, request: FastifyRequest): Promise<string> {
+  const header = request.headers['x-facility-id'];
+  if (typeof header === 'string' && header) return header;
+
+  const facilities = await app.prisma.facility.findMany({ select: { id: true }, take: 2 });
+  if (facilities.length === 1) return facilities[0]!.id;
+
+  throw Errors.VALIDATION_ERROR('X-Facility-ID header is required');
+}
+
 // Device context recorded against the session (refresh-token row) at issue time.
 function sessionMeta(request: FastifyRequest): { userAgent: string | null; ip: string | null } {
   const ua = request.headers['user-agent'];
@@ -52,10 +80,7 @@ export async function authRoutes(app: FastifyInstance) {
     url: '/v1/auth/login',
     schema: { body: LoginRequest },
     handler: async (request, reply) => {
-      const facilityId = request.headers['x-facility-id'] as string | undefined;
-      if (!facilityId) {
-        throw Errors.VALIDATION_ERROR('X-Facility-ID header is required');
-      }
+      const facilityId = await resolveFacilityId(app, request);
       const body = request.body as { email: string; password: string };
       const result = await service.login(facilityId, body.email, body.password, sessionMeta(request));
       return sendSuccess(reply, await withPermissions(app, result));
@@ -69,10 +94,7 @@ export async function authRoutes(app: FastifyInstance) {
     schema: { body: ForgotPasswordRequest },
     config: { rateLimit: { max: 3, timeWindow: '15 minutes' } },
     handler: async (request, reply) => {
-      const facilityId = request.headers['x-facility-id'] as string | undefined;
-      if (!facilityId) {
-        throw Errors.VALIDATION_ERROR('X-Facility-ID header is required');
-      }
+      const facilityId = await resolveFacilityId(app, request);
       const body = request.body as z.infer<typeof ForgotPasswordRequest>;
       const result = await service.forgotPassword(facilityId, body.email, request.ip);
       request.log.info({ email: body.email, sent: result.sent }, 'forgot-password request');
@@ -87,10 +109,7 @@ export async function authRoutes(app: FastifyInstance) {
     schema: { body: ResetPasswordWithOtpRequest },
     config: { rateLimit: { max: 5, timeWindow: '15 minutes' } },
     handler: async (request, reply) => {
-      const facilityId = request.headers['x-facility-id'] as string | undefined;
-      if (!facilityId) {
-        throw Errors.VALIDATION_ERROR('X-Facility-ID header is required');
-      }
+      const facilityId = await resolveFacilityId(app, request);
       const body = request.body as z.infer<typeof ResetPasswordWithOtpRequest>;
       const result = await service.resetPassword(facilityId, body.email, body.code, body.new_password);
       return sendSuccess(reply, result);
