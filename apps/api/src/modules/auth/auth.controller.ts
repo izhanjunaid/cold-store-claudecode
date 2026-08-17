@@ -16,6 +16,7 @@ import { OtpService } from './otp.service';
 import { UserService } from '../user/user.service';
 import { sendSuccess } from '../../common/response';
 import { Errors } from '../../common/errors';
+import { requestContext } from '../../common/request-context';
 
 // Neutral response for both steps of the reset flow — never reveals whether
 // an account exists or whether an email actually went out.
@@ -53,9 +54,17 @@ async function resolveFacilityId(app: FastifyInstance, request: FastifyRequest):
   const rows =
     await app.prisma.$queryRaw<{ id: string | null }[]>`SELECT sole_facility_id() AS id`;
   const sole = rows[0]?.id;
-  if (sole) return sole;
+  if (!sole) throw Errors.VALIDATION_ERROR('X-Facility-ID header is required');
 
-  throw Errors.VALIDATION_ERROR('X-Facility-ID header is required');
+  // Put it into the request context, not just the return value. Everything after
+  // this — the user lookup, the session row, the audit rows — runs against tables
+  // under row-level security keyed on `app.facility_id`, and the facility-scope
+  // extension stamps that setting from the context. Returning the id alone would
+  // resolve the facility and then still read nothing.
+  const ctx = requestContext.getStore();
+  if (ctx) ctx.facilityId = sole;
+
+  return sole;
 }
 
 // Device context recorded against the session (refresh-token row) at issue time.
