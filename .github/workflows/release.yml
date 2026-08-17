@@ -162,6 +162,38 @@ jobs:
           docker compose --env-file .env.production logs --tail=60 api
           exit 1
 
+      # A stack that answers /health is not a stack anyone can use. v0.4.1 shipped
+      # green on every check and was impossible to log into: /health needs no auth,
+      # so nothing exercised the one path every client walks first. Provision a
+      # facility exactly as the installer does, then log in as the owner with the
+      # generated password — no X-Facility-ID header, because a fresh browser has none.
+      - name: A new owner can actually log in
+        run: |
+          set -e
+          cat > /tmp/smoke-client.json <<'JSON'
+          { "facility": { "name": "Smoke Test Cold Store", "city": "Lahore" },
+            "loadChartOfAccounts": true,
+            "users": [ { "name": "Smoke Owner", "email": "owner@smoke.test", "role": "OWNER" } ] }
+          JSON
+          out=$(docker compose --env-file .env.production run --rm -T \
+                  -v /tmp/smoke-client.json:/app/cfg.json:ro -e CLIENT_CONFIG=/app/cfg.json \
+                  migrate pnpm --filter @coldchain/db run db:provision)
+          echo "$out"
+          pw=$(echo "$out" | grep -A2 'owner@smoke.test' | sed -n 's/.*password: *//p' | tr -d '\r' | head -1)
+          [ -n "$pw" ] || { echo "::error::could not read the generated password from provisioning output"; exit 1; }
+
+          code=$(curl -s -o /tmp/login.json -w '%{http_code}' -m 20 \
+                   -X POST http://localhost/v1/auth/login \
+                   -H 'Content-Type: application/json' \
+                   -d "{\"email\":\"owner@smoke.test\",\"password\":\"$pw\"}")
+          if [ "$code" != "200" ]; then
+            echo "::error::a freshly provisioned owner cannot log in (HTTP $code) — this is what a client hits on day one"
+            cat /tmp/login.json
+            exit 1
+          fi
+          grep -q access_token /tmp/login.json || { echo "::error::login returned 200 with no token"; cat /tmp/login.json; exit 1; }
+          echo "  ok — new owner logged in on a fresh browser (no facility header)"
+
       - name: The runtime role must stay least-privilege (F-2a)
         run: |
           APP_PW=$(grep '^APP_DB_PASSWORD=' .env.production | cut -d= -f2)
