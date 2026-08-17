@@ -14,6 +14,13 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export type RequestAuditContext = {
   userId?: string;
   facilityId?: string;
+  /**
+   * Interactive-transaction nesting depth, maintained by the patched
+   * `$transaction` in the facility-scope plugin. The per-operation extension
+   * checks it so it never tries to open a transaction inside one that already
+   * stamped the settings.
+   */
+  depth?: number;
 };
 
 export const requestContext = new AsyncLocalStorage<RequestAuditContext>();
