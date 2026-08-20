@@ -38,6 +38,7 @@ const cards: AcctCard[] = [
   { title: 'Trial Balance', href: '/accounting/reports/trial-balance', icon: Scale, description: 'Verify debits = credits across all accounts.' },
   { title: 'Profit & Loss', href: '/accounting/reports/profit-loss', icon: FileBarChart, description: 'Revenue, cost of service, and net profit for any period.' },
   { title: 'Balance Sheet', href: '/accounting/reports/balance-sheet', icon: FileBarChart, description: 'Assets = Liabilities + Equity, as of any date.' },
+  { title: 'Cash Flow', href: '/accounting/reports/cash-flow', icon: FilePlus2, description: 'Statement of cash flows — where the money came from and went.' },
   { title: 'Fixed Assets', href: '/accounting/fixed-assets', icon: Building2, description: 'Register, commission, and dispose of plant, building and vehicle assets.' },
   { title: 'Depreciation Runs', href: '/accounting/fixed-assets/runs', icon: CalendarClock, description: 'Run monthly depreciation (JE-13) and review past runs.' },
   { title: 'Employees', href: '/accounting/payroll/employees', icon: Users, description: 'Manage salaried staff and daily-wage workers, with EOBI registration.' },

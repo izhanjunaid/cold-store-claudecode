@@ -110,6 +110,7 @@ function format(a: Prisma.ChartOfAccountsGetPayload<{}>) {
     parent_account_code: a.parentAccountCode,
     normal_balance: a.normalBalance,
     statement_section: a.statementSection,
+    cash_flow_section: a.cashFlowSection,
     is_system_account: a.isSystemAccount,
     is_active: a.isActive,
     created_at: a.createdAt.toISOString(),

@@ -191,6 +191,16 @@ enum StatementSection {
   OTHER_EXPENSE
 }
 
+// Where an account's cash movements land on the statement of cash flows.
+// Null is the normal state: the section is derived from statement_section +
+// account_class, and this column exists only to override the few accounts
+// where that derivation is wrong (1140 peshgi, 2120 owner loan).
+enum CashFlowSection {
+  OPERATING
+  INVESTING
+  FINANCING
+}
+
 enum EntryType {
   INVOICE
   PAYMENT
@@ -895,6 +905,7 @@ model ChartOfAccounts {
   parentAccountCode String?       @map("parent_account_code") @db.VarChar(10)
   normalBalance     NormalBalance @map("normal_balance")
   statementSection  StatementSection? @map("statement_section")
+  cashFlowSection   CashFlowSection?  @map("cash_flow_section")
   isSystemAccount   Boolean       @default(false) @map("is_system_account")
   isActive          Boolean       @default(true) @map("is_active")
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz()

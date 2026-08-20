@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   AccountClass,
   AccountType,
+  CashFlowSection,
   NormalBalance,
   StatementSection,
   JournalEntryType,
@@ -26,6 +27,7 @@ export const ChartOfAccountsResponse = z.object({
   parent_account_code: z.string().nullable(),
   normal_balance: NormalBalance,
   statement_section: StatementSection.nullable(),
+  cash_flow_section: CashFlowSection.nullable(),
   is_system_account: z.boolean(),
   is_active: z.boolean(),
   created_at: z.string(),
@@ -454,6 +456,13 @@ export const BalanceSheetResponse = z.object({
   liability_lines: z.array(StatementLine),
 });
 export type BalanceSheetResponseType = z.infer<typeof BalanceSheetResponse>;
+
+export const CashFlowQuery = z.object({
+  date_from: dateOnly,
+  date_to: dateOnly,
+  book_type: BookType.optional(),
+});
+export type CashFlowQueryType = z.infer<typeof CashFlowQuery>;
 
 export const BalanceSheetQuery = z.object({
   as_of_date: dateOnly,

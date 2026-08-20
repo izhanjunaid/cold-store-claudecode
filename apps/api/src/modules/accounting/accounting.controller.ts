@@ -11,6 +11,7 @@ import {
   TrialBalanceQuery,
   ProfitLossQuery,
   BalanceSheetQuery,
+  CashFlowQuery,
   LockPeriodRequest,
   UnlockPeriodRequest,
   CreateCreditNoteRequest,
@@ -26,6 +27,7 @@ import { CoaService } from './coa.service';
 import { JournalEntryService } from './journal-entry.service';
 import { GlService } from './gl.service';
 import { FinancialStatementsService } from './financial-statements.service';
+import { CashFlowService } from './cash-flow.service';
 import { PeriodLockService } from './period-lock.service';
 import { CreditNoteService } from './credit-note.service';
 import { BadDebtService } from './bad-debt.service';
@@ -43,6 +45,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   const coa = new CoaService(app.prisma);
   const gl = new GlService(app.prisma);
   const financials = new FinancialStatementsService(app.prisma);
+  const cashFlow = new CashFlowService(app.prisma);
   const creditNote = new CreditNoteService(app.prisma, journalEntry);
   const badDebt = new BadDebtService(app.prisma, journalEntry);
   const openingBalance = new OpeningBalanceService(app.prisma, journalEntry);
@@ -284,6 +287,19 @@ export async function accountingRoutes(app: FastifyInstance) {
       const q = request.query as z.infer<typeof BalanceSheetQuery>;
       const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
       const data = await financials.getBalanceSheet(request.user!.facilityId, { ...q, book_type: bookType });
+      return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'GET',
+    url: '/v1/accounting/cash-flow',
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
+    schema: { querystring: CashFlowQuery },
+    handler: async (request, reply) => {
+      const q = request.query as z.infer<typeof CashFlowQuery>;
+      const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
+      const data = await cashFlow.getCashFlow(request.user!.facilityId, { ...q, book_type: bookType });
       return sendSuccess(reply, data);
     },
   });
