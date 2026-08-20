@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { PageHeader } from '@/components/layout/page-header';
+import { OpeningBalanceNotice } from '@/components/opening-balance-notice';
 import { StatementFrame, StatementSkeleton } from '@/components/accounting/statement-frame';
 import { StatementToolbar } from '@/components/accounting/statement-toolbar';
 import { StatementTable, SectionHeading, StatementRow, SpacerRow } from '@/components/accounting/statement';
@@ -122,6 +123,8 @@ export default function ProfitLossPage() {
   return (
     <div className="max-w-4xl">
       <PageHeader title="Profit &amp; Loss" description="Income statement — revenue, cost of service and profit" />
+
+      <OpeningBalanceNotice context="statement" />
 
       <StatementToolbar
         mode="range"

@@ -118,4 +118,45 @@ describe('syncChartOfAccounts (runs on every client update)', () => {
     await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID);
     expect(await parentOf()).toBe('6100');
   });
+
+  // The six accounts this release introduces. A client box is exactly the case
+  // this covers: seeded before they existed, updated afterwards, and expected
+  // to pick them up without anyone running a script by hand.
+  it('brings a facility seeded before this release up to the new chart', async () => {
+    const NEW_CODES = ['1240', '1250', '1260', '2071', '2072', '3015'];
+    await prisma.chartOfAccounts.deleteMany({
+      where: { facilityId: SCRATCH_FACILITY_ID, accountCode: { in: NEW_CODES } },
+    });
+
+    expect(await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID)).toBe(NEW_CODES.length);
+
+    const added = await prisma.chartOfAccounts.findMany({
+      where: { facilityId: SCRATCH_FACILITY_ID, accountCode: { in: NEW_CODES } },
+      orderBy: { accountCode: 'asc' },
+    });
+    expect(added.map((a) => a.accountCode)).toEqual(NEW_CODES);
+
+    const by = (code: string) => added.find((a) => a.accountCode === code)!;
+
+    // Accrued unbilled revenue must sit under Other Current Assets, never under
+    // 1100 Trade Receivables — nobody owes it yet, so it must not reach AR
+    // ageing or the AR control accounts.
+    expect(by('1250').parentAccountCode).toBe('1200');
+    expect(by('1250').accountClass).toBe('ASSET');
+
+    // Drawings is contra-equity: DEBIT-normal, root-level like the rest of
+    // equity. The balance sheet sums equity as credit-minus-debit, so this
+    // presents negative with no change to the statement code.
+    expect(by('3015').accountClass).toBe('EQUITY');
+    expect(by('3015').normalBalance).toBe('DEBIT');
+    expect(by('3015').parentAccountCode).toBeNull();
+
+    // Withholding stays split by section — the s.165 statement reports by
+    // section, and separating one merged balance afterwards is guesswork.
+    expect(by('2071').accountClass).toBe('LIABILITY');
+    expect(by('2072').accountClass).toBe('LIABILITY');
+
+    // And it stays a no-op from here.
+    expect(await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID)).toBe(0);
+  });
 });

@@ -51,6 +51,17 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   { code: '1210', name: 'Advance Payments to Suppliers', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
   { code: '1220', name: 'Prepaid Electricity (Security Deposit)', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
   { code: '1230', name: 'Advances to Employees', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
+  // Tax customers withhold from payments to us under s.153. It is an advance
+  // of our own income tax, not a discount — without this account the withheld
+  // amount silently becomes an unexplained shortfall in the party's AR.
+  { code: '1240', name: 'Tax Withheld at Source — Receivable', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
+  // Contra-entry for the monthly storage-revenue accrual (JE-25). Deliberately
+  // under 1200 and not under 1100 Trade Receivables: it is not owed by anyone
+  // yet, so it must never reach AR ageing or the AR control accounts.
+  { code: '1250', name: 'Accrued Storage Revenue (Unbilled)', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT', system: true },
+  // Only used where the facility is registered for provincial sales tax on
+  // services; harmless and unposted otherwise.
+  { code: '1260', name: 'Sales Tax — Input / Adjustable', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
   { code: '1300', name: 'Fixed Assets', cls: 'ASSET', type: 'HEADER', parent: null, normal: 'DEBIT', system: true, section: 'NON_CURRENT_ASSET' },
   { code: '1310', name: 'Cold Storage Plant & Equipment', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT', system: true },
   { code: '1311', name: 'Accum. Depreciation — Plant & Equipment', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT', system: true },
@@ -72,7 +83,12 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   { code: '2040', name: 'Utility Bills Payable', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
   { code: '2060', name: 'EOBI Payable — Employee Portion', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
   { code: '2061', name: 'EOBI Payable — Employer Portion', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
-  { code: '2070', name: 'Income Tax Withheld Payable', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
+  { code: '2070', name: 'Income Tax Withheld — Salaries (s.149)', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
+  // We are a withholding agent on payments out, not only on payroll. Kept as
+  // separate accounts because the s.165 statement reports by section, and
+  // splitting a single balance afterwards is guesswork.
+  { code: '2071', name: 'Tax Withheld — Suppliers & Services (s.153)', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT' },
+  { code: '2072', name: 'Tax Withheld — Rent (s.155)', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT' },
   { code: '2080', name: 'Damage / Spoilage Liability Payable', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT' },
   { code: '2100', name: 'Long-Term Liabilities', cls: 'LIABILITY', type: 'HEADER', parent: null, normal: 'CREDIT', system: true, section: 'NON_CURRENT_LIABILITY' },
   { code: '2110', name: 'Bank Loan — Equipment Finance', cls: 'LIABILITY', type: 'DETAIL', parent: '2100', normal: 'CREDIT' },
@@ -80,6 +96,12 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
 
   // CLASS 3: EQUITY
   { code: '3010', name: "Owner's Capital", cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true },
+  // A proprietor takes drawings constantly and had nowhere to post them but
+  // against capital itself, which destroys the contributed-vs-withdrawn split
+  // the owner's tax computation depends on. DEBIT-normal: a contra-equity
+  // account, so the balance sheet's credit-minus-debit sum presents it
+  // negative with no change to the statement code.
+  { code: '3015', name: "Owner's Drawings", cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'DEBIT' },
   { code: '3020', name: 'Retained Earnings', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT' },
   { code: '3030', name: 'Current Year Profit / (Loss)', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true },
 

@@ -136,6 +136,17 @@ describe('Gap 1 · opening balances', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('rejects accrued unbilled revenue (1250) — the accrual runner owns that account', async () => {
+    // The runner posts and reverses 1250 every period from the live lot set and
+    // only ever reverses its own entries, so an opening balance parked there
+    // would be double-counted by the first accrual and never cleared.
+    const res = await enter(managerToken, {
+      as_of_date: '2026-01-01',
+      other_lines: [{ account_code: '1250', debit_pkr: 5000, credit_pkr: 0 }],
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('rejects a P&L-class account in other_lines (phase/19)', async () => {
     const res = await enter(managerToken, {
       as_of_date: '2026-01-01',

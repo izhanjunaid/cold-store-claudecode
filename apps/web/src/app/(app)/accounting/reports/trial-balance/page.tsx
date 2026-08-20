@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { CheckCircle2, TriangleAlert } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { PageHeader } from '@/components/layout/page-header';
+import { OpeningBalanceNotice } from '@/components/opening-balance-notice';
 import { StatementFrame, StatementSkeleton } from '@/components/accounting/statement-frame';
 import { StatementToolbar } from '@/components/accounting/statement-toolbar';
 import { useStatementPeriod } from '@/components/accounting/use-statement-period';
@@ -93,6 +94,8 @@ export default function TrialBalancePage() {
   return (
     <div>
       <PageHeader title="Trial Balance" description="Opening · movement · closing balances across all accounts" />
+
+      <OpeningBalanceNotice context="statement" />
 
       <StatementToolbar
         mode="range"
