@@ -397,6 +397,15 @@ export const ProfitLossResponse = z.object({
   net_profit_pkr: z.number(),
   net_profit_pct: z.number().nullable(),
 
+  // Statement of income and retained earnings (IFRS for SMEs §3.18 style):
+  // opening equity + profit − drawings = closing equity. Ties to the balance
+  // sheet's total_equity_pkr at date_to, but only when the range starts on the
+  // fiscal-year start — equity carries FY-to-date profit, not range profit.
+  opening_equity_pkr: z.number(),
+  drawings_pkr: z.number(),
+  closing_equity_pkr: z.number(),
+  is_fiscal_year_to_date: z.boolean(),
+
   // Activity in accounts the header rollups could not place (F-6b);
   // amounts are signed as their contribution to net profit.
   unclassified_lines: z.array(StatementLine),
