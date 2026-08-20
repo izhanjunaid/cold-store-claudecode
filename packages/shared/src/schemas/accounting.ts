@@ -462,6 +462,22 @@ export const BalanceSheetQuery = z.object({
 export type BalanceSheetQueryType = z.infer<typeof BalanceSheetQuery>;
 
 // ============================================================
+// Revenue Accrual (JE-25)
+// ============================================================
+
+export const RevenueAccrualPeriodQuery = z.object({
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  period_month: z.coerce.number().int().min(1).max(12),
+});
+export type RevenueAccrualPeriodQueryType = z.infer<typeof RevenueAccrualPeriodQuery>;
+
+export const RunRevenueAccrualRequest = z.object({
+  period_year: z.number().int().min(2000).max(2100),
+  period_month: z.number().int().min(1).max(12),
+});
+export type RunRevenueAccrualRequestType = z.infer<typeof RunRevenueAccrualRequest>;
+
+// ============================================================
 // Period Lock
 // ============================================================
 

@@ -17,6 +17,8 @@ import {
   CreditNoteListQuery,
   BadDebtWriteOffRequest,
   EnterOpeningBalancesRequest,
+  RevenueAccrualPeriodQuery,
+  RunRevenueAccrualRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { assertKatchiWriteAllowed, resolveBookTypeForRead } from './book-gate';
@@ -28,6 +30,7 @@ import { PeriodLockService } from './period-lock.service';
 import { CreditNoteService } from './credit-note.service';
 import { BadDebtService } from './bad-debt.service';
 import { OpeningBalanceService } from './opening-balance.service';
+import { RevenueAccrualService } from './revenue-accrual.service';
 import { Errors } from '../../common/errors';
 
 const CodeParam = z.object({ code: z.string().regex(/^[0-9]+$/) });
@@ -43,6 +46,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   const creditNote = new CreditNoteService(app.prisma, journalEntry);
   const badDebt = new BadDebtService(app.prisma, journalEntry);
   const openingBalance = new OpeningBalanceService(app.prisma, journalEntry);
+  const revenueAccrual = new RevenueAccrualService(app.prisma, journalEntry);
 
   // ==========================================================
   // CHART OF ACCOUNTS — S-35
@@ -281,6 +285,39 @@ export async function accountingRoutes(app: FastifyInstance) {
       const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
       const data = await financials.getBalanceSheet(request.user!.facilityId, { ...q, book_type: bookType });
       return sendSuccess(reply, data);
+    },
+  });
+
+  // ==========================================================
+  // REVENUE ACCRUAL (JE-25)
+  // ==========================================================
+
+  app.route({
+    method: 'GET',
+    url: '/v1/accounting/revenue-accrual',
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
+    schema: { querystring: RevenueAccrualPeriodQuery },
+    handler: async (request, reply) => {
+      const q = request.query as z.infer<typeof RevenueAccrualPeriodQuery>;
+      const data = await revenueAccrual.preview(request.user!.facilityId, q.period_year, q.period_month);
+      return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/revenue-accrual',
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
+    schema: { body: RunRevenueAccrualRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof RunRevenueAccrualRequest>;
+      const data = await revenueAccrual.run(
+        request.user!.facilityId,
+        request.user!.userId,
+        body.period_year,
+        body.period_month,
+      );
+      return sendSuccess(reply.status(201), data);
     },
   });
 
