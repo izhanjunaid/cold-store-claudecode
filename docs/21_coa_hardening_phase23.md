@@ -25,8 +25,11 @@ balance and cannot be posted to. The real accounts are three independent DETAIL
 accounts — `1010` Cash on Hand, `1020` Bank Account — Main, `1030` Mobile Wallet
 Receipts — each with its own balance, GL drill-down and trial-balance row.
 
-What is grouped is the **presentation**, and grouping is correct: IAS 1 / IAS 7 require
+What is grouped is the **presentation**, and grouping is correct: IFRS for SMEs §7 requires
 "cash and cash equivalents" as one face-of-statement line with composition disclosed.
+(This passage originally cited IAS 1 / IAS 7. Those belong to full IFRS and have no
+counterpart numbering in IFRS for SMEs, which is the framework this system declares —
+see `docs/09` §1. The requirement, and so the conclusion below, is unchanged.)
 QuickBooks, Xero and SAP all do the same. Splitting them into two balance-sheet
 sections would be non-standard and would add nothing the GL doesn't already give.
 

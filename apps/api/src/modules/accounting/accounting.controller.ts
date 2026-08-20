@@ -97,6 +97,18 @@ export async function accountingRoutes(app: FastifyInstance) {
     },
   });
 
+  app.route({
+    method: 'DELETE',
+    url: '/v1/accounting/accounts/:code',
+    preHandler: [app.authenticate, app.requirePermission('accounting.manage_accounts')],
+    schema: { params: CodeParam },
+    handler: async (request, reply) => {
+      const { code } = request.params as z.infer<typeof CodeParam>;
+      const data = await coa.remove(request.user!.facilityId, code);
+      return sendSuccess(reply, data);
+    },
+  });
+
   // ==========================================================
   // JOURNAL ENTRIES — S-36
   // ==========================================================

@@ -32,17 +32,76 @@ export const ChartOfAccountsResponse = z.object({
 });
 export type ChartOfAccountsResponseType = z.infer<typeof ChartOfAccountsResponse>;
 
-export const CreateAccountRequest = z.object({
-  account_code: z.string().min(2).max(10).regex(/^[0-9]+$/),
-  account_name: z.string().min(1).max(200),
-  account_class: AccountClass,
-  account_type: AccountType,
-  parent_account_code: z.string().max(10).nullable().optional(),
-  normal_balance: NormalBalance,
-  // HEADER only — which statement section its children roll up into. Absent
-  // routes to the unclassified bucket, same as every header before phase/24.
-  statement_section: StatementSection.optional(),
-});
+/**
+ * The normal balance every account of a class carries unless it is a contra
+ * account. Derivable — so callers need not supply it, and a caller supplying
+ * the *wrong* one is the bug this replaces: normal_balance drives the trial
+ * balance and the general ledger's running balance, and
+ * guard_chart_of_accounts locks it permanently the moment the account has a
+ * posting. There is no correcting it afterwards.
+ */
+export const NORMAL_BALANCE_BY_CLASS = {
+  ASSET: 'DEBIT',
+  COST_OF_SERVICE: 'DEBIT',
+  EXPENSE: 'DEBIT',
+  LIABILITY: 'CREDIT',
+  EQUITY: 'CREDIT',
+  REVENUE: 'CREDIT',
+} as const;
+
+export function normalBalanceForClass(
+  accountClass: keyof typeof NORMAL_BALANCE_BY_CLASS,
+): 'DEBIT' | 'CREDIT' {
+  return NORMAL_BALANCE_BY_CLASS[accountClass];
+}
+
+export const CreateAccountRequest = z
+  .object({
+    account_code: z.string().min(2).max(10).regex(/^[0-9]+$/),
+    account_name: z.string().min(1).max(200),
+    account_class: AccountClass,
+    account_type: AccountType,
+    parent_account_code: z.string().max(10).nullable().optional(),
+    // Optional: derived from account_class when absent (normalBalanceForClass).
+    // A value contradicting the class requires is_contra below.
+    normal_balance: NormalBalance.optional(),
+    // Opt-in acknowledgement that this account deliberately inverts its
+    // class's normal balance — 1311 Accum. Depreciation (ASSET/CREDIT),
+    // 4910 Discounts Allowed (REVENUE/DEBIT). Request-level only: the
+    // persisted normal_balance already encodes the result, so no column.
+    is_contra: z.boolean().optional(),
+    // HEADER only — which statement section its children roll up into.
+    statement_section: StatementSection.optional(),
+  })
+  .superRefine((v, ctx) => {
+    // A header with no section appears in no section's list, so every detail
+    // account beneath it silently lands in the statements' unclassified
+    // bucket. Disclosing that is honest; making it unreachable is better.
+    // EQUITY is exempt — equity aggregates by class, not by header.
+    if (v.account_type === 'HEADER' && v.account_class !== 'EQUITY' && !v.statement_section) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['statement_section'],
+        message: 'A header account must declare the statement section its children roll up into',
+      });
+    }
+    if (
+      v.normal_balance &&
+      v.normal_balance !== normalBalanceForClass(v.account_class) &&
+      !v.is_contra
+    ) {
+      const expected = normalBalanceForClass(v.account_class);
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['normal_balance'],
+        message:
+          v.account_class +
+          ' accounts normally carry a ' +
+          expected +
+          ' balance. Set is_contra to open a contra account that deliberately inverts it.',
+      });
+    }
+  });
 export type CreateAccountRequestType = z.infer<typeof CreateAccountRequest>;
 
 export const UpdateAccountRequest = z.object({

@@ -1120,6 +1120,10 @@ describe('account creation validates the parent (F-6a)', () => {
         account_type: 'HEADER',
         parent_account_code: '6000',
         normal_balance: 'DEBIT',
+        // Present so the request clears CreateAccountRequest and the nested-header
+        // rule is what rejects it. Without a section the schema rejects first and
+        // this test would pass for the wrong reason.
+        statement_section: 'OPERATING_EXPENSE',
       },
     });
     expect(res.statusCode).toBe(422);
@@ -1137,6 +1141,9 @@ describe('account creation validates the parent (F-6a)', () => {
         account_class: 'EQUITY',
         account_type: 'DETAIL',
         normal_balance: 'DEBIT',
+        // EQUITY normally carries a credit balance; drawings deliberately invert
+        // it, which the API now requires the caller to declare rather than infer.
+        is_contra: true,
       },
     });
     expect(res.statusCode).toBe(201);
@@ -1149,19 +1156,22 @@ describe('account creation validates the parent (F-6a)', () => {
 
 describe('statements surface activity in unclassified accounts (F-6b)', () => {
   it('P&L includes custom-header expense activity instead of silently dropping it', async () => {
-    const header = await app.inject({
-      method: 'POST',
-      url: '/v1/accounting/accounts',
-      headers: authHeaders(ownerToken),
-      payload: {
-        account_code: '7000',
-        account_name: 'Financing Costs (custom)',
-        account_class: 'EXPENSE',
-        account_type: 'HEADER',
-        normal_balance: 'DEBIT',
+    // Legacy state, written directly. Since Phase A a header must declare its
+    // statement_section, so an unsectioned one can only exist as history — a row
+    // created before the rule. That is exactly the state this test needs, and
+    // the API can no longer produce it (nor should it). What is under test is
+    // the statements' safety net for such rows, not the create endpoint.
+    await prisma.chartOfAccounts.create({
+      data: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: '7000',
+        accountName: 'Financing Costs (custom)',
+        accountClass: 'EXPENSE',
+        accountType: 'HEADER',
+        normalBalance: 'DEBIT',
+        statementSection: null,
       },
     });
-    expect(header.statusCode).toBe(201);
     const detail = await app.inject({
       method: 'POST',
       url: '/v1/accounting/accounts',
@@ -1224,19 +1234,22 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
   });
 
   it('Balance sheet includes custom-header asset balances and still balances', async () => {
-    const header = await app.inject({
-      method: 'POST',
-      url: '/v1/accounting/accounts',
-      headers: authHeaders(ownerToken),
-      payload: {
-        account_code: '9903',
-        account_name: 'Custom Asset Header',
-        account_class: 'ASSET',
-        account_type: 'HEADER',
-        normal_balance: 'DEBIT',
+    // Legacy state, written directly. Since Phase A a header must declare its
+    // statement_section, so an unsectioned one can only exist as history — a row
+    // created before the rule. That is exactly the state this test needs, and
+    // the API can no longer produce it (nor should it). What is under test is
+    // the statements' safety net for such rows, not the create endpoint.
+    await prisma.chartOfAccounts.create({
+      data: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: '9903',
+        accountName: 'Custom Asset Header',
+        accountClass: 'ASSET',
+        accountType: 'HEADER',
+        normalBalance: 'DEBIT',
+        statementSection: null,
       },
     });
-    expect(header.statusCode).toBe(201);
     const detail = await app.inject({
       method: 'POST',
       url: '/v1/accounting/accounts',
@@ -1289,19 +1302,22 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
   // branch of the fold — a separate code path (credit-normal, added straight
   // to total_operating_revenue_pkr rather than subtracted as a magnitude).
   it('P&L includes custom-header revenue activity, folded into net_revenue and every subtotal above it', async () => {
-    const header = await app.inject({
-      method: 'POST',
-      url: '/v1/accounting/accounts',
-      headers: authHeaders(ownerToken),
-      payload: {
-        account_code: '7020',
-        account_name: 'Ancillary Revenue (custom)',
-        account_class: 'REVENUE',
-        account_type: 'HEADER',
-        normal_balance: 'CREDIT',
+    // Legacy state, written directly. Since Phase A a header must declare its
+    // statement_section, so an unsectioned one can only exist as history — a row
+    // created before the rule. That is exactly the state this test needs, and
+    // the API can no longer produce it (nor should it). What is under test is
+    // the statements' safety net for such rows, not the create endpoint.
+    await prisma.chartOfAccounts.create({
+      data: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: '7020',
+        accountName: 'Ancillary Revenue (custom)',
+        accountClass: 'REVENUE',
+        accountType: 'HEADER',
+        normalBalance: 'CREDIT',
+        statementSection: null,
       },
     });
-    expect(header.statusCode).toBe(201);
     const detail = await app.inject({
       method: 'POST',
       url: '/v1/accounting/accounts',
@@ -1627,19 +1643,22 @@ describe('account codes must not collide with another class range (phase/19)', (
 
 describe('deactivation requires a zero ledger balance (phase/19)', () => {
   it('blocks deactivating an account holding a balance; allows it once zeroed', async () => {
-    const header = await app.inject({
-      method: 'POST',
-      url: '/v1/accounting/accounts',
-      headers: authHeaders(ownerToken),
-      payload: {
-        account_code: '7900',
-        account_name: 'Deactivation Test Header',
-        account_class: 'EXPENSE',
-        account_type: 'HEADER',
-        normal_balance: 'DEBIT',
+    // Legacy state, written directly. Since Phase A a header must declare its
+    // statement_section, so an unsectioned one can only exist as history — a row
+    // created before the rule. That is exactly the state this test needs, and
+    // the API can no longer produce it (nor should it). What is under test is
+    // the statements' safety net for such rows, not the create endpoint.
+    await prisma.chartOfAccounts.create({
+      data: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: '7900',
+        accountName: 'Deactivation Test Header',
+        accountClass: 'EXPENSE',
+        accountType: 'HEADER',
+        normalBalance: 'DEBIT',
+        statementSection: null,
       },
     });
-    expect(header.statusCode).toBe(201);
     const detail = await app.inject({
       method: 'POST',
       url: '/v1/accounting/accounts',

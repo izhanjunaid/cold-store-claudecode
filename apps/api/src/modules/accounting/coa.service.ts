@@ -5,6 +5,7 @@ import type {
   CreateAccountRequestType,
   UpdateAccountRequestType,
 } from '@coldchain/shared';
+import { normalBalanceForClass } from '@coldchain/shared';
 
 // The seed numbers every class by its leading digit (1 asset … 6 expense).
 // We reject only a code whose leading digit is *another* class's assigned
@@ -52,6 +53,51 @@ function validateStatementSection(
     );
   }
 }
+
+// Every place an account code is stored as configuration rather than as a
+// posting. None of these are foreign keys (they are plain VarChar(10)), so
+// nothing in the database stops an account being deleted out from under
+// them — a rate plan pointing at a deleted revenue account fails at the next
+// invoice, long after the delete.
+//
+// Each entry builds its own where-clause because the models are not
+// uniformly shaped: party_loan_repayments has no facility_id of its own and
+// scopes through its parent loan. Adding a new *_account_code column means
+// adding a line here.
+const CONFIG_REFERENCES: Array<{
+  model: string;
+  label: string;
+  where: (facilityId: string, code: string) => Record<string, unknown>;
+}> = [
+  { model: 'ratePlan', label: 'rate plan', where: (f, c) => ({ facilityId: f, revenueAccountCode: c }) },
+  { model: 'serviceCharge', label: 'service charge', where: (f, c) => ({ facilityId: f, revenueAccountCode: c }) },
+  { model: 'payment', label: 'payment', where: (f, c) => ({ facilityId: f, assetAccountCode: c }) },
+  {
+    model: 'fixedAsset',
+    label: 'fixed asset',
+    where: (f, c) => ({
+      facilityId: f,
+      OR: [{ assetAccountCode: c }, { accumDeprAccountCode: c }, { deprExpenseAccountCode: c }],
+    }),
+  },
+  {
+    model: 'expenseVoucher',
+    label: 'expense voucher',
+    where: (f, c) => ({ facilityId: f, OR: [{ expenseAccountCode: c }, { assetAccountCode: c }] }),
+  },
+  { model: 'partyLoan', label: 'peshgi loan', where: (f, c) => ({ facilityId: f, sourceAssetAccountCode: c }) },
+  {
+    model: 'partyLoanRepayment',
+    label: 'peshgi repayment',
+    // No facility_id column — scope through the parent loan.
+    where: (f, c) => ({ loan: { facilityId: f }, assetAccountCode: c }),
+  },
+  {
+    model: 'employeeAdvance',
+    label: 'employee advance',
+    where: (f, c) => ({ facilityId: f, sourceAssetAccountCode: c }),
+  },
+];
 
 function format(a: Prisma.ChartOfAccountsGetPayload<{}>) {
   return {
@@ -154,12 +200,72 @@ export class CoaService {
           accountClass: body.account_class,
           accountType: body.account_type,
           parentAccountCode: body.parent_account_code ?? null,
-          normalBalance: body.normal_balance,
+          // Derived from the class unless the caller explicitly declared a
+          // contra account (CreateAccountRequest.superRefine enforces that).
+          normalBalance: body.normal_balance ?? normalBalanceForClass(body.account_class),
           statementSection: body.statement_section ?? null,
           isSystemAccount: false,
         },
       });
       return format(created);
+    });
+  }
+
+  /**
+   * Delete an account outright. Only ever legal for one thing: an account
+   * opened by mistake that nothing has touched yet. Deactivation is the
+   * route for an account with history — it keeps that history on every
+   * report, which is why there was no delete at all before this.
+   *
+   * The journal-entry-line FK is ON DELETE RESTRICT, so Postgres is the
+   * backstop if a check below is ever missed. The config references are
+   * plain VarChar columns, not FKs, so they must be checked by hand — a
+   * rate plan pointing at a deleted revenue account would fail at the next
+   * invoice, long after the delete.
+   */
+  async remove(facilityId: string, code: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const a = await tx.chartOfAccounts.findUnique({
+        where: { facilityId_accountCode: { facilityId, accountCode: code } },
+      });
+      if (!a) throw Errors.ACCOUNT_NOT_FOUND();
+      if (a.isSystemAccount) throw Errors.SYSTEM_ACCOUNT_PROTECTED();
+
+      const postings = await tx.journalEntryLine.count({
+        where: { facilityId, accountCode: code },
+      });
+      if (postings > 0) {
+        throw Errors.ACCOUNT_IN_USE(
+          `it has ${postings} journal posting(s). Deactivate it instead — its history stays on every report.`,
+        );
+      }
+
+      const children = await tx.chartOfAccounts.count({
+        where: { facilityId, parentAccountCode: code },
+      });
+      if (children > 0) {
+        throw Errors.ACCOUNT_IN_USE(`${children} account(s) sit under it. Delete or re-parent those first.`);
+      }
+
+      for (const ref of CONFIG_REFERENCES) {
+        const delegate = (tx as unknown as Record<
+          string,
+          { count: (a: unknown) => Promise<number> } | undefined
+        >)[ref.model];
+        // A missing delegate means the table above names a model that no
+        // longer exists. Fail loudly: silently skipping the check would let
+        // an account be deleted out from under live configuration.
+        if (!delegate) {
+          throw new Error(`CONFIG_REFERENCES names unknown Prisma model '${ref.model}'`);
+        }
+        const used = await delegate.count({ where: ref.where(facilityId, code) });
+        if (used > 0) {
+          throw Errors.ACCOUNT_IN_USE(`${used} ${ref.label}(s) are configured to post to it.`);
+        }
+      }
+
+      await tx.chartOfAccounts.delete({ where: { id: a.id } });
+      return { deleted: true, account_code: code };
     });
   }
 
