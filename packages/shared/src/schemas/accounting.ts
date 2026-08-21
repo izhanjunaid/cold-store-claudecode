@@ -297,6 +297,10 @@ export const TrialBalanceRow = z.object({
   account_code: z.string(),
   account_name: z.string(),
   account_class: AccountClass,
+  // Where this row sits on the statements. Beyond the ten StatementSection
+  // values it can be 'EQUITY' (equity is placed by class, not by header) or
+  // 'UNCLASSIFIED' (a legacy header with no section) — hence a plain string.
+  statement_section: z.string(),
   normal_balance: NormalBalance,
   opening_debit_pkr: z.number(),
   opening_credit_pkr: z.number(),
@@ -322,10 +326,28 @@ export const TrialBalanceGroup = z.object({
 });
 export type TrialBalanceGroupType = z.infer<typeof TrialBalanceGroup>;
 
+export const TrialBalanceSectionGroup = z.object({
+  statement_section: z.string(),
+  label: z.string(),
+  rows: z.array(TrialBalanceRow),
+  subtotal: z.object({
+    opening_debit_pkr: z.number(),
+    opening_credit_pkr: z.number(),
+    movement_debit_pkr: z.number(),
+    movement_credit_pkr: z.number(),
+    debit_balance_pkr: z.number(),
+    credit_balance_pkr: z.number(),
+  }),
+});
+export type TrialBalanceSectionGroupType = z.infer<typeof TrialBalanceSectionGroup>;
+
 export const TrialBalanceResponse = z.object({
   date_from: z.string().nullable(),
   date_to: z.string(),
   groups: z.array(TrialBalanceGroup),
+  // The same rows grouped by statement section, so a subtotal here can be
+  // traced onto the face of the P&L or balance sheet.
+  section_groups: z.array(TrialBalanceSectionGroup),
   rows: z.array(TrialBalanceRow),
   total_opening_debit_pkr: z.number(),
   total_opening_credit_pkr: z.number(),
