@@ -518,6 +518,20 @@ export const RunRevenueAccrualRequest = z.object({
 export type RunRevenueAccrualRequestType = z.infer<typeof RunRevenueAccrualRequest>;
 
 // ============================================================
+// Cash / bank transfer (JE-27)
+// ============================================================
+
+export const CreateCashTransferRequest = z.object({
+  transfer_date: dateOnly,
+  from_account_code: z.string().regex(/^[0-9]+$/),
+  to_account_code: z.string().regex(/^[0-9]+$/),
+  amount_pkr: z.number().positive(),
+  note: z.string().max(300).optional(),
+  book_type: BookType.optional().default('PACCI'),
+});
+export type CreateCashTransferRequestType = z.infer<typeof CreateCashTransferRequest>;
+
+// ============================================================
 // GST / Sales Tax Settlement (JE-26)
 // ============================================================
 

@@ -22,6 +22,7 @@ import {
   RunRevenueAccrualRequest,
   GstSettlementQuery,
   PostGstSettlementRequest,
+  CreateCashTransferRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { assertKatchiWriteAllowed, resolveBookTypeForRead } from './book-gate';
@@ -36,6 +37,7 @@ import { BadDebtService } from './bad-debt.service';
 import { OpeningBalanceService } from './opening-balance.service';
 import { RevenueAccrualService } from './revenue-accrual.service';
 import { GstSettlementService } from './gst-settlement.service';
+import { buildJE27CashTransfer, CASH_TRANSFER_ACCOUNTS } from './templates/je-27-cash-transfer';
 import { Errors } from '../../common/errors';
 
 const CodeParam = z.object({ code: z.string().regex(/^[0-9]+$/) });
@@ -338,6 +340,57 @@ export async function accountingRoutes(app: FastifyInstance) {
         body.period_month,
       );
       return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  // ==========================================================
+  // CASH / BANK TRANSFER (JE-27)
+  // ==========================================================
+
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/cash-transfers',
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
+    schema: { body: CreateCashTransferRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof CreateCashTransferRequest>;
+      assertKatchiWriteAllowed(request.user!.role, body.book_type);
+
+      const allowed = CASH_TRANSFER_ACCOUNTS as readonly string[];
+      for (const [field, code] of [
+        ['from_account_code', body.from_account_code],
+        ['to_account_code', body.to_account_code],
+      ] as const) {
+        if (!allowed.includes(code)) {
+          throw Errors.VALIDATION_ERROR(
+            `A transfer may only move money between cash and bank accounts (${allowed.join(', ')}).`,
+            field,
+          );
+        }
+      }
+      if (body.from_account_code === body.to_account_code) {
+        throw Errors.VALIDATION_ERROR(
+          'The source and destination must be different accounts.',
+          'to_account_code',
+        );
+      }
+
+      const posted = await journalEntry.post(
+        request.user!.facilityId,
+        request.user!.userId,
+        buildJE27CashTransfer({
+          transferDate: new Date(body.transfer_date),
+          amountPkr: body.amount_pkr,
+          fromAccountCode: body.from_account_code,
+          toAccountCode: body.to_account_code,
+          bookType: body.book_type,
+          userId: request.user!.userId,
+          note: body.note,
+        }),
+        { postingStatus: 'POSTED' },
+      );
+      const full = await journalEntry.getById(request.user!.facilityId, posted.id);
+      return sendSuccess(reply.status(201), full);
     },
   });
 
