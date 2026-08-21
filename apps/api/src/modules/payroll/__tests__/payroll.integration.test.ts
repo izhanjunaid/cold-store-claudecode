@@ -248,6 +248,36 @@ describe('Phase 8B — Payroll', () => {
       0,
     );
     expect(credit2030).toBeCloseTo(sumNetPay);
+
+    // The same invariant, now reported on the run itself so the screen can
+    // show it. Asserting the JE alone proved it held on the day the test ran;
+    // this is what tells the accountant it still holds on a run they are
+    // looking at.
+    expect(run.reconciliation).not.toBeNull();
+    expect(run.reconciliation.gl_salaries_payable_pkr).toBeCloseTo(credit2030, 2);
+    expect(run.reconciliation.register_net_pay_pkr).toBeCloseTo(sumNetPay, 2);
+    expect(run.reconciliation.difference_pkr).toBeCloseTo(0, 2);
+    expect(run.reconciliation.is_reconciled).toBe(true);
+  });
+
+  it('reports no reconciliation on a draft run — there is no entry to tie to yet', async () => {
+    const list = await app.inject({
+      method: 'GET',
+      url: '/v1/payroll-runs?status=DRAFT',
+      headers: authHeaders(accountantToken),
+    });
+    const rows = JSON.parse(list.body).data as { id: string }[];
+    if (rows.length === 0) return;
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/payroll-runs/${rows[0].id}`,
+      headers: authHeaders(accountantToken),
+    });
+    expect(res.statusCode).toBe(200);
+    // Not zero and not a difference equal to the whole payroll — null, because
+    // an unfinalised run has nothing to disagree with.
+    expect(JSON.parse(res.body).data.reconciliation).toBeNull();
   });
 
   it('cannot finalize already-finalized run', async () => {

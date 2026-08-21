@@ -601,7 +601,7 @@ export class PayrollRunService {
       },
     });
     if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
-    return formatRun(run);
+    return { ...formatRun(run), reconciliation: await salariesPayableReconciliation(db, run) };
   }
 
   async list(facilityId: string, query: any) {
@@ -664,6 +664,45 @@ export class PayrollRunService {
       daysWorked: line.daysWorked ? Number(line.daysWorked) : null,
     };
   }
+}
+
+/**
+ * Does the GL agree with the payroll register? (Inv-16)
+ *
+ * 2030 Salaries Payable is credited in aggregate — one line for the whole run —
+ * while who is owed what lives in payroll_line_items. IFRS for SMEs s.28 wants
+ * the liability recognised, not a GL account per employee, so the aggregate
+ * posting is right and a per-employee subledger would be machinery for nothing.
+ * What was missing is the tie between the two. If they ever disagree, the
+ * register and the books are telling different stories about the same wages,
+ * and the screen says so rather than leaving it to be discovered at year end.
+ *
+ * Null until the run is finalised: before that there is no journal entry to
+ * reconcile against, and reporting a difference equal to the whole payroll
+ * would be noise, not a finding.
+ */
+async function salariesPayableReconciliation(
+  db: PrismaClient | Prisma.TransactionClient,
+  run: { payrollJournalEntryId: string | null; lineItems?: { netPayPkr: unknown }[] },
+) {
+  if (!run.payrollJournalEntryId) return null;
+
+  const agg = await db.journalEntryLine.aggregate({
+    where: { journalEntryId: run.payrollJournalEntryId, accountCode: '2030' },
+    _sum: { creditAmount: true, debitAmount: true },
+  });
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const gl = round2(Number(agg._sum.creditAmount ?? 0) - Number(agg._sum.debitAmount ?? 0));
+  const register = round2(
+    (run.lineItems ?? []).reduce((s, l) => s + Number(l.netPayPkr), 0),
+  );
+
+  return {
+    gl_salaries_payable_pkr: gl,
+    register_net_pay_pkr: register,
+    difference_pkr: round2(gl - register),
+    is_reconciled: Math.abs(gl - register) < 0.005,
+  };
 }
 
 function formatRun(r: any) {
