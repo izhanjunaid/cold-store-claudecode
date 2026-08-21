@@ -9,6 +9,7 @@ import { buildJE06ChequeDishonoured } from '../accounting/templates/je-06-cheque
 import { buildJE24ChequeCleared } from '../accounting/templates/je-24-cheque-cleared';
 import { receiptAssetAccountForPaymentMethod } from '../accounting/templates/types';
 import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recovered';
+import { generateReceiptNumber } from './receipt-number';
 
 // Internal allocation shape used by service. Controller normalises legacy
 // `{invoice_id, allocated_amount_pkr}` payloads into INVOICE-targeted lines.
@@ -25,6 +26,7 @@ function formatPayment(p: PaymentWithRelations) {
     payment_date: p.paymentDate.toISOString().slice(0, 10),
     amount_pkr: Number(p.amountPkr),
     payment_method: p.paymentMethod,
+    receipt_number: p.receiptNumber ?? null,
     reference_number: p.referenceNumber ?? null,
     is_advance: p.isAdvance,
     status: p.status,
@@ -103,10 +105,12 @@ export class PaymentService {
       const assetAccountCode = receiptAssetAccountForPaymentMethod(params.paymentMethod);
       const bookType = ((params.bookType as 'PACCI' | 'KATCHI' | undefined) ?? 'PACCI');
 
+      const paymentDateValue = new Date(params.paymentDate);
       const payment = await this.repo.create(tx, {
         facilityId: params.facilityId,
         partyId: params.partyId,
-        paymentDate: new Date(params.paymentDate),
+        receiptNumber: await generateReceiptNumber(tx, params.facilityId, paymentDateValue),
+        paymentDate: paymentDateValue,
         amountPkr: params.amountPkr,
         paymentMethod: params.paymentMethod as any,
         referenceNumber: params.referenceNumber ?? null,

@@ -845,6 +845,7 @@ model Payment {
   paymentDate      DateTime        @map("payment_date") @db.Date
   amountPkr        Decimal         @map("amount_pkr") @db.Decimal(12, 2)
   paymentMethod    PaymentMethod   @map("payment_method")
+  receiptNumber    String?         @map("receipt_number") @db.VarChar(20)
   referenceNumber  String?         @map("reference_number") @db.VarChar(100)
   isAdvance        Boolean         @default(false) @map("is_advance")
   status           PaymentStatus   @default(RECORDED)
@@ -867,6 +868,7 @@ model Payment {
   @@index([facilityId, partyId])
   @@index([facilityId, status])
   @@index([facilityId, paymentDate])
+  @@unique([facilityId, receiptNumber])
   @@index([facilityId, paymentDate, status])
   @@map("payments")
 }

@@ -30,6 +30,7 @@ interface Payment {
   party_id: string;
   party_name: string;
   payment_date: string;
+  receipt_number: string | null;
   amount_pkr: number;
   payment_method: string;
   reference_number: string | null;
@@ -210,7 +211,11 @@ export default function PaymentDetailPage() {
 
   return (
     <div className="max-w-3xl">
-      <PageHeader title="Payment Detail" crumb="Detail" />
+      <PageHeader
+        title={payment.receipt_number ?? 'Payment Detail'}
+        description={payment.receipt_number ? 'Payment receipt' : undefined}
+        crumb="Detail"
+      />
 
       <div className="mb-4">
         <StatusBadge status={payment.status} />
@@ -226,6 +231,7 @@ export default function PaymentDetailPage() {
               </Button>
             }
           />
+          <Info label="Receipt No." value={payment.receipt_number ?? '—'} />
           <Info label="Payment Date" value={payment.payment_date} />
           <Info label="Method" value={METHOD_LABELS[payment.payment_method] ?? payment.payment_method} />
           <Info label="Reference" value={payment.reference_number ?? '—'} />

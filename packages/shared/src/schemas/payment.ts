@@ -89,6 +89,7 @@ export const PaymentResponse = z.object({
   payment_date: z.string(),
   amount_pkr: z.number(),
   payment_method: PaymentMethod,
+  receipt_number: z.string().nullable(),
   reference_number: z.string().nullable(),
   is_advance: z.boolean(),
   status: PaymentStatus,

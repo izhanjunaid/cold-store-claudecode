@@ -58,6 +58,7 @@ interface PaymentSummary {
   payment_date: string;
   amount_pkr: number;
   payment_method: string;
+  receipt_number: string | null;
   reference_number: string | null;
   status: string;
 }
