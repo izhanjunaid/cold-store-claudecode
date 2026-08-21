@@ -34,6 +34,12 @@ export const CommodityInventoryReportQuery = z.object({
 });
 export type CommodityInventoryReportQueryType = z.infer<typeof CommodityInventoryReportQuery>;
 
+export const WithholdingTaxReportQuery = z.object({
+  date_from: dateOnly,
+  date_to: dateOnly,
+});
+export type WithholdingTaxReportQueryType = z.infer<typeof WithholdingTaxReportQuery>;
+
 export const CashExceptionsReportQuery = z.object({
   as_of_date: dateOnly.optional(),
 });
