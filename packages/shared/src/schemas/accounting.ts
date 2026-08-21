@@ -518,6 +518,26 @@ export const RunRevenueAccrualRequest = z.object({
 export type RunRevenueAccrualRequestType = z.infer<typeof RunRevenueAccrualRequest>;
 
 // ============================================================
+// GST / Sales Tax Settlement (JE-26)
+// ============================================================
+
+export const GstSettlementQuery = z.object({
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  period_month: z.coerce.number().int().min(1).max(12),
+});
+export type GstSettlementQueryType = z.infer<typeof GstSettlementQuery>;
+
+export const PostGstSettlementRequest = z.object({
+  period_year: z.number().int().min(2000).max(2100),
+  period_month: z.number().int().min(1).max(12),
+  // When the money actually leaves. Deliberately separate from the tax period:
+  // the liability is owed at the period end but remitted weeks later.
+  payment_date: dateOnly,
+  bank_account_code: z.string().regex(/^[0-9]+$/).optional(),
+});
+export type PostGstSettlementRequestType = z.infer<typeof PostGstSettlementRequest>;
+
+// ============================================================
 // Period Lock
 // ============================================================
 

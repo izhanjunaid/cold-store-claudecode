@@ -35,6 +35,7 @@ const cards: AcctCard[] = [
   { title: 'Period Locks', href: '/accounting/period-locks', icon: LockKeyhole, description: 'Close finished months so nothing can be posted into them.' },
   { title: 'Opening Balances', href: '/accounting/opening-balances', icon: FilePlus2, description: 'Bring balances from your paper registers into the system at go-live.' },
   { title: 'Revenue Accrual', href: '/accounting/revenue-accrual', icon: FilePlus2, description: 'Recognise storage earned but not yet billed, before closing the period.' },
+  { title: 'Sales Tax Settlement', href: '/accounting/gst-settlement', icon: Coins, description: 'Clear GST collected on invoices against input tax and what was remitted.' },
   { title: 'Trial Balance', href: '/accounting/reports/trial-balance', icon: Scale, description: 'Verify debits = credits across all accounts.' },
   { title: 'Profit & Loss', href: '/accounting/reports/profit-loss', icon: FileBarChart, description: 'Revenue, cost of service, and net profit for any period.' },
   { title: 'Balance Sheet', href: '/accounting/reports/balance-sheet', icon: FileBarChart, description: 'Assets = Liabilities + Equity, as of any date.' },

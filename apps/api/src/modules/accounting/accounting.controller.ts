@@ -20,6 +20,8 @@ import {
   EnterOpeningBalancesRequest,
   RevenueAccrualPeriodQuery,
   RunRevenueAccrualRequest,
+  GstSettlementQuery,
+  PostGstSettlementRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { assertKatchiWriteAllowed, resolveBookTypeForRead } from './book-gate';
@@ -33,6 +35,7 @@ import { CreditNoteService } from './credit-note.service';
 import { BadDebtService } from './bad-debt.service';
 import { OpeningBalanceService } from './opening-balance.service';
 import { RevenueAccrualService } from './revenue-accrual.service';
+import { GstSettlementService } from './gst-settlement.service';
 import { Errors } from '../../common/errors';
 
 const CodeParam = z.object({ code: z.string().regex(/^[0-9]+$/) });
@@ -50,6 +53,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   const badDebt = new BadDebtService(app.prisma, journalEntry);
   const openingBalance = new OpeningBalanceService(app.prisma, journalEntry);
   const revenueAccrual = new RevenueAccrualService(app.prisma, journalEntry);
+  const gstSettlement = new GstSettlementService(app.prisma, journalEntry);
 
   // ==========================================================
   // CHART OF ACCOUNTS — S-35
@@ -333,6 +337,34 @@ export async function accountingRoutes(app: FastifyInstance) {
         body.period_year,
         body.period_month,
       );
+      return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  // ==========================================================
+  // GST / SALES TAX SETTLEMENT (JE-26)
+  // ==========================================================
+
+  app.route({
+    method: 'GET',
+    url: '/v1/accounting/gst-settlement',
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
+    schema: { querystring: GstSettlementQuery },
+    handler: async (request, reply) => {
+      const q = request.query as z.infer<typeof GstSettlementQuery>;
+      const data = await gstSettlement.preview(request.user!.facilityId, q.period_year, q.period_month);
+      return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/gst-settlement',
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
+    schema: { body: PostGstSettlementRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof PostGstSettlementRequest>;
+      const data = await gstSettlement.settle(request.user!.facilityId, request.user!.userId, body);
       return sendSuccess(reply.status(201), data);
     },
   });
