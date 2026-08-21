@@ -1075,6 +1075,7 @@ model FixedAsset {
   depreciationStartDate      DateTime?          @map("depreciation_start_date") @db.Date
   status                     FixedAssetStatus   @default(PURCHASED)
   accumulatedDepreciationPkr Decimal            @default(0) @map("accumulated_depreciation_pkr") @db.Decimal(14, 2)
+  accumulatedImpairmentPkr   Decimal            @default(0) @map("accumulated_impairment_pkr") @db.Decimal(14, 2)
   disposalDate               DateTime?          @map("disposal_date") @db.Date
   disposalProceedsPkr        Decimal?           @map("disposal_proceeds_pkr") @db.Decimal(14, 2)
   purchaseJournalEntryId     String?            @unique @map("purchase_journal_entry_id") @db.Uuid

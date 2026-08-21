@@ -74,6 +74,14 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   { code: '1350', name: 'Capital Work in Progress', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT' },
   { code: '1360', name: 'Intangible Assets — Software', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT' },
   { code: '1361', name: 'Accum. Amortisation — Software', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT' },
+  // Impairment is kept apart from accumulated depreciation on purpose.
+  // Depreciation is systematic allocation over a useful life; impairment is a
+  // one-off write-down. Merging them makes the standard disclosure — cost,
+  // accumulated depreciation, accumulated impairment, carrying amount —
+  // impossible to reconstruct, and 1311/1321/1331/1341 are named for
+  // depreciation. One shared account rather than one per class is the
+  // proportionate choice at this scale.
+  { code: '1370', name: 'Accum. Impairment — Fixed Assets', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT', system: true },
 
   // CLASS 2: LIABILITIES
   { code: '2000', name: 'Current Liabilities', cls: 'LIABILITY', type: 'HEADER', parent: null, normal: 'CREDIT', system: true, section: 'CURRENT_LIABILITY' },
@@ -152,6 +160,7 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   { code: '6130', name: 'Depreciation — Vehicles', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
   { code: '6140', name: 'Amortisation — Software', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
   { code: '6150', name: 'Spoilage / Damage Compensation Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
+  { code: '6160', name: 'Impairment Loss — Fixed Assets', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
 
   // CLASS 6 (continued): NON-OPERATING EXPENSES — below operating profit,
   // same idea as 4200 Other Income on the revenue side (phase/25).

@@ -267,11 +267,12 @@ describe('Phase 8B — Payroll', () => {
       headers: authHeaders(accountantToken),
     });
     const rows = JSON.parse(list.body).data as { id: string }[];
-    if (rows.length === 0) return;
+    const draft = rows[0];
+    if (!draft) return;
 
     const res = await app.inject({
       method: 'GET',
-      url: `/v1/payroll-runs/${rows[0].id}`,
+      url: `/v1/payroll-runs/${draft.id}`,
       headers: authHeaders(accountantToken),
     });
     expect(res.statusCode).toBe(200);

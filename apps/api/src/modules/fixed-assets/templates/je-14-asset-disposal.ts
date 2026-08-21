@@ -1,5 +1,6 @@
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
 import { ACCOUNT_GAIN_ON_DISPOSAL, ACCOUNT_LOSS_ON_DISPOSAL } from './types';
+import { ACCOUNT_ACCUM_IMPAIRMENT } from './je-28-asset-impairment';
 
 type Input = {
   assetId: string;
@@ -11,6 +12,8 @@ type Input = {
   disposalDate: Date;
   costPkr: number;
   accumDeprPkr: number;
+  /** Cumulative impairment written down against this asset. Zero for almost every asset. */
+  accumImpairmentPkr?: number;
   proceedsPkr: number;
   bookType: 'PACCI' | 'KATCHI';
 };
@@ -36,12 +39,20 @@ type Input = {
  *   DR  1311                  accum_depr
  *   DR  6110 Loss             loss (= NBV − proceeds)
  *     CR  1310                  cost
+ *
+ * An impaired asset additionally carries a credit balance in 1370, which has
+ * to be cleared here too:
+ *   DR  1370 Accum. Impairment  accum_impairment
+ * and NBV is cost − accum_depr − accum_impairment. Leaving 1370 out would
+ * strand the write-down against an asset that no longer exists and would book
+ * the impairment a second time as a disposal loss.
  */
 export function buildJE14AssetDisposal(input: Input): JournalEntryDraft {
   const cost = round2(input.costPkr);
   const accumDepr = round2(input.accumDeprPkr);
+  const accumImpairment = round2(input.accumImpairmentPkr ?? 0);
   const proceeds = round2(input.proceedsPkr);
-  const nbv = round2(cost - accumDepr);
+  const nbv = round2(cost - accumDepr - accumImpairment);
   const gainOrLoss = round2(proceeds - nbv);
 
   const lines: JournalEntryLineDraft[] = [];
@@ -61,6 +72,15 @@ export function buildJE14AssetDisposal(input: Input): JournalEntryDraft {
       debitAmount: accumDepr,
       creditAmount: 0,
       description: `Clear accumulated depreciation — ${input.assetNumber}`,
+    });
+  }
+
+  if (accumImpairment > 0) {
+    lines.push({
+      accountCode: ACCOUNT_ACCUM_IMPAIRMENT,
+      debitAmount: accumImpairment,
+      creditAmount: 0,
+      description: `Clear accumulated impairment — ${input.assetNumber}`,
     });
   }
 

@@ -24,7 +24,10 @@ export type ScheduleRowInput = {
   depreciationStartDate: Date;
   periodYear: number;
   periodMonth: number;
+  /** Carrying amount at the start of the period — cost less accumulated depreciation AND impairment. */
   openingNbvPkr: number;
+  /** Cumulative impairment written down so far. Zero for almost every asset. */
+  accumulatedImpairmentPkr?: number;
 };
 
 export type ScheduleRow = {
@@ -34,6 +37,11 @@ export type ScheduleRow = {
   depreciationAmountPkr: number;
   closingNbvPkr: number;
 };
+
+/** Whole months from the start date to the given period. Local time, matching isPeriodActive. */
+export function monthsElapsed(start: Date, year: number, month: number): number {
+  return (year - start.getFullYear()) * 12 + (month - (start.getMonth() + 1));
+}
 
 /**
  * Returns true if the given period (year, month) is on or after the depreciation start date,
@@ -84,8 +92,27 @@ export function computeMonthlyDepreciation(input: ScheduleRowInput): ScheduleRow
     if (!input.usefulLifeYears || input.usefulLifeYears <= 0) {
       throw new Error('usefulLifeYears required for SLM');
     }
-    const annual = round2((input.costPkr - residual) / input.usefulLifeYears);
-    monthly = round2(annual / 12);
+    if (round2(input.accumulatedImpairmentPkr ?? 0) > 0.005) {
+      // IFRS for SMEs 27.10: once an impairment is recognised, later periods
+      // spread the REVISED carrying amount, less residual, over the REMAINING
+      // useful life. Charging the original cost-based amount against a written
+      // -down asset would depreciate it past its residual value and, given
+      // enough time, past zero.
+      //
+      // Only impaired assets take this branch. For an unimpaired asset the two
+      // formulas are algebraically identical, but not identical to the paisa
+      // once rounding compounds — and this runs on a live register, so an
+      // untouched asset must keep producing the schedule it already has.
+      const totalMonths = Math.round(input.usefulLifeYears * 12);
+      const remaining = Math.max(
+        totalMonths - monthsElapsed(input.depreciationStartDate, input.periodYear, input.periodMonth),
+        1,
+      );
+      monthly = round2(remainingDepreciable / remaining);
+    } else {
+      const annual = round2((input.costPkr - residual) / input.usefulLifeYears);
+      monthly = round2(annual / 12);
+    }
   } else {
     if (!input.wdvRatePercent || input.wdvRatePercent <= 0) {
       throw new Error('wdvRatePercent required for WDV');
