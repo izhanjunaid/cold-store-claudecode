@@ -2,7 +2,7 @@
 
 **Purpose:** the durable register of all 40 findings raised by the phase/20 audit (`docs/18`), with severity and current status. `docs/18:133` previously pointed at a phase plan file for this list; that file was overwritten and the backlog existed nowhere in the repo. This document replaces that reference.
 
-**Last reconciled:** 2026-08-05, against HEAD `f56f8b8` on `phase/22-audit-backlog`. Every `OPEN` row below was re-verified against source on that date — the `file:line` in the status column is the evidence, not a memory.
+**Last reconciled:** 2026-08-22, against `accounting/F-completion` (see §Phase 29 below). Prior reconciliation 2026-08-05, against HEAD `f56f8b8` on `phase/22-audit-backlog`. Every `OPEN` row below was re-verified against source on that date — the `file:line` in the status column is the evidence, not a memory.
 
 **Legend** — `FIXED — <batch>`: shipped, see the linked doc section. `OPEN`: verified still present. `DEFERRED`: decided, deliberately not built yet.
 
@@ -23,13 +23,13 @@
 | P1-1 | `other_deductions_pkr` never reached the journal entry; `JE-15B` had no `2070` tax line, so any daily-wage run with income tax could never leave DRAFT | **FIXED** — Batch C (partial, `docs/18` §4) + Phase 21 (full) |
 | P1-2 | Employee advances absent entirely; `other_deductions` was the only hook | **FIXED** — Phase 21, `docs/19` |
 | P1-3 | Payroll runs and fixed assets were terminal — no cancel, reverse or un-dispose existed | **FIXED** — Batch E, `docs/18` §5 |
-| P1-4 | **GST Payable 2020 is credited forever and never debited** — no settlement path exists | **OPEN** — `je-01-invoice-finalized.ts:137` credits it; repo-wide, nothing debits it |
+| P1-4 | **GST Payable 2020 is credited forever and never debited** — no settlement path exists | **FIXED** — Phase 29, JE-26 + `/v1/accounting/gst-settlement` |
 | P1-5 | One account map, four copies — two of them in the browser | **FIXED** — Batch B, `docs/18` §6 |
 | P1-6 | **No cash-negative guard** — a posted entry can drive Cash on Hand below zero | **RESOLVED, by detection instead of prevention** — `GET /v1/reports/cash-exceptions` (phase/24); the posting-time guard itself stays un-built, deliberately; see below |
 | P1-7 | **`number_format` setting is wired to nothing** | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P1-8 | **No PDF surface formats money** — invoices print `1234567.5` | **FIXED** — Batch G, phase/22 (`dc08cf4`) |
 | P1-9 | Payroll remittance was repeatable and unvalidated | **FIXED** — Batch C |
-| P1-10 | No contra / cash-book voucher; petty-cash replenishment is one-way and has no UI | **OPEN** |
+| P1-10 | No contra / cash-book voucher; petty-cash replenishment is one-way and has no UI | **FIXED** — Phase 29, JE-27 + `/accounting/cash-transfers` (any direction between 1010/1020/1030). JE-17C stays as the petty-cash-specific sibling; the new screen is the only UI, so there is one place to record a transfer |
 | P1-11 | Expenses was the only financial module taking no row lock — two concurrent `pay()` calls both posted | **FIXED** — Batch A, `docs/18` §3 |
 | P1-12 | Cheque clearance never implemented — `clearance_status` is stamped `CLEARED` on receipt, `PENDING` is never assigned, `cheque_date` is never read. **Not a policy**: `docs/09` §258/§364-366/§372 require the opposite | **FIXED** — Phase 25, `docs/09` §JE-24, `payment.service.ts:clear()` |
 | P1-13 | JE-09/JE-09B spoilage path absent while `2080`/`6150` are seeded and postable | **OPEN** — no `je-09*` template exists |
@@ -46,16 +46,16 @@
 | P2-2 | **Petty-cash JE points at a voucher row that does not exist** — the audit trail asserts a source document that was never created | **FIXED** — Batch H part 3, phase/22. Retagged `sourceTable: 'manual'`, `sourceId: <acting user>`, matching the one other source-document-less template rather than fabricating a voucher row |
 | P2-3 | Account picker is a plain `<select>` over 84 accounts; `ComboboxField` ships and is used elsewhere | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P2-4 | Voucher running totals bypass the shared formatter | **FIXED** — Batch G, phase/22 (`c162472`) |
-| P2-5 | No per-employee subledger — payroll posts a single aggregate `2030` line | **OPEN** — `je-15:55`, `je-15b:58`, `je-16:29` |
-| P2-6 | `PLANNED` / `WRITTEN_OFF` asset statuses have no writer | **OPEN** — `fixed-asset.service.ts:165` reads `WRITTEN_OFF`; nothing sets it for an asset |
-| P2-7 | No partial disposal, revaluation, impairment or CWIP | **OPEN** — zero matches repo-wide |
+| P2-5 | No per-employee subledger — payroll posts a single aggregate `2030` line | **CLOSED — won't build.** IFRS for SMEs s.28 requires the *liability* be recognised, not a GL account per employee, and the per-employee detail already exists in `payroll_line_items`. The aggregate posting is correct. Phase 29 built invariant 16 instead (below), which closes the actual gap |
+| P2-6 | `PLANNED` / `WRITTEN_OFF` asset statuses have no writer | **MOSTLY FIXED** — Phase 29's impairment writes `WRITTEN_OFF` when a write-down leaves no carrying amount. `PLANNED` remains a dead enum value, which is not an accounting defect |
+| P2-7 | No partial disposal, revaluation, impairment or CWIP | **PARTLY FIXED — impairment only, deliberately.** Phase 29 shipped IFRS for SMEs s.27 impairment (JE-28, accounts `6160`/`1370`, migration `0023`), because s.27 *requires* an assessment at each reporting date and a failed compressor is a realistic indicator here. **Revaluation: won't build** — s.17 permits cost *or* revaluation; cost is chosen, implemented and compliant. **Partial disposal / CWIP: won't build** — you do not sell half a compressor, `1350` CWIP is seeded, and a manual JE covers the rare case |
 | P2-8 | Depreciation period ordering unconstrained — March can be run before February | **FIXED** — Batch H part 3, phase/22. Per-asset "eligible last period" guard using the same `computeMonthlyDepreciation` calc the run itself uses, so a calendar gap with zero `IN_SERVICE` assets can't permanently deadlock a later run |
-| P2-9 | Employee termination has no settlement / gratuity and posts no JE | **OPEN** — Phase 21 added an outstanding-debt warning to the terminate dialog, but no accounting |
+| P2-9 | Employee termination has no settlement / gratuity and posts no JE | **OPEN — awaiting the facility's accountant, not an engineering decision.** Gratuity depends on establishment size and the terms of employment; IFRS for SMEs s.28 would require accruing it *as it is earned*, so if the facility owes it and never accrues, liabilities and cost are understated and the understatement compounds per employee per year of service. Building it blind means inventing a rate, a vesting rule and an eligibility test, and a wrong accrual is worse than a disclosed absent one. **The question to put to them:** does the facility employ 20 or more workers, and do the terms of employment (or any standing order applying to it) provide for gratuity or any other end-of-service benefit? If yes, this becomes a real work item and needs the rate, the vesting rule, and whether past service is already owed. If no, record that finding here and the item closes legitimately |
 | P2-10 | **KATCHI gate applied on create only, not later stages** | **FIXED (22 of 23 routes) — Batch H part 2, phase/22.** `POST /v1/depreciation/runs` still ungated — it batches every `IN_SERVICE` asset regardless of book, so there's no single record to gate on; deferred as a product decision, see below |
 | P2-11 | Dishonour date forced to `new Date()` | **FIXED** (Batch H1, `e8edad8`) — `payment.service.ts:355,363` takes `dishonourDateInput`; re-verified 2026-08-07 |
 | P2-12 | Payroll duplicate-period guard ran outside its transaction | **FIXED** — Batch C |
 | P2-13 | Statement and operational formatters disagree on the zero/null glyph | **FIXED** — Batch G, phase/22 (`c162472`) |
-| P2-14 | Payments have no document / receipt number at all | **OPEN** — zero matches for `payment_number` / `receipt_number` |
+| P2-14 | Payments have no document / receipt number at all | **FIXED** — Phase 29, `RCP-YYYYMM-NNNN` via the advisory-locked generator, migration `0022`. Existing payments deliberately not backfilled — a receipt number belongs to a receipt that was issued |
 | P2-15 | Voucher creator can approve their own voucher; cancel reason silently discarded | **FIXED** — Batch H part 3, phase/22. `approve()` rejects same-user (`EXPENSE_VOUCHER_SELF_APPROVAL`); cancel reason now read from the request body and appended to `notes`. Backend-only: `formatVoucher()` doesn't return `created_by`, so the web Approve button isn't hidden for the creator — clicking it now correctly 422s with a toast instead of silently succeeding, same as any other permission rejection on this screen. Not a bug; a client-side hide is a follow-on, not part of this fix |
 
 ## P3
@@ -64,10 +64,10 @@
 |---|---|---|
 | P3-1 | Grouped amount input yields a silent zero — typing `40,00,000` posts `0` | **FIXED** — Batch G, phase/22 (`c162472`) |
 | P3-2 | Dead export `defaultsForCategory` | **FIXED** (Batch H1, `e8edad8`) — removed; zero hits repo-wide, re-verified 2026-08-07 |
-| P3-3 | Dev-DB drift: `invoice_surcharges` exists in the live dev database but not in this branch's schema | **OPEN** — ops check, not code. Confirmed absent from the Prisma schema (`schema.prisma` has no `invoice_surcharge`/`invoice_surcharges` model at all). **Now also confirmed live**: `je-21-late-payment-surcharge.ts:34`, `invoice.service.ts:300`, `payment.service.ts:646`, `reporting/reports/receivables-aging.ts:204` all stamp `sourceTable: 'invoice_surcharge'` on posted JEs — the audit trail asserts a document type with no backing table anywhere on this branch, the same shape as P2-2, found by the invariant-17 test rather than by reading. Not restructuring JE-21 in this batch; invariant 17 carries it as a named, documented gap so it isn't silently skipped or a crash risk |
+| P3-3 | Dev-DB drift: `invoice_surcharges` exists in the live dev database but not in this branch's schema | **CLOSED — cosmetic, won't change.** The GL is the system of record and there is deliberately no surcharge table; the `sourceTable` string is merely misleading, and renaming it would break idempotency counting that relies on existing rows. Invariant 17 already carries it as a named gap. Original note: **OPEN** — ops check, not code. Confirmed absent from the Prisma schema (`schema.prisma` has no `invoice_surcharge`/`invoice_surcharges` model at all). **Now also confirmed live**: `je-21-late-payment-surcharge.ts:34`, `invoice.service.ts:300`, `payment.service.ts:646`, `reporting/reports/receivables-aging.ts:204` all stamp `sourceTable: 'invoice_surcharge'` on posted JEs — the audit trail asserts a document type with no backing table anywhere on this branch, the same shape as P2-2, found by the invariant-17 test rather than by reading. Not restructuring JE-21 in this batch; invariant 17 carries it as a named, documented gap so it isn't silently skipped or a crash risk |
 | P3-4 | Depreciation batch runs in one transaction on Prisma's 5 s default timeout | **FIXED** — Batch H part 3, phase/22. Explicit `{ timeout: 30_000, maxWait: 10_000 }` — the first explicit Prisma transaction timeout anywhere in this codebase (confirmed via full-repo grep before choosing the shape) |
 | P3-5 | `PaymentService` constructed without its journal-entry dependency in reporting | **FIXED** (Batch H1, `e8edad8`) — `reporting.controller.ts:39-43` passes the `JournalEntryService`; the constructor param is now required, no `if (this.journalEntry)` guard remains. Re-verified 2026-08-07 |
-| P3-6 | No account for income tax withheld *from* the facility (s.153, when the billing party is a prescribed/withholding-agent payer) — a short payment today has to be cleared via credit note, and `CreditNoteLineItem.revenueAccountCode` is non-nullable, so the workaround debits revenue instead of a receivable. Found in the phase/25 ERPNext/Odoo benchmark (`docs/09` §2) | **DEFERRED** — genuinely low-frequency today: most billing parties (farmers, traders, arhtis) are not prescribed withholding agents. Build when the facility onboards its first corporate/institutional billing party. Shape: seed `1240 Tax Withheld at Source — Receivable`, add `Payment.taxWithheldPkr`, JE-02 splits into `DR cash/bank (net) + DR 1240 (withheld) / CR AR (gross)` |
+| P3-6 | ~~No account for income tax withheld *from* the facility~~ **FIXED — Phase 29**, built to exactly the shape recorded below: `1240`, `Payment.taxWithheldPkr` (migration `0024`), JE-02 splits `DR cash (net) + DR 1240 (withheld) / CR AR (gross)`. Original note follows. No account for income tax withheld *from* the facility (s.153, when the billing party is a prescribed/withholding-agent payer) — a short payment today has to be cleared via credit note, and `CreditNoteLineItem.revenueAccountCode` is non-nullable, so the workaround debits revenue instead of a receivable. Found in the phase/25 ERPNext/Odoo benchmark (`docs/09` §2) | **DEFERRED** — genuinely low-frequency today: most billing parties (farmers, traders, arhtis) are not prescribed withholding agents. Build when the facility onboards its first corporate/institutional billing party. Shape: seed `1240 Tax Withheld at Source — Receivable`, add `Payment.taxWithheldPkr`, JE-02 splits into `DR cash/bank (net) + DR 1240 (withheld) / CR AR (gross)` |
 
 ---
 
@@ -82,7 +82,7 @@ The audit proposed ten ledger invariants (11–20) and marked several "MISSING �
 | 13 | No `1020` balance includes a non-`CLEARED` cheque | P0-2 / P1-12 | **EXISTS** — Phase 25; `1025` holds every PENDING cheque, `payment.integration.test.ts` "clears a PENDING cheque" et al. |
 | 14 | No cash-class account ever goes negative | P1-6 | **NOT ENFORCED, by decision** — a negative balance is still possible and is meant to be: `GET /v1/reports/cash-exceptions` (phase/24) surfaces it instead of blocking the posting that caused it; see below |
 | 15 | Every payroll run has at most one remittance JE | P1-9 | **EXISTS** — guard `payroll-run.service.ts:411-412`, test `payroll.integration.test.ts:583` |
-| 16 | Σ `2030` credits = Σ per-employee net pay | P2-5 | **MISSING** — checkable today without the subledger |
+| 16 | Σ `2030` credits = Σ per-employee net pay | P2-5 | **EXISTS** — Phase 29. Computed on the payroll run itself (`reconciliation` on the run response) and shown on the run screen, so an accountant sees it for the run in front of them rather than trusting that a test passed once. Null on a draft run: there is no entry to reconcile against yet |
 | 17 | Every JE `sourceId` resolves to a real row in `sourceTable` | P2-2 | **EXISTS** — `accounting-hardening.integration.test.ts`, "every JE sourceId resolves to a live row" (self-verifying: an unmapped `sourceTable` fails loudly rather than being silently skipped). Surfaced P3-3 as a second instance of the same defect shape — see below |
 | 18 | One expense voucher never has more than one payment JE | P1-11 | **EXISTS** — `expense.integration.test.ts:339-344` |
 | 19 | `invoice_number` is unique per facility | P2-0a | **EXISTS** — as a DB constraint, migration `0011` |
@@ -206,3 +206,98 @@ Batch H and Batch I are now both closed. Still open: the depreciation-run KATCHI
 Everything else above is new capability rather than repair, and is deliberately held: P1-4, P1-10, P1-13, P2-5, P2-6, P2-7, P2-9, P2-14, and depreciation-run reversal (`DepreciationScheduleStatus` has no `REVERSED` member — it does not exist at all). **P1-6 joined this list mid-batch**, not by original scoping — it looked like defect repair until the test suite showed it depends on opening cash balances existing first (see decision above), which is new capability. **P1-12 left this list in Phase 25** — built, see the decision-on-record above.
 
 **Still open for production** (`docs/18:145`): run the duplicate-invoice-number pre-check in the `0011` migration banner before deploying. Dev returned clean but holds zero invoices, which proves nothing.
+
+---
+
+## Phase 29 — accounting completion (2026-08-22, `accounting/F-completion`)
+
+Closes P1-4, P1-10, P2-14, P3-6 and invariant 16; ships the narrow slice of
+P2-7; adds Pakistani withholding on payments out, which the audit never raised
+because nothing in the system could do it. Migrations `0022` (receipt number),
+`0023` (accumulated impairment), `0024` (tax withheld on receipts).
+
+**Journal entry numbering.** The plan reserved JE-27 for impairment. Templates
+were numbered in build order instead, so: **JE-26** GST settlement, **JE-27**
+cash transfer, **JE-28** asset impairment, **JE-29** withholding remittance.
+Stated here because the plan file says otherwise.
+
+### FINDING — every reversal in the ledger is applied twice
+
+**This is larger than anything else on this page and it is not fixed.** It was
+found while building P3-6 and is unrelated to it: it reproduces with no
+withholding involved at all.
+
+`markReversed()` sets the original entry's `posting_status` to `REVERSED`,
+**and** the caller separately posts a full mirror entry. Every statement, the
+GL and the trial balance filter `posting_status = 'POSTED'`, so the original
+drops out of the ledger entirely *and* the mirror is applied. The reversal
+therefore lands twice.
+
+Measured on a 10,000 cheque receipt, dishonoured, **no withholding**:
+
+| Account | Before | After receipt | After bounce | Should be |
+|---|---|---|---|---|
+| AR control (1110–1150) | 0 | −10,000 | **+10,000** | 0 |
+| 1025 Cheques in Hand | 0 | +10,000 | **−10,000** | 0 |
+
+Equal and opposite, so **the trial balance still balances** — which is why
+three accounting audits did not see it. AR is overstated by the full amount of
+every bounced cheque, and `1025` is driven negative.
+
+**Six call sites share the shape**, each posting a mirror *and* calling
+`markReversed`: payment dishonour (`payment.service.ts:544`, `:589`), invoice
+VOID (`invoice.service.ts:334`), asset disposal reversal
+(`fixed-asset.service.ts:363`), payroll run reversal
+(`payroll-run.service.ts:573`), and the generic
+`JournalEntryService.reverse()` (`journal-entry.service.ts:195`) which serves
+manual entries and opening balances. Only the dishonour path was measured; the
+others are read, not proven.
+
+**Check this on the client's box before anything else** — if bounced cheques
+have driven `1025` negative there, `GET /v1/reports/cash-exceptions` has been
+flagging this defect all along and nobody read it as this:
+
+```sql
+SELECT l.account_code, ROUND(SUM(l.debit_amount - l.credit_amount), 2) AS balance
+FROM journal_entry_lines l
+JOIN journal_entries j ON j.id = l.journal_entry_id
+WHERE j.posting_status = 'POSTED' AND j.book_type = 'PACCI'
+  AND l.account_code IN ('1010','1020','1025','1030')
+GROUP BY l.account_code ORDER BY l.account_code;
+
+SELECT source_table, entry_type, count(*) FROM journal_entries
+WHERE posting_status = 'REVERSED' GROUP BY 1, 2 ORDER BY 3 DESC;
+```
+
+**Two candidate fixes.**
+
+1. **Stop writing `REVERSED`; let both entries stand.** The original really
+   happened and belongs in its own period; the mirror is dated when the
+   reversal happened. This is the same argument the JE-25 docblock already
+   makes — marking an original REVERSED erases it from the period it was
+   recognising. `reverse()`'s already-reversed guard moves to `reversedById`,
+   and the UI badge reads `reversed_by` instead of the status.
+2. **Keep `REVERSED`; stop posting the mirror.** Rejected: the original's
+   effect then vanishes retroactively from its own period, so a bounce in
+   April silently restates March.
+
+**Option 1 is the recommendation**, and it is a phase of its own, not a patch.
+It changes what `posting_status` means, which migration `0002` enforces with a
+trigger permitting exactly one POSTED → REVERSED transition, and it reaches
+six services plus the journal-entry list filter and status badge.
+
+`apps/api/src/modules/payment/__tests__/tax-withheld.integration.test.ts`
+carries a comment recording this at the exact place someone will next look,
+and deliberately does **not** assert the post-bounce end state.
+
+### Also open, and newly created here
+
+- **`2071` / `2072` remittance is built (JE-29); `1240` has no relief path.**
+  Tax withheld *from* the facility accumulates in `1240` as an advance of its
+  own income tax and is only relieved when that tax is assessed — which this
+  system does not model. Expect `1240` to grow across a tax year and be
+  cleared by a manual JE at assessment. Not a defect; a documented boundary.
+- **The withholding report is not a return.** A s.165 filing needs each
+  payee's CNIC/NTN, which is not held anywhere: expense vouchers carry a
+  free-text `vendor_name` and payroll withholding is against staff
+  collectively. The screen says so on its face.

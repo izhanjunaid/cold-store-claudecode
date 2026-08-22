@@ -277,6 +277,14 @@ npx playwright test
 turbo test:coverage
 ```
 
+> **Phase 29 (accounting completion, 2026-08-22): 219 unit + 614 integration (api, +44) + 132 unit (web) green.** Fourteen commits, three migrations (`0022` receipt numbers, `0023` accumulated impairment, `0024` tax withheld on receipts). The new files are `gst-settlement` (6), `cash-transfer` (7), `receipt-number` (4), `impairment` (8), `withholding` (10), `tax-withheld` (7), `trial-balance-sections` (5), plus additions to the payroll suite.
+>
+> **Three of these tests exist to prove a change did NOT happen**, and they are the ones that matter: a receipt with no withholding must post exactly `DR cash / CR AR` for the full amount; an expense voucher paid with no withholding must post exactly two lines; and an unimpaired asset's depreciation schedule must be identical to the paisa. Each guards a path that every existing record in the facility takes, and each is the line between an additive change and a silent regression across all of them.
+>
+> **Two more assert an absence that only shows up later.** `1025` must clear to exactly zero after a withheld cheque is banked — a single assertion that catches JE-02 and JE-24 being wrong together in the same direction, which a bank-side check alone would miss. And re-running a settled GST period must settle nothing, because the settlement is dated *after* the period end, so a naive balance-at-period-end would never see its own debit and would pay twice.
+>
+> **What the suite still cannot see:** a bounced cheque reverses twice (`docs/20` §Phase 29). Every statement filters `posting_status = 'POSTED'`, the original is marked `REVERSED` and drops out, and a full mirror is also posted. AR ends overstated and `1025` ends negative by the same amount — so the trial balance balances, and no existing assertion is watching the *pair*. Found by measurement while building something else, not by a test.
+
 ## Coverage Targets
 
 | Layer | Target | Tool |
