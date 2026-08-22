@@ -31,6 +31,8 @@ interface Payment {
   party_name: string;
   payment_date: string;
   receipt_number: string | null;
+  tax_withheld_pkr: number;
+  cash_received_pkr: number;
   amount_pkr: number;
   payment_method: string;
   reference_number: string | null;
@@ -232,6 +234,12 @@ export default function PaymentDetailPage() {
             }
           />
           <Info label="Receipt No." value={payment.receipt_number ?? '—'} />
+          {payment.tax_withheld_pkr > 0 && (
+            <>
+              <Info label="Tax Withheld (s.153)" value={formatMoney(payment.tax_withheld_pkr)} />
+              <Info label="Cash Received" value={formatMoney(payment.cash_received_pkr)} />
+            </>
+          )}
           <Info label="Payment Date" value={payment.payment_date} />
           <Info label="Method" value={METHOD_LABELS[payment.payment_method] ?? payment.payment_method} />
           <Info label="Reference" value={payment.reference_number ?? '—'} />

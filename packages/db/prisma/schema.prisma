@@ -844,6 +844,9 @@ model Payment {
   partyId          String          @map("party_id") @db.Uuid
   paymentDate      DateTime        @map("payment_date") @db.Date
   amountPkr        Decimal         @map("amount_pkr") @db.Decimal(12, 2)
+  // Tax the customer deducted at source. amountPkr stays GROSS — it is what
+  // settles the invoice; cash actually received is amountPkr - taxWithheldPkr.
+  taxWithheldPkr   Decimal         @default(0) @map("tax_withheld_pkr") @db.Decimal(12, 2)
   paymentMethod    PaymentMethod   @map("payment_method")
   receiptNumber    String?         @map("receipt_number") @db.VarChar(20)
   referenceNumber  String?         @map("reference_number") @db.VarChar(100)

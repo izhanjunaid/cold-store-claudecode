@@ -27,6 +27,9 @@ function formatPayment(p: PaymentWithRelations) {
     amount_pkr: Number(p.amountPkr),
     payment_method: p.paymentMethod,
     receipt_number: p.receiptNumber ?? null,
+    tax_withheld_pkr: Number(p.taxWithheldPkr),
+    // What actually arrived. amount_pkr is what settled the invoice.
+    cash_received_pkr: round2(Number(p.amountPkr) - Number(p.taxWithheldPkr)),
     reference_number: p.referenceNumber ?? null,
     is_advance: p.isAdvance,
     status: p.status,
@@ -64,6 +67,7 @@ export class PaymentService {
     amountPkr: number;
     paymentMethod: string;
     referenceNumber?: string;
+    taxWithheldPkr?: number;
     isAdvance?: boolean;
     chequeDate?: string;
     bookType?: string;
@@ -101,6 +105,36 @@ export class PaymentService {
       // bounce. It starts PENDING and posts to 1025 (clearing), not 1020;
       // POST /v1/payments/:id/clear moves it once the bank actually
       // processes it (phase/25, docs/09 §2).
+      // s.153 withholding is refused on two shapes, on tax grounds rather
+      // than for convenience — and refusing them is what keeps JE-06 a
+      // two-case template instead of three.
+      //
+      //  - An advance credits 2010, not AR. A deduction certificate is issued
+      //    against an invoice for services rendered; there is no invoice yet.
+      //  - A peshgi recovery is repayment of a loan, not a payment for
+      //    services, so s.153 does not reach it.
+      const taxWithheldPkr = round2(params.taxWithheldPkr ?? 0);
+      if (taxWithheldPkr > 0) {
+        if (isAdvance) {
+          throw Errors.VALIDATION_ERROR(
+            'Tax cannot be withheld on an advance receipt — a deduction certificate is issued against an invoice, and an advance has none yet. Record the receipt, then apply it.',
+            'tax_withheld_pkr',
+          );
+        }
+        if (allocations.some((a) => a.target === 'LOAN')) {
+          throw Errors.VALIDATION_ERROR(
+            'Tax cannot be withheld on a peshgi recovery — repaying a loan is not a payment for services, so s.153 does not reach it. Record the recovery separately.',
+            'tax_withheld_pkr',
+          );
+        }
+        if (taxWithheldPkr > params.amountPkr + 0.005) {
+          throw Errors.VALIDATION_ERROR(
+            'The tax withheld cannot exceed the amount settling the invoice.',
+            'tax_withheld_pkr',
+          );
+        }
+      }
+
       const clearanceStatus = params.paymentMethod === 'CHEQUE' ? 'PENDING' : 'NA';
       const assetAccountCode = receiptAssetAccountForPaymentMethod(params.paymentMethod);
       const bookType = ((params.bookType as 'PACCI' | 'KATCHI' | undefined) ?? 'PACCI');
@@ -112,6 +146,7 @@ export class PaymentService {
         receiptNumber: await generateReceiptNumber(tx, params.facilityId, paymentDateValue),
         paymentDate: paymentDateValue,
         amountPkr: params.amountPkr,
+        taxWithheldPkr,
         paymentMethod: params.paymentMethod as any,
         referenceNumber: params.referenceNumber ?? null,
         isAdvance,
@@ -175,6 +210,7 @@ export class PaymentService {
               paymentId: payment.id,
               paymentDate: payment.paymentDate,
               amountPkr: cashReceiptAmount,
+              taxWithheldPkr,
               paymentMethod: payment.paymentMethod,
               referenceNumber: payment.referenceNumber,
               bookType,
@@ -491,6 +527,7 @@ export class PaymentService {
           paymentId: id,
           dishonourDate: dishonourDate ?? new Date(),
           amountPkr: je06Amount,
+          taxWithheldPkr: Number(fullPayment.taxWithheldPkr),
           bookType: fullPayment.bookType as 'PACCI' | 'KATCHI',
           party: fullPayment.party,
           originalAssetAccountCode: fullPayment.assetAccountCode,
@@ -592,7 +629,9 @@ export class PaymentService {
       const draft = buildJE24ChequeCleared({
         paymentId: id,
         clearedDate: clearDate,
-        amountPkr: Number(fullPayment.amountPkr),
+        // The cash leg, not the invoice amount: 1025 received the net, so
+        // clearing the gross would leave it permanently short.
+        amountPkr: round2(Number(fullPayment.amountPkr) - Number(fullPayment.taxWithheldPkr)),
         bookType: fullPayment.bookType as 'PACCI' | 'KATCHI',
         party: fullPayment.party,
         referenceNumber: fullPayment.referenceNumber,
