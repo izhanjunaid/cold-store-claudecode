@@ -9,6 +9,7 @@ import { StatementToolbar } from '@/components/accounting/statement-toolbar';
 import { StatementTable, SectionHeading, StatementRow, SpacerRow } from '@/components/accounting/statement';
 import { RatiosStrip } from '@/components/accounting/ratios-strip';
 import { useStatementPeriod } from '@/components/accounting/use-statement-period';
+import { useFacility } from '@/hooks/use-reference-data';
 import { describePeriod } from '@/lib/fiscal-period';
 import { fmtPct, fmtAcct } from '@/lib/accounting-format';
 import { buildCsv, downloadCsv } from '@/components/data-table/export-csv';
@@ -49,6 +50,10 @@ interface PL {
   ebitda_pct: number | null;
   net_profit_pkr: number;
   net_profit_pct: number | null;
+  opening_equity_pkr: number;
+  drawings_pkr: number;
+  closing_equity_pkr: number;
+  is_fiscal_year_to_date: boolean;
   unclassified_lines: Line[];
   total_unclassified_pkr: number;
   has_unclassified: boolean;
@@ -76,6 +81,7 @@ export default function ProfitLossPage() {
   const [data, setData] = useState<PL | null>(null);
   const [priorData, setPriorData] = useState<PL | null>(null);
   const [loading, setLoading] = useState(false);
+  const facility = useFacility();
 
   useEffect(() => {
     setLoading(true);
@@ -96,6 +102,13 @@ export default function ProfitLossPage() {
 
   const cmp = compare ? priorData : null;
   const priorLines = lineMap(cmp);
+  // The basis note must describe the policy actually in force. Saying "no
+  // month-end accrual is made" on a facility that runs JE-25 is a false
+  // statement on the face of the statement, which is the one place it matters.
+  const accrual = facility.data?.settings?.revenue_accrual?.enabled ?? false;
+  const basisNote = accrual
+    ? 'Storage revenue is recognized as it is earned: at each period end an accrual (JE-25) brings unbilled storage into revenue, and it is reversed when the invoice is raised, so a month shows the storage it actually provided.'
+    : 'Storage revenue is recognized when invoiced (typically at withdrawal); no month-end accrual is made. During the storage season a month can show low revenue against full running costs — the revenue arrives in the months lots are dispatched.';
   const glHref = (code: string) =>
     `/accounting/general-ledger?account_code=${code}&date_from=${range.date_from}&date_to=${range.date_to}${bookType ? `&book_type=${bookType}` : ''}`;
   const pl = (code: string) => (cmp ? priorLines.get(code) ?? 0 : undefined);
@@ -148,7 +161,7 @@ export default function ProfitLossPage() {
             title="Statement of Profit or Loss"
             periodLabel={describePeriod(range, 'period')}
             bookType={bookType}
-            note="Storage revenue is recognized when invoiced (typically at withdrawal); no month-end accrual is made. During the storage season a month can show low revenue against full running costs — the revenue arrives in the months lots are dispatched."
+            note={basisNote}
           >
             <StatementTable compare={compare} currentLabel={range.label} priorLabel={prior.label}>
               <SectionHeading>Revenue</SectionHeading>
@@ -211,7 +224,26 @@ export default function ProfitLossPage() {
               )}
 
               <StatementRow emphasis="grand" label={data.net_profit_pkr >= 0 ? 'Net Profit' : 'Net Loss'} amount={data.net_profit_pkr} prior={cmp?.net_profit_pkr} />
+
+              {data.is_fiscal_year_to_date && (
+                <>
+                  <SpacerRow />
+                  <SectionHeading>Owner&apos;s Equity — fiscal year to date</SectionHeading>
+                  <StatementRow depth={1} label="Owner's equity, opening" amount={data.opening_equity_pkr} prior={cmp?.opening_equity_pkr} />
+                  <StatementRow depth={1} label={data.net_profit_pkr >= 0 ? 'Add: profit for the period' : 'Less: loss for the period'} amount={data.net_profit_pkr} prior={cmp?.net_profit_pkr} />
+                  <StatementRow depth={1} code="3015" label="Less: owner's drawings" amount={-data.drawings_pkr} prior={cmp ? -cmp.drawings_pkr : undefined} href={glHref('3015')} />
+                  <StatementRow emphasis="total" label="Owner's equity, closing" amount={data.closing_equity_pkr} prior={cmp?.closing_equity_pkr} />
+                </>
+              )}
             </StatementTable>
+
+            {data.is_fiscal_year_to_date && (
+              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                Closing equity ties to Total Equity on the balance sheet at the period end. These rows
+                are fiscal-year-to-date: equity carries the year&apos;s profit, not this range&apos;s, so
+                they appear only for a range starting on the fiscal-year start.
+              </p>
+            )}
 
             {data.has_unclassified && (
               <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">

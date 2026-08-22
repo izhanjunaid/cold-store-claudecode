@@ -19,8 +19,18 @@ vi.mock('@/components/accounting/ratios-strip', () => ({
   RatiosStrip: () => null,
 }));
 vi.mock('@/components/accounting/statement-frame', () => ({
-  StatementFrame: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  StatementFrame: ({ children, note }: { children: React.ReactNode; note?: string }) => (
+    <div>
+      {children}
+      <p>{note}</p>
+    </div>
+  ),
   StatementSkeleton: () => null,
+}));
+
+const accrualEnabled = vi.fn(() => false);
+vi.mock('@/hooks/use-reference-data', () => ({
+  useFacility: () => ({ data: { settings: { revenue_accrual: { enabled: accrualEnabled() } } } }),
 }));
 vi.mock('@/components/accounting/use-statement-period', () => ({
   useStatementPeriod: () => ({
@@ -68,6 +78,10 @@ const BASE_PL = {
   ],
   total_unclassified_pkr: -500,
   has_unclassified: true,
+  opening_equity_pkr: 2000,
+  drawings_pkr: 300,
+  closing_equity_pkr: 1200,
+  is_fiscal_year_to_date: true,
 };
 
 describe('ProfitLossPage — unclassified accounts surface on the statement (F-6b)', () => {
@@ -87,5 +101,47 @@ describe('ProfitLossPage — unclassified accounts surface on the statement (F-6
     render(<ProfitLossPage />);
     await waitFor(() => expect(screen.getByText(/Net Profit/)).toBeTruthy());
     expect(screen.queryByText(/Unclassified/)).toBeNull();
+  });
+});
+
+describe('ProfitLossPage — statement of income and retained earnings', () => {
+  beforeEach(() => {
+    apiClient.mockReset();
+    apiClient.mockResolvedValue(BASE_PL);
+    accrualEnabled.mockReturnValue(false);
+  });
+
+  it('shows opening equity, the result, drawings and closing equity', async () => {
+    render(<ProfitLossPage />);
+    await waitFor(() => expect(screen.getByText(/Owner's equity, opening/)).toBeTruthy());
+    expect(screen.getByText(/Less: owner's drawings/)).toBeTruthy();
+    expect(screen.getByText(/Owner's equity, closing/)).toBeTruthy();
+  });
+
+  it('hides the rows when the range is not fiscal-year-to-date — equity carries FY profit, not the range profit', async () => {
+    apiClient.mockResolvedValue({ ...BASE_PL, is_fiscal_year_to_date: false });
+    render(<ProfitLossPage />);
+    await waitFor(() => expect(screen.getByText(/Net Loss/)).toBeTruthy());
+    expect(screen.queryByText(/Owner's equity, opening/)).toBeNull();
+  });
+});
+
+describe('ProfitLossPage — the basis note states the policy actually in force', () => {
+  beforeEach(() => {
+    apiClient.mockReset();
+    apiClient.mockResolvedValue(BASE_PL);
+  });
+
+  it('says no accrual is made when accrual is off', async () => {
+    accrualEnabled.mockReturnValue(false);
+    render(<ProfitLossPage />);
+    await waitFor(() => expect(screen.getByText(/no month-end accrual is made/)).toBeTruthy());
+  });
+
+  it('does NOT claim that once JE-25 is running', async () => {
+    accrualEnabled.mockReturnValue(true);
+    render(<ProfitLossPage />);
+    await waitFor(() => expect(screen.getByText(/recognized as it is earned/)).toBeTruthy());
+    expect(screen.queryByText(/no month-end accrual is made/)).toBeNull();
   });
 });

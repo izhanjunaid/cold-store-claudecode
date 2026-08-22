@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 import { formatDate, formatMoney } from '@/lib/format';
+import { periodToSettle } from '@/lib/tax-period';
 
 interface Row {
   entry_date: string;
@@ -70,23 +71,25 @@ export default function WithholdingTaxPage() {
     void load();
   }, [load]);
 
-  // Pay over what is still held. The period is the month the report ends in —
-  // the amount is measured at that period end while the entry is dated today,
-  // because the tax is owed at the period end and paid over weeks later.
+  // Pay over what is still held for the last CLOSED tax period. The amount is
+  // measured at that period end while the entry is dated today, because the tax
+  // is owed at the period end and paid over weeks later.
+  const period = periodToSettle(to);
+  const periodLabel = period.label;
+
   const remit = async (section: string) => {
     setRemitting(section);
     try {
-      const end = new Date(`${to}T00:00:00.000Z`);
       const result = (await apiClient('/v1/accounting/withholding-remittance', {
         method: 'POST',
         body: {
           section,
-          period_year: end.getUTCFullYear(),
-          period_month: end.getUTCMonth() + 1,
+          period_year: period.year,
+          period_month: period.month,
           payment_date: new Date().toISOString().slice(0, 10),
         },
       })) as { entry_number: string; amount_pkr: number };
-      toast.success(`Paid over ${formatMoney(result.amount_pkr)} — ${result.entry_number}`);
+      toast.success(`Paid over ${formatMoney(result.amount_pkr)} for ${periodLabel} — ${result.entry_number}`);
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to record the remittance');
@@ -159,8 +162,12 @@ export default function WithholdingTaxPage() {
                   variant="outline"
                   disabled={remitting !== null}
                   onClick={() => remit(s.section)}
+                  // Name the period on the button: "still to pay" is measured at
+                  // the report's To date, while a remittance settles one closed
+                  // period, so the two figures can legitimately differ.
+                  title={`Pay over what is outstanding for ${periodLabel}`}
                 >
-                  {remitting === s.section ? 'Recording…' : 'Pay over…'}
+                  {remitting === s.section ? 'Recording…' : `Pay over ${periodLabel}…`}
                 </Button>
               )}
               {s.section === 'S149' && s.unremitted_pkr > 0 && (
