@@ -277,7 +277,7 @@ npx playwright test
 turbo test:coverage
 ```
 
-> **Phase 29 (accounting completion, 2026-08-22): 219 unit + 618 integration (api, +48) + 132 unit (web) green.** Sixteen commits, four migrations (`0022` receipt numbers, `0023` accumulated impairment, `0024` tax withheld on receipts, `0025` reversal keeps the original posted). The new files are `gst-settlement` (6), `cash-transfer` (7), `receipt-number` (4), `impairment` (8), `withholding` (10), `tax-withheld` (7), `trial-balance-sections` (5), plus additions to the payroll suite.
+> **Phase 29 (accounting completion, 2026-08-22 → 23): 219 unit + 618 integration (api, +48) + 143 unit (web, +11) green.** Sixteen commits, four migrations (`0022` receipt numbers, `0023` accumulated impairment, `0024` tax withheld on receipts, `0025` reversal keeps the original posted). The new files are `gst-settlement` (6), `cash-transfer` (7), `receipt-number` (4), `impairment` (8), `withholding` (10), `tax-withheld` (7), `trial-balance-sections` (5), plus additions to the payroll suite.
 >
 > **Three of these tests exist to prove a change did NOT happen**, and they are the ones that matter: a receipt with no withholding must post exactly `DR cash / CR AR` for the full amount; an expense voucher paid with no withholding must post exactly two lines; and an unimpaired asset's depreciation schedule must be identical to the paisa. Each guards a path that every existing record in the facility takes, and each is the line between an additive change and a silent regression across all of them.
 >

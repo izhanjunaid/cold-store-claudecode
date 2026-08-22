@@ -317,3 +317,59 @@ restoring the one-line bug fails three of its four cases.
   payee's CNIC/NTN, which is not held anywhere: expense vouchers carry a
   free-text `vendor_name` and payroll withholding is against staff
   collectively. The screen says so on its face.
+
+### FIXED — three defects the suites could not see, found by clicking
+
+Phase 29 closed with a browser pass over its own screens. 618 integration
+tests and 139 web unit tests were green at that point. None of these three
+survives a single click, and each fails in a different way that a test over
+API responses is structurally unable to reach.
+
+**1. The withholding report's "Pay over…" was refused every time.** The button
+derived the tax period from the report's *To* date, which defaults to today,
+so it asked the server to settle an unfinished month — and `payment_date <
+period_end` is exactly what the service is built to refuse. The integration
+test passes an explicit, already-closed period, so it exercised the service
+and never the default. **The generalisation worth keeping: a test that
+supplies its own input cannot catch a wrong default.** Fixed by
+`apps/web/src/lib/tax-period.ts` (`periodToSettle`), which returns the latest
+period that has actually *closed*; six unit cases including the year boundary,
+a leap-year February, an invariant that the period end never postdates the
+report date, and a cleared date input (an `<input type="date">` can be emptied,
+and the unguarded version rendered "Pay over undefined NaN…" and posted `NaN`
+period fields). It lives in `lib/`, not the page, because an App Router page
+may export only `default` and metadata — the rule that kept CI red from
+phase/22 to phase/26.
+
+**2. The statement of income and retained earnings was backend-only.** The P&L
+response has carried `opening_equity_pkr`, `drawings_pkr`,
+`closing_equity_pkr` and `is_fiscal_year_to_date` since Phase E; the page never
+read them. The four rows the plan specified existed as dead data on a green
+suite — an API-shaped test asserts the numbers are computed, never that anyone
+can see them. Now rendered under Net Profit, gated on `is_fiscal_year_to_date`
+because over a range that is not fiscal-year-to-date the identity legitimately
+does not hold. Verified live: closing equity (61,200) equals Total Equity on
+the balance sheet at the same date.
+
+**3. The basis of preparation contradicted the accounting policy.** The note
+printed on the face of the statement said *"no month-end accrual is made"* —
+false on any facility running JE-25, which this same phase built. A hardcoded
+string, so nothing could fail. It now follows `revenue_accrual.enabled`.
+
+**Verified in the same pass, closing two carry-overs:** the Payments detail
+"Cheque Clearing" card (Mark Cleared posted JE-24, DR `1020` / CR `1025`) and
+the P&L "Other Expense" section (`6110` below operating profit) — both had sat
+unverified since phase/24 because the Chrome extension disconnected twice. Also
+confirmed live: receipt numbers on the payments list, the impairment dialog
+(NBV 855,000 → 755,000 with `ACCUM. IMPAIRMENT` as its own tile), the
+withholding remittance posting JE-29 both sections to zero, and the revenue
+accrual screen (read-only — posting JE-25 would have written facility-wide).
+
+**A note on cleaning up after a browser pass.** The teardown script matched
+only rows tagged `BV-`, which the entries posted *through the UI* are not. It
+would have deleted the seeded credits to `2071`/`2072`, left the JE-29 debit
+standing, and then reported success, because its own check counted only tagged
+rows. Snapshot the facility's journal entries *before* the pass and assert
+against that baseline afterwards — the sweep is "everything not in the
+baseline", not "everything I can name".
+

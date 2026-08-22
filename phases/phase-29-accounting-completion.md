@@ -1,9 +1,9 @@
 # Phase 29 — Accounting Completion
 
 **Branch:** `accounting/F-completion` (worktree `.claude/worktrees/accounting-a-guardrails`, cut from `main` at `d98b1f3`)
-**Date:** 2026-08-19 → 2026-08-22
+**Date:** 2026-08-19 → 2026-08-23
 **Migrations:** `0019` opening-balance unique index, `0020`/`0021` cash-flow section, `0022` receipt numbers, `0023` accumulated impairment, `0024` tax withheld on receipts, `0025` reversal keeps the original posted
-**Suite:** 219 api unit + 618 api integration + 132 web unit, green
+**Suite:** 219 api unit + 618 api integration + 143 web unit, green
 
 ---
 
@@ -110,6 +110,36 @@ documented rollback path in `docs/23`. The integration suite found it.
 the one-line bug fails three of the new test's four cases, including the
 generic manual-reversal path that had never been measured — which is how the
 defect was proven to generalise beyond the dishonour path it was found on.
+
+## What the browser pass found, after the suites were green
+
+The plan asked for a click-through. It paid for itself twice over: it closed
+two verifications carried since phase/24 (the Payments "Cheque Clearing" card,
+the P&L "Other Expense" section) **and** it found three defects that 618
+integration tests and 139 web unit tests could not. Full detail in
+`docs/20_audit_backlog.md` §Phase 29; the three shapes are worth carrying
+forward because none of them is a coverage gap you could close by writing more
+of the same tests:
+
+**A test that supplies its own input cannot catch a wrong default.** The
+withholding report's "Pay over…" derived the tax period from a date input
+defaulting to today, so it always asked to settle an unfinished month and was
+always refused. The integration test passes an explicit closed period — it
+proved the service correct and never touched the default.
+
+**An API-shaped test asserts the numbers are computed, never that anyone can
+see them.** Phase E's statement of income and retained earnings shipped four
+fields on the P&L response; the page never read them. Green suite, dead data.
+
+**A hardcoded string cannot fail.** The basis of preparation printed on the
+face of the statement said "no month-end accrual is made" — false on any
+facility running the JE-25 accrual this same phase built.
+
+And one about cleaning up: the teardown script matched only `BV-`-tagged rows,
+which entries posted through the UI are not, so it would have deleted the
+seeded credits to `2071`/`2072`, left the JE-29 debit standing, and reported
+success — its check counted only tagged rows. Snapshot the ledger before the
+pass; sweep everything not in that baseline.
 
 ## Open, and deliberately so
 
