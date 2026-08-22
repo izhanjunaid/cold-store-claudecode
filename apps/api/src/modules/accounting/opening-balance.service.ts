@@ -41,7 +41,7 @@ export class OpeningBalanceService {
 
   async getStatus(facilityId: string) {
     const existing = await this.prisma.journalEntry.findFirst({
-      where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED' },
+      where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED', reversedById: null },
       orderBy: { createdAt: 'desc' },
       select: { id: true, entryNumber: true, entryDate: true },
     });
@@ -76,7 +76,7 @@ export class OpeningBalanceService {
       await advisoryXactLock(tx, `${facilityId}:opening-balances`);
 
       const existing = await tx.journalEntry.findFirst({
-        where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED' },
+        where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED', reversedById: null },
       });
       if (existing) throw Errors.OPENING_BALANCES_ALREADY_ENTERED();
 

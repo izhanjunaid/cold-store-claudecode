@@ -332,7 +332,7 @@ Impaired ${body.impairment_date}: ${body.reason}`
         where: { id: asset.disposalJournalEntryId, facilityId },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-      if (original.postingStatus === 'REVERSED') {
+      if (original.reversedById) {
         throw Errors.ASSET_NOT_REVERSIBLE('Disposal entry has already been reversed');
       }
 

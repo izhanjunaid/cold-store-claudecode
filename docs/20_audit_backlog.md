@@ -221,11 +221,12 @@ were numbered in build order instead, so: **JE-26** GST settlement, **JE-27**
 cash transfer, **JE-28** asset impairment, **JE-29** withholding remittance.
 Stated here because the plan file says otherwise.
 
-### FINDING — every reversal in the ledger is applied twice
+### FIXED — every reversal in the ledger was applied twice
 
-**This is larger than anything else on this page and it is not fixed.** It was
-found while building P3-6 and is unrelated to it: it reproduces with no
-withholding involved at all.
+**This was larger than anything else on this page.** It was found while
+building P3-6 and is unrelated to it: it reproduced with no withholding
+involved at all. **Fixed in migration `0025`**, with the repair described at
+the end of this section.
 
 `markReversed()` sets the original entry's `posting_status` to `REVERSED`,
 **and** the caller separately posts a full mirror entry. Every statement, the
@@ -244,18 +245,20 @@ Equal and opposite, so **the trial balance still balances** — which is why
 three accounting audits did not see it. AR is overstated by the full amount of
 every bounced cheque, and `1025` is driven negative.
 
-**Six call sites share the shape**, each posting a mirror *and* calling
-`markReversed`: payment dishonour (`payment.service.ts:544`, `:589`), invoice
-VOID (`invoice.service.ts:334`), asset disposal reversal
-(`fixed-asset.service.ts:363`), payroll run reversal
-(`payroll-run.service.ts:573`), and the generic
-`JournalEntryService.reverse()` (`journal-entry.service.ts:195`) which serves
-manual entries and opening balances. Only the dishonour path was measured; the
-others are read, not proven.
+**Six call sites shared the shape**, each posting a mirror *and* calling
+`markReversed`: payment dishonour (×2), invoice VOID, asset disposal reversal,
+payroll run reversal, and the generic `JournalEntryService.reverse()` which
+serves manual entries and opening balances. All six were then read line by
+line and confirmed to post a **full 1:1 mirror** whose amount equals the
+original(s) it marks — which is what made the repair safe. The defect was
+subsequently **proven** on the generic path too, not just the dishonour one:
+reverting the fix fails the new test on a manual entry as well.
 
-**Check this on the client's box before anything else** — if bounced cheques
-have driven `1025` negative there, `GET /v1/reports/cash-exceptions` has been
-flagging this defect all along and nobody read it as this:
+**Still worth running on the client's box** — migration `0025` repairs the
+ledger automatically, but if bounced cheques drove `1025` negative there,
+`GET /v1/reports/cash-exceptions` had been flagging this defect all along and
+nobody read it as this. Run these **before** updating to capture the
+before-picture:
 
 ```sql
 SELECT l.account_code, ROUND(SUM(l.debit_amount - l.credit_amount), 2) AS balance
@@ -269,26 +272,39 @@ SELECT source_table, entry_type, count(*) FROM journal_entries
 WHERE posting_status = 'REVERSED' GROUP BY 1, 2 ORDER BY 3 DESC;
 ```
 
-**Two candidate fixes.**
+**What was built (option 1 of two).**
 
-1. **Stop writing `REVERSED`; let both entries stand.** The original really
+1. ✅ **Stop writing `REVERSED`; let both entries stand.** The original really
    happened and belongs in its own period; the mirror is dated when the
    reversal happened. This is the same argument the JE-25 docblock already
    makes — marking an original REVERSED erases it from the period it was
-   recognising. `reverse()`'s already-reversed guard moves to `reversedById`,
-   and the UI badge reads `reversed_by` instead of the status.
-2. **Keep `REVERSED`; stop posting the mirror.** Rejected: the original's
+   recognising.
+2. ❌ **Keep `REVERSED`; stop posting the mirror.** Rejected: the original's
    effect then vanishes retroactively from its own period, so a bounce in
    April silently restates March.
 
-**Option 1 is the recommendation**, and it is a phase of its own, not a patch.
-It changes what `posting_status` means, which migration `0002` enforces with a
-trigger permitting exactly one POSTED → REVERSED transition, and it reaches
-six services plus the journal-entry list filter and status badge.
+Migration `0025` does three things: relaxes `guard_journal_entries_fn` to
+permit POSTED → POSTED setting `reversed_by` once (keeping the legacy
+POSTED → REVERSED branch, so a rolled-back image fails soft rather than taking
+the store offline); repairs history by putting every `REVERSED` row that
+carries a `reversed_by` back to `POSTED`; and **re-cuts the
+one-opening-balance-per-facility unique index**, which keyed on
+`posting_status = 'POSTED'` and only worked because a reversed entry stopped
+being POSTED — without that, re-entering opening balances after a reversal
+would have failed, breaking the documented rollback path in `docs/23`. The
+integration suite caught that interaction; reading had not.
 
-`apps/api/src/modules/payment/__tests__/tax-withheld.integration.test.ts`
-carries a comment recording this at the exact place someone will next look,
-and deliberately does **not** assert the post-bounce end state.
+`markReversed()` now writes only `reversedById`, so **"has this been reversed?"
+is `reversedById != null`, never the posting status** — updated in
+`reverse()`'s guard, the fixed-asset and payroll reversal guards, the
+opening-balance "already entered" check, the journal-entry list badge and the
+detail page's Reverse button (which would otherwise have allowed reversing the
+same entry twice).
+
+The test is `accounting/__tests__/reversal-nets-to-zero.integration.test.ts`.
+Every case asserts the same shape: take a balance, do a thing, reverse it,
+require the balance to return. **Verified to fail against the defect** —
+restoring the one-line bug fails three of its four cases.
 
 ### Also open, and newly created here
 

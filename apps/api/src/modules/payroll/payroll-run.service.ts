@@ -546,7 +546,7 @@ export class PayrollRunService {
           where: { id: originalId, facilityId },
           include: { lines: { orderBy: { lineNumber: 'asc' } } },
         });
-        if (original.postingStatus === 'REVERSED') continue;
+        if (original.reversedById) continue;
 
         const reversal = await this.journalEntry.postInTransaction(
           tx,

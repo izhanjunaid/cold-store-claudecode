@@ -1036,9 +1036,11 @@ describe('Party GET — over_credit_limit (credit exposure)', () => {
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.body).data.status).toBe('VOID');
 
-      // Original JE-01 marked REVERSED and cross-linked.
+      // Original JE-01 stays POSTED and is cross-linked to its mirror. It
+      // really happened; the mirror is what reverses it. Flipping the original
+      // too made every reversal land twice (migration 0025).
       const original = await prisma.journalEntry.findUniqueOrThrow({ where: { id: jeId } });
-      expect(original.postingStatus).toBe('REVERSED');
+      expect(original.postingStatus).toBe('POSTED');
       expect(original.reversedById).toBeTruthy();
 
       // The reversal mirrors JE-01 (net GL effect on AR is zero).

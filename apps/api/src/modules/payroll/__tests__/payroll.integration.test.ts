@@ -705,9 +705,9 @@ describe('Phase 8B — Payroll', () => {
     expect(rev.statusCode).toBe(200);
     expect(JSON.parse(rev.body).data.status).toBe('REVERSED');
 
-    // Original flipped to REVERSED and cross-linked.
+    // Original stays POSTED and is cross-linked to its mirror (migration 0025).
     const original = await prisma.journalEntry.findUnique({ where: { id: originalJeId } });
-    expect(original!.postingStatus).toBe('REVERSED');
+    expect(original!.postingStatus).toBe('POSTED');
     expect(original!.reversedById).toBeTruthy();
 
     // The mirror exists and is the exact opposite of the original.

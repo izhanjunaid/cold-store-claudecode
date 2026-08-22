@@ -2,8 +2,8 @@
 
 **Branch:** `accounting/F-completion` (worktree `.claude/worktrees/accounting-a-guardrails`, cut from `main` at `d98b1f3`)
 **Date:** 2026-08-19 → 2026-08-22
-**Migrations:** `0019` opening-balance unique index, `0020`/`0021` cash-flow section, `0022` receipt numbers, `0023` accumulated impairment, `0024` tax withheld on receipts
-**Suite:** 219 api unit + 614 api integration + 132 web unit, green
+**Migrations:** `0019` opening-balance unique index, `0020`/`0021` cash-flow section, `0022` receipt numbers, `0023` accumulated impairment, `0024` tax withheld on receipts, `0025` reversal keeps the original posted
+**Suite:** 219 api unit + 618 api integration + 132 web unit, green
 
 ---
 
@@ -83,15 +83,33 @@ not identical to the paisa once rounding compounds — and this runs on a live
 register. Disposal would have stranded `1370` against an asset that no longer
 exists and booked the write-down a second time as a disposal loss.
 
-## The finding this phase did not fix
+## The finding this phase turned up, and then fixed
 
-**Every reversal in the ledger is applied twice.** Full write-up, measurements
-and both candidate fixes: `docs/20_audit_backlog.md` §Phase 29. Found by
-measurement while building P3-6; reproduces with no withholding involved.
-Equal and opposite on the two sides, so the trial balance still balances —
-which is why three accounting audits missed it. It needs its own phase: it
-changes what `posting_status` means, which migration `0002` enforces with a
-trigger, and it reaches six services plus the API and UI.
+**Every reversal in the ledger was applied twice.** Found by measurement while
+building P3-6 — it reproduces with no withholding involved at all. Equal and
+opposite on the two sides, so the trial balance still balanced, which is why
+three accounting audits missed it. Full write-up: `docs/20_audit_backlog.md`
+§Phase 29.
+
+Three things about it are worth carrying forward:
+
+**The symmetry is what hid it.** AR ended overstated by exactly the amount
+`1025` ended understated. Any check on `is_balanced` passes. The assertion
+that catches it is the per-account end state — take a balance, do a thing,
+reverse it, require the balance to return.
+
+**Reading was not enough for the blast radius.** All six call sites were read
+and confirmed to post full 1:1 mirrors, which is what made the repair safe.
+But the *interaction* that reading missed was the one-opening-balance-per-
+facility unique index: it keyed on `posting_status = 'POSTED'` and worked only
+because a reversed entry stopped being POSTED. Keeping the original POSTED
+would have made re-entering opening balances after a reversal fail — the
+documented rollback path in `docs/23`. The integration suite found it.
+
+**The fix was verified against the defect, not just for the fix.** Restoring
+the one-line bug fails three of the new test's four cases, including the
+generic manual-reversal path that had never been measured — which is how the
+defect was proven to generalise beyond the dishonour path it was found on.
 
 ## Open, and deliberately so
 
