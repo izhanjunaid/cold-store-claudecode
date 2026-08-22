@@ -532,6 +532,21 @@ export const CreateCashTransferRequest = z.object({
 export type CreateCashTransferRequestType = z.infer<typeof CreateCashTransferRequest>;
 
 // ============================================================
+// Withholding tax remittance (JE-29)
+// ============================================================
+
+// s.149 is absent on purpose: salary tax clears through the payroll run's own
+// remittance step, and a second path to 2070 could pay it over twice.
+export const RemitWithholdingRequest = z.object({
+  section: z.enum(['S153', 'S155']),
+  period_year: z.number().int().min(2000).max(2100),
+  period_month: z.number().int().min(1).max(12),
+  payment_date: dateOnly,
+  bank_account_code: z.string().regex(/^[0-9]+$/).optional(),
+});
+export type RemitWithholdingRequestType = z.infer<typeof RemitWithholdingRequest>;
+
+// ============================================================
 // GST / Sales Tax Settlement (JE-26)
 // ============================================================
 

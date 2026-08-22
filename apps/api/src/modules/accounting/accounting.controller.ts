@@ -23,6 +23,7 @@ import {
   GstSettlementQuery,
   PostGstSettlementRequest,
   CreateCashTransferRequest,
+  RemitWithholdingRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { assertKatchiWriteAllowed, resolveBookTypeForRead } from './book-gate';
@@ -37,6 +38,7 @@ import { BadDebtService } from './bad-debt.service';
 import { OpeningBalanceService } from './opening-balance.service';
 import { RevenueAccrualService } from './revenue-accrual.service';
 import { GstSettlementService } from './gst-settlement.service';
+import { WithholdingRemittanceService } from './withholding-remittance.service';
 import { buildJE27CashTransfer, CASH_TRANSFER_ACCOUNTS } from './templates/je-27-cash-transfer';
 import { Errors } from '../../common/errors';
 
@@ -56,6 +58,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   const openingBalance = new OpeningBalanceService(app.prisma, journalEntry);
   const revenueAccrual = new RevenueAccrualService(app.prisma, journalEntry);
   const gstSettlement = new GstSettlementService(app.prisma, journalEntry);
+  const withholdingRemittance = new WithholdingRemittanceService(app.prisma, journalEntry);
 
   // ==========================================================
   // CHART OF ACCOUNTS — S-35
@@ -338,6 +341,26 @@ export async function accountingRoutes(app: FastifyInstance) {
         request.user!.userId,
         body.period_year,
         body.period_month,
+      );
+      return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  // ==========================================================
+  // WITHHOLDING TAX REMITTANCE (JE-29)
+  // ==========================================================
+
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/withholding-remittance',
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
+    schema: { body: RemitWithholdingRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof RemitWithholdingRequest>;
+      const data = await withholdingRemittance.remit(
+        request.user!.facilityId,
+        request.user!.userId,
+        body,
       );
       return sendSuccess(reply.status(201), data);
     },

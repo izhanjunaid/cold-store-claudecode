@@ -25,7 +25,19 @@ export interface WithholdingSectionReport {
   opening_balance_pkr: number;
   withheld_pkr: number;
   remitted_pkr: number;
+  /** Balance at the reporting date — what was owed then. */
   closing_balance_pkr: number;
+  /**
+   * What is still unpaid, which is NOT the same number.
+   *
+   * Tax is withheld inside a period and paid over weeks later, so a
+   * remittance for March is dated in April and falls outside a
+   * January–March report. The balance at 31 March stays what it was — the
+   * tax really was owed then — while the amount still to pay is zero. This
+   * is the figure a remittance clears, and it uses the same asymmetric
+   * windows the remittance service does so the two can never disagree.
+   */
+  unremitted_pkr: number;
   rows: WithholdingRow[];
 }
 
@@ -55,7 +67,7 @@ export async function getWithholdingTax(
   const dayBefore = new Date(from.getTime() - 24 * 60 * 60 * 1000);
   const codes = Object.values(WITHHOLDING_ACCOUNT_BY_SECTION);
 
-  const [openingAgg, lines] = await Promise.all([
+  const [openingAgg, withheldToDateAgg, remittedEverAgg, lines] = await Promise.all([
     prisma.journalEntryLine.groupBy({
       by: ['accountCode'],
       where: {
@@ -64,6 +76,28 @@ export async function getWithholdingTax(
         journalEntry: { postingStatus: 'POSTED', bookType: 'PACCI', entryDate: { lte: dayBefore } },
       },
       _sum: { debitAmount: true, creditAmount: true },
+    }),
+    // Everything withheld up to the reporting date...
+    prisma.journalEntryLine.groupBy({
+      by: ['accountCode'],
+      where: {
+        facilityId,
+        accountCode: { in: codes },
+        journalEntry: { postingStatus: 'POSTED', bookType: 'PACCI', entryDate: { lte: to } },
+      },
+      _sum: { creditAmount: true },
+    }),
+    // ...against every remittance regardless of date. A remittance only ever
+    // clears tax already withheld, so counting them all is what makes a
+    // paid-over period report nothing left to pay.
+    prisma.journalEntryLine.groupBy({
+      by: ['accountCode'],
+      where: {
+        facilityId,
+        accountCode: { in: codes },
+        journalEntry: { postingStatus: 'POSTED', bookType: 'PACCI' },
+      },
+      _sum: { debitAmount: true },
     }),
     prisma.journalEntryLine.findMany({
       where: {
@@ -105,6 +139,13 @@ export async function getWithholdingTax(
     : [];
   const vendorById = new Map(vouchers.map((v) => [v.id, v.vendorName ?? v.voucherNumber]));
 
+  const withheldToDateByCode = new Map(
+    withheldToDateAgg.map((r) => [r.accountCode, round2(Number(r._sum.creditAmount ?? 0))]),
+  );
+  const remittedEverByCode = new Map(
+    remittedEverAgg.map((r) => [r.accountCode, round2(Number(r._sum.debitAmount ?? 0))]),
+  );
+
   const openingByCode = new Map(
     openingAgg.map((r) => [
       r.accountCode,
@@ -127,6 +168,9 @@ export async function getWithholdingTax(
         withheld_pkr: withheld,
         remitted_pkr: remitted,
         closing_balance_pkr: round2(opening + withheld - remitted),
+        unremitted_pkr: round2(
+          (withheldToDateByCode.get(accountCode) ?? 0) - (remittedEverByCode.get(accountCode) ?? 0),
+        ),
         rows: sectionLines
           .filter((l) => Number(l.creditAmount) > 0)
           .map((l) => ({
@@ -142,7 +186,7 @@ export async function getWithholdingTax(
     },
   );
 
-  const sum = (k: 'withheld_pkr' | 'remitted_pkr' | 'closing_balance_pkr') =>
+  const sum = (k: 'withheld_pkr' | 'remitted_pkr' | 'closing_balance_pkr' | 'unremitted_pkr') =>
     round2(sections.reduce((s, x) => s + x[k], 0));
 
   return {
@@ -151,6 +195,6 @@ export async function getWithholdingTax(
     sections,
     total_withheld_pkr: sum('withheld_pkr'),
     total_remitted_pkr: sum('remitted_pkr'),
-    total_outstanding_pkr: sum('closing_balance_pkr'),
+    total_outstanding_pkr: sum('unremitted_pkr'),
   };
 }

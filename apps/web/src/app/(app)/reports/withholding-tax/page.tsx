@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
+import { useCan } from '@/lib/permissions';
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,6 +28,7 @@ interface Section {
   withheld_pkr: number;
   remitted_pkr: number;
   closing_balance_pkr: number;
+  unremitted_pkr: number;
   rows: Row[];
 }
 
@@ -42,6 +45,8 @@ const startOfYear = () => `${new Date().getUTCFullYear()}-01-01`;
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function WithholdingTaxPage() {
+  const canPost = useCan('accounting.post_journal');
+  const [remitting, setRemitting] = useState<string | null>(null);
   const [from, setFrom] = useState(startOfYear);
   const [to, setTo] = useState(today);
   const [data, setData] = useState<Report | null>(null);
@@ -64,6 +69,31 @@ export default function WithholdingTaxPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Pay over what is still held. The period is the month the report ends in —
+  // the amount is measured at that period end while the entry is dated today,
+  // because the tax is owed at the period end and paid over weeks later.
+  const remit = async (section: string) => {
+    setRemitting(section);
+    try {
+      const end = new Date(`${to}T00:00:00.000Z`);
+      const result = (await apiClient('/v1/accounting/withholding-remittance', {
+        method: 'POST',
+        body: {
+          section,
+          period_year: end.getUTCFullYear(),
+          period_month: end.getUTCMonth() + 1,
+          payment_date: new Date().toISOString().slice(0, 10),
+        },
+      })) as { entry_number: string; amount_pkr: number };
+      toast.success(`Paid over ${formatMoney(result.amount_pkr)} — ${result.entry_number}`);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to record the remittance');
+    } finally {
+      setRemitting(null);
+    }
+  };
 
   return (
     <div>
@@ -118,6 +148,24 @@ export default function WithholdingTaxPage() {
               <span className="font-medium text-foreground">
                 Closing <span className="tabular-nums">{formatMoney(s.closing_balance_pkr)}</span>
               </span>
+              {s.unremitted_pkr !== s.closing_balance_pkr && (
+                <span title="Tax is withheld in one period and paid over in the next, so what is still to pay differs from what was owed at the reporting date.">
+                  Still to pay <span className="tabular-nums">{formatMoney(s.unremitted_pkr)}</span>
+                </span>
+              )}
+              {canPost && s.section !== 'S149' && s.unremitted_pkr > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={remitting !== null}
+                  onClick={() => remit(s.section)}
+                >
+                  {remitting === s.section ? 'Recording…' : 'Pay over…'}
+                </Button>
+              )}
+              {s.section === 'S149' && s.unremitted_pkr > 0 && (
+                <span className="text-muted-foreground">Paid over from the payroll run</span>
+              )}
             </div>
           </div>
 

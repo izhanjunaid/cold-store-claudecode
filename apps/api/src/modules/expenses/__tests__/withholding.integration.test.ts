@@ -23,6 +23,7 @@ let app: FastifyInstance;
 let ownerToken: string;
 let accountantToken: string;
 const createdVoucherIds: string[] = [];
+const createdEntryIds: string[] = [];
 
 const AMOUNT = 50_000;
 const WITHHELD = 5_000;
@@ -86,7 +87,7 @@ afterAll(async () => {
       where: { facilityId: TEST_FACILITY_ID, sourceTable: 'expense_vouchers', sourceId: { in: createdVoucherIds } },
       select: { id: true },
     });
-    const jeIds = jes.map((j) => j.id);
+    const jeIds = [...jes.map((j) => j.id), ...createdEntryIds];
     await prisma.expenseVoucher.updateMany({
       where: { id: { in: createdVoucherIds } },
       data: { accrualJournalEntryId: null, paymentJournalEntryId: null },
@@ -192,5 +193,64 @@ describe('the s.165 report', () => {
 
     // s.149 is included: salary withholding is part of the same statement.
     expect(report.sections.some((s: { section: string }) => s.section === 'S149')).toBe(true);
+  });
+});
+
+describe('paying the withheld tax over', () => {
+  const remit = (section: string, extra: Record<string, unknown> = {}) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/accounting/withholding-remittance',
+      headers: authHeaders(ownerToken),
+      payload: { section, period_year: 2033, period_month: 3, payment_date: '2033-04-15', ...extra },
+    });
+
+  const outstanding = async (section: 'S153' | 'S155') => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/reports/withholding-tax?date_from=2033-01-01&date_to=2033-03-31',
+      headers: authHeaders(ownerToken),
+    });
+    // unremitted, not closing: the remittance is dated after the period end,
+    // so the balance AT 31 March stays what was owed then while the amount
+    // still to pay goes to zero. Those are two different, both-correct numbers.
+    return JSON.parse(res.body).data.sections.find((s: { section: string }) => s.section === section)
+      .unremitted_pkr as number;
+  };
+
+  it('clears 2071 and takes the money from the bank', async () => {
+    const before = await outstanding('S153');
+    expect(before).toBeGreaterThan(0);
+
+    const res = await remit('S153');
+    expect(res.statusCode, res.body).toBe(201);
+    const result = JSON.parse(res.body).data;
+    createdEntryIds.push(result.journal_entry_id);
+    expect(result.amount_pkr).toBeCloseTo(before, 2);
+
+    const lines = await linesOf(result.journal_entry_id);
+    expect(Number(lines.find((l) => l.accountCode === '2071')!.debitAmount)).toBeCloseTo(before, 2);
+    expect(Number(lines.find((l) => l.accountCode === '1020')!.creditAmount)).toBeCloseTo(before, 2);
+
+    // Without this the liability grows forever — the same defect that made
+    // 2020 GST Payable wrong, reproduced the moment withholding was built.
+    expect(await outstanding('S153')).toBeCloseTo(0, 2);
+  });
+
+  it('pays a period over only once, though the entry is dated after it', async () => {
+    const res = await remit('S153', { payment_date: '2033-05-15' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('nothing to pay over');
+  });
+
+  it('refuses s.149 — salary tax is paid over from the payroll run that withheld it', async () => {
+    const res = await remit('S149');
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('refuses a payment date before the period closed', async () => {
+    const res = await remit('S155', { payment_date: '2033-03-20' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('payment_date');
   });
 });
