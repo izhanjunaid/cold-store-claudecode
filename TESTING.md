@@ -277,6 +277,14 @@ npx playwright test
 turbo test:coverage
 ```
 
+> **Phase 29 (accounting completion, 2026-08-22 → 23): 219 unit + 618 integration (api, +48) + 143 unit (web, +11) green.** Sixteen commits, four migrations (`0022` receipt numbers, `0023` accumulated impairment, `0024` tax withheld on receipts, `0025` reversal keeps the original posted). The new files are `gst-settlement` (6), `cash-transfer` (7), `receipt-number` (4), `impairment` (8), `withholding` (10), `tax-withheld` (7), `trial-balance-sections` (5), plus additions to the payroll suite.
+>
+> **Three of these tests exist to prove a change did NOT happen**, and they are the ones that matter: a receipt with no withholding must post exactly `DR cash / CR AR` for the full amount; an expense voucher paid with no withholding must post exactly two lines; and an unimpaired asset's depreciation schedule must be identical to the paisa. Each guards a path that every existing record in the facility takes, and each is the line between an additive change and a silent regression across all of them.
+>
+> **Two more assert an absence that only shows up later.** `1025` must clear to exactly zero after a withheld cheque is banked — a single assertion that catches JE-02 and JE-24 being wrong together in the same direction, which a bank-side check alone would miss. And re-running a settled GST period must settle nothing, because the settlement is dated *after* the period end, so a naive balance-at-period-end would never see its own debit and would pay twice.
+>
+> **The defect the suite could not see, and now can.** A bounced cheque reversed twice: every statement filters `posting_status = 'POSTED'`, the original was marked `REVERSED` and dropped out, and a full mirror was also posted. AR ended overstated and `1025` negative by the same amount — **equal and opposite, so `is_balanced` passed** and no existing assertion watched the *pair*. Found by measurement while building something else. `reversal-nets-to-zero.integration.test.ts` closes it, and every case asserts the shape that catches it: take a balance, do a thing, reverse it, require the balance to return. **It is verified to fail against the defect** — restoring the one-line bug fails three of its four cases, including the generic manual-reversal path that had never been measured. Seven existing tests had encoded the old behaviour (`expect(postingStatus).toBe('REVERSED')`) and were asserting the bug; they now assert `POSTED` plus a non-null `reversedById`.
+
 ## Coverage Targets
 
 | Layer | Target | Tool |

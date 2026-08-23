@@ -1,5 +1,10 @@
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import { ACCOUNT_ADVANCE_RECEIPTS, arAccountForParty, assetAccountForPaymentMethod } from './types';
+import {
+  ACCOUNT_ADVANCE_RECEIPTS,
+  ACCOUNT_TAX_WITHHELD_RECEIVABLE,
+  arAccountForParty,
+  assetAccountForPaymentMethod,
+} from './types';
 
 type Input = {
   paymentId: string;
@@ -14,6 +19,15 @@ type Input = {
    * receipt, which reverses wholly against AR exactly as before.
    */
   advanceRemainderPkr?: number;
+  /**
+   * Tax the customer withheld on the original receipt. The bank/clearing
+   * account only ever received `amountPkr − taxWithheldPkr`, so reversing the
+   * gross would overdraw it; and the 1240 receivable has to go back too — a
+   * bounced cheque means no payment was made and so no tax was withheld on it.
+   * Never combined with advanceRemainderPkr: withholding is refused on
+   * advances, which is what makes this a two-case template and not three.
+   */
+  taxWithheldPkr?: number;
 };
 
 /**
@@ -21,7 +35,8 @@ type Input = {
  *
  *   DR  2010 Advance Receipts                advance_remainder   (only if > 0)
  *   DR  1110/1120/1130 Receivable — Type     amount − remainder  (only if > 0)
- *     CR  1020 Bank Account — Main              amount_pkr
+ *     CR  1240 Tax Withheld at Source           withheld (if any)
+ *     CR  1020 Bank Account — Main              amount − withheld
  *
  * Reverses the bank debit and re-opens whatever the original receipt credited.
  *
@@ -42,6 +57,8 @@ export function buildJE06ChequeDishonoured(input: Input): JournalEntryDraft {
   // Clamp defensively: the remainder can never exceed what is being reversed.
   const advanceRemainder = Math.min(round2(input.advanceRemainderPkr ?? 0), amount);
   const arPortion = round2(amount - advanceRemainder);
+  const withheld = Math.min(round2(input.taxWithheldPkr ?? 0), amount);
+  const cash = round2(amount - withheld);
 
   const lines: JournalEntryLineDraft[] = [];
 
@@ -65,10 +82,20 @@ export function buildJE06ChequeDishonoured(input: Input): JournalEntryDraft {
     });
   }
 
+  if (withheld > 0) {
+    lines.push({
+      accountCode: ACCOUNT_TAX_WITHHELD_RECEIVABLE,
+      debitAmount: 0,
+      creditAmount: withheld,
+      partyId: input.party.id,
+      description: `Reverse tax withheld — bounced cheque`,
+    });
+  }
+
   lines.push({
     accountCode: bankAccount,
     debitAmount: 0,
-    creditAmount: amount,
+    creditAmount: cash,
     partyId: input.party.id,
     description: `Reverse bank entry — bounced cheque`,
   });

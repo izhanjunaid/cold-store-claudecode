@@ -398,7 +398,9 @@ describe('Phase 8B — Fixed Assets', () => {
     expect(restored.disposal_journal_entry_id).toBeNull();
 
     const original = await prisma.journalEntry.findUnique({ where: { id: disposalJeId } });
-    expect(original!.postingStatus).toBe('REVERSED');
+    // Stays POSTED — it really happened. The mirror is what reverses it;
+    // flipping the original too made every reversal land twice (migration 0025).
+    expect(original!.postingStatus).toBe('POSTED');
     expect(original!.reversedById).toBeTruthy();
 
     // Every account JE-14 touched nets back to zero.

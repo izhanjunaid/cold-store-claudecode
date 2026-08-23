@@ -6,6 +6,7 @@ import {
   ReceivablesAgingReportQuery,
   CommodityInventoryReportQuery,
   CashExceptionsReportQuery,
+  WithholdingTaxReportQuery,
   WeightVarianceReportQuery,
   SeasonalSummaryReportQuery,
   OwnershipTransfersReportQuery,
@@ -26,6 +27,7 @@ import { getLotAging } from './reports/lot-aging';
 import { getReceivablesAging } from './reports/receivables-aging';
 import { getCommodityInventory } from './reports/commodity-inventory';
 import { getCashExceptions } from './reports/cash-exceptions';
+import { getWithholdingTax } from './reports/withholding-tax';
 import { getWeightVariance } from './reports/weight-variance';
 import { getSeasonalSummary } from './reports/seasonal-summary';
 import { getOwnershipTransfers } from './reports/ownership-transfers';
@@ -108,6 +110,21 @@ export async function reportingRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof CashExceptionsReportQuery>;
       const result = await getCashExceptions(app.prisma, request.user!.facilityId, query);
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // ==========================================================
+  // GET /v1/reports/withholding-tax — the s.165 figures
+  // ==========================================================
+  app.route({
+    method: 'GET',
+    url: '/v1/reports/withholding-tax',
+    preHandler: [app.authenticate, app.requirePermission('reports.financial')],
+    schema: { querystring: WithholdingTaxReportQuery },
+    handler: async (request, reply) => {
+      const query = request.query as z.infer<typeof WithholdingTaxReportQuery>;
+      const result = await getWithholdingTax(app.prisma, request.user!.facilityId, query);
       return sendSuccess(reply, result);
     },
   });

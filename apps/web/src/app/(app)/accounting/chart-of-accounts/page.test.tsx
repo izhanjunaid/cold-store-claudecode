@@ -171,7 +171,7 @@ describe('ChartOfAccountsPage — owner management', () => {
     );
   });
 
-  it('omits statement_section for a HEADER left unset — the account still creates, into the unclassified bucket', async () => {
+  it('blocks a HEADER with no statement section — an unsectioned header orphans its own children', async () => {
     render(<ChartOfAccountsPage />);
     await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /add account/i }));
@@ -181,24 +181,29 @@ describe('ChartOfAccountsPage — owner management', () => {
     fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '7500' } });
 
     apiClient.mockClear();
-    apiClient.mockResolvedValue(ACCOUNTS);
-    fireEvent.click(screen.getByRole('button', { name: /create account/i }));
+    const create = screen.getByRole('button', { name: /create account/i }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    expect(screen.getByText(/choose the statement section/i)).toBeTruthy();
 
-    await waitFor(() =>
-      expect(apiClient).toHaveBeenCalledWith('/v1/accounting/accounts', {
-        method: 'POST',
-        body: {
-          account_code: '7500',
-          account_name: 'Custom Head',
-          account_class: 'ASSET',
-          account_type: 'HEADER',
-          parent_account_code: null,
-          normal_balance: 'DEBIT',
-          // No statement_section key at all — omitted, not null, matching
-          // CreateAccountRequest treating it as optional.
-        },
-      }),
-    );
+    fireEvent.click(create);
+    // Nothing is sent: the form refuses before the request, so the account
+    // cannot be created into the unclassified bucket in the first place.
+    expect(apiClient).not.toHaveBeenCalled();
+  });
+
+  it('preselects the only legal section rather than asking — cost of service has exactly one', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+
+    fireEvent.change(screen.getByLabelText(/^class$/i), { target: { value: 'COST_OF_SERVICE' } });
+    fireEvent.change(screen.getByLabelText(/^type$/i), { target: { value: 'HEADER' } });
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Direct Costs (custom)' } });
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '5500' } });
+
+    const section = screen.getByLabelText(/statement section/i) as HTMLSelectElement;
+    expect(section.value).toBe('COST_OF_SERVICE');
+    expect((screen.getByRole('button', { name: /create account/i }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('disables the section field for an EQUITY header — equity is placed by class, not by header', async () => {
@@ -221,6 +226,9 @@ describe('ChartOfAccountsPage — owner management', () => {
 
     fireEvent.change(screen.getByLabelText(/^class$/i), { target: { value: 'EXPENSE' } });
     fireEvent.change(screen.getByLabelText(/^type$/i), { target: { value: 'HEADER' } });
+    // Set so the section rule is satisfied and the *parent* rule is what this
+    // test measures. EXPENSE allows two sections, so it must be chosen.
+    fireEvent.change(screen.getByLabelText(/statement section/i), { target: { value: 'OPERATING_EXPENSE' } });
     fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'New Overhead Group' } });
     fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '6200' } });
 

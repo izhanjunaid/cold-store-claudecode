@@ -1016,7 +1016,10 @@ describe('Phase 9 — Combined settlement (invoice + loan)', () => {
     const originalJe02Refreshed = await prisma.journalEntry.findUnique({
       where: { id: originalJe02!.id },
     });
-    expect(originalJe02Refreshed?.postingStatus).toBe('REVERSED');
+    // Stays POSTED — it really happened. The mirror is what reverses it;
+    // flipping the original too made every reversal land twice (migration 0025).
+    expect(originalJe02Refreshed?.postingStatus).toBe('POSTED');
+    expect(originalJe02Refreshed?.reversedById).toBeTruthy();
 
     // Per-loan REVERSAL JE: sourceTable='party_loans', sourceId=loan.id, DR 1140 / CR 1025
     // (the loan side used the payment's own assetAccountCode, same as the
@@ -1040,7 +1043,10 @@ describe('Phase 9 — Combined settlement (invoice + loan)', () => {
     const originalJe19Refreshed = await prisma.journalEntry.findUnique({
       where: { id: originalJe19Id },
     });
-    expect(originalJe19Refreshed?.postingStatus).toBe('REVERSED');
+    // Stays POSTED — it really happened. The mirror is what reverses it;
+    // flipping the original too made every reversal land twice (migration 0025).
+    expect(originalJe19Refreshed?.postingStatus).toBe('POSTED');
+    expect(originalJe19Refreshed?.reversedById).toBeTruthy();
 
     // Net on 1025 (cheque clearing) across all four JEs must be zero:
     // +invoiceTotal (JE-02) + loanPrincipal (JE-19) − invoiceTotal (JE-06) − loanPrincipal (loan reversal).

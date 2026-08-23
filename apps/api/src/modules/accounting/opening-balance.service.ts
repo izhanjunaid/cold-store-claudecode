@@ -14,8 +14,15 @@ import type { JournalEntryService } from './journal-entry.service';
 
 // Per-party receivables must go through party_receivables (they need party
 // attribution); peshgi balances belong to the Peshgi module (they need a
-// loan record to drive recovery).
-const BLOCKED_OTHER_LINE_CODES = new Set(['1110', '1120', '1130', '1140', '1150']);
+// loan record to drive recovery). 1250 is owned by the storage-revenue
+// accrual runner, which posts and reverses it every period from the live lot
+// set — an opening balance there would be double-counted by the first accrual
+// and never cleared, since the accrual only ever reverses its own entries.
+//
+// Owner's Drawings (3015) is deliberately NOT blocked: a proprietor's paper
+// books often carry a current-year drawings figure at the cutover date, and
+// it is an ordinary equity line.
+const BLOCKED_OTHER_LINE_CODES = new Set(['1110', '1120', '1130', '1140', '1150', '1250']);
 
 // Opening balances belong on the balance sheet; a P&L-class opening line has no
 // meaning (its net effect is owner equity, which the plug already books). And
@@ -34,7 +41,7 @@ export class OpeningBalanceService {
 
   async getStatus(facilityId: string) {
     const existing = await this.prisma.journalEntry.findFirst({
-      where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED' },
+      where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED', reversedById: null },
       orderBy: { createdAt: 'desc' },
       select: { id: true, entryNumber: true, entryDate: true },
     });
@@ -69,7 +76,7 @@ export class OpeningBalanceService {
       await advisoryXactLock(tx, `${facilityId}:opening-balances`);
 
       const existing = await tx.journalEntry.findFirst({
-        where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED' },
+        where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED', reversedById: null },
       });
       if (existing) throw Errors.OPENING_BALANCES_ALREADY_ENTERED();
 

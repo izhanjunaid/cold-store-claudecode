@@ -38,6 +38,7 @@ interface FixedAsset {
   depreciation_start_date: string | null;
   status: string;
   accumulated_depreciation_pkr: number;
+  accumulated_impairment_pkr: number;
   net_book_value_pkr: number;
   asset_account_code: string;
   accum_depr_account_code: string;
@@ -69,6 +70,10 @@ export default function FixedAssetDetailPage() {
   const [loading, setLoading] = useState(true);
   const [showCommission, setShowCommission] = useState(false);
   const [showDispose, setShowDispose] = useState(false);
+  const [showImpair, setShowImpair] = useState(false);
+  const [impairDate, setImpairDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [impairAmount, setImpairAmount] = useState('');
+  const [impairReason, setImpairReason] = useState('');
   const [showReverse, setShowReverse] = useState(false);
   const [commissionDate, setCommissionDate] = useState(new Date().toISOString().slice(0, 10));
   const [disposalDate, setDisposalDate] = useState(new Date().toISOString().slice(0, 10));
@@ -111,6 +116,27 @@ export default function FixedAssetDetailPage() {
     }
   }
 
+  async function impair() {
+    if (!impairReason.trim() || !(Number(impairAmount) > 0)) return;
+    try {
+      await apiClient(`/v1/fixed-assets/${id}/impair`, {
+        method: 'POST',
+        body: {
+          impairment_date: impairDate,
+          amount_pkr: Number(impairAmount),
+          reason: impairReason.trim(),
+        },
+      });
+      setShowImpair(false);
+      setImpairAmount('');
+      setImpairReason('');
+      toast.success('Impairment recorded', { description: 'Journal entry JE-28 posted.' });
+      fetchAsset();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed');
+    }
+  }
+
   async function reverseDisposal() {
     if (!reverseReason.trim()) return;
     setReversing(true);
@@ -142,6 +168,9 @@ export default function FixedAssetDetailPage() {
           <>
             {isOwner && asset.status === 'PURCHASED' && <Button onClick={() => setShowCommission(true)}>Commission</Button>}
             {isOwner && (asset.status === 'PURCHASED' || asset.status === 'IN_SERVICE') && (
+              <Button variant="outline" onClick={() => setShowImpair(true)}>Impair…</Button>
+            )}
+            {isOwner && (asset.status === 'PURCHASED' || asset.status === 'IN_SERVICE') && (
               <Button variant="outline" className="text-destructive" onClick={() => setShowDispose(true)}>Dispose</Button>
             )}
             {canReverseDisposal && asset.status === 'DISPOSED' && (
@@ -162,6 +191,9 @@ export default function FixedAssetDetailPage() {
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <Kpi label="Purchase Cost" value={`${formatMoney(asset.purchase_cost_pkr)}`} />
             <Kpi label="Accum. Depreciation" value={`${formatMoney(asset.accumulated_depreciation_pkr)}`} tone="text-amber-700" />
+            {asset.accumulated_impairment_pkr > 0 && (
+              <Kpi label="Accum. Impairment" value={`${formatMoney(asset.accumulated_impairment_pkr)}`} tone="text-destructive" />
+            )}
             <Kpi label="Net Book Value" value={`${formatMoney(asset.net_book_value_pkr)}`} tone="text-green-700" />
             <Kpi label="Depreciation" value={`${asset.depreciation_method} ${asset.wdv_rate_percent ? `${asset.wdv_rate_percent}%` : `${asset.useful_life_years}yr`}`} />
           </div>
@@ -245,6 +277,52 @@ export default function FixedAssetDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDispose(false)}>Cancel</Button>
             <Button className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={dispose}>Dispose</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showImpair} onOpenChange={setShowImpair}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Record Impairment</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Write the asset down to what it is actually worth — a failed compressor, flood damage,
+            an accident. Posts JE-28: DR 6160 Impairment Loss / CR 1370 Accum. Impairment, keeping
+            the write-down separate from depreciation so cost, depreciation and impairment stay
+            readable side by side. Later depreciation spreads what is left over the remaining life.
+            <br />
+            Carrying amount now: {formatMoney(asset.net_book_value_pkr)} — the most that can be
+            written down.
+          </p>
+          <div className="space-y-1.5">
+            <Label>Impairment Date</Label>
+            <Input type="date" value={impairDate} onChange={(e) => setImpairDate(e.target.value)} className="tabular-nums" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Amount (PKR)</Label>
+            <Input
+              type="number"
+              min={0}
+              step={0.01}
+              value={impairAmount}
+              onChange={(e) => setImpairAmount(e.target.value)}
+              placeholder="0.00"
+              className="tabular-nums"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Reason</Label>
+            <Input
+              value={impairReason}
+              onChange={(e) => setImpairReason(e.target.value)}
+              placeholder="e.g. compressor failed beyond economic repair"
+              maxLength={300}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowImpair(false)}>Cancel</Button>
+            <Button onClick={impair} disabled={!impairReason.trim() || !(Number(impairAmount) > 0)}>
+              Record impairment
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

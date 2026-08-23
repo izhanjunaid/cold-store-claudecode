@@ -51,6 +51,7 @@ export default function NewPaymentPage() {
   const [amountPkr, setAmountPkr] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [referenceNumber, setReferenceNumber] = useState('');
+  const [taxWithheld, setTaxWithheld] = useState('');
   const [isAdvance, setIsAdvance] = useState(false);
   const [chequeDate, setChequeDate] = useState('');
   const [notes, setNotes] = useState('');
@@ -120,6 +121,7 @@ export default function NewPaymentPage() {
           amount_pkr: parseFloat(amountPkr),
           payment_method: paymentMethod,
           reference_number: referenceNumber || undefined,
+          ...(Number(taxWithheld) > 0 ? { tax_withheld_pkr: Number(taxWithheld) } : {}),
           is_advance: isAdvance,
           cheque_date: paymentMethod === 'CHEQUE' && chequeDate ? chequeDate : undefined,
           notes: notes || undefined,
@@ -184,6 +186,31 @@ export default function NewPaymentPage() {
               <Label>Reference number</Label>
               <Input name="reference_number" value={referenceNumber} onChange={(e) => setReferenceNumber(e.target.value)} placeholder="Cheque #, transfer ref…" />
             </div>
+            {!isAdvance && (
+              <div className="space-y-1.5">
+                <Label>Tax withheld at source (optional)</Label>
+                <Input
+                  name="tax_withheld_pkr"
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={taxWithheld}
+                  onChange={(e) => setTaxWithheld(e.target.value)}
+                  placeholder="0.00"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {Number(taxWithheld) > 0 && Number(amountPkr) > 0 ? (
+                    <>
+                      The invoice settles in full at {formatMoney(Number(amountPkr))}; cash received is{' '}
+                      {formatMoney(Number(amountPkr) - Number(taxWithheld))}. The deduction is an advance
+                      of your own income tax, held in 1240 — not a discount and not a shortfall.
+                    </>
+                  ) : (
+                    <>Enter the amount above as what settles the invoice, before any deduction.</>
+                  )}
+                </p>
+              </div>
+            )}
             {paymentMethod === 'CHEQUE' && (
               <div className="space-y-1.5">
                 <Label>Cheque date</Label>

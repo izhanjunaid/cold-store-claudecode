@@ -34,6 +34,7 @@ const cards: ReportCard[] = [
   { title: 'Seasonal Summary', href: '/reports/seasonal-summary', icon: CalendarRange, permission: 'reports.seasonal', description: 'Total inbound, outbound, and revenue across a date range, per commodity.' },
   { title: 'Ownership Transfer Log', href: '/reports/ownership-transfers', icon: ArrowRightLeft, permission: 'reports.inventory', description: 'Timeline of all FULL and PARTIAL ownership transfers across the facility.' },
   { title: 'Late Payment Surcharges', href: '/reports/surcharges', icon: AlarmClock, permission: 'reports.financial', description: 'Overdue invoices eligible for a surcharge, applied one at a time — never automatically.' },
+  { title: 'Withholding Tax', href: '/reports/withholding-tax', icon: Receipt, permission: 'reports.financial', description: 'Tax deducted at source by section — the figures behind a s.165 statement.' },
 ];
 
 export default function ReportsHubPage() {

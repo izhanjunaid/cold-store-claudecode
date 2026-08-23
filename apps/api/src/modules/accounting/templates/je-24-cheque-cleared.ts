@@ -19,6 +19,10 @@ type Input = {
  * A received cheque posts JE-02/JE-03 to 1025, not 1020 (phase/25) — it is not
  * yet bank funds and can still bounce. This entry fires when the bank actually
  * processes it, moving the amount from the clearing account into Bank.
+ *
+ * `amountPkr` here is the CASH leg, not the invoice amount. Where the customer
+ * withheld tax at source, 1025 only ever received the net, so clearing the
+ * gross would leave 1025 permanently short by the withheld amount.
  */
 export function buildJE24ChequeCleared(input: Input): JournalEntryDraft {
   const amount = round2(input.amountPkr);

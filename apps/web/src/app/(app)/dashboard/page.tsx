@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/layout/page-header';
+import { OpeningBalanceNotice } from '@/components/opening-balance-notice';
 import { StatTile } from '@/components/stat-tile';
 
 const fmt = formatCount;
@@ -64,6 +65,8 @@ export default function DashboardPage() {
         title="Operational Dashboard"
         description="Live facility overview · auto-refreshes every 30s"
       />
+
+      <OpeningBalanceNotice context="dashboard" />
 
       {error && (
         <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">

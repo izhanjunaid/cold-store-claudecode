@@ -56,6 +56,12 @@ interface PayrollRun {
   paid_at: string | null;
   notes: string | null;
   line_items: LineItem[];
+  reconciliation: {
+    gl_salaries_payable_pkr: number;
+    register_net_pay_pkr: number;
+    difference_pkr: number;
+    is_reconciled: boolean;
+  } | null;
 }
 
 export default function PayrollRunDetailPage() {
@@ -251,6 +257,31 @@ export default function PayrollRunDetailPage() {
             <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Employer EOBI</div><div className="text-lg font-semibold tabular-nums">{formatMoney(run.total_employer_eobi_pkr)}</div></div>
             <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Net Payable</div><div className="text-lg font-semibold tabular-nums text-green-700">{formatMoney(run.total_net_payable_pkr)}</div></div>
           </div>
+          {run.reconciliation && (
+            <div
+              className={
+                run.reconciliation.is_reconciled
+                  ? 'mt-4 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground'
+                  : 'mt-4 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive'
+              }
+            >
+              {run.reconciliation.is_reconciled ? (
+                <>
+                  Ledger agrees with the register: 2030 Salaries Payable carries{' '}
+                  {formatMoney(run.reconciliation.gl_salaries_payable_pkr)} for this run, the same as
+                  the {run.line_items.length} line items below add up to.
+                </>
+              ) : (
+                <>
+                  <strong>The ledger and the register disagree.</strong> 2030 Salaries Payable carries{' '}
+                  {formatMoney(run.reconciliation.gl_salaries_payable_pkr)} for this run but the line
+                  items add up to {formatMoney(run.reconciliation.register_net_pay_pkr)} — a difference
+                  of {formatMoney(run.reconciliation.difference_pkr)}. The books and the payroll
+                  register are describing the same wages differently; raise it before paying.
+                </>
+              )}
+            </div>
+          )}
           <div className="mt-4 space-y-1 text-sm text-muted-foreground">
             {run.payroll_journal_entry_id && <div>Payroll JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${run.payroll_journal_entry_id}`)}>{run.payroll_journal_entry_id.slice(0, 8)}…</Button></div>}
             {run.payment_journal_entry_id && <div>Payment JE-16: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${run.payment_journal_entry_id}`)}>{run.payment_journal_entry_id.slice(0, 8)}…</Button></div>}

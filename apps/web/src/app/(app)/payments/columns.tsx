@@ -8,6 +8,7 @@ export interface PaymentRow {
   payment_date: string;
   amount_pkr: number;
   payment_method: string;
+  receipt_number: string | null;
   reference_number: string | null;
   status: 'RECORDED' | 'ALLOCATED' | 'ADVANCE' | 'DISHONOURED';
   allocations: { id: string }[];
@@ -28,6 +29,19 @@ const STATUS_TONE: Record<string, 'info' | 'success' | 'warning' | 'danger'> = {
 };
 
 export const paymentColumns: DataTableColumn<PaymentRow>[] = [
+  {
+    id: 'receipt',
+    header: 'Receipt #',
+    // Payments recorded before receipts were numbered carry none, and are not
+    // retro-numbered — a receipt number belongs to a receipt that was issued.
+    cell: (p) =>
+      p.receipt_number ? (
+        <span className="font-mono">{p.receipt_number}</span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      ),
+    csv: (p) => p.receipt_number ?? '',
+  },
   { id: 'date', header: 'Date', cell: (p) => formatDate(p.payment_date), csv: (p) => p.payment_date },
   {
     id: 'party',

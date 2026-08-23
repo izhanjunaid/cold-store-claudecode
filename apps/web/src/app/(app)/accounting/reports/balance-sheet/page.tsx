@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { CheckCircle2, TriangleAlert } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { PageHeader } from '@/components/layout/page-header';
+import { OpeningBalanceNotice } from '@/components/opening-balance-notice';
 import { StatementFrame, StatementSkeleton } from '@/components/accounting/statement-frame';
 import { StatementToolbar } from '@/components/accounting/statement-toolbar';
 import { StatementTable, SectionHeading, StatementRow, SpacerRow } from '@/components/accounting/statement';
@@ -149,6 +150,8 @@ export default function BalanceSheetPage() {
   return (
     <div className="max-w-4xl">
       <PageHeader title="Balance Sheet" description="Statement of financial position — Assets = Liabilities + Equity" />
+
+      <OpeningBalanceNotice context="statement" />
 
       <StatementToolbar
         mode="asof"

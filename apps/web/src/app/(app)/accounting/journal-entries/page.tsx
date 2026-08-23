@@ -23,6 +23,7 @@ interface JournalEntry {
   book_type: 'PACCI' | 'KATCHI';
   description: string;
   posting_status: 'AUTO_DRAFT' | 'POSTED' | 'REVERSED';
+  reversed_by_entry_number: string | null;
   total_debit_pkr: number;
 }
 
@@ -39,7 +40,20 @@ const columns: DataTableColumn<JournalEntry>[] = [
   { id: 'book', header: 'Book', cell: (e) => e.book_type, csv: (e) => e.book_type },
   { id: 'description', header: 'Description', cell: (e) => <span className="block max-w-md truncate">{e.description}</span>, csv: (e) => e.description },
   { id: 'amount', header: 'Amount', numeric: true, cell: (e) => e.total_debit_pkr.toLocaleString(), csv: (e) => e.total_debit_pkr },
-  { id: 'status', header: 'Status', cell: (e) => <StatusBadge status={e.posting_status} tone={STATUS_TONE[e.posting_status]} />, csv: (e) => e.posting_status },
+  {
+    id: 'status',
+    header: 'Status',
+    // A reversed entry stays POSTED — it really happened, and its mirror
+    // cancels it — so the badge reads off reversed_by, not the status.
+    // Entries reversed before that change still carry the REVERSED status.
+    cell: (e) =>
+      e.reversed_by_entry_number ? (
+        <StatusBadge status="REVERSED" tone="danger" />
+      ) : (
+        <StatusBadge status={e.posting_status} tone={STATUS_TONE[e.posting_status]} />
+      ),
+    csv: (e) => (e.reversed_by_entry_number ? 'REVERSED' : e.posting_status),
+  },
 ];
 
 const FILTER_KEYS = ['entry_type', 'book_type', 'posting_status', 'date_from', 'date_to'] as const;

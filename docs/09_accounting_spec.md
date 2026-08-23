@@ -28,8 +28,37 @@ The original M7 draft was effectively a one-sided party ledger: invoices raised 
 4. **Audit and owner trust**: The cold store owner needs to know their actual financial position at any point in the season — not just AR. A balanced trial balance is the only mechanism that catches entry errors through the fundamental check: Total Debits = Total Credits.
 
 ### Accounting Standard Applied
-- **Framework**: Cash-and-Accrual hybrid appropriate for SME Pakistan businesses
-- **Standard**: Aligned with IFRS for SMEs (International Financial Reporting Standard for Small and Medium-sized Entities), simplified for operational use
+
+**Decided, not assumed.** `docs/16:333` left this open — *"Assumed IFRS for SMEs per the
+spec's own declaration; not confirmed with the owner whether AFRS-for-SSEs applies
+instead."* Confirmed with the owner: the facility is a **sole proprietorship / AOP**, not a
+company registered under the Companies Act 2017.
+
+- **What binds the entity**: **no SECP/ICAP financial reporting framework does.** The
+  Companies Act 2017 Third Schedule — the instrument that assigns full IFRS, IFRS for SMEs
+  or AFRS for SSEs by company tier — reaches *companies*. It does not reach a
+  proprietorship or an AOP. What does bind: the **Income Tax Ordinance 2001** (§32 method
+  of accounting, §174 records and retention; note §32 permits a non-company to use cash or
+  accrual), the **withholding regime** (§149 salary, §153 goods/services, §155 rent, with
+  statements under §165), and **provincial sales tax on services (PRA)** where applicable.
+- **Framework**: **IFRS for SMEs, adopted voluntarily**, presented at AFRS-for-SSEs-level
+  simplicity. Voluntary because it is a single self-contained volume with a fixed, small
+  set of primary statements — a model a chart of accounts and a statement generator can be
+  built against, where full IFRS is 40+ standards with an option at every turn. The books
+  stay on **accrual** despite the §32 latitude: receivables ageing and credit-limit
+  enforcement, which this business runs on operationally, cannot be produced from a
+  cash-basis ledger. The tax computation is a reconciliation, not a second ledger.
+- **Not adopted: IFRS 18** (effective 1 January 2027, replacing IAS 1). It is
+  presentation-and-disclosure only — it changes no recognition and no measurement, so it
+  would fix nothing in this ledger — its Management-defined Performance Measure machinery
+  only earns its keep for an entity publishing non-IFRS measures publicly, and it targets
+  public-interest and large entities. Note that `ebitda_pkr` on the face of the P&L would
+  itself be an MPM under IFRS 18: adopting it would *create* disclosure obligations this
+  entity does not have.
+- **Where the framework lives in the code**: nowhere. Recognition and measurement live in
+  the ledger; presentation lives in the `statement_section` mapping layer (phase/24). If
+  the entity ever incorporates into a tier that mandates a different framework, that is a
+  change to the mapping, not to account codes or posting logic.
 - **Tax basis**: Pakistan Income Tax / GST where applicable; tax-reportable but not enforced
 
 ### The Katchi vs Pacci Reality (Dual Ledger Flag)
@@ -70,7 +99,8 @@ it never auto-assigns.
 Every HEADER account carries a nullable `statement_section` column (migration `0015`).
 `financial-statements.service.ts` places accounts by querying headers with a matching
 section — `sectionHeaders(accounts, 'CURRENT_ASSET')` — not by a hardcoded array of
-codes. The nine sections:
+codes. The ten sections (`OTHER_EXPENSE` was added in phase/25 — the enum and the web
+UI's `CLASS_SECTIONS` both carry ten):
 
 | Section | Statement | Seeded headers |
 |---|---|---|

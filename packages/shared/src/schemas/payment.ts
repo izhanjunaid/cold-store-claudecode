@@ -26,6 +26,9 @@ export const CreatePaymentRequest = z.object({
   amount_pkr: z.number().positive(),
   payment_method: PaymentMethod,
   reference_number: z.string().max(100).optional(),
+  // Tax the customer deducted at source (s.153). amount_pkr stays GROSS — it
+  // is what settles the invoice — so allocation validation is unaffected.
+  tax_withheld_pkr: z.number().nonnegative().optional(),
   is_advance: z.boolean().optional().default(false),
   cheque_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   book_type: z.enum(['PACCI', 'KATCHI']).optional().default('PACCI'),
@@ -89,6 +92,9 @@ export const PaymentResponse = z.object({
   payment_date: z.string(),
   amount_pkr: z.number(),
   payment_method: PaymentMethod,
+  receipt_number: z.string().nullable(),
+  tax_withheld_pkr: z.number(),
+  cash_received_pkr: z.number(),
   reference_number: z.string().nullable(),
   is_advance: z.boolean(),
   status: PaymentStatus,

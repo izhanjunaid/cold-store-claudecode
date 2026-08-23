@@ -49,11 +49,29 @@ export const CancelExpenseRequest = z.object({ reason: z.string().optional() });
 
 export const AccrueExpenseRequest = z.object({}).optional();
 
-export const PayExpenseRequest = z.object({
-  payment_date: dateOnly,
-  payment_method: ExpensePaymentMethod,
-  asset_account_code: z.string().regex(/^[0-9]+$/),
-});
+export const WithholdingSection = z.enum(['S153', 'S155']);
+export type WithholdingSectionType = z.infer<typeof WithholdingSection>;
+
+export const PayExpenseRequest = z
+  .object({
+    payment_date: dateOnly,
+    payment_method: ExpensePaymentMethod,
+    asset_account_code: z.string().regex(/^[0-9]+$/),
+    // Tax deducted at source from this payment. The expense stays gross —
+    // withholding splits how the cost is settled, it does not reduce it.
+    tax_withheld_pkr: z.number().nonnegative().optional(),
+    withholding_section: WithholdingSection.optional(),
+  })
+  .superRefine((v, ctx) => {
+    if ((v.tax_withheld_pkr ?? 0) > 0 && !v.withholding_section) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['withholding_section'],
+        message:
+          'Say which section the tax was deducted under — s.153 and s.155 are reported separately on the s.165 statement.',
+      });
+    }
+  });
 export type PayExpenseRequestType = z.infer<typeof PayExpenseRequest>;
 
 export const PettyCashReplenishRequest = z.object({

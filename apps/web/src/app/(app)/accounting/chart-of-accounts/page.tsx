@@ -174,6 +174,16 @@ export default function ChartOfAccountsPage() {
   // orphan its own children (phase/24).
   const parentRequired = draft.type === 'DETAIL' && draft.cls !== 'EQUITY';
   const sectionOptions = CLASS_SECTIONS[draft.cls] ?? [];
+  // A header must declare its section, or every detail account beneath it
+  // lands in the statements' unclassified bucket. Where the class allows
+  // exactly one section (cost of service), there is nothing to ask.
+  const sectionRequired = draft.type === 'HEADER' && sectionOptions.length > 0;
+  const effectiveSection =
+    draft.section || (sectionOptions.length === 1 ? sectionOptions[0] : '');
+  // The class's normal balance; anything else is a contra account, which the
+  // API requires the caller to declare rather than infer.
+  const classNormal = DEBIT_NORMAL.has(draft.cls) ? 'DEBIT' : 'CREDIT';
+  const isContra = draft.normal !== classNormal;
 
   // Prefill only — never auto-assign. A code is permanent once the account has
   // postings (guard_chart_of_accounts + the JE-line FK's ON UPDATE RESTRICT),
@@ -202,7 +212,8 @@ export default function ChartOfAccountsPage() {
     codeError ??
     (!draft.code ? 'Enter an account code.' : null) ??
     (!draft.name.trim() ? 'Enter an account name.' : null) ??
-    (parentRequired && !draft.parent ? 'Select a parent header.' : null);
+    (parentRequired && !draft.parent ? 'Select a parent header.' : null) ??
+    (sectionRequired && !effectiveSection ? 'Choose the statement section this header rolls up into.' : null);
 
   const createAccount = async () => {
     setSaving(true);
@@ -216,10 +227,14 @@ export default function ChartOfAccountsPage() {
           account_type: draft.type,
           parent_account_code: draft.type === 'DETAIL' ? draft.parent || null : null,
           normal_balance: draft.normal,
-          // Absent (not null) — CreateAccountRequest treats the key as
-          // optional and coa.service.ts defaults an absent section to
-          // unclassified, same as every header before this field existed.
-          ...(draft.type === 'HEADER' && draft.section ? { statement_section: draft.section } : {}),
+          // Only when it deviates from the class default — CreateAccountRequest
+          // rejects a mismatched normal_balance without it.
+          ...(isContra ? { is_contra: true } : {}),
+          // Required for a non-equity header now: an unsectioned header
+          // orphans its own children into the unclassified bucket.
+          ...(draft.type === 'HEADER' && effectiveSection
+            ? { statement_section: effectiveSection }
+            : {}),
         },
       });
       toast.success(`Account ${draft.code} — ${draft.name} created`);
@@ -465,16 +480,19 @@ export default function ChartOfAccountsPage() {
               </div>
             ) : (
               <div className="space-y-1.5">
-                <Label htmlFor="coa-section">Statement section</Label>
+                <Label htmlFor="coa-section">
+                  Statement section
+                  {sectionRequired && <span className="text-destructive"> *</span>}
+                </Label>
                 <select
                   id="coa-section"
-                  value={draft.section}
+                  value={effectiveSection}
                   onChange={(e) => setDraft((d) => ({ ...d, section: e.target.value }))}
                   className={SELECT_CLASS}
                   disabled={sectionOptions.length === 0}
                 >
                   <option value="">
-                    {sectionOptions.length === 0 ? 'Not applicable to Equity' : 'Unclassified (choose later)'}
+                    {sectionOptions.length === 0 ? 'Not applicable to Equity' : 'Select a section…'}
                   </option>
                   {sectionOptions.map((s) => (
                     <option key={s} value={s}>{SECTION_LABEL[s]}</option>
@@ -483,7 +501,7 @@ export default function ChartOfAccountsPage() {
                 <p className="text-xs text-muted-foreground">
                   {sectionOptions.length === 0
                     ? 'Equity accounts are placed by class, not by header — this header groups them on the Chart of Accounts screen only.'
-                    : 'Where this header’s detail accounts appear on the P&L or balance sheet. Leave unset and they show under "Unclassified" until you place it — editable later.'}
+                    : 'Where this header’s detail accounts appear on the P&L or balance sheet. Required — without it they would not appear on either. You can change it later.'}
                 </p>
               </div>
             )}

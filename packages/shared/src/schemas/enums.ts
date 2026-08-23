@@ -121,6 +121,11 @@ export const StatementSection = z.enum([
 ]);
 export type StatementSection = z.infer<typeof StatementSection>;
 
+// Which cash-flow activity an account's movements represent. Null/absent means
+// "derive it" — see cash-flow.service.ts. Only set where the derivation is wrong.
+export const CashFlowSection = z.enum(['OPERATING', 'INVESTING', 'FINANCING']);
+export type CashFlowSection = z.infer<typeof CashFlowSection>;
+
 export const JournalEntryType = z.enum([
   'INVOICE',
   'PAYMENT',
