@@ -29,6 +29,7 @@ vi.mock('@/components/form', () => ({
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
+import { toast } from 'sonner';
 
 import ChartOfAccountsPage from './page';
 
@@ -342,6 +343,51 @@ describe('ChartOfAccountsPage — owner management', () => {
         body: { is_active: false },
       }),
     );
+  });
+
+  it('deletes a never-posted account after confirmation', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+
+    apiClient.mockClear();
+    apiClient.mockResolvedValue(ACCOUNTS);
+    fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
+
+    await waitFor(() => expect(confirmFn).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(apiClient).toHaveBeenCalledWith('/v1/accounting/accounts/6090', { method: 'DELETE' }),
+    );
+  });
+
+  it('does not delete when the confirmation is declined', async () => {
+    confirmFn.mockResolvedValueOnce(false);
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+
+    apiClient.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
+
+    await waitFor(() => expect(confirmFn).toHaveBeenCalled());
+    expect(apiClient).not.toHaveBeenCalled();
+  });
+
+  it('offers no Delete on a system account — only the non-system row has one', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Cash on Hand/)).toBeTruthy());
+    // 1010 and 6000 are system accounts; only 6090 is not.
+    expect(screen.getAllByRole('button', { name: /^delete$/i })).toHaveLength(1);
+  });
+
+  it("surfaces the API's refusal verbatim — the detail names what is blocking the delete", async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+
+    const detail = 'Account cannot be deleted: 3 rate plan(s) are configured to post to it.';
+    apiClient.mockClear();
+    apiClient.mockRejectedValue(new Error(detail));
+    fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(detail));
   });
 
   it('requires a parent before a non-equity account can be created', async () => {

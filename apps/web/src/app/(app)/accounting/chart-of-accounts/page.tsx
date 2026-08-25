@@ -289,6 +289,33 @@ export default function ChartOfAccountsPage() {
     }
   };
 
+  // Deactivation leaves a mistyped account in every picker forever; this removes
+  // it outright. Only ever reaches an account that never touched the books — the
+  // API refuses a system account, any posted line, DETAIL children, and anything
+  // a rate plan or voucher is configured to post to. Both the creation and the
+  // deletion stay in audit_log (the audit_chart_of_accounts trigger fires on
+  // DELETE too), so nothing is destroyed without a trace.
+  const removeAccount = async (a: Account) => {
+    const ok = await confirm({
+      title: `Delete ${a.account_code} — ${a.account_name}?`,
+      description:
+        'Removes the account from the chart for good. This is only possible while it has never been posted to and nothing is configured to use it — otherwise the delete is refused and nothing changes. Both the creation and the deletion stay in the activity log.',
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await apiClient(`/v1/accounting/accounts/${a.account_code}`, { method: 'DELETE' });
+      toast.success(`Account ${a.account_code} deleted`);
+      await fetchAccounts();
+    } catch (e) {
+      // The refusal names the exact blocker — "3 rate plan(s) are configured to
+      // post to it", "2 account(s) sit under it. Delete or re-parent those
+      // first." Surface it verbatim: that detail is the instruction.
+      toast.error(e instanceof Error ? e.message : 'Failed to delete account');
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -382,6 +409,14 @@ export default function ChartOfAccountsPage() {
                             onClick={() => toggleActive(a)}
                           >
                             {a.is_active ? 'Deactivate' : 'Activate'}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive"
+                            onClick={() => removeAccount(a)}
+                          >
+                            Delete
                           </Button>
                         </div>
                       )}
