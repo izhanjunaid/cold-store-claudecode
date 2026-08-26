@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
+import { SoftwareVersion } from '@/components/settings/software-version';
 
 import { PageSkeleton } from '@/components/page-skeleton';
 interface Commodity {
@@ -246,6 +247,8 @@ export default function SettingsPage() {
         </Card>
 
         <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save Settings'}</Button>
+
+        <SoftwareVersion />
       </div>
     </div>
   );
