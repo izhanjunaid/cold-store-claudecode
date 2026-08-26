@@ -67,6 +67,7 @@ jobs:
         run: |
           echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
           echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - name: Build & push API image
         uses: docker/build-push-action@v6
         with:
@@ -74,6 +75,10 @@ jobs:
           file: apps/api/Dockerfile
           target: runtime
           push: true
+          build-args: |
+            COLDCHAIN_VERSION=${{ steps.meta.outputs.version }}
+            COLDCHAIN_COMMIT=${{ github.sha }}
+            COLDCHAIN_BUILT_AT=${{ steps.meta.outputs.built_at }}
           tags: |
             ghcr.io/${{ steps.meta.outputs.owner }}/coldchain-api:${{ steps.meta.outputs.version }}
             ghcr.io/${{ steps.meta.outputs.owner }}/coldchain-api:latest
