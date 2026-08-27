@@ -36,18 +36,18 @@ export function StatTile({
 }: StatTileProps) {
   return (
     <Card className={className}>
-      <CardContent className="pt-5">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+      <CardContent className="p-3">
+        <div className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</div>
         <div
           className={cn(
-            'mt-1.5 font-bold tabular-nums',
-            size === 'compact' ? 'text-lg' : 'text-3xl',
+            'mt-1 font-bold tabular-nums',
+            size === 'compact' ? 'text-lg' : 'text-2xl',
             TONE_CLASS[tone],
           )}
         >
           {value}
         </div>
-        {caption && <div className="mt-1 text-xs text-muted-foreground">{caption}</div>}
+        {caption && <div className="mt-1 text-2xs text-muted-foreground">{caption}</div>}
       </CardContent>
     </Card>
   );

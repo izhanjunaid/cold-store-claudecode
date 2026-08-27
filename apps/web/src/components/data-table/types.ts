@@ -19,6 +19,14 @@ export interface DataTableColumn<T> {
   className?: string;
   /** Header tooltip / extra width hint. */
   width?: string;
+  /**
+   * Single-line with ellipsis + title tooltip past the column's width,
+   * instead of wrapping. Wrapping cells make row height non-deterministic,
+   * which defeats the point of a pinned density mode.
+   */
+  truncate?: boolean;
+  /** Renders a totals row when at least one visible column defines this. */
+  footer?: (rows: T[]) => ReactNode;
 }
 
 export interface FacetOption {

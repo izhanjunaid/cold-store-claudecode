@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Boxes, Users } from 'lucide-react';
 import { apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { navItemsForUser } from '@/components/layout/nav-config';
+import { navItemsForUser, paletteActionsForUser } from '@/components/layout/nav-config';
 import {
   CommandDialog,
   CommandEmpty,
@@ -77,6 +77,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   }, []);
 
   const navItems = useMemo(() => navItemsForUser(user), [user]);
+  const actionItems = useMemo(() => paletteActionsForUser(user), [user]);
 
   const debouncedQuery = useDebounced(query.trim(), 250);
   const searchEnabled = isOpen && debouncedQuery.length >= 2;
@@ -107,6 +108,12 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     return navItems.filter((item) => item.label.toLowerCase().includes(q));
   }, [navItems, query]);
 
+  const matchingActions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return actionItems;
+    return actionItems.filter((item) => item.label.toLowerCase().includes(q));
+  }, [actionItems, query]);
+
   const go = useCallback(
     (href: string) => {
       setIsOpen(false);
@@ -130,6 +137,24 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         />
         <CommandList>
           <CommandEmpty>No results found.</CommandEmpty>
+          {matchingActions.length > 0 && (
+            <CommandGroup heading="Actions">
+              {matchingActions.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <CommandItem
+                    key={item.href}
+                    value={`action-${item.label}`}
+                    onSelect={() => go(item.href)}
+                  >
+                    <Icon className="mr-2 h-4 w-4" aria-hidden />
+                    {item.label}
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          )}
+          {matchingActions.length > 0 && matchingNav.length > 0 && <CommandSeparator />}
           {matchingNav.length > 0 && (
             <CommandGroup heading="Go to">
               {matchingNav.map((item) => {

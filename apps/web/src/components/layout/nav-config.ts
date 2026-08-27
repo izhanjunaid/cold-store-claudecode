@@ -7,11 +7,13 @@ import {
   DoorOpen,
   HandCoins,
   LayoutDashboard,
+  PlusCircle,
   ReceiptText,
   Settings,
   Sprout,
   Tags,
   TrendingUp,
+  UserPlus,
   Users,
   Warehouse,
   type LucideIcon,
@@ -100,6 +102,36 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
 ];
+
+/**
+ * Common "create" destinations, surfaced as an Actions group in the command
+ * palette so a create doesn't cost a detour through a list page first. Same
+ * NavItem shape and permission mechanism as NAV_GROUPS — a courtesy filter,
+ * not a substitute for the API's own guard.
+ */
+export const PALETTE_ACTIONS: NavItem[] = [
+  { label: 'New Inbound', href: '/lots/new', icon: Boxes },
+  { label: 'New Party', href: '/parties/new', icon: UserPlus },
+  { label: 'Record Payment', href: '/payments/new', icon: Banknote, permission: 'billing.view' },
+  {
+    label: 'New Journal Entry',
+    href: '/accounting/journal-entries/new',
+    icon: BookOpenText,
+    permission: 'accounting.view',
+  },
+  {
+    label: 'New Expense',
+    href: '/accounting/expenses/new',
+    icon: PlusCircle,
+    permission: 'expenses.record',
+  },
+  { label: 'Issue Loan', href: '/loans/issue', icon: HandCoins, permission: 'loans.view' },
+];
+
+/** Palette actions visible to a user (same permission rule as nav items). */
+export function paletteActionsForUser(user: UserLike | null | undefined): NavItem[] {
+  return PALETTE_ACTIONS.filter((item) => itemVisible(item, user));
+}
 
 function itemVisible(item: NavItem, user: UserLike | null | undefined): boolean {
   if (!item.permission) return true;

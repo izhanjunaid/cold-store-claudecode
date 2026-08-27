@@ -1,11 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -17,6 +19,23 @@ import { DataTableToolbar } from './data-table-toolbar';
 import { buildCsv, downloadCsv, type CsvColumn } from './export-csv';
 import type { DataTableColumn, FacetConfig, TableMeta } from './types';
 import type { TableSort } from './use-table-state';
+
+/**
+ * Row height per density mode, pinned on `<tr>` rather than left to padding
+ * + inherited line-height so the number in docs/24_ui_density_spec.md is
+ * actually what renders. `<tr>` height is a floor in table layout — content
+ * taller than it still expands the row — so compact-mode cells must stay
+ * single-line (see `col.truncate`) and compact-row actions must use
+ * Button size="sm" (h-7); a default/icon button (h-8) forces the row to 32px.
+ */
+const ROW_HEIGHT: Record<'compact' | 'comfortable', string> = {
+  compact: 'h-7',
+  comfortable: 'h-9',
+};
+const CELL_PAD_Y: Record<'compact' | 'comfortable', string> = {
+  compact: 'py-1',
+  comfortable: 'py-2',
+};
 
 export interface DataTableProps<T> {
   columns: DataTableColumn<T>[];
@@ -45,6 +64,10 @@ export interface DataTableProps<T> {
   emptyState?: { title: string; description?: string; action?: React.ReactNode };
   /** Enables the CSV export button; exports the current page. */
   csvFilename?: string;
+  /** Row height mode — see ROW_HEIGHT above. Default 'compact'. */
+  density?: 'compact' | 'comfortable';
+  /** Renders a chevron column; toggling it shows this beneath the row. */
+  renderExpanded?: (row: T) => React.ReactNode;
 }
 
 export function DataTable<T>({
@@ -68,12 +91,15 @@ export function DataTable<T>({
   onResetFilters,
   emptyState,
   csvFilename,
+  density = 'compact',
+  renderExpanded,
 }: DataTableProps<T>) {
   const [hidden, setHidden] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     for (const col of columns) if (col.defaultHidden) initial[col.id] = true;
     return initial;
   });
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const visibleColumns = useMemo(
     () => columns.filter((c) => !hidden[c.id]),
@@ -91,7 +117,19 @@ export function DataTable<T>({
     };
   }, [csvFilename, visibleColumns, data]);
 
-  const colCount = visibleColumns.length;
+  const colCount = visibleColumns.length + (renderExpanded ? 1 : 0);
+  const footerColumns = visibleColumns.filter((c) => c.footer);
+  const rowHeight = ROW_HEIGHT[density];
+  const cellPadY = CELL_PAD_Y[density];
+
+  const toggleExpanded = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-3">
@@ -118,12 +156,13 @@ export function DataTable<T>({
       <div className="rounded-lg border bg-card">
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow className="hover:bg-transparent">
+            <TableRow className="h-8 hover:bg-transparent">
+              {renderExpanded && <TableHead className="w-8" scope="col" aria-hidden />}
               {visibleColumns.map((col) => (
                 <TableHead
                   key={col.id}
                   className={cn(
-                    'h-9 whitespace-nowrap text-xs',
+                    'whitespace-nowrap text-xs',
                     (col.align === 'right' || col.numeric) && 'text-right',
                     col.className,
                   )}
@@ -165,29 +204,82 @@ export function DataTable<T>({
                 </TableCell>
               </TableRow>
             ) : (
-              data.map((row) => (
-                <TableRow
-                  key={getRowId(row)}
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  className={cn(onRowClick && 'cursor-pointer')}
-                >
-                  {visibleColumns.map((col) => (
-                    <TableCell
-                      key={col.id}
-                      className={cn(
-                        'py-1.5 text-[13px]',
-                        (col.align === 'right' || col.numeric) && 'text-right',
-                        col.numeric && 'tabular-nums',
-                        col.className,
-                      )}
+              data.map((row) => {
+                const id = getRowId(row);
+                const isExpanded = expanded.has(id);
+                return (
+                  <Fragment key={id}>
+                    <TableRow
+                      onClick={onRowClick ? () => onRowClick(row) : undefined}
+                      className={cn(rowHeight, onRowClick && 'cursor-pointer')}
                     >
-                      {col.cell(row)}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
+                      {renderExpanded && (
+                        <TableCell className={cellPadY}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpanded(id);
+                            }}
+                            aria-label={isExpanded ? 'Collapse row' : 'Expand row'}
+                            aria-expanded={isExpanded}
+                            className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted"
+                          >
+                            <ChevronRight
+                              className={cn('h-3.5 w-3.5 transition-transform', isExpanded && 'rotate-90')}
+                              aria-hidden
+                            />
+                          </button>
+                        </TableCell>
+                      )}
+                      {visibleColumns.map((col) => (
+                        <TableCell
+                          key={col.id}
+                          className={cn(
+                            cellPadY,
+                            'text-sm',
+                            (col.align === 'right' || col.numeric) && 'text-right',
+                            col.numeric && 'tabular-nums',
+                            col.truncate && 'truncate',
+                            col.className,
+                          )}
+                          style={col.truncate && col.width ? { maxWidth: col.width } : undefined}
+                          title={col.truncate ? textFallback(col, row) || undefined : undefined}
+                        >
+                          {col.cell(row)}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                    {renderExpanded && isExpanded && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={colCount} className="bg-muted/30 p-3">
+                          {renderExpanded(row)}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                );
+              })
             )}
           </TableBody>
+          {footerColumns.length > 0 && (
+            <TableFooter className="sticky bottom-0 z-10">
+              <TableRow className="hover:bg-transparent">
+                {renderExpanded && <TableCell />}
+                {visibleColumns.map((col) => (
+                  <TableCell
+                    key={col.id}
+                    className={cn(
+                      'text-sm tabular-nums',
+                      (col.align === 'right' || col.numeric) && 'text-right',
+                    )}
+                  >
+                    {col.footer ? col.footer(data) : null}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableFooter>
+          )}
         </Table>
       </div>
 

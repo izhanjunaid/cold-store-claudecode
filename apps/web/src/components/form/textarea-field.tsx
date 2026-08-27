@@ -40,7 +40,7 @@ export function TextareaField<T extends FieldValues>({
       control={control}
       name={name}
       render={({ field }) => (
-        <FormItem className={cn('space-y-1.5', className)}>
+        <FormItem className={className}>
           <FormLabel>
             {label}
             {required && <span className="ml-0.5 text-destructive">*</span>}

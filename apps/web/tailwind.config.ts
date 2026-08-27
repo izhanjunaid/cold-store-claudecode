@@ -78,18 +78,6 @@ const config: Config = {
           4: 'hsl(var(--chart-4))',
           5: 'hsl(var(--chart-5))',
         },
-        earth: {
-          50: '#fdf8f0',
-          100: '#f5ead6',
-          200: '#ead4ad',
-          300: '#ddb97e',
-          400: '#d09e50',
-          500: '#b8862d',
-          600: '#9a6e22',
-          700: '#7a571c',
-          800: '#5c4116',
-          900: '#3e2c10',
-        },
       },
       borderRadius: {
         lg: 'var(--radius)',
@@ -99,6 +87,16 @@ const config: Config = {
       fontFamily: {
         sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
         urdu: ['var(--font-urdu)', 'serif'],
+      },
+      // ERP type ramp. Only the three steps that carry the density win are
+      // remapped — larger sizes are set at the call site instead, since a
+      // bare `theme.fontSize` would replace the scale and strip text-4xl,
+      // which is live in a page.tsx this pass cannot touch. See
+      // docs/24_ui_density_spec.md.
+      fontSize: {
+        '2xs': ['0.6875rem', { lineHeight: '0.875rem' }], // 11px/14 helper, micro-label
+        sm: ['0.8125rem', { lineHeight: '1.125rem' }], // 13px/18 control text, table cell
+        base: ['0.875rem', { lineHeight: '1.25rem' }], // 14px/20 body
       },
       keyframes: {
         'accordion-down': {

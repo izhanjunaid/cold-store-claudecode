@@ -16,7 +16,7 @@ export function PageHeader({ title, description, actions, crumb }: PageHeaderPro
   useCrumb(crumb ?? title);
 
   return (
-    <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">{title}</h1>
         {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
