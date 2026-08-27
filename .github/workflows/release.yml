@@ -11,7 +11,9 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: read
+  # contents: write — the package job creates the GitHub Release that carries the
+  # customer installer zip. Everything else here only needs read.
+  contents: write
   packages: write
 
 jobs:
@@ -218,3 +220,48 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose --env-file .env.production down -v || true
+
+  # The customer-facing half of a release. Until this existed there was no link to
+  # send anyone: release.yml published container images and nothing else, so the
+  # installer folder was assembled by hand on one laptop and its file list lived in
+  # somebody's memory.
+  #
+  # Runs after `smoke`, never before — an image nobody has started must not get a
+  # download link.
+  #
+  # Runs the same script a person runs locally (pwsh is present on the runner), so
+  # CI and hand-built artifacts cannot drift into two implementations.
+  package:
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the installer zip
+        shell: pwsh
+        run: ./scripts/package-client.ps1 -Version ${{ github.ref_name }}
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Quoted heredoc: the notes contain backticks, and an unquoted one would
+          # run them as command substitution. __VER__ is substituted after.
+          cat > notes.md <<'EOF'
+          Installer for a **new** facility PC: download the zip below, unzip it, and
+          run `install.bat` **as administrator** — without elevation the nightly
+          auto-update task is never registered and the box then never updates itself.
+
+          An **existing** box needs nothing from this page. It updates overnight once
+          this version is promoted to `:stable`.
+
+          Images: `ghcr.io/izhanjunaid/coldchain-api:__VER__` and
+          `ghcr.io/izhanjunaid/coldchain-web:__VER__`.
+          EOF
+          sed -i "s/__VER__/${GITHUB_REF_NAME}/g" notes.md
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "ColdChain ${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            "dist/ColdChain-${GITHUB_REF_NAME}.zip"
