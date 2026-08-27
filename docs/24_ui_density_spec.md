@@ -55,18 +55,27 @@ pinned directly on `<tr>` (`h-7`/`h-9`), not left to padding + inherited line-he
 in-cell control taller than it forces the row to grow, silently breaking the density promise:
 
 - `StatusBadge` (~22px) fits inside a compact row.
-- `Button size="sm"` (28px, `h-7`) fits exactly inside a compact row.
+- `Button size="sm"` — **measured at exactly 28px** in the live app (`getBoundingClientRect`
+  on a real "Rename" action button) — fits exactly inside a compact row.
 - `Button` default/`icon` (32px, `h-8`) does **not** fit inside a compact row — it forces the
   row to 32px. Use `size="sm"` for any row action in a `density="compact"` table, or switch
   that table to `comfortable`.
+- **`UrduText`** (`ui/urdu-text.tsx`, used for `marka` and `name_urdu` values) sets
+  `leading-loose` (2× line-height) deliberately, to avoid clipping Nastaliq script's vertical
+  strokes — a pre-existing, correct choice, not a density-pass regression. **Measured on a real
+  seeded lot row: 28.7px without a marka value, 34.87px with one.** Any list column that can
+  render Urdu text will not hold the 28px compact-row promise for rows that have a value in
+  that column. This is expected, not a bug — don't "fix" it by removing `leading-loose`.
 
 Cells default to `whitespace-nowrap`; opt into `col.truncate` for ellipsis + hover tooltip on a
 column that legitimately holds long text — pair it with `col.width` (an unbounded column can't
 truncate). Wrapping cells are what make row height non-deterministic; don't reach for it.
 
 **Sticky header/footer — the mechanism, so you don't reintroduce the bug.** The header/footer
-now actually stick (verified in-browser; they never worked before this branch). Two things had
-to change together, and neither works alone:
+now actually stick — verified against real seeded data on `/lots` (19 rows): scrolling `<main>`
+by a real ~292px (its full available scroll range) left the `<thead>`'s position pixel-for-pixel
+unchanged. Before this branch, the same scroll moved the header the full scroll distance, i.e.
+it never stuck at all. Two things had to change together, and neither works alone:
 
 1. `app/(app)/layout.tsx`: the shell is `h-screen overflow-hidden`; `<main>` is `overflow-auto`
    (both axes — see below) and is the *only* scroll container in the app.
