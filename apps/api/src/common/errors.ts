@@ -40,6 +40,8 @@ export const Errors = {
     new AppError('PERIOD_LOCKED', 'Accounting period is closed; cannot post entries', 409),
   ACCOUNT_NOT_FOUND: () =>
     new AppError('ACCOUNT_NOT_FOUND', 'Account code does not exist in CoA', 404),
+  ACCOUNT_IN_USE: (detail: string) =>
+    new AppError('ACCOUNT_IN_USE', `Account cannot be deleted: ${detail}`, 409),
   SYSTEM_ACCOUNT_PROTECTED: () =>
     new AppError('SYSTEM_ACCOUNT_PROTECTED', 'System accounts cannot be deleted, recoded or renamed', 409),
   ACCOUNT_HAS_BALANCE: () =>

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { CheckCircle2, TriangleAlert } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { PageHeader } from '@/components/layout/page-header';
+import { OpeningBalanceNotice } from '@/components/opening-balance-notice';
 import { StatementFrame, StatementSkeleton } from '@/components/accounting/statement-frame';
 import { StatementToolbar } from '@/components/accounting/statement-toolbar';
 import { useStatementPeriod } from '@/components/accounting/use-statement-period';
@@ -39,10 +40,17 @@ interface Group {
   rows: Row[];
   subtotal: Subtotal;
 }
+interface SectionGroup {
+  statement_section: string;
+  label: string;
+  rows: Row[];
+  subtotal: Subtotal;
+}
 interface TB {
   date_from: string | null;
   date_to: string;
   groups: Group[];
+  section_groups: SectionGroup[];
   rows: Row[];
   total_opening_debit_pkr: number;
   total_opening_credit_pkr: number;
@@ -59,6 +67,10 @@ const headCls = 'px-2 py-1 text-right font-medium';
 export default function TrialBalancePage() {
   const { preset, setPreset, range, setCustom, bookType, setBookType, compare, setCompare } = useStatementPeriod('this_fy');
   const [data, setData] = useState<TB | null>(null);
+  // The class view is the conventional trial balance, so it stays the default.
+  // The section view exists so a subtotal here can be traced straight onto the
+  // face of the P&L or balance sheet, which group by section.
+  const [groupBy, setGroupBy] = useState<'class' | 'section'>('class');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -90,9 +102,40 @@ export default function TrialBalancePage() {
     downloadCsv(`trial-balance-${range.date_from}_${range.date_to}`, csv);
   }
 
+  // One shape for both groupings so the table body does not branch.
+  const groupsToRender = (
+    groupBy === 'section'
+      ? (data?.section_groups ?? []).map((g) => ({ key: g.statement_section, label: g.label, rows: g.rows, subtotal: g.subtotal }))
+      : (data?.groups ?? []).map((g) => ({ key: g.account_class, label: g.label, rows: g.rows, subtotal: g.subtotal }))
+  );
+
   return (
     <div>
       <PageHeader title="Trial Balance" description="Opening · movement · closing balances across all accounts" />
+
+      <div className="mb-3 flex items-center gap-2 text-xs">
+        <span className="text-muted-foreground">Group by</span>
+        {(['class', 'section'] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setGroupBy(mode)}
+            className={cn(
+              'rounded-md border px-2 py-1',
+              groupBy === mode ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground',
+            )}
+          >
+            {mode === 'class' ? 'Account class' : 'Statement section'}
+          </button>
+        ))}
+        <span className="text-muted-foreground">
+          {groupBy === 'section'
+            ? '— the same grouping the P&L and balance sheet use'
+            : '— the conventional trial balance'}
+        </span>
+      </div>
+
+      <OpeningBalanceNotice context="statement" />
 
       <StatementToolbar
         mode="range"
@@ -134,15 +177,15 @@ export default function TrialBalancePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.groups.length === 0 && (
+                  {groupsToRender.length === 0 && (
                     <tr>
                       <td colSpan={7} className="px-2 py-6 text-center text-muted-foreground">
                         No journal entries in this period.
                       </td>
                     </tr>
                   )}
-                  {data.groups.map((g) => (
-                    <Fragment key={g.account_class}>
+                  {groupsToRender.map((g) => (
+                    <Fragment key={g.key}>
                       <tr>
                         <td colSpan={7} className="pt-3 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{g.label}</td>
                       </tr>

@@ -58,6 +58,16 @@ RUN pnpm --filter @coldchain/db run db:generate \
 ############################################################
 FROM base AS runtime
 ENV NODE_ENV=production
+
+# Stamped into the image so a facility box can say what it is running without
+# reaching the network — release.yml passes these; a local build leaves them
+# empty and the API reports "dev", which is the honest answer.
+ARG COLDCHAIN_VERSION=""
+ARG COLDCHAIN_COMMIT=""
+ARG COLDCHAIN_BUILT_AT=""
+ENV COLDCHAIN_VERSION=$COLDCHAIN_VERSION
+ENV COLDCHAIN_COMMIT=$COLDCHAIN_COMMIT
+ENV COLDCHAIN_BUILT_AT=$COLDCHAIN_BUILT_AT
 # Puppeteer picks this up automatically (launch() passes no executablePath).
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 # System Chromium + Urdu/Latin fonts for PDF rendering. apt cache mounts + retries make

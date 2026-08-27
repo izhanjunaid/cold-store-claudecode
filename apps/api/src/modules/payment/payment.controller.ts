@@ -37,6 +37,7 @@ export async function paymentRoutes(app: FastifyInstance) {
         partyId: body.party_id,
         paymentDate: body.payment_date,
         amountPkr: body.amount_pkr,
+        taxWithheldPkr: body.tax_withheld_pkr,
         paymentMethod: body.payment_method,
         referenceNumber: body.reference_number,
         isAdvance: body.is_advance,

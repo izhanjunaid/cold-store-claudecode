@@ -89,8 +89,11 @@ export default function JournalEntryDetailPage() {
   // Only manual and opening-balance entries are reversible here — system
   // entries are corrected through their source document (credit note,
   // dishonour, write-off).
+  // A reversed entry now stays POSTED — "already reversed" is reversed_by_id,
+  // never the status — so without this an entry could be reversed twice.
   const canReverse =
     entry.posting_status === 'POSTED' &&
+    !entry.reversed_by_id &&
     (entry.source_table === 'manual' || entry.source_table === 'opening_balances') &&
     canWriteBook;
 

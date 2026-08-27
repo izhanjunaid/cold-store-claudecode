@@ -55,6 +55,8 @@ export default function ExpenseVoucherDetailPage() {
   // Default stays 1020 (bank) so an untouched dialog pays exactly as it did
   // before this picker read the live chart.
   const [assetAccount, setAssetAccount] = useState(DEFAULT_BANK_ACCOUNT_CODE);
+  const [taxWithheld, setTaxWithheld] = useState('');
+  const [withholdingSection, setWithholdingSection] = useState<'S153' | 'S155'>('S153');
   const { data: accounts = [] } = useAccounts();
   const cashAccounts = accounts.filter(isCashOrBank);
 
@@ -84,8 +86,22 @@ export default function ExpenseVoucherDetailPage() {
   }
 
   async function pay() {
-    if (await action('pay', { payment_date: paymentDate, payment_method: paymentMethod, asset_account_code: assetAccount }, 'Voucher paid')) {
+    const withheld = Number(taxWithheld) || 0;
+    const ok = await action(
+      'pay',
+      {
+        payment_date: paymentDate,
+        payment_method: paymentMethod,
+        asset_account_code: assetAccount,
+        ...(withheld > 0
+          ? { tax_withheld_pkr: withheld, withholding_section: withholdingSection }
+          : {}),
+      },
+      'Voucher paid',
+    );
+    if (ok) {
       setShowPay(false);
+      setTaxWithheld('');
     }
   }
 
@@ -175,6 +191,39 @@ export default function ExpenseVoucherDetailPage() {
                 ))}
               </select>
             </div>
+            <div className="space-y-1.5">
+              <Label>Tax Withheld (PKR, optional)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={0.01}
+                value={taxWithheld}
+                onChange={(e) => setTaxWithheld(e.target.value)}
+                placeholder="0.00"
+                className="tabular-nums"
+              />
+            </div>
+            {Number(taxWithheld) > 0 && (
+              <div className="space-y-1.5">
+                <Label>Withheld Under</Label>
+                <select
+                  value={withholdingSection}
+                  onChange={(e) => setWithholdingSection(e.target.value as 'S153' | 'S155')}
+                  className={SELECT_CLASS}
+                >
+                  <option value="S153">s.153 — goods, services &amp; contracts (2071)</option>
+                  <option value="S155">s.155 — rent of immovable property (2072)</option>
+                </select>
+              </div>
+            )}
+            {Number(taxWithheld) > 0 && v.amount_pkr > 0 && (
+              <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                The supplier receives {formatMoney(v.amount_pkr - Number(taxWithheld))}; the{' '}
+                {formatMoney(Number(taxWithheld))} withheld is held as a liability until it is paid
+                over. The expense stays at {formatMoney(v.amount_pkr)} — withholding splits how the
+                cost is settled, it does not reduce it.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowPay(false)}>Cancel</Button>

@@ -248,6 +248,37 @@ describe('Phase 8B — Payroll', () => {
       0,
     );
     expect(credit2030).toBeCloseTo(sumNetPay);
+
+    // The same invariant, now reported on the run itself so the screen can
+    // show it. Asserting the JE alone proved it held on the day the test ran;
+    // this is what tells the accountant it still holds on a run they are
+    // looking at.
+    expect(run.reconciliation).not.toBeNull();
+    expect(run.reconciliation.gl_salaries_payable_pkr).toBeCloseTo(credit2030, 2);
+    expect(run.reconciliation.register_net_pay_pkr).toBeCloseTo(sumNetPay, 2);
+    expect(run.reconciliation.difference_pkr).toBeCloseTo(0, 2);
+    expect(run.reconciliation.is_reconciled).toBe(true);
+  });
+
+  it('reports no reconciliation on a draft run — there is no entry to tie to yet', async () => {
+    const list = await app.inject({
+      method: 'GET',
+      url: '/v1/payroll-runs?status=DRAFT',
+      headers: authHeaders(accountantToken),
+    });
+    const rows = JSON.parse(list.body).data as { id: string }[];
+    const draft = rows[0];
+    if (!draft) return;
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/payroll-runs/${draft.id}`,
+      headers: authHeaders(accountantToken),
+    });
+    expect(res.statusCode).toBe(200);
+    // Not zero and not a difference equal to the whole payroll — null, because
+    // an unfinalised run has nothing to disagree with.
+    expect(JSON.parse(res.body).data.reconciliation).toBeNull();
   });
 
   it('cannot finalize already-finalized run', async () => {
@@ -674,9 +705,9 @@ describe('Phase 8B — Payroll', () => {
     expect(rev.statusCode).toBe(200);
     expect(JSON.parse(rev.body).data.status).toBe('REVERSED');
 
-    // Original flipped to REVERSED and cross-linked.
+    // Original stays POSTED and is cross-linked to its mirror (migration 0025).
     const original = await prisma.journalEntry.findUnique({ where: { id: originalJeId } });
-    expect(original!.postingStatus).toBe('REVERSED');
+    expect(original!.postingStatus).toBe('POSTED');
     expect(original!.reversedById).toBeTruthy();
 
     // The mirror exists and is the exact opposite of the original.

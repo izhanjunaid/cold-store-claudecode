@@ -52,6 +52,16 @@ export const DisposeAssetRequest = z.object({
 });
 export type DisposeAssetRequestType = z.infer<typeof DisposeAssetRequest>;
 
+// IFRS for SMEs Section 27 write-down. The reason is required, not optional:
+// an impairment is a judgement, and a judgement with no stated basis is not
+// auditable.
+export const ImpairAssetRequest = z.object({
+  impairment_date: dateOnly,
+  amount_pkr: z.number().positive(),
+  reason: z.string().min(1).max(300),
+});
+export type ImpairAssetRequestType = z.infer<typeof ImpairAssetRequest>;
+
 export const ReverseDisposalRequest = z.object({
   reason: z.string().min(1).max(400),
   reversal_date: dateOnly.optional(),

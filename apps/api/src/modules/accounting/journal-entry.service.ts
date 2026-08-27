@@ -172,7 +172,7 @@ export class JournalEntryService {
       if (entry.sourceTable !== 'manual' && entry.sourceTable !== 'opening_balances') {
         throw Errors.JOURNAL_ENTRY_NOT_REVERSIBLE();
       }
-      if (entry.postingStatus === 'REVERSED') throw Errors.JOURNAL_ENTRY_ALREADY_REVERSED();
+      if (entry.reversedById) throw Errors.JOURNAL_ENTRY_ALREADY_REVERSED();
       if (entry.postingStatus !== 'POSTED') throw Errors.JOURNAL_ENTRY_NOT_POSTED();
 
       const reversal = await this.postInTransaction(tx, facilityId, userId, {
@@ -198,16 +198,29 @@ export class JournalEntryService {
   }
 
   /**
-   * Mark an existing journal entry as REVERSED and link it to the reversing entry.
-   * Used by the dishonour flow (JE-06 reverses JE-02).
+   * Record that an entry has been reversed, linking it to the reversing entry.
+   *
+   * The original stays POSTED. It used to be flipped to REVERSED as well, and
+   * because every statement, the GL and the trial balance filter POSTED, that
+   * dropped it out of the ledger entirely *while the mirror was also applied* —
+   * so every reversal in the system landed twice. Measured on a bounced 10,000
+   * cheque: AR ended +10,000 and 1025 ended -10,000. Equal and opposite, so the
+   * trial balance still balanced, which is why it went unseen for so long.
+   *
+   * Keeping the original POSTED is also right on its own terms: it really
+   * happened and belongs in its period, while the mirror is dated when the
+   * reversal happened. Flipping it erased it retroactively — a bounce in April
+   * silently restated March. That is the same argument the JE-25 accrual
+   * reversal already makes for not routing through reverse().
+   *
+   * "Has this been reversed?" is therefore `reversedById != null`, never the
+   * posting status. Migration 0025 relaxed the guard trigger to permit this
+   * and repaired the historical rows.
    */
   async markReversed(tx: Tx, originalId: string, reversingEntryId: string): Promise<void> {
     await tx.journalEntry.update({
       where: { id: originalId },
-      data: {
-        postingStatus: 'REVERSED',
-        reversedById: reversingEntryId,
-      },
+      data: { reversedById: reversingEntryId },
     });
   }
 

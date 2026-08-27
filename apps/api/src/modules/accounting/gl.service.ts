@@ -185,6 +185,8 @@ export class GlService {
     });
 
     const groupMap = new Map<string, { account_class: string; label: string; rows: TrialBalanceRow[]; subtotal: ReturnType<typeof blankSub> }>();
+    const sectionMap = new Map<string, { statement_section: string; label: string; rows: TrialBalanceRow[]; subtotal: ReturnType<typeof blankSub> }>();
+    const accountsByCode = new Map(accounts.map((a) => [a.accountCode, a]));
     const totals = blankSub();
 
     for (const a of accounts) {
@@ -198,6 +200,7 @@ export class GlService {
         account_code: a.accountCode,
         account_name: a.accountName,
         account_class: a.accountClass,
+        statement_section: sectionFor(a, accountsByCode),
         normal_balance: a.normalBalance,
         opening_debit_pkr: round2(Math.max(openingNet, 0)),
         opening_credit_pkr: round2(Math.max(-openingNet, 0)),
@@ -213,18 +216,38 @@ export class GlService {
         groupMap.set(a.accountClass, g);
       }
       g.rows.push(row);
+
+      let s = sectionMap.get(row.statement_section);
+      if (!s) {
+        s = {
+          statement_section: row.statement_section,
+          label: SECTION_LABEL[row.statement_section] ?? row.statement_section,
+          rows: [],
+          subtotal: blankSub(),
+        };
+        sectionMap.set(row.statement_section, s);
+      }
+      s.rows.push(row);
+
       for (const k of Object.keys(totals) as (keyof ReturnType<typeof blankSub>)[]) {
         g.subtotal[k] = round2(g.subtotal[k] + row[k]);
+        s.subtotal[k] = round2(s.subtotal[k] + row[k]);
         totals[k] = round2(totals[k] + row[k]);
       }
     }
 
     const groups = CLASS_ORDER.filter((c) => groupMap.has(c)).map((c) => groupMap.get(c)!);
+    // Every row lands in exactly one group of each kind, so the two sets of
+    // subtotals must sum to the same grand total. If they ever diverge, the
+    // two views of the trial balance disagree — which is the defect this
+    // grouping exists to remove.
+    const section_groups = SECTION_ORDER.filter((s) => sectionMap.has(s)).map((s) => sectionMap.get(s)!);
 
     return {
       date_from: query.date_from ?? null,
       date_to: query.date_to ?? new Date().toISOString().slice(0, 10),
       groups,
+      section_groups,
       // Flat row list retained for convenience / back-compat
       rows: groups.flatMap((g) => g.rows),
       total_opening_debit_pkr: totals.opening_debit_pkr,
@@ -242,6 +265,7 @@ interface TrialBalanceRow {
   account_code: string;
   account_name: string;
   account_class: string;
+  statement_section: string;
   normal_balance: NormalBalance;
   opening_debit_pkr: number;
   opening_credit_pkr: number;
@@ -249,6 +273,66 @@ interface TrialBalanceRow {
   movement_credit_pkr: number;
   debit_balance_pkr: number;
   credit_balance_pkr: number;
+}
+
+/**
+ * The trial balance also groups by statement_section, the same axis the P&L
+ * and balance sheet use.
+ *
+ * Grouping by account_class alone meant an accountant reading the TB and the
+ * statements saw two incompatible pictures of one ledger, with no way to trace
+ * a TB subtotal onto the face of a statement. Both groupings are returned: the
+ * class view is the conventional trial balance and some accountants want it.
+ *
+ * Two sections exist here that the statements do not have:
+ *   EQUITY       — equity accounts carry no statement_section by design; the
+ *                  balance sheet places them by class (3010/3015/3020/3030).
+ *   UNCLASSIFIED — a legacy header with no section, mirroring the disclosure
+ *                  the P&L and balance sheet already make for the same rows.
+ */
+const SECTION_ORDER = [
+  'CURRENT_ASSET',
+  'NON_CURRENT_ASSET',
+  'CURRENT_LIABILITY',
+  'NON_CURRENT_LIABILITY',
+  'EQUITY',
+  'REVENUE',
+  'CONTRA_REVENUE',
+  'OTHER_INCOME',
+  'COST_OF_SERVICE',
+  'OPERATING_EXPENSE',
+  'OTHER_EXPENSE',
+  'UNCLASSIFIED',
+] as const;
+
+const SECTION_LABEL: Record<string, string> = {
+  CURRENT_ASSET: 'Current Assets',
+  NON_CURRENT_ASSET: 'Non-current Assets',
+  CURRENT_LIABILITY: 'Current Liabilities',
+  NON_CURRENT_LIABILITY: 'Non-current Liabilities',
+  EQUITY: 'Equity',
+  REVENUE: 'Revenue',
+  CONTRA_REVENUE: 'Contra Revenue',
+  OTHER_INCOME: 'Other Income',
+  COST_OF_SERVICE: 'Cost of Service',
+  OPERATING_EXPENSE: 'Operating Expenses',
+  OTHER_EXPENSE: 'Non-Operating Expenses',
+  UNCLASSIFIED: 'Unclassified — not under a standard header',
+};
+
+/**
+ * Where a row sits on the statements. A DETAIL account inherits its parent
+ * header's section — the same one-level rollup the statements rely on, which
+ * coa.service.ts enforces at write time by refusing HEADER-under-HEADER.
+ */
+function sectionFor(
+  a: { accountClass: string; accountType: string; parentAccountCode: string | null; statementSection: string | null },
+  byCode: Map<string, { statementSection: string | null }>,
+): string {
+  if (a.accountClass === 'EQUITY') return 'EQUITY';
+  if (a.accountType === 'HEADER') return a.statementSection ?? 'UNCLASSIFIED';
+  const parent = a.parentAccountCode ? byCode.get(a.parentAccountCode) : undefined;
+  return parent?.statementSection ?? 'UNCLASSIFIED';
 }
 
 const CLASS_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'COST_OF_SERVICE', 'EXPENSE'] as const;

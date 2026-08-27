@@ -8,6 +8,7 @@ import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting/templates/types';
 import { buildJE12AssetPurchase } from './templates/je-12-asset-purchase';
 import { buildJE13Depreciation } from './templates/je-13-depreciation';
 import { buildJE14AssetDisposal } from './templates/je-14-asset-disposal';
+import { buildJE28AssetImpairment } from './templates/je-28-asset-impairment';
 import { computeMonthlyDepreciation } from './depreciation-calc';
 
 type CreateInput = {
@@ -170,6 +171,7 @@ export class FixedAssetService {
       const disposalDate = new Date(body.disposal_date);
       const cost = Number(asset.purchaseCostPkr);
       const accum = Number(asset.accumulatedDepreciationPkr);
+      const accumImpairment = Number(asset.accumulatedImpairmentPkr);
       const proceeds = body.disposal_proceeds_pkr;
 
       const draft = buildJE14AssetDisposal({
@@ -182,6 +184,7 @@ export class FixedAssetService {
         disposalDate,
         costPkr: cost,
         accumDeprPkr: accum,
+        accumImpairmentPkr: accumImpairment,
         proceedsPkr: proceeds,
         bookType: asset.bookType,
       });
@@ -201,6 +204,94 @@ export class FixedAssetService {
 
       const reloaded = await this.repo.findById(facilityId, id, tx);
       return formatAsset(reloaded);
+    });
+  }
+
+  /**
+   * Write an asset down to its recoverable amount (IFRS for SMEs Section 27).
+   *
+   * Section 27 requires an assessment at each reporting date, and a failed
+   * compressor or a flood-damaged building is a realistic indicator here. The
+   * loss is a one-off write-down, not a change to the depreciation policy, so
+   * it credits 1370 rather than the asset's accumulated-depreciation account —
+   * see JE-28 for why that separation matters.
+   *
+   * A write-down to zero carrying amount sets the asset WRITTEN_OFF, which
+   * gives that status its first writer (backlog P2-6).
+   */
+  async impair(
+    facilityId: string,
+    userId: string,
+    id: string,
+    body: { impairment_date: string; amount_pkr: number; reason: string },
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      // Two concurrent impairments would each read the same carrying amount
+      // and each pass the cap, writing the asset down twice.
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM fixed_assets WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
+        id,
+        facilityId,
+      );
+      const asset = await tx.fixedAsset.findFirst({ where: { facilityId, id } });
+      if (!asset) throw Errors.FIXED_ASSET_NOT_FOUND();
+      if (asset.status === 'DISPOSED' || asset.status === 'WRITTEN_OFF') {
+        throw Errors.FIXED_ASSET_INVALID_STATUS(
+          `Asset is already ${asset.status} and has no carrying amount left to impair`,
+        );
+      }
+
+      const carrying = round2(
+        Number(asset.purchaseCostPkr) -
+          Number(asset.accumulatedDepreciationPkr) -
+          Number(asset.accumulatedImpairmentPkr),
+      );
+      const amount = round2(body.amount_pkr);
+      if (amount <= 0) {
+        throw Errors.VALIDATION_ERROR('The impairment must be more than zero.', 'amount_pkr');
+      }
+      if (amount > carrying + 0.005) {
+        // An impairment writes an asset down to its recoverable amount. Going
+        // past the carrying amount would put the asset at a negative value and
+        // recognise a loss the entity never had to begin with.
+        throw Errors.VALIDATION_ERROR(
+          `The impairment cannot exceed the carrying amount of Rs. ${carrying.toLocaleString()}.`,
+          'amount_pkr',
+        );
+      }
+
+      const posted = await this.journalEntry.postInTransaction(
+        tx,
+        facilityId,
+        userId,
+        buildJE28AssetImpairment({
+          assetId: asset.id,
+          assetNumber: asset.assetNumber,
+          assetName: asset.assetName,
+          impairmentDate: new Date(body.impairment_date),
+          amountPkr: amount,
+          reason: body.reason,
+          bookType: asset.bookType,
+        }),
+        { postingStatus: 'POSTED' },
+      );
+
+      const remaining = round2(carrying - amount);
+      await tx.fixedAsset.update({
+        where: { id },
+        data: {
+          accumulatedImpairmentPkr: { increment: amount },
+          // Nothing left to carry and nothing left to depreciate.
+          ...(remaining <= 0.005 ? { status: 'WRITTEN_OFF' as const } : {}),
+          notes: asset.notes
+            ? `${asset.notes}
+Impaired ${body.impairment_date}: ${body.reason}`
+            : `Impaired ${body.impairment_date}: ${body.reason}`,
+        },
+      });
+
+      const reloaded = await this.repo.findById(facilityId, id, tx);
+      return { ...formatAsset(reloaded), impairment_journal_entry_id: posted.id };
     });
   }
 
@@ -241,7 +332,7 @@ export class FixedAssetService {
         where: { id: asset.disposalJournalEntryId, facilityId },
         include: { lines: { orderBy: { lineNumber: 'asc' } } },
       });
-      if (original.postingStatus === 'REVERSED') {
+      if (original.reversedById) {
         throw Errors.ASSET_NOT_REVERSIBLE('Disposal entry has already been reversed');
       }
 
@@ -327,7 +418,10 @@ export class FixedAssetService {
       const prevYear = month === 1 ? year - 1 : year;
       const eligibleLastPeriod = assets.filter((a) => {
         if (!a.depreciationStartDate) return false;
-        const opening = Number(a.purchaseCostPkr) - Number(a.accumulatedDepreciationPkr);
+        const opening =
+          Number(a.purchaseCostPkr) -
+          Number(a.accumulatedDepreciationPkr) -
+          Number(a.accumulatedImpairmentPkr);
         const row = computeMonthlyDepreciation({
           method: a.depreciationMethod,
           costPkr: Number(a.purchaseCostPkr),
@@ -338,6 +432,7 @@ export class FixedAssetService {
           periodYear: prevYear,
           periodMonth: prevMonth,
           openingNbvPkr: opening,
+          accumulatedImpairmentPkr: Number(a.accumulatedImpairmentPkr),
         });
         return row.depreciationAmountPkr > 0;
       });
@@ -366,7 +461,10 @@ export class FixedAssetService {
 
       for (const asset of assets) {
         if (!asset.depreciationStartDate) continue;
-        const opening = Number(asset.purchaseCostPkr) - Number(asset.accumulatedDepreciationPkr);
+        const opening =
+          Number(asset.purchaseCostPkr) -
+          Number(asset.accumulatedDepreciationPkr) -
+          Number(asset.accumulatedImpairmentPkr);
         const row = computeMonthlyDepreciation({
           method: asset.depreciationMethod,
           costPkr: Number(asset.purchaseCostPkr),
@@ -377,6 +475,7 @@ export class FixedAssetService {
           periodYear: year,
           periodMonth: month,
           openingNbvPkr: opening,
+          accumulatedImpairmentPkr: Number(asset.accumulatedImpairmentPkr),
         });
 
         if (row.depreciationAmountPkr <= 0) continue;
@@ -487,7 +586,12 @@ function formatAssetSummary(a: any) {
     purchase_date: a.purchaseDate.toISOString().slice(0, 10),
     purchase_cost_pkr: Number(a.purchaseCostPkr),
     accumulated_depreciation_pkr: Number(a.accumulatedDepreciationPkr),
-    net_book_value_pkr: round2(Number(a.purchaseCostPkr) - Number(a.accumulatedDepreciationPkr)),
+    accumulated_impairment_pkr: Number(a.accumulatedImpairmentPkr),
+    net_book_value_pkr: round2(
+      Number(a.purchaseCostPkr) -
+        Number(a.accumulatedDepreciationPkr) -
+        Number(a.accumulatedImpairmentPkr),
+    ),
     depreciation_method: a.depreciationMethod,
     status: a.status,
     book_type: a.bookType,

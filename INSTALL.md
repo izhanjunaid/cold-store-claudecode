@@ -129,6 +129,39 @@ Two things worth knowing:
   dated file into the `backups` folder. (Restoring one is `restore.ps1`, and is a last resort —
   ask your provider first.)
 
+**What's new in v0.5.1**:
+- **You can now see which version you are running.** Settings → General shows the version, when
+  it was built, and when this computer last started it. More usefully, it tells you whether the
+  last update actually finished — if the database is missing changes, it says so in plain words
+  instead of quietly carrying on. Quote what it shows when you contact your provider.
+- **A mistyped account can be deleted.** In the Chart of Accounts, an account that has never been
+  used can be removed outright rather than only switched off and left in every list forever. If
+  something is using it, ColdChain refuses and tells you exactly what.
+
+**What's new in v0.5.0**:
+- **Storage revenue lands in the month it is earned.** Previously a lot stored October to March
+  put six months of revenue into March and showed nothing in the months before it. A month-end
+  step now recognises what has been earned so far, and the invoice is unaffected when it is
+  finally raised. Ask your accountant before switching this on.
+- **Statement of Cash Flows** — where the money actually came from and went, as a proper
+  statement rather than a bank balance.
+- **Sales tax you have collected can now be paid over.** GST Payable used to only ever grow; there
+  was no way to settle it, so the balance sheet overstated what you owed indefinitely.
+- **Moving cash to the bank** is now something you can record, in either direction.
+- **Receipts are numbered**, so a disputed payment can be quoted by its number.
+- **Withholding tax, both ways** — tax deducted from your payments, and tax you deduct from
+  suppliers and rent, with a report shaped like the statement your tax advisor needs.
+- **Writing down a damaged asset** (a failed compressor, flood damage) is now supported, kept
+  separate from ordinary depreciation.
+- **A ledger correction.** Reversing anything — a bounced cheque, a voided invoice, a cancelled
+  payroll run — used to apply the reversal twice, leaving receivables overstated by the amount.
+  This update repairs the affected records automatically. It never unbalanced the books, which is
+  why it went unnoticed.
+
+**What's new in v0.4.4**:
+- **Fixed: a brand-new install could not be logged into.** Also corrected who was recorded against
+  each change in the audit trail.
+
 **What's new in v0.4.0**:
 - **ColdChain now updates itself.** It checks nightly and installs new versions on its own —
   including database changes — after taking a full backup. If anything fails it puts the previous

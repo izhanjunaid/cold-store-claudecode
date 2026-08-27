@@ -62,6 +62,8 @@ export interface FacilitySettings {
   backdating_max_days?: number | null;
   gst_enabled?: boolean;
   gst_default_rate?: number;
+  /** JE-25 — when on, the P&L states an accrual basis for storage revenue. */
+  revenue_accrual?: { enabled: boolean; start_date: string | null };
   [key: string]: unknown;
 }
 

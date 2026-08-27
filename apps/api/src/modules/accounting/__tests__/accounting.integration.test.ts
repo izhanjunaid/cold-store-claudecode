@@ -293,7 +293,9 @@ describe('Phase 8 — Journal entries (forward path)', () => {
     expect(dishonourRes.statusCode).toBe(200);
 
     const originalJE = await prisma.journalEntry.findUnique({ where: { id: originalJEId } });
-    expect(originalJE?.postingStatus).toBe('REVERSED');
+    // Stays POSTED — it really happened. The mirror is what reverses it;
+    // flipping the original too made every reversal land twice (migration 0025).
+    expect(originalJE?.postingStatus).toBe('POSTED');
     expect(originalJE?.reversedById).not.toBeNull();
 
     const reversal = await prisma.journalEntry.findUnique({

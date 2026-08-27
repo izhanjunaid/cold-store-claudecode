@@ -40,6 +40,22 @@ export const NotificationSettings = z.object({
 });
 export type NotificationSettingsType = z.infer<typeof NotificationSettings>;
 
+/**
+ * Storage is a service rendered over time, but revenue is only recognised when
+ * the invoice is finalised — at withdrawal. A lot stored October to March puts
+ * six months of revenue into March, and every lot still in storage at a period
+ * end has none recognised at all. docs/16 names this F-16.
+ *
+ * Off by default so an existing facility's reported periods are never restated
+ * behind the owner's back. start_date should be set to a fiscal-year boundary
+ * when switching it on.
+ */
+export const RevenueAccrualRule = z.object({
+  enabled: z.boolean(),
+  start_date: z.string().regex(/^d{4}-d{2}-d{2}$/).nullable(),
+});
+export type RevenueAccrualRuleType = z.infer<typeof RevenueAccrualRule>;
+
 export const FacilitySettings = z.object({
   weight_dispute_threshold_kg: z.number().nonnegative(),
   storage_alert_thresholds: z.record(z.string().uuid(), z.number().int().positive()),
@@ -53,6 +69,7 @@ export const FacilitySettings = z.object({
   // retained earnings) and the web report period presets.
   fiscal_year_start_month: z.number().int().min(1).max(12),
   late_payment_surcharge: LatePaymentSurchargeRule,
+  revenue_accrual: RevenueAccrualRule,
   email: EmailSettings,
   notifications: NotificationSettings,
 });
@@ -72,6 +89,7 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
   gst_default_rate: 18,
   fiscal_year_start_month: 7, // July — Pakistan's standard fiscal year (matches web DEFAULT_FY_START_MONTH)
   late_payment_surcharge: { enabled: false, pct_per_month: 2, grace_days: 30 },
+  revenue_accrual: { enabled: false, start_date: null },
   email: {
     enabled: false,
     smtp_host: 'smtp.gmail.com',

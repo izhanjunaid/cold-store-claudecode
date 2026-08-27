@@ -11,12 +11,19 @@ import {
   TrialBalanceQuery,
   ProfitLossQuery,
   BalanceSheetQuery,
+  CashFlowQuery,
   LockPeriodRequest,
   UnlockPeriodRequest,
   CreateCreditNoteRequest,
   CreditNoteListQuery,
   BadDebtWriteOffRequest,
   EnterOpeningBalancesRequest,
+  RevenueAccrualPeriodQuery,
+  RunRevenueAccrualRequest,
+  GstSettlementQuery,
+  PostGstSettlementRequest,
+  CreateCashTransferRequest,
+  RemitWithholdingRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { assertKatchiWriteAllowed, resolveBookTypeForRead } from './book-gate';
@@ -24,10 +31,15 @@ import { CoaService } from './coa.service';
 import { JournalEntryService } from './journal-entry.service';
 import { GlService } from './gl.service';
 import { FinancialStatementsService } from './financial-statements.service';
+import { CashFlowService } from './cash-flow.service';
 import { PeriodLockService } from './period-lock.service';
 import { CreditNoteService } from './credit-note.service';
 import { BadDebtService } from './bad-debt.service';
 import { OpeningBalanceService } from './opening-balance.service';
+import { RevenueAccrualService } from './revenue-accrual.service';
+import { GstSettlementService } from './gst-settlement.service';
+import { WithholdingRemittanceService } from './withholding-remittance.service';
+import { buildJE27CashTransfer, CASH_TRANSFER_ACCOUNTS } from './templates/je-27-cash-transfer';
 import { Errors } from '../../common/errors';
 
 const CodeParam = z.object({ code: z.string().regex(/^[0-9]+$/) });
@@ -40,9 +52,13 @@ export async function accountingRoutes(app: FastifyInstance) {
   const coa = new CoaService(app.prisma);
   const gl = new GlService(app.prisma);
   const financials = new FinancialStatementsService(app.prisma);
+  const cashFlow = new CashFlowService(app.prisma);
   const creditNote = new CreditNoteService(app.prisma, journalEntry);
   const badDebt = new BadDebtService(app.prisma, journalEntry);
   const openingBalance = new OpeningBalanceService(app.prisma, journalEntry);
+  const revenueAccrual = new RevenueAccrualService(app.prisma, journalEntry);
+  const gstSettlement = new GstSettlementService(app.prisma, journalEntry);
+  const withholdingRemittance = new WithholdingRemittanceService(app.prisma, journalEntry);
 
   // ==========================================================
   // CHART OF ACCOUNTS — S-35
@@ -93,6 +109,18 @@ export async function accountingRoutes(app: FastifyInstance) {
       const { code } = request.params as z.infer<typeof CodeParam>;
       const body = request.body as z.infer<typeof UpdateAccountRequest>;
       const data = await coa.update(request.user!.facilityId, code, body);
+      return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'DELETE',
+    url: '/v1/accounting/accounts/:code',
+    preHandler: [app.authenticate, app.requirePermission('accounting.manage_accounts')],
+    schema: { params: CodeParam },
+    handler: async (request, reply) => {
+      const { code } = request.params as z.infer<typeof CodeParam>;
+      const data = await coa.remove(request.user!.facilityId, code);
       return sendSuccess(reply, data);
     },
   });
@@ -269,6 +297,151 @@ export async function accountingRoutes(app: FastifyInstance) {
       const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
       const data = await financials.getBalanceSheet(request.user!.facilityId, { ...q, book_type: bookType });
       return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'GET',
+    url: '/v1/accounting/cash-flow',
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
+    schema: { querystring: CashFlowQuery },
+    handler: async (request, reply) => {
+      const q = request.query as z.infer<typeof CashFlowQuery>;
+      const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
+      const data = await cashFlow.getCashFlow(request.user!.facilityId, { ...q, book_type: bookType });
+      return sendSuccess(reply, data);
+    },
+  });
+
+  // ==========================================================
+  // REVENUE ACCRUAL (JE-25)
+  // ==========================================================
+
+  app.route({
+    method: 'GET',
+    url: '/v1/accounting/revenue-accrual',
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
+    schema: { querystring: RevenueAccrualPeriodQuery },
+    handler: async (request, reply) => {
+      const q = request.query as z.infer<typeof RevenueAccrualPeriodQuery>;
+      const data = await revenueAccrual.preview(request.user!.facilityId, q.period_year, q.period_month);
+      return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/revenue-accrual',
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
+    schema: { body: RunRevenueAccrualRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof RunRevenueAccrualRequest>;
+      const data = await revenueAccrual.run(
+        request.user!.facilityId,
+        request.user!.userId,
+        body.period_year,
+        body.period_month,
+      );
+      return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  // ==========================================================
+  // WITHHOLDING TAX REMITTANCE (JE-29)
+  // ==========================================================
+
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/withholding-remittance',
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
+    schema: { body: RemitWithholdingRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof RemitWithholdingRequest>;
+      const data = await withholdingRemittance.remit(
+        request.user!.facilityId,
+        request.user!.userId,
+        body,
+      );
+      return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  // ==========================================================
+  // CASH / BANK TRANSFER (JE-27)
+  // ==========================================================
+
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/cash-transfers',
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
+    schema: { body: CreateCashTransferRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof CreateCashTransferRequest>;
+      assertKatchiWriteAllowed(request.user!.role, body.book_type);
+
+      const allowed = CASH_TRANSFER_ACCOUNTS as readonly string[];
+      for (const [field, code] of [
+        ['from_account_code', body.from_account_code],
+        ['to_account_code', body.to_account_code],
+      ] as const) {
+        if (!allowed.includes(code)) {
+          throw Errors.VALIDATION_ERROR(
+            `A transfer may only move money between cash and bank accounts (${allowed.join(', ')}).`,
+            field,
+          );
+        }
+      }
+      if (body.from_account_code === body.to_account_code) {
+        throw Errors.VALIDATION_ERROR(
+          'The source and destination must be different accounts.',
+          'to_account_code',
+        );
+      }
+
+      const posted = await journalEntry.post(
+        request.user!.facilityId,
+        request.user!.userId,
+        buildJE27CashTransfer({
+          transferDate: new Date(body.transfer_date),
+          amountPkr: body.amount_pkr,
+          fromAccountCode: body.from_account_code,
+          toAccountCode: body.to_account_code,
+          bookType: body.book_type,
+          userId: request.user!.userId,
+          note: body.note,
+        }),
+        { postingStatus: 'POSTED' },
+      );
+      const full = await journalEntry.getById(request.user!.facilityId, posted.id);
+      return sendSuccess(reply.status(201), full);
+    },
+  });
+
+  // ==========================================================
+  // GST / SALES TAX SETTLEMENT (JE-26)
+  // ==========================================================
+
+  app.route({
+    method: 'GET',
+    url: '/v1/accounting/gst-settlement',
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
+    schema: { querystring: GstSettlementQuery },
+    handler: async (request, reply) => {
+      const q = request.query as z.infer<typeof GstSettlementQuery>;
+      const data = await gstSettlement.preview(request.user!.facilityId, q.period_year, q.period_month);
+      return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/gst-settlement',
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
+    schema: { body: PostGstSettlementRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof PostGstSettlementRequest>;
+      const data = await gstSettlement.settle(request.user!.facilityId, request.user!.userId, body);
+      return sendSuccess(reply.status(201), data);
     },
   });
 

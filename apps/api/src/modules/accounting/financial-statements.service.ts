@@ -19,8 +19,59 @@ interface StatementGroup {
   subtotal_pkr: number;
 }
 
-// Depreciation & amortisation accounts (for EBITDA add-back)
-const DA_CODES = new Set(['5040', '6120', '6130', '6140']);
+// The depreciation and amortisation accounts the seed ships, used for the
+// EBITDA add-back. Owner-created depreciation accounts are picked up at
+// runtime from the fixed-asset register — see daCodesFor().
+const SEEDED_DA_CODES = ['5040', '6120', '6130', '6140'];
+
+/** P&L-class net result over one window: revenue − cost of service − expense. */
+function plNetOver(accounts: Account[], window: SumMap): number {
+  let net = 0;
+  for (const a of accounts) {
+    if (a.accountType !== 'DETAIL') continue;
+    const s = window.get(a.accountCode);
+    if (!s) continue;
+    if (a.accountClass === 'REVENUE') net += s.credit - s.debit;
+    else if (a.accountClass === 'COST_OF_SERVICE') net -= s.debit - s.credit;
+    else if (a.accountClass === 'EXPENSE') net -= s.debit - s.credit;
+  }
+  return net;
+}
+
+/**
+ * Equity as the balance sheet presents it, at one date.
+ *
+ * Pure: it takes the two windows the caller already fetched (all-time up to
+ * the date, and the fiscal year containing it) rather than querying again.
+ * Extracted so the statement of income and retained earnings on the P&L and
+ * the balance sheet's equity section are the same definition — two
+ * implementations of "what is the owner's equity" would eventually disagree,
+ * and the one an accountant noticed would be the wrong one.
+ */
+function equitySnapshot(accounts: Account[], sums: SumMap, fySums: SumMap) {
+  const crAmt = (s: Sums) => s.credit - s.debit;
+
+  // Capital (3010), drawings (3015) and any other equity detail account.
+  // 3020 is folded into retained earnings below; 3030 is never posted.
+  const equity_lines = accounts
+    .filter(
+      (a) =>
+        a.accountClass === 'EQUITY' &&
+        a.accountType === 'DETAIL' &&
+        a.accountCode !== '3020' &&
+        a.accountCode !== '3030',
+    )
+    .map((a) => line(a, sums, crAmt))
+    .filter((l) => l.amount_pkr !== 0);
+
+  const current_year_pl_pkr = round2(plNetOver(accounts, fySums));
+  const prior_years_pl_pkr = round2(plNetOver(accounts, sums) - plNetOver(accounts, fySums));
+  const posted3020 = sums.get('3020');
+  const retained_earnings_pkr = round2((posted3020 ? crAmt(posted3020) : 0) + prior_years_pl_pkr);
+  const total_equity_pkr = round2(sumLines(equity_lines) + retained_earnings_pkr + current_year_pl_pkr);
+
+  return { equity_lines, current_year_pl_pkr, prior_years_pl_pkr, retained_earnings_pkr, total_equity_pkr };
+}
 
 export class FinancialStatementsService {
   constructor(private prisma: PrismaClient) {}
@@ -129,16 +180,29 @@ export class FinancialStatementsService {
 
     const net_profit_pkr = round2(operating_profit_pkr + total_other_income_pkr - total_other_expense_pkr);
 
-    // Depreciation & amortisation add-back for EBITDA
+    // Depreciation & amortisation add-back for EBITDA. The seeded four are not
+    // the whole story: an owner who opens their own depreciation account and
+    // points a fixed asset at it would otherwise have it silently left out of
+    // the add-back, understating EBITDA with nothing to indicate why. Take the
+    // seeded set plus whatever the asset register actually depreciates into.
+    const daCodes = await this.daCodesFor(facilityId);
     let da = 0;
     for (const a of accounts) {
-      if (DA_CODES.has(a.accountCode)) {
+      if (daCodes.has(a.accountCode)) {
         const s = sums.get(a.accountCode);
         if (s) da += debit(s);
       }
     }
     const depreciation_amortisation_pkr = round2(da);
     const ebitda_pkr = round2(operating_profit_pkr + depreciation_amortisation_pkr);
+
+    // Statement of income and retained earnings (IFRS for SMEs). Permitted in
+    // place of separate statements of comprehensive income and of changes in
+    // equity where the only equity movements are profit or loss,
+    // distributions, prior-period error corrections and policy changes — which
+    // for an owner-managed facility is the case. Four rows on the P&L rather
+    // than a screen nobody would open.
+    const equity = await this.equityRollforward(facilityId, query);
 
     // A margin over zero or negative net revenue is undefined, not 0% —
     // returning 0 would read as "break-even" when the period actually has no
@@ -152,6 +216,8 @@ export class FinancialStatementsService {
     return {
       date_from: query.date_from,
       date_to: query.date_to,
+
+      ...equity,
 
       revenue_groups,
       total_operating_revenue_pkr,
@@ -201,6 +267,71 @@ export class FinancialStatementsService {
    *   Equity (Capital + Retained Earnings + Current-Year P&L)
    *   Assets = Liabilities + Equity
    */
+  /**
+   * Owner's equity at the day before date_from and at date_to, plus the
+   * drawings taken in between.
+   *
+   * The closing figure ties to total_equity_pkr on the balance sheet at
+   * date_to — but only over a fiscal-year-to-date range. Equity includes the
+   * current-year result, which is bounded to the fiscal year containing the
+   * date, not to [date_from, date_to]; over, say, February to April the two
+   * legitimately differ, and chasing that difference leads someone to "fix" a
+   * correct balance sheet. is_fiscal_year_to_date says which case the reader
+   * is looking at.
+   */
+  private async equityRollforward(facilityId: string, query: ProfitLossQueryType) {
+    const accounts = await this.loadAccounts(facilityId);
+    const facility = await this.prisma.facility.findUniqueOrThrow({
+      where: { id: facilityId },
+      select: { settings: true },
+    });
+    const fyStartMonth = resolveFacilitySettings(facility.settings).fiscal_year_start_month;
+
+    const at = async (asOfIso: string) => {
+      const fyStart = fiscalYearStart(new Date(asOfIso), fyStartMonth);
+      const [all, fy] = await Promise.all([
+        this.fetchLines(facilityId, undefined, asOfIso, query.book_type),
+        this.fetchLines(facilityId, fyStart.toISOString().slice(0, 10), asOfIso, query.book_type),
+      ]);
+      return equitySnapshot(accounts, aggregate(all), aggregate(fy)).total_equity_pkr;
+    };
+
+    const dayBefore = new Date(new Date(`${query.date_from}T00:00:00.000Z`).getTime() - 86400000)
+      .toISOString()
+      .slice(0, 10);
+
+    const [opening_equity_pkr, closing_equity_pkr] = await Promise.all([at(dayBefore), at(query.date_to)]);
+
+    // Drawings are contra-equity (3015 is DEBIT-normal), so the movement is
+    // debits less credits over the period.
+    const drawingLines = await this.fetchLines(facilityId, query.date_from, query.date_to, query.book_type);
+    const drawingSums = aggregate(drawingLines).get('3015');
+    const drawings_pkr = drawingSums ? round2(drawingSums.debit - drawingSums.credit) : 0;
+
+    const fyStartForTo = fiscalYearStart(new Date(query.date_to), fyStartMonth).toISOString().slice(0, 10);
+
+    return {
+      opening_equity_pkr,
+      drawings_pkr,
+      closing_equity_pkr,
+      is_fiscal_year_to_date: query.date_from === fyStartForTo,
+    };
+  }
+
+  /**
+   * Accounts that carry depreciation or amortisation for this facility: the
+   * seeded four, plus every account the fixed-asset register is configured to
+   * depreciate into.
+   */
+  private async daCodesFor(facilityId: string): Promise<Set<string>> {
+    const configured = await this.prisma.fixedAsset.findMany({
+      where: { facilityId },
+      select: { deprExpenseAccountCode: true },
+      distinct: ['deprExpenseAccountCode'],
+    });
+    return new Set([...SEEDED_DA_CODES, ...configured.map((a) => a.deprExpenseAccountCode)]);
+  }
+
   async getBalanceSheet(facilityId: string, query: BalanceSheetQueryType) {
     const lines = await this.fetchLines(facilityId, undefined, query.as_of_date, query.book_type);
     const accounts = await this.loadAccounts(facilityId);
@@ -267,47 +398,14 @@ export class FinancialStatementsService {
       total_current_liabilities_pkr + total_non_current_liabilities_pkr + sumLines(unclassified_liability_lines),
     );
 
-    // Equity — Capital (3010) and other equity detail accounts. Exclude BOTH
-    // 3020 Retained Earnings (folded into retained_earnings_pkr below) and 3030
-    // Current Year P&L (never posted; computed live).
-    const equity_lines = accounts
-      .filter(
-        (a) =>
-          a.accountClass === 'EQUITY' &&
-          a.accountType === 'DETAIL' &&
-          a.accountCode !== '3020' &&
-          a.accountCode !== '3030',
-      )
-      .map((a) => line(a, sums, crAmt))
-      .filter((l) => l.amount_pkr !== 0);
-
-    // P&L-class net result over a given window (revenue − cost − expense).
-    const plNet = (window: SumMap): number => {
-      let net = 0;
-      for (const a of accounts) {
-        if (a.accountType !== 'DETAIL') continue;
-        const s = window.get(a.accountCode);
-        if (!s) continue;
-        if (a.accountClass === 'REVENUE') net += s.credit - s.debit;
-        else if (a.accountClass === 'COST_OF_SERVICE') net -= s.debit - s.credit;
-        else if (a.accountClass === 'EXPENSE') net -= s.debit - s.credit;
-      }
-      return net;
-    };
-
-    // Current-year P&L = current fiscal-year window; prior years = all-time
-    // (up to as_of) minus current year. Retained earnings merges the posted
-    // 3020 balance (today only touched by opening balances) with that
-    // accumulated prior-year result. This keeps the identity exact:
+    // Current-year P&L covers only the fiscal year containing as_of_date;
+    // everything earlier is prior-period result and belongs in retained
+    // earnings. Retained earnings merges the posted 3020 balance (today only
+    // touched by opening balances) with that accumulated prior-year result,
+    // keeping the identity exact:
     //   retained + current = posted-3020 + all-time-P&L
-    // which is precisely what the old single "current_year_pl" line summed.
-    const current_year_pl_pkr = round2(plNet(fySums));
-    const allTimePL = plNet(sums);
-    const prior_years_pl_pkr = round2(allTimePL - plNet(fySums));
-    const posted3020 = sums.get('3020');
-    const retained_earnings_pkr = round2((posted3020 ? crAmt(posted3020) : 0) + prior_years_pl_pkr);
-
-    const total_equity_pkr = round2(sumLines(equity_lines) + retained_earnings_pkr + current_year_pl_pkr);
+    const { equity_lines, current_year_pl_pkr, prior_years_pl_pkr, retained_earnings_pkr, total_equity_pkr } =
+      equitySnapshot(accounts, sums, fySums);
     const total_liabilities_and_equity_pkr = round2(total_liabilities_pkr + total_equity_pkr);
 
     return {

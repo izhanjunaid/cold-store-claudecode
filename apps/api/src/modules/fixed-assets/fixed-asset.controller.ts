@@ -4,6 +4,7 @@ import {
   CreateFixedAssetRequest,
   CommissionAssetRequest,
   DisposeAssetRequest,
+  ImpairAssetRequest,
   ReverseDisposalRequest,
   RunDepreciationRequest,
   FixedAssetListQuery,
@@ -90,6 +91,21 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
       const existing = await service.getById(request.user!.facilityId, id);
       assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await service.dispose(request.user!.facilityId, request.user!.userId, id, body);
+      return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/fixed-assets/:id/impair',
+    preHandler: [app.authenticate, app.requirePermission('fixed_assets.manage')],
+    schema: { params: IdParam, body: ImpairAssetRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof ImpairAssetRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
+      const data = await service.impair(request.user!.facilityId, request.user!.userId, id, body);
       return sendSuccess(reply.status(201), data);
     },
   });

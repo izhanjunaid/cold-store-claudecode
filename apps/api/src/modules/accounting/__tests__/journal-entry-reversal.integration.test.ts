@@ -111,7 +111,8 @@ describe('Gap 2 · journal entry reversal endpoint', () => {
       headers: authHeaders(managerToken),
     });
     const originalAfter = JSON.parse(after.body).data;
-    expect(originalAfter.posting_status).toBe('REVERSED');
+    // Stays POSTED — the mirror is what reverses it (migration 0025).
+    expect(originalAfter.posting_status).toBe('POSTED');
     expect(originalAfter.reversed_by_id).toBe(reversal.id);
   });
 

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   AccountClass,
   AccountType,
+  CashFlowSection,
   NormalBalance,
   StatementSection,
   JournalEntryType,
@@ -26,23 +27,83 @@ export const ChartOfAccountsResponse = z.object({
   parent_account_code: z.string().nullable(),
   normal_balance: NormalBalance,
   statement_section: StatementSection.nullable(),
+  cash_flow_section: CashFlowSection.nullable(),
   is_system_account: z.boolean(),
   is_active: z.boolean(),
   created_at: z.string(),
 });
 export type ChartOfAccountsResponseType = z.infer<typeof ChartOfAccountsResponse>;
 
-export const CreateAccountRequest = z.object({
-  account_code: z.string().min(2).max(10).regex(/^[0-9]+$/),
-  account_name: z.string().min(1).max(200),
-  account_class: AccountClass,
-  account_type: AccountType,
-  parent_account_code: z.string().max(10).nullable().optional(),
-  normal_balance: NormalBalance,
-  // HEADER only — which statement section its children roll up into. Absent
-  // routes to the unclassified bucket, same as every header before phase/24.
-  statement_section: StatementSection.optional(),
-});
+/**
+ * The normal balance every account of a class carries unless it is a contra
+ * account. Derivable — so callers need not supply it, and a caller supplying
+ * the *wrong* one is the bug this replaces: normal_balance drives the trial
+ * balance and the general ledger's running balance, and
+ * guard_chart_of_accounts locks it permanently the moment the account has a
+ * posting. There is no correcting it afterwards.
+ */
+export const NORMAL_BALANCE_BY_CLASS = {
+  ASSET: 'DEBIT',
+  COST_OF_SERVICE: 'DEBIT',
+  EXPENSE: 'DEBIT',
+  LIABILITY: 'CREDIT',
+  EQUITY: 'CREDIT',
+  REVENUE: 'CREDIT',
+} as const;
+
+export function normalBalanceForClass(
+  accountClass: keyof typeof NORMAL_BALANCE_BY_CLASS,
+): 'DEBIT' | 'CREDIT' {
+  return NORMAL_BALANCE_BY_CLASS[accountClass];
+}
+
+export const CreateAccountRequest = z
+  .object({
+    account_code: z.string().min(2).max(10).regex(/^[0-9]+$/),
+    account_name: z.string().min(1).max(200),
+    account_class: AccountClass,
+    account_type: AccountType,
+    parent_account_code: z.string().max(10).nullable().optional(),
+    // Optional: derived from account_class when absent (normalBalanceForClass).
+    // A value contradicting the class requires is_contra below.
+    normal_balance: NormalBalance.optional(),
+    // Opt-in acknowledgement that this account deliberately inverts its
+    // class's normal balance — 1311 Accum. Depreciation (ASSET/CREDIT),
+    // 4910 Discounts Allowed (REVENUE/DEBIT). Request-level only: the
+    // persisted normal_balance already encodes the result, so no column.
+    is_contra: z.boolean().optional(),
+    // HEADER only — which statement section its children roll up into.
+    statement_section: StatementSection.optional(),
+  })
+  .superRefine((v, ctx) => {
+    // A header with no section appears in no section's list, so every detail
+    // account beneath it silently lands in the statements' unclassified
+    // bucket. Disclosing that is honest; making it unreachable is better.
+    // EQUITY is exempt — equity aggregates by class, not by header.
+    if (v.account_type === 'HEADER' && v.account_class !== 'EQUITY' && !v.statement_section) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['statement_section'],
+        message: 'A header account must declare the statement section its children roll up into',
+      });
+    }
+    if (
+      v.normal_balance &&
+      v.normal_balance !== normalBalanceForClass(v.account_class) &&
+      !v.is_contra
+    ) {
+      const expected = normalBalanceForClass(v.account_class);
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['normal_balance'],
+        message:
+          v.account_class +
+          ' accounts normally carry a ' +
+          expected +
+          ' balance. Set is_contra to open a contra account that deliberately inverts it.',
+      });
+    }
+  });
 export type CreateAccountRequestType = z.infer<typeof CreateAccountRequest>;
 
 export const UpdateAccountRequest = z.object({
@@ -236,6 +297,10 @@ export const TrialBalanceRow = z.object({
   account_code: z.string(),
   account_name: z.string(),
   account_class: AccountClass,
+  // Where this row sits on the statements. Beyond the ten StatementSection
+  // values it can be 'EQUITY' (equity is placed by class, not by header) or
+  // 'UNCLASSIFIED' (a legacy header with no section) — hence a plain string.
+  statement_section: z.string(),
   normal_balance: NormalBalance,
   opening_debit_pkr: z.number(),
   opening_credit_pkr: z.number(),
@@ -261,10 +326,28 @@ export const TrialBalanceGroup = z.object({
 });
 export type TrialBalanceGroupType = z.infer<typeof TrialBalanceGroup>;
 
+export const TrialBalanceSectionGroup = z.object({
+  statement_section: z.string(),
+  label: z.string(),
+  rows: z.array(TrialBalanceRow),
+  subtotal: z.object({
+    opening_debit_pkr: z.number(),
+    opening_credit_pkr: z.number(),
+    movement_debit_pkr: z.number(),
+    movement_credit_pkr: z.number(),
+    debit_balance_pkr: z.number(),
+    credit_balance_pkr: z.number(),
+  }),
+});
+export type TrialBalanceSectionGroupType = z.infer<typeof TrialBalanceSectionGroup>;
+
 export const TrialBalanceResponse = z.object({
   date_from: z.string().nullable(),
   date_to: z.string(),
   groups: z.array(TrialBalanceGroup),
+  // The same rows grouped by statement section, so a subtotal here can be
+  // traced onto the face of the P&L or balance sheet.
+  section_groups: z.array(TrialBalanceSectionGroup),
   rows: z.array(TrialBalanceRow),
   total_opening_debit_pkr: z.number(),
   total_opening_credit_pkr: z.number(),
@@ -336,6 +419,15 @@ export const ProfitLossResponse = z.object({
   net_profit_pkr: z.number(),
   net_profit_pct: z.number().nullable(),
 
+  // Statement of income and retained earnings (IFRS for SMEs §3.18 style):
+  // opening equity + profit − drawings = closing equity. Ties to the balance
+  // sheet's total_equity_pkr at date_to, but only when the range starts on the
+  // fiscal-year start — equity carries FY-to-date profit, not range profit.
+  opening_equity_pkr: z.number(),
+  drawings_pkr: z.number(),
+  closing_equity_pkr: z.number(),
+  is_fiscal_year_to_date: z.boolean(),
+
   // Activity in accounts the header rollups could not place (F-6b);
   // amounts are signed as their contribution to net profit.
   unclassified_lines: z.array(StatementLine),
@@ -396,11 +488,83 @@ export const BalanceSheetResponse = z.object({
 });
 export type BalanceSheetResponseType = z.infer<typeof BalanceSheetResponse>;
 
+export const CashFlowQuery = z.object({
+  date_from: dateOnly,
+  date_to: dateOnly,
+  book_type: BookType.optional(),
+});
+export type CashFlowQueryType = z.infer<typeof CashFlowQuery>;
+
 export const BalanceSheetQuery = z.object({
   as_of_date: dateOnly,
   book_type: BookType.optional(),
 });
 export type BalanceSheetQueryType = z.infer<typeof BalanceSheetQuery>;
+
+// ============================================================
+// Revenue Accrual (JE-25)
+// ============================================================
+
+export const RevenueAccrualPeriodQuery = z.object({
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  period_month: z.coerce.number().int().min(1).max(12),
+});
+export type RevenueAccrualPeriodQueryType = z.infer<typeof RevenueAccrualPeriodQuery>;
+
+export const RunRevenueAccrualRequest = z.object({
+  period_year: z.number().int().min(2000).max(2100),
+  period_month: z.number().int().min(1).max(12),
+});
+export type RunRevenueAccrualRequestType = z.infer<typeof RunRevenueAccrualRequest>;
+
+// ============================================================
+// Cash / bank transfer (JE-27)
+// ============================================================
+
+export const CreateCashTransferRequest = z.object({
+  transfer_date: dateOnly,
+  from_account_code: z.string().regex(/^[0-9]+$/),
+  to_account_code: z.string().regex(/^[0-9]+$/),
+  amount_pkr: z.number().positive(),
+  note: z.string().max(300).optional(),
+  book_type: BookType.optional().default('PACCI'),
+});
+export type CreateCashTransferRequestType = z.infer<typeof CreateCashTransferRequest>;
+
+// ============================================================
+// Withholding tax remittance (JE-29)
+// ============================================================
+
+// s.149 is absent on purpose: salary tax clears through the payroll run's own
+// remittance step, and a second path to 2070 could pay it over twice.
+export const RemitWithholdingRequest = z.object({
+  section: z.enum(['S153', 'S155']),
+  period_year: z.number().int().min(2000).max(2100),
+  period_month: z.number().int().min(1).max(12),
+  payment_date: dateOnly,
+  bank_account_code: z.string().regex(/^[0-9]+$/).optional(),
+});
+export type RemitWithholdingRequestType = z.infer<typeof RemitWithholdingRequest>;
+
+// ============================================================
+// GST / Sales Tax Settlement (JE-26)
+// ============================================================
+
+export const GstSettlementQuery = z.object({
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  period_month: z.coerce.number().int().min(1).max(12),
+});
+export type GstSettlementQueryType = z.infer<typeof GstSettlementQuery>;
+
+export const PostGstSettlementRequest = z.object({
+  period_year: z.number().int().min(2000).max(2100),
+  period_month: z.number().int().min(1).max(12),
+  // When the money actually leaves. Deliberately separate from the tax period:
+  // the liability is owed at the period end but remitted weeks later.
+  payment_date: dateOnly,
+  bank_account_code: z.string().regex(/^[0-9]+$/).optional(),
+});
+export type PostGstSettlementRequestType = z.infer<typeof PostGstSettlementRequest>;
 
 // ============================================================
 // Period Lock

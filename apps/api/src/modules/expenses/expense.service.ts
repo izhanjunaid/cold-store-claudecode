@@ -7,6 +7,9 @@ import { buildJE17AExpensePaid } from './templates/je-17a-expense-paid';
 import { buildJE17BExpenseAccrued } from './templates/je-17b-expense-accrued';
 import { buildJE17BPayAccruedExpense } from './templates/je-17b-pay-accrued-payment';
 import { buildJE17CPettyCashReplenish } from './templates/je-17c-petty-cash-replenish';
+import { WITHHOLDING_ACCOUNTS, type WithholdingSection } from './templates/withholding';
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 type Tx = Prisma.TransactionClient;
 
@@ -169,6 +172,18 @@ export class ExpenseService {
       const paymentDate = new Date(body.payment_date);
       const assetAccount = body.asset_account_code;
 
+      const taxWithheldPkr = round2(body.tax_withheld_pkr ?? 0);
+      if (taxWithheldPkr > Number(v.amountPkr) + 0.005) {
+        throw Errors.VALIDATION_ERROR(
+          'The tax withheld cannot exceed the voucher amount.',
+          'tax_withheld_pkr',
+        );
+      }
+      const withholdingAccountCode =
+        taxWithheldPkr > 0
+          ? WITHHOLDING_ACCOUNTS[body.withholding_section as WithholdingSection]
+          : undefined;
+
       let draft;
       if (v.status === 'ACCRUED') {
         // JE-17B-PAY: clear liability
@@ -178,6 +193,8 @@ export class ExpenseService {
           entryDate: paymentDate,
           assetAccountCode: assetAccount,
           amountPkr: Number(v.amountPkr),
+          taxWithheldPkr,
+          withholdingAccountCode,
           bookType: v.bookType,
         });
       } else {
@@ -189,6 +206,8 @@ export class ExpenseService {
           expenseAccountCode: v.expenseAccountCode,
           assetAccountCode: assetAccount,
           amountPkr: Number(v.amountPkr),
+          taxWithheldPkr,
+          withholdingAccountCode,
           bookType: v.bookType,
         });
       }
