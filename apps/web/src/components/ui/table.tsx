@@ -6,7 +6,15 @@ const Table = React.forwardRef<
   HTMLTableElement,
   React.HTMLAttributes<HTMLTableElement>
 >(({ className, ...props }, ref) => (
-  <div className="relative w-full overflow-auto">
+  // No overflow-auto here: that would make this div the nearest scrolling
+  // ancestor for any `position: sticky` cell inside it (thead/tfoot), and
+  // CSS coerces a lone `overflow-x: auto` into `overflow-y: auto` too — so
+  // a horizontal-scroll-only version of this div silently breaks vertical
+  // sticky the same way. <main> (app/(app)/layout.tsx) is the one scroll
+  // container, both axes; a table wider than the viewport scrolls the page
+  // content pane rather than just itself. Verified in-browser; see
+  // docs/24_ui_density_spec.md.
+  <div className="relative w-full">
     <table
       ref={ref}
       className={cn("w-full caption-bottom text-sm", className)}

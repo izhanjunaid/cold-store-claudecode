@@ -1,4 +1,4 @@
-export { FormSection, FormActions } from './form-section';
+export { FormActions } from './form-actions';
 export { EntrySheet, EntryGroup, EntryChip } from './entry-sheet';
 export { TextField } from './text-field';
 export { NumberField } from './number-field';
@@ -8,6 +8,6 @@ export { CheckboxField } from './checkbox-field';
 export { DateField } from './date-field';
 export { ComboboxField } from './combobox-field';
 export { MaskedField } from './masked-field';
-export { SummaryRail, SummaryItem } from './summary-rail';
+export { EditableRows, type EditableRowColumn } from './editable-rows';
 export { ConfirmDialogProvider, useConfirm } from './confirm-dialog';
 export { Form } from '@/components/ui/form';
