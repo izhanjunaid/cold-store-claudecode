@@ -143,8 +143,8 @@ export default function JournalEntryDetailPage() {
       <PageHeader title={entry.entry_number} crumb={entry.entry_number} description={entry.description} />
 
       <Card className="mb-4">
-        <CardContent className="pt-6">
-          <div className="mb-4 flex items-center justify-between">
+        <CardContent className="p-4">
+          <div className="mb-3 flex items-center justify-between">
             <StatusBadge status={entry.posting_status} tone={STATUS_TONE[entry.posting_status]} />
             <div className="flex items-center gap-2">
               {canPostDraft && (
@@ -160,14 +160,17 @@ export default function JournalEntryDetailPage() {
             </div>
           </div>
           {entry.posting_status === 'AUTO_DRAFT' && (
-            <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+            <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
               This is a draft — it is not included in the general ledger or any financial report until posted.
             </p>
           )}
-          <dl className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
+          <dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
             <div><dt className="text-muted-foreground">Entry Date</dt><dd className="font-medium">{formatDate(entry.entry_date)}</dd></div>
             <div><dt className="text-muted-foreground">Type</dt><dd className="font-medium">{entry.entry_type}</dd></div>
-            <div><dt className="text-muted-foreground">Book</dt><dd className="font-medium">{entry.book_type}</dd></div>
+            <div>
+              <dt className="text-muted-foreground">Book</dt>
+              <dd className={entry.book_type === 'KATCHI' ? 'font-semibold text-amber-700 dark:text-amber-400' : 'font-medium'}>{entry.book_type}</dd>
+            </div>
             <div><dt className="text-muted-foreground">Source</dt><dd className="font-mono text-xs">{entry.source_table}</dd></div>
             <div><dt className="text-muted-foreground">Created</dt><dd className="font-medium">{formatDateTime(entry.created_at)}</dd></div>
             <div><dt className="text-muted-foreground">Created By</dt><dd className="font-medium">{entry.created_by_name}</dd></div>
@@ -203,37 +206,37 @@ export default function JournalEntryDetailPage() {
         <div className="border-b px-4 py-3"><h2 className="text-sm font-semibold">Lines</h2></div>
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>#</TableHead>
-              <TableHead>Account</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Party</TableHead>
-              <TableHead>Lot</TableHead>
-              <TableHead className="text-right">Debit</TableHead>
-              <TableHead className="text-right">Credit</TableHead>
+            <TableRow className="h-8 hover:bg-transparent">
+              <TableHead className="h-8">#</TableHead>
+              <TableHead className="h-8">Account</TableHead>
+              <TableHead className="h-8">Description</TableHead>
+              <TableHead className="h-8">Party</TableHead>
+              <TableHead className="h-8">Lot</TableHead>
+              <TableHead className="h-8 text-right">Debit</TableHead>
+              <TableHead className="h-8 text-right">Credit</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {entry.lines.map((l) => (
-              <TableRow key={l.id}>
-                <TableCell className="text-xs text-muted-foreground">{l.line_number}</TableCell>
-                <TableCell><span className="font-mono">{l.account_code}</span><span className="ml-2 text-muted-foreground">{l.account_name}</span></TableCell>
-                <TableCell>{l.description ?? '—'}</TableCell>
-                <TableCell>{l.party_name ?? '—'}</TableCell>
-                <TableCell className="font-mono">{l.lot_number ?? '—'}</TableCell>
-                <TableCell className="text-right tabular-nums font-medium">{l.debit_amount > 0 ? l.debit_amount.toLocaleString() : ''}</TableCell>
-                <TableCell className="text-right tabular-nums font-medium">{l.credit_amount > 0 ? l.credit_amount.toLocaleString() : ''}</TableCell>
+              <TableRow key={l.id} className="h-7">
+                <TableCell className="py-1 text-xs text-muted-foreground">{l.line_number}</TableCell>
+                <TableCell className="py-1"><span className="font-mono">{l.account_code}</span><span className="ml-2 text-muted-foreground">{l.account_name}</span></TableCell>
+                <TableCell className="py-1">{l.description ?? '—'}</TableCell>
+                <TableCell className="py-1">{l.party_name ?? '—'}</TableCell>
+                <TableCell className="py-1 font-mono">{l.lot_number ?? '—'}</TableCell>
+                <TableCell className="py-1 text-right tabular-nums font-medium">{l.debit_amount > 0 ? l.debit_amount.toLocaleString() : ''}</TableCell>
+                <TableCell className="py-1 text-right tabular-nums font-medium">{l.credit_amount > 0 ? l.credit_amount.toLocaleString() : ''}</TableCell>
               </TableRow>
             ))}
           </TableBody>
           <TableFooter>
-            <TableRow>
-              <TableCell colSpan={5} className="text-right font-semibold">Totals</TableCell>
-              <TableCell className="text-right tabular-nums font-semibold">{entry.total_debit_pkr.toLocaleString()}</TableCell>
-              <TableCell className="text-right tabular-nums font-semibold">{entry.total_credit_pkr.toLocaleString()}</TableCell>
+            <TableRow className="h-8">
+              <TableCell className="py-1 text-right font-semibold" colSpan={5}>Totals</TableCell>
+              <TableCell className="py-1 text-right tabular-nums font-semibold">{entry.total_debit_pkr.toLocaleString()}</TableCell>
+              <TableCell className="py-1 text-right tabular-nums font-semibold">{entry.total_credit_pkr.toLocaleString()}</TableCell>
             </TableRow>
-            <TableRow className="hover:bg-transparent">
-              <TableCell colSpan={7} className="text-right">
+            <TableRow className="h-8 hover:bg-transparent">
+              <TableCell colSpan={7} className="py-1 text-right">
                 <span className={`inline-flex items-center gap-1.5 ${balanced ? 'text-green-600' : 'text-destructive'}`}>
                   {balanced ? <CheckCircle2 className="h-4 w-4" /> : <TriangleAlert className="h-4 w-4" />}
                   {balanced ? 'Balanced' : 'UNBALANCED'}

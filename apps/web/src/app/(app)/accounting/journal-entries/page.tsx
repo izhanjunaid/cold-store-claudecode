@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState, type DataTableColumn } from '@/components/data-table';
+import { JournalEntryPeek } from '@/components/accounting/journal-entry-peek';
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
 import { useAuthStore } from '@/stores/auth.store';
@@ -69,7 +70,7 @@ export default function JournalEntryListPage() {
   });
   const params = useMemo(() => ({ page: state.page, page_size: state.perPage, ...state.filters }), [state]);
 
-  const { data, isLoading, isError } = useListQuery<JournalEntry>(
+  const { data, isLoading, isError, refetch } = useListQuery<JournalEntry>(
     qk.accounting.list('journal-entries', params),
     '/v1/accounting/journal-entries',
     params,
@@ -105,6 +106,7 @@ export default function JournalEntryListPage() {
         perPageOptions={[25, 50, 100]}
         getRowId={(e) => e.id}
         onRowClick={(e) => router.push(`/accounting/journal-entries/${e.id}`)}
+        renderExpanded={(e) => <JournalEntryPeek entryId={e.id} onPosted={refetch} />}
         filterValues={state.filters}
         onFilterChange={setFilter}
         onResetFilters={resetFilters}

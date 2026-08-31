@@ -18,60 +18,88 @@ import {
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/layout/page-header';
 
-interface AcctCard {
+interface AcctLink {
   title: string;
   href: string;
   description: string;
   icon: LucideIcon;
 }
+interface AcctGroup {
+  label: string;
+  links: AcctLink[];
+}
 
-const cards: AcctCard[] = [
-  { title: 'Chart of Accounts', href: '/accounting/chart-of-accounts', icon: Layers, description: 'View the standard chart of accounts.' },
-  { title: 'Journal Entries', href: '/accounting/journal-entries', icon: BookOpenText, description: 'Browse all journal entries — auto-posted and manual.' },
-  { title: 'General Ledger', href: '/accounting/general-ledger', icon: ClipboardList, description: 'Drill into a single account to see every line that hit it.' },
-  { title: 'Period Locks', href: '/accounting/period-locks', icon: LockKeyhole, description: 'Close finished months so nothing can be posted into them.' },
-  { title: 'Opening Balances', href: '/accounting/opening-balances', icon: FilePlus2, description: 'Bring balances from your paper registers into the system at go-live.' },
-  { title: 'Revenue Accrual', href: '/accounting/revenue-accrual', icon: FilePlus2, description: 'Recognise storage earned but not yet billed, before closing the period.' },
-  { title: 'Cash Transfer', href: '/accounting/cash-transfers', icon: Wallet, description: "Move money between the facility's own cash, bank and wallet accounts." },
-  { title: 'Sales Tax Settlement', href: '/accounting/gst-settlement', icon: Coins, description: 'Clear GST collected on invoices against input tax and what was remitted.' },
-  { title: 'Trial Balance', href: '/accounting/reports/trial-balance', icon: Scale, description: 'Verify debits = credits across all accounts.' },
-  { title: 'Profit & Loss', href: '/accounting/reports/profit-loss', icon: FileBarChart, description: 'Revenue, cost of service, and net profit for any period.' },
-  { title: 'Balance Sheet', href: '/accounting/reports/balance-sheet', icon: FileBarChart, description: 'Assets = Liabilities + Equity, as of any date.' },
-  { title: 'Cash Flow', href: '/accounting/reports/cash-flow', icon: FilePlus2, description: 'Statement of cash flows — where the money came from and went.' },
-  { title: 'Fixed Assets', href: '/accounting/fixed-assets', icon: Building2, description: 'Register, commission, and dispose of plant, building and vehicle assets.' },
-  { title: 'Depreciation Runs', href: '/accounting/fixed-assets/runs', icon: CalendarClock, description: 'Run monthly depreciation (JE-13) and review past runs.' },
-  { title: 'Employees', href: '/accounting/payroll/employees', icon: Users, description: 'Manage salaried staff and daily-wage workers, with EOBI registration.' },
-  { title: 'Payroll Runs', href: '/accounting/payroll/runs', icon: Wallet, description: 'Create monthly payroll runs, finalize, pay and remit.' },
-  { title: 'Employee Advances', href: '/accounting/payroll/advances', icon: HandCoins, description: 'Issue cash advances against salary and track recovery through payroll.' },
-  { title: 'Expense Vouchers', href: '/accounting/expenses', icon: ReceiptText, description: 'Record, approve, accrue, and pay operating expenses.' },
+const groups: AcctGroup[] = [
+  {
+    label: 'Ledger',
+    links: [
+      { title: 'Chart of Accounts', href: '/accounting/chart-of-accounts', icon: Layers, description: 'The account structure and current balances.' },
+      { title: 'Journal Entries', href: '/accounting/journal-entries', icon: BookOpenText, description: 'Auto-posted and manual ledger entries.' },
+      { title: 'General Ledger', href: '/accounting/general-ledger', icon: ClipboardList, description: 'Every line that hit a single account.' },
+      { title: 'Period Locks', href: '/accounting/period-locks', icon: LockKeyhole, description: 'Close finished months so nothing can be posted into them.' },
+      { title: 'Opening Balances', href: '/accounting/opening-balances', icon: FilePlus2, description: 'Bring balances forward at go-live.' },
+      { title: 'Revenue Accrual', href: '/accounting/revenue-accrual', icon: FilePlus2, description: 'Recognise storage earned but not yet billed.' },
+      { title: 'Cash Transfer', href: '/accounting/cash-transfers', icon: Wallet, description: 'Move money between cash, bank and wallet.' },
+      { title: 'Sales Tax Settlement', href: '/accounting/gst-settlement', icon: Coins, description: 'Clear GST collected against input tax remitted.' },
+    ],
+  },
+  {
+    label: 'Statements',
+    links: [
+      { title: 'Trial Balance', href: '/accounting/reports/trial-balance', icon: Scale, description: 'Verify debits = credits across all accounts.' },
+      { title: 'Profit & Loss', href: '/accounting/reports/profit-loss', icon: FileBarChart, description: 'Revenue, cost of service, and net profit.' },
+      { title: 'Balance Sheet', href: '/accounting/reports/balance-sheet', icon: FileBarChart, description: 'Assets = Liabilities + Equity, as of any date.' },
+      { title: 'Cash Flow', href: '/accounting/reports/cash-flow', icon: FilePlus2, description: 'Where the money came from and went.' },
+    ],
+  },
+  {
+    label: 'Assets & Payroll',
+    links: [
+      { title: 'Fixed Assets', href: '/accounting/fixed-assets', icon: Building2, description: 'Register, commission, and dispose of assets.' },
+      { title: 'Depreciation Runs', href: '/accounting/fixed-assets/runs', icon: CalendarClock, description: 'Run monthly depreciation and review past runs.' },
+      { title: 'Employees', href: '/accounting/payroll/employees', icon: Users, description: 'Salaried staff and daily-wage workers.' },
+      { title: 'Payroll Runs', href: '/accounting/payroll/runs', icon: Wallet, description: 'Create, finalize, pay and remit monthly payroll.' },
+      { title: 'Employee Advances', href: '/accounting/payroll/advances', icon: HandCoins, description: 'Cash advances against salary, tracked to recovery.' },
+    ],
+  },
+  {
+    label: 'Expenses',
+    links: [
+      { title: 'Expense Vouchers', href: '/accounting/expenses', icon: ReceiptText, description: 'Record, approve, accrue, and pay operating expenses.' },
+    ],
+  },
 ];
 
 export default function AccountingHomePage() {
   return (
     <div>
       <PageHeader title="Accounting" description="General ledger, financial statements, fixed assets, payroll and expenses" />
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {cards.map((c) => {
-          const Icon = c.icon;
-          return (
-            <Link key={c.href} href={c.href} className="group">
-              <Card className="h-full transition-colors group-hover:border-primary/40">
-                <CardHeader className="flex-row items-center gap-3 space-y-0">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary">
-                    <Icon className="h-5 w-5" aria-hidden />
-                  </div>
-                  <CardTitle className="text-base">{c.title}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">{c.description}</p>
-                </CardContent>
-              </Card>
-            </Link>
-          );
-        })}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+        {groups.map((g) => (
+          <div key={g.label}>
+            <h2 className="mb-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">{g.label}</h2>
+            <div className="space-y-1">
+              {g.links.map((l) => {
+                const Icon = l.icon;
+                return (
+                  <Link
+                    key={l.href}
+                    href={l.href}
+                    className="group flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60"
+                  >
+                    <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground group-hover:text-primary" aria-hidden />
+                    <div>
+                      <div className="text-sm font-medium group-hover:text-primary">{l.title}</div>
+                      <p className="text-2xs text-muted-foreground">{l.description}</p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

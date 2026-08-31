@@ -34,8 +34,18 @@ export function StatementFrame({ title, periodLabel, bookType, note, children, c
   const locationLine = [facility?.address, facility?.city].filter(Boolean).join(', ');
 
   return (
-    <Card className={cn('overflow-hidden', className)}>
-      <header className="border-b px-6 py-5 text-center">
+    // No overflow-hidden: it would make this Card the scroll ancestor for any
+    // sticky <thead> inside it, so the header would stick to a box that never
+    // scrolls — Foundation's §3 failure mode. <main> is the one scroll
+    // container (docs/24_ui_density_spec.md §3). Rounding moves to the header
+    // block instead, since the border no longer clips to the Card's corners.
+    <Card className={className}>
+      {/* Entity letterhead — print-only. On screen this is a compact one-line
+          bar (title · period · basis pill); the facility name/address/NTN,
+          "Expressed in PKR" and the generated timestamp only matter once
+          printed, and cost ~150px of a screen whose job is fitting a
+          statement without scrolling. */}
+      <header className="hidden rounded-t-lg border-b px-6 py-5 text-center print:block">
         <div className="text-lg font-bold tracking-tight">{facility?.name ?? 'Facility'}</div>
         {locationLine && <p className="text-xs text-muted-foreground">{locationLine}</p>}
         {facility?.gst_number && <p className="text-xs text-muted-foreground">NTN / GST: {facility.gst_number}</p>}
@@ -54,15 +64,31 @@ export function StatementFrame({ title, periodLabel, bookType, note, children, c
         </div>
       </header>
 
-      <div className="px-6 py-5">{children}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-lg border-b bg-muted/30 px-4 py-2 print:hidden">
+        <div>
+          <h2 className="text-sm font-semibold">{title}</h2>
+          <p className="text-xs text-muted-foreground">{periodLabel}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{basis}</span>
+          {unaudited && (
+            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+              Unaudited
+            </span>
+          )}
+        </div>
+      </div>
 
+      <div className="px-4 py-3">{children}</div>
+
+      {/* A real disclosure, not chrome — stays visible on screen. */}
       {note && (
-        <p className="border-t px-6 py-3 text-[11px] leading-relaxed text-muted-foreground">
+        <p className="border-t px-4 py-2 text-[11px] leading-relaxed text-muted-foreground">
           <span className="font-medium">Basis of preparation:</span> {note}
         </p>
       )}
 
-      <footer className="flex items-center justify-between border-t px-6 py-2 text-[10px] text-muted-foreground">
+      <footer className="hidden items-center justify-between border-t px-6 py-2 text-[10px] text-muted-foreground print:flex">
         <span>Generated {generated}</span>
         <span>ColdChain</span>
       </footer>

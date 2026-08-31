@@ -19,7 +19,7 @@ const MONTHS = [
 ];
 
 const SELECT_CLASS =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 const BANK_ACCOUNTS = [
   { code: '1020', label: '1020 — Bank Account (Main)' },
@@ -120,9 +120,9 @@ export default function GstSettlementPage() {
         liability on the very balance sheet the return is prepared from.
       </p>
 
-      <Card className="mb-4 p-4">
+      <Card className="mb-4 p-3">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="gst-month">Tax period</Label>
             <select id="gst-month" className={SELECT_CLASS} value={month} onChange={(e) => setMonth(Number(e.target.value))}>
               {MONTHS.map((m, i) => (
@@ -130,7 +130,7 @@ export default function GstSettlementPage() {
               ))}
             </select>
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="gst-year">Year</Label>
             <select id="gst-year" className={SELECT_CLASS} value={year} onChange={(e) => setYear(Number(e.target.value))}>
               {[year - 2, year - 1, year, year + 1].map((y) => (
@@ -138,7 +138,7 @@ export default function GstSettlementPage() {
               ))}
             </select>
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="gst-paid-on">Paid on</Label>
             <Input
               id="gst-paid-on"
@@ -148,7 +148,7 @@ export default function GstSettlementPage() {
               className="w-44"
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="gst-bank">Paid from</Label>
             <select id="gst-bank" className={SELECT_CLASS} value={bankAccount} onChange={(e) => setBankAccount(e.target.value)}>
               {BANK_ACCOUNTS.map((a) => (
@@ -188,40 +188,40 @@ export default function GstSettlementPage() {
             )}
             {data && !loading && (
               <>
-                <TableRow className="bg-muted/50">
-                  <TableCell colSpan={2} className="text-xs font-semibold uppercase tracking-wide">
+                <TableRow className="h-7 bg-muted/50">
+                  <TableCell colSpan={2} className="py-1 text-xs font-semibold uppercase tracking-wide">
                     This period ({data.period_end})
                   </TableCell>
                 </TableRow>
-                <TableRow>
-                  <TableCell className="pl-6">Output tax charged on invoices</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(data.period_output_tax_pkr)}</TableCell>
+                <TableRow className="h-7">
+                  <TableCell className="py-1 pl-6">Output tax charged on invoices</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{formatMoney(data.period_output_tax_pkr)}</TableCell>
                 </TableRow>
-                <TableRow>
-                  <TableCell className="pl-6">Input tax incurred</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(data.period_input_tax_pkr)}</TableCell>
+                <TableRow className="h-7">
+                  <TableCell className="py-1 pl-6">Input tax incurred</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{formatMoney(data.period_input_tax_pkr)}</TableCell>
                 </TableRow>
 
-                <TableRow className="bg-muted/50">
-                  <TableCell colSpan={2} className="text-xs font-semibold uppercase tracking-wide">
+                <TableRow className="h-7 bg-muted/50">
+                  <TableCell colSpan={2} className="py-1 text-xs font-semibold uppercase tracking-wide">
                     To be settled
                   </TableCell>
                 </TableRow>
-                <TableRow>
-                  <TableCell className="pl-6">Output tax outstanding (2020)</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(data.outstanding_output_tax_pkr)}</TableCell>
+                <TableRow className="h-7">
+                  <TableCell className="py-1 pl-6">Output tax outstanding (2020)</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{formatMoney(data.outstanding_output_tax_pkr)}</TableCell>
                 </TableRow>
-                <TableRow>
-                  <TableCell className="pl-6">Input tax available (1260)</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(data.available_input_tax_pkr)}</TableCell>
+                <TableRow className="h-7">
+                  <TableCell className="py-1 pl-6">Input tax available (1260)</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{formatMoney(data.available_input_tax_pkr)}</TableCell>
                 </TableRow>
-                <TableRow>
-                  <TableCell className="pl-6">Input tax applied</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(data.input_tax_applied_pkr)}</TableCell>
+                <TableRow className="h-7">
+                  <TableCell className="py-1 pl-6">Input tax applied</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{formatMoney(data.input_tax_applied_pkr)}</TableCell>
                 </TableRow>
-                <TableRow className="border-t-2 font-semibold">
-                  <TableCell>Net payable</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(data.net_payable_pkr)}</TableCell>
+                <TableRow className="h-7 border-t-2 font-semibold">
+                  <TableCell className="py-1">Net payable</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{formatMoney(data.net_payable_pkr)}</TableCell>
                 </TableRow>
               </>
             )}

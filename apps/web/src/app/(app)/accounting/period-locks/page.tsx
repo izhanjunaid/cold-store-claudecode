@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { LockKeyhole, LockOpen, Info } from 'lucide-react';
+import { LockKeyhole, LockOpen } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -18,8 +18,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
+import { cn } from '@/lib/utils';
 
 interface PeriodLock {
   id: string;
@@ -39,7 +41,7 @@ const MONTHS = [
 ];
 
 const SELECT_CLASS =
-  'flex h-9 w-auto rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  'flex h-8 w-auto rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { dateStyle: 'medium' });
 
@@ -48,7 +50,11 @@ type PendingAction = { kind: 'lock' | 'unlock'; year: number; month: number } | 
 export default function PeriodLocksPage() {
   const { user } = useAuthStore();
   const canLock = can(user, 'accounting.period_lock');
-  const canUnlock = user?.role === 'OWNER';
+  // Gate on the permission key, not a hard-coded OWNER check — the API
+  // already guards this route on accounting.period_unlock (defaultMinRole
+  // OWNER, so behaviour is unchanged with no owner overrides), mirroring the
+  // phase/19 fix applied to Chart of Accounts.
+  const canUnlock = can(user, 'accounting.period_unlock');
 
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -122,18 +128,9 @@ export default function PeriodLocksPage() {
     <div className="max-w-5xl">
       <PageHeader
         title="Period Locks"
-        description="Close finished months so nothing — invoices, payments, journal entries — can be posted into them."
+        description="Closing a month blocks every posting dated inside it, and closes every earlier month with it. Reopening needs the owner and a reason — both actions stay on the permanent audit record."
         crumb="Period Locks"
       />
-
-      <div className="mb-4 flex items-start gap-2 rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-        <p>
-          Closing a month blocks every posting dated inside it — and closes every earlier month
-          with it. Reopening a single month requires the owner and a reason, and both actions are
-          kept on the permanent audit record. Close each month once its billing is done.
-        </p>
-      </div>
 
       {watermarkLabel && (
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-900 dark:border-green-900 dark:bg-green-950 dark:text-green-200">
@@ -159,11 +156,11 @@ export default function PeriodLocksPage() {
       <Card>
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Month</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Details</TableHead>
-              <TableHead className="w-40 text-right">Action</TableHead>
+            <TableRow className="h-8 hover:bg-transparent">
+              <TableHead className="h-8">Month</TableHead>
+              <TableHead className="h-8">Status</TableHead>
+              <TableHead className="h-8">Details</TableHead>
+              <TableHead className="h-8 w-40 text-right">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -178,27 +175,24 @@ export default function PeriodLocksPage() {
                     ? 'implied'
                     : 'open';
               return (
-                <TableRow key={m} className={!isCurrentOrPast(m) ? 'opacity-50' : undefined}>
-                  <TableCell className="font-medium">{name} {year}</TableCell>
-                  <TableCell>
-                    {state === 'locked' && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-950 dark:text-green-300">
-                        <LockKeyhole className="h-3 w-3" aria-hidden /> Closed
+                <TableRow key={m} className={cn('h-8', !isCurrentOrPast(m) && 'opacity-50')}>
+                  <TableCell className="py-1 font-medium">{name} {year}</TableCell>
+                  <TableCell className="py-1">
+                    {(state === 'locked' || state === 'implied') && (
+                      <span className="inline-flex items-center gap-1">
+                        <LockKeyhole className="h-3 w-3 text-green-700 dark:text-green-400" aria-hidden />
+                        <StatusBadge status="Closed" tone="success" />
                       </span>
                     )}
                     {state === 'reopened' && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                        <LockOpen className="h-3 w-3" aria-hidden /> Reopened
+                      <span className="inline-flex items-center gap-1">
+                        <LockOpen className="h-3 w-3 text-amber-700 dark:text-amber-400" aria-hidden />
+                        <StatusBadge status="Reopened" tone="warning" />
                       </span>
                     )}
-                    {state === 'implied' && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-950 dark:text-green-300">
-                        <LockKeyhole className="h-3 w-3" aria-hidden /> Closed
-                      </span>
-                    )}
-                    {state === 'open' && <span className="text-xs text-muted-foreground">Open</span>}
+                    {state === 'open' && <StatusBadge status="Open" tone="neutral" />}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="py-1 text-xs text-muted-foreground">
                     {state === 'locked' && lock && (
                       <>Closed by {lock.locked_by_name} on {fmt(lock.locked_at)}{lock.reason ? ` — ${lock.reason}` : ''}</>
                     )}
@@ -207,7 +201,7 @@ export default function PeriodLocksPage() {
                     )}
                     {state === 'implied' && <>Covered by the {watermarkLabel} close</>}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="py-1 text-right">
                     {state === 'locked' || state === 'implied' ? (
                       canUnlock && (
                         <Button variant="outline" size="sm" onClick={() => { setPending({ kind: 'unlock', year, month: m }); setReason(''); }}>

@@ -13,7 +13,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { formatMoney } from '@/lib/format';
 
 const SELECT_CLASS =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 const ACCOUNTS = [
   { code: '1010', label: '1010 — Cash on Hand' },
@@ -75,13 +75,13 @@ export default function CashTransfersPage() {
         income or expense.
       </p>
 
-      <Card className="max-w-3xl p-4">
+      <Card className="max-w-3xl p-3">
         <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="xfer-date">Date</Label>
             <Input id="xfer-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="xfer-amount">Amount (PKR)</Label>
             <Input
               id="xfer-amount"
@@ -94,7 +94,7 @@ export default function CashTransfersPage() {
             />
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="xfer-from">From</Label>
             <select id="xfer-from" className={SELECT_CLASS} value={from} onChange={(e) => setFrom(e.target.value)}>
               {ACCOUNTS.map((a) => (
@@ -102,7 +102,7 @@ export default function CashTransfersPage() {
               ))}
             </select>
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="xfer-to">To</Label>
             <select id="xfer-to" className={SELECT_CLASS} value={to} onChange={(e) => setTo(e.target.value)}>
               {ACCOUNTS.map((a) => (
@@ -111,7 +111,7 @@ export default function CashTransfersPage() {
             </select>
           </div>
 
-          <div className="space-y-1.5 sm:col-span-2">
+          <div className="space-y-1 sm:col-span-2">
             <Label htmlFor="xfer-note">Note (optional)</Label>
             <Input
               id="xfer-note"

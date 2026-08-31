@@ -18,7 +18,7 @@ const MONTHS = [
 ];
 
 const SELECT_CLASS =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 interface AccrualRow {
   lot_id: string;
@@ -117,9 +117,9 @@ export default function RevenueAccrualPage() {
         and a locked period can never be accrued afterwards.
       </p>
 
-      <Card className="mb-4 p-4">
+      <Card className="mb-4 p-3">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="accrual-month">Period</Label>
             <select
               id="accrual-month"
@@ -132,7 +132,7 @@ export default function RevenueAccrualPage() {
               ))}
             </select>
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="accrual-year">Year</Label>
             <select
               id="accrual-year"
@@ -180,15 +180,15 @@ export default function RevenueAccrualPage() {
 
       <Card>
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Lot</TableHead>
-              <TableHead>Party</TableHead>
-              <TableHead>Commodity</TableHead>
-              <TableHead className="text-right">Bags</TableHead>
-              <TableHead className="text-right">Days</TableHead>
-              <TableHead>Revenue account</TableHead>
-              <TableHead className="text-right">Earned to date</TableHead>
+          <TableHeader className="sticky top-0 z-10 bg-card">
+            <TableRow className="h-8 hover:bg-transparent">
+              <TableHead className="h-8">Lot</TableHead>
+              <TableHead className="h-8">Party</TableHead>
+              <TableHead className="h-8">Commodity</TableHead>
+              <TableHead className="h-8 text-right">Bags</TableHead>
+              <TableHead className="h-8 text-right">Days</TableHead>
+              <TableHead className="h-8">Revenue account</TableHead>
+              <TableHead className="h-8 text-right">Earned to date</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -203,20 +203,20 @@ export default function RevenueAccrualPage() {
               </TableRow>
             )}
             {data?.lots.map((l) => (
-              <TableRow key={l.lot_id}>
-                <TableCell className="font-medium">{l.lot_number}</TableCell>
-                <TableCell>{l.party_name}</TableCell>
-                <TableCell>{l.commodity_name}</TableCell>
-                <TableCell className="text-right">{l.bags}</TableCell>
-                <TableCell className="text-right">{l.days_in_storage}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">{l.revenue_account_code}</TableCell>
-                <TableCell className="text-right">{formatMoney(l.accrued_to_date_pkr)}</TableCell>
+              <TableRow key={l.lot_id} className="h-7">
+                <TableCell className="py-1 font-medium">{l.lot_number}</TableCell>
+                <TableCell className="py-1">{l.party_name}</TableCell>
+                <TableCell className="py-1">{l.commodity_name}</TableCell>
+                <TableCell className="py-1 text-right">{l.bags}</TableCell>
+                <TableCell className="py-1 text-right">{l.days_in_storage}</TableCell>
+                <TableCell className="py-1 text-xs text-muted-foreground">{l.revenue_account_code}</TableCell>
+                <TableCell className="py-1 text-right">{formatMoney(l.accrued_to_date_pkr)}</TableCell>
               </TableRow>
             ))}
             {data && data.lots.length > 0 && (
-              <TableRow className="font-medium">
-                <TableCell colSpan={6}>Total accrued to {data.period_end}</TableCell>
-                <TableCell className="text-right">{formatMoney(data.total_pkr)}</TableCell>
+              <TableRow className="h-7 font-medium">
+                <TableCell className="py-1" colSpan={6}>Total accrued to {data.period_end}</TableCell>
+                <TableCell className="py-1 text-right">{formatMoney(data.total_pkr)}</TableCell>
               </TableRow>
             )}
           </TableBody>

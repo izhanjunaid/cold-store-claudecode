@@ -157,9 +157,13 @@ export default function TrialBalancePage() {
       ) : !data ? null : (
         <div className="print-area">
           <StatementFrame title="Trial Balance" periodLabel={describePeriod({ date_from: range.date_from, date_to: range.date_to }, 'period')} bookType={bookType}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
+            {/* No overflow-x-auto wrapper — that would make this div the
+                nearest scrolling ancestor for the sticky <thead> below, which
+                breaks it the same way described in ui/table.tsx. <main> is
+                the one scroll container; a table wider than the viewport
+                scrolls the page content pane instead (docs/24 §3). */}
+            <table className="w-full text-sm">
+                <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b text-[11px] uppercase tracking-wide text-muted-foreground">
                     <th className="px-2 py-1 text-left font-medium">Account</th>
                     <th className={headCls} colSpan={2}>Opening</th>
@@ -226,8 +230,7 @@ export default function TrialBalancePage() {
                     <td className={numCls}>{fmtAcct(data.total_credit_pkr)}</td>
                   </tr>
                 </tbody>
-              </table>
-            </div>
+            </table>
 
             <div className={cn('mt-4 flex items-center justify-center gap-1.5 text-sm font-medium', data.is_balanced ? 'text-green-600' : 'text-destructive')}>
               {data.is_balanced ? <CheckCircle2 className="h-4 w-4" /> : <TriangleAlert className="h-4 w-4" />}
