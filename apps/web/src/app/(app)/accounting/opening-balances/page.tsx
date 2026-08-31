@@ -3,15 +3,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { CheckCircle2, Info, Plus, X } from 'lucide-react';
+import { CheckCircle2, Info } from 'lucide-react';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Combobox } from '@/components/ui/combobox';
+import { EditableRows, FormActions, type EditableRowColumn } from '@/components/form';
 import { PageHeader } from '@/components/layout/page-header';
 import { formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -51,7 +52,7 @@ interface PeriodLock {
 }
 
 const SELECT_CLASS =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 // Per-party receivables go through the rows above; peshgi through its module.
 // The three cash-class accounts have dedicated fields in Cash & Bank, so they
@@ -158,6 +159,76 @@ export default function OpeningBalancesPage() {
 
   const hasAnything = totals.debit > 0 || totals.credit > 0;
 
+  const receivableColumns: EditableRowColumn<ReceivableRow>[] = [
+    {
+      key: 'party',
+      header: 'Party',
+      width: '2fr',
+      render: (row, update) => (
+        <Combobox
+          options={partyOptions.filter((o) => o.value === row.party_id || !receivables.some((r) => r.party_id === o.value))}
+          value={row.party_id}
+          onChange={(v) => update({ party_id: v })}
+          placeholder="Select party…"
+          searchPlaceholder="Search parties…"
+        />
+      ),
+    },
+    {
+      key: 'amount',
+      header: 'Amount owed (Rs)',
+      width: '160px',
+      align: 'right',
+      render: (row, update) => (
+        <Input type="number" min="0" value={row.amount} onChange={(e) => update({ amount: e.target.value })} className="text-right tabular-nums" />
+      ),
+    },
+  ];
+
+  const otherColumns: EditableRowColumn<OtherRow>[] = [
+    {
+      key: 'account',
+      header: 'Account',
+      width: '2fr',
+      render: (row, update) => (
+        <select value={row.account_code} onChange={(e) => update({ account_code: e.target.value })} className={SELECT_CLASS}>
+          <option value="">Select account…</option>
+          {otherAccounts.map((a) => (
+            <option key={a.account_code} value={a.account_code}>
+              {a.account_code} — {a.account_name}
+            </option>
+          ))}
+        </select>
+      ),
+    },
+    {
+      key: 'debit',
+      header: 'Debit (Rs)',
+      width: '130px',
+      align: 'right',
+      render: (row, update) => (
+        <Input type="number" min="0" value={row.debit} onChange={(e) => update({ debit: e.target.value, credit: e.target.value ? '' : row.credit })} className="text-right tabular-nums" />
+      ),
+    },
+    {
+      key: 'credit',
+      header: 'Credit (Rs)',
+      width: '130px',
+      align: 'right',
+      render: (row, update) => (
+        <Input type="number" min="0" value={row.credit} onChange={(e) => update({ credit: e.target.value, debit: e.target.value ? '' : row.debit })} className="text-right tabular-nums" />
+      ),
+    },
+    {
+      key: 'note',
+      header: 'Note',
+      width: '1fr',
+      render: (row, update) => (
+        <Input value={row.description} onChange={(e) => update({ description: e.target.value })} />
+      ),
+    },
+  ];
+
   const submit = async () => {
     setSubmitting(true);
     try {
@@ -237,7 +308,7 @@ export default function OpeningBalancesPage() {
   }
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-4xl pb-16">
       <PageHeader
         title="Opening Balances"
         crumb="Opening Balances"
@@ -270,156 +341,75 @@ export default function OpeningBalancesPage() {
 
       <div className="space-y-4">
         <Card>
-          <CardHeader><CardTitle className="text-base">As-of Date</CardTitle></CardHeader>
-          <CardContent>
-            <div className="max-w-xs space-y-1.5">
-              <Label>Balances are stated as of</Label>
+          <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 md:grid-cols-4">
+            <div className="space-y-1">
+              <Label>Balances stated as of</Label>
               <Input type="date" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} className="tabular-nums" />
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle className="text-base">Party Receivables</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {receivables.map((row, idx) => (
-              <div key={idx} className="flex items-end gap-2">
-                <div className="flex-1 space-y-1.5">
-                  {idx === 0 && <Label>Party</Label>}
-                  <Combobox
-                    options={partyOptions.filter(
-                      (o) => o.value === row.party_id || !receivables.some((r) => r.party_id === o.value),
-                    )}
-                    value={row.party_id}
-                    onChange={(v) => setReceivables((c) => c.map((r, i) => (i === idx ? { ...r, party_id: v } : r)))}
-                    placeholder="Select party…"
-                    searchPlaceholder="Search parties…"
-                  />
-                </div>
-                <div className="w-40 space-y-1.5">
-                  {idx === 0 && <Label>Amount owed (Rs)</Label>}
-                  <Input
-                    type="number"
-                    min="0"
-                    value={row.amount}
-                    onChange={(e) => setReceivables((c) => c.map((r, i) => (i === idx ? { ...r, amount: e.target.value } : r)))}
-                    className="text-right tabular-nums"
-                  />
-                </div>
-                <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setReceivables((c) => c.filter((_, i) => i !== idx))}>
-                  <X className="h-4 w-4" aria-hidden />
-                </Button>
-              </div>
-            ))}
-            <Button variant="outline" size="sm" onClick={() => setReceivables((c) => [...c, { party_id: '', amount: '' }])}>
-              <Plus className="mr-1.5 h-4 w-4" aria-hidden /> Add party
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle className="text-base">Cash &amp; Bank</CardTitle></CardHeader>
-          <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Cash on hand (1010), Rs</Label>
               <Input type="number" min="0" value={cash} onChange={(e) => setCash(e.target.value)} className="text-right tabular-nums" />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Bank balance (1020), Rs</Label>
               <Input type="number" min="0" value={bank} onChange={(e) => setBank(e.target.value)} className="text-right tabular-nums" />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Mobile wallet (1030), Rs</Label>
               <Input type="number" min="0" value={wallet} onChange={(e) => setWallet(e.target.value)} className="text-right tabular-nums" />
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">Other Assets &amp; Liabilities (optional)</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {others.map((row, idx) => (
-              <div key={idx} className="flex items-end gap-2">
-                <div className="flex-1 space-y-1.5">
-                  {idx === 0 && <Label>Account</Label>}
-                  <select
-                    value={row.account_code}
-                    onChange={(e) => setOthers((c) => c.map((r, i) => (i === idx ? { ...r, account_code: e.target.value } : r)))}
-                    className={SELECT_CLASS}
-                  >
-                    <option value="">Select account…</option>
-                    {otherAccounts.map((a) => (
-                      <option key={a.account_code} value={a.account_code}>
-                        {a.account_code} — {a.account_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="w-32 space-y-1.5">
-                  {idx === 0 && <Label>Debit (Rs)</Label>}
-                  <Input
-                    type="number"
-                    min="0"
-                    value={row.debit}
-                    onChange={(e) => setOthers((c) => c.map((r, i) => (i === idx ? { ...r, debit: e.target.value, credit: e.target.value ? '' : r.credit } : r)))}
-                    className="text-right tabular-nums"
-                  />
-                </div>
-                <div className="w-32 space-y-1.5">
-                  {idx === 0 && <Label>Credit (Rs)</Label>}
-                  <Input
-                    type="number"
-                    min="0"
-                    value={row.credit}
-                    onChange={(e) => setOthers((c) => c.map((r, i) => (i === idx ? { ...r, credit: e.target.value, debit: e.target.value ? '' : r.debit } : r)))}
-                    className="text-right tabular-nums"
-                  />
-                </div>
-                <div className="w-44 space-y-1.5">
-                  {idx === 0 && <Label>Note</Label>}
-                  <Input
-                    value={row.description}
-                    onChange={(e) => setOthers((c) => c.map((r, i) => (i === idx ? { ...r, description: e.target.value } : r)))}
-                  />
-                </div>
-                <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setOthers((c) => c.filter((_, i) => i !== idx))}>
-                  <X className="h-4 w-4" aria-hidden />
-                </Button>
-              </div>
-            ))}
-            <Button variant="outline" size="sm" onClick={() => setOthers((c) => [...c, { account_code: '', debit: '', credit: '', description: '' }])}>
-              <Plus className="mr-1.5 h-4 w-4" aria-hidden /> Add line
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              Assets you own (equipment, buildings, deposits) go in Debit; amounts you owe (loans,
-              unpaid bills) go in Credit.
-            </p>
-          </CardContent>
-        </Card>
+        <div className="space-y-1.5">
+          <h2 className="text-sm font-semibold">Party Receivables</h2>
+          <EditableRows
+            rows={receivables}
+            onChange={setReceivables}
+            columns={receivableColumns}
+            newRow={() => ({ party_id: '', amount: '' })}
+            addLabel="Add party"
+          />
+        </div>
 
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="space-y-1 text-sm">
-                <p>
-                  Total debits <span className="font-semibold tabular-nums">{formatMoney(totals.debit)}</span>
-                  {' · '}
-                  Total credits <span className="font-semibold tabular-nums">{formatMoney(totals.credit)}</span>
-                </p>
-                {hasAnything && totals.plug !== 0 && (
-                  <p className="text-muted-foreground">
-                    Owner&apos;s Capital (3010) will be {totals.plug > 0 ? 'credited' : 'debited'}{' '}
-                    <span className="font-semibold tabular-nums">{formatMoney(Math.abs(totals.plug))}</span> to balance the entry.
-                  </p>
-                )}
-              </div>
-              <Button onClick={submit} disabled={!canEnter || !hasAnything || submitting}>
-                {submitting ? 'Posting…' : 'Post opening balances'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="space-y-1.5">
+          <h2 className="text-sm font-semibold">Other Assets &amp; Liabilities (optional)</h2>
+          <EditableRows
+            rows={others}
+            onChange={setOthers}
+            columns={otherColumns}
+            newRow={() => ({ account_code: '', debit: '', credit: '', description: '' })}
+            addLabel="Add line"
+            footer={
+              <p className="text-2xs text-muted-foreground">
+                Assets you own go in Debit; amounts you owe go in Credit.
+              </p>
+            }
+          />
+        </div>
       </div>
+
+      <FormActions
+        meta={
+          <div className="text-sm">
+            <span>
+              Total debits <span className="font-semibold tabular-nums">{formatMoney(totals.debit)}</span>
+              {' · '}
+              Total credits <span className="font-semibold tabular-nums">{formatMoney(totals.credit)}</span>
+            </span>
+            {hasAnything && totals.plug !== 0 && (
+              <span className="ml-3 text-muted-foreground">
+                Owner&apos;s Capital {totals.plug > 0 ? 'credited' : 'debited'}{' '}
+                <span className="font-semibold tabular-nums">{formatMoney(Math.abs(totals.plug))}</span>
+              </span>
+            )}
+          </div>
+        }
+      >
+        <Button onClick={submit} disabled={!canEnter || !hasAnything || submitting}>
+          {submitting ? 'Posting…' : 'Post opening balances'}
+        </Button>
+      </FormActions>
     </div>
   );
 }

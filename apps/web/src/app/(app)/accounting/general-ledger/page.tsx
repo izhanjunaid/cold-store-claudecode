@@ -11,6 +11,8 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 import { StatementFrame, StatementSkeleton } from '@/components/accounting/statement-frame';
+import { JournalEntryPeek } from '@/components/accounting/journal-entry-peek';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet';
 import { describePeriod } from '@/lib/fiscal-period';
 import { fmtAcct } from '@/lib/accounting-format';
 import { buildCsv, downloadCsv } from '@/components/data-table/export-csv';
@@ -42,14 +44,14 @@ interface GLResponse {
 }
 
 const SELECT_CLASS =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 function Summary({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (
-    <div>
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={`mt-0.5 tabular-nums ${bold ? 'font-semibold' : ''}`}>{value}</div>
-    </div>
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</span>
+      <span className={`tabular-nums ${bold ? 'font-semibold' : ''}`}>{value}</span>
+    </span>
   );
 }
 
@@ -63,6 +65,7 @@ export default function GeneralLedgerPage() {
   const [bookType, setBookType] = useState('');
   const [data, setData] = useState<GLResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [peekEntryId, setPeekEntryId] = useState<string | null>(null);
 
   // Initialise from URL (drill-down from a statement line) — once, on mount.
   useEffect(() => {
@@ -119,7 +122,7 @@ export default function GeneralLedgerPage() {
       <div className="print-hide mb-4 rounded-lg border bg-card p-3">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Account</Label>
+            <Label className="text-2xs text-muted-foreground">Account</Label>
             <select value={accountCode} onChange={(e) => setAccountCode(e.target.value)} className={`${SELECT_CLASS} font-mono`}>
               <option value="">Select account…</option>
               {accounts.map((a) => (
@@ -130,15 +133,15 @@ export default function GeneralLedgerPage() {
             </select>
           </div>
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">From</Label>
+            <Label className="text-2xs text-muted-foreground">From</Label>
             <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="tabular-nums" />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">To</Label>
+            <Label className="text-2xs text-muted-foreground">To</Label>
             <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="tabular-nums" />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Book</Label>
+            <Label className="text-2xs text-muted-foreground">Book</Label>
             <select value={bookType} onChange={(e) => setBookType(e.target.value)} className={SELECT_CLASS}>
               <option value="">PACCI (Official)</option>
               {canSeeKatchi && <option value="KATCHI">KATCHI (Internal)</option>}
@@ -164,7 +167,7 @@ export default function GeneralLedgerPage() {
       ) : (
         <div className="print-area">
           <StatementFrame title={`General Ledger — ${data.account_code} ${data.account_name}`} periodLabel={periodLabel} bookType={bookType}>
-            <div className="mb-4 grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
+            <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-1 border-b pb-3 text-sm">
               <Summary label="Opening" value={fmtAcct(data.opening_balance_pkr)} />
               <Summary label="Total Debit" value={fmtAcct(data.total_debit_pkr)} />
               <Summary label="Total Credit" value={fmtAcct(data.total_credit_pkr)} />
@@ -172,16 +175,16 @@ export default function GeneralLedgerPage() {
             </div>
 
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Entry</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Party</TableHead>
-                  <TableHead>Lot</TableHead>
-                  <TableHead className="text-right">Debit</TableHead>
-                  <TableHead className="text-right">Credit</TableHead>
-                  <TableHead className="text-right">Balance</TableHead>
+              <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableRow className="h-8 hover:bg-transparent">
+                  <TableHead className="h-8">Date</TableHead>
+                  <TableHead className="h-8">Entry</TableHead>
+                  <TableHead className="h-8">Description</TableHead>
+                  <TableHead className="h-8">Party</TableHead>
+                  <TableHead className="h-8">Lot</TableHead>
+                  <TableHead className="h-8 text-right">Debit</TableHead>
+                  <TableHead className="h-8 text-right">Credit</TableHead>
+                  <TableHead className="h-8 text-right">Balance</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -191,15 +194,19 @@ export default function GeneralLedgerPage() {
                   </TableRow>
                 ) : (
                   data.entries.map((e) => (
-                    <TableRow key={`${e.entry_id}-${e.date}-${e.entry_number}`}>
-                      <TableCell className="tabular-nums">{e.date}</TableCell>
-                      <TableCell className="font-mono text-xs">{e.entry_number}</TableCell>
-                      <TableCell className="max-w-md truncate">{e.description}</TableCell>
-                      <TableCell>{e.party_name ?? '—'}</TableCell>
-                      <TableCell className="font-mono text-xs">{e.lot_number ?? '—'}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtAcct(e.debit_pkr)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtAcct(e.credit_pkr)}</TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums">{fmtAcct(e.balance_pkr)}</TableCell>
+                    <TableRow
+                      key={`${e.entry_id}-${e.date}-${e.entry_number}`}
+                      className="h-7 cursor-pointer"
+                      onClick={() => setPeekEntryId(e.entry_id)}
+                    >
+                      <TableCell className="py-1 tabular-nums">{e.date}</TableCell>
+                      <TableCell className="py-1 font-mono text-xs">{e.entry_number}</TableCell>
+                      <TableCell className="max-w-md truncate py-1">{e.description}</TableCell>
+                      <TableCell className="py-1">{e.party_name ?? '—'}</TableCell>
+                      <TableCell className="py-1 font-mono text-xs">{e.lot_number ?? '—'}</TableCell>
+                      <TableCell className="py-1 text-right tabular-nums">{fmtAcct(e.debit_pkr)}</TableCell>
+                      <TableCell className="py-1 text-right tabular-nums">{fmtAcct(e.credit_pkr)}</TableCell>
+                      <TableCell className="py-1 text-right font-semibold tabular-nums">{fmtAcct(e.balance_pkr)}</TableCell>
                     </TableRow>
                   ))
                 )}
@@ -208,6 +215,15 @@ export default function GeneralLedgerPage() {
           </StatementFrame>
         </div>
       )}
+
+      <Sheet open={peekEntryId !== null} onOpenChange={(o) => !o && setPeekEntryId(null)}>
+        <SheetContent size="lg">
+          <SheetHeader>
+            <SheetTitle>Journal Entry</SheetTitle>
+          </SheetHeader>
+          <SheetBody>{peekEntryId && <JournalEntryPeek entryId={peekEntryId} />}</SheetBody>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

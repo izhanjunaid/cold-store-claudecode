@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { CheckCircle2, Plus, TriangleAlert, X } from 'lucide-react';
+import { CheckCircle2, TriangleAlert } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { EditableRows, type EditableRowColumn } from '@/components/form';
 import { PageHeader } from '@/components/layout/page-header';
 import { fmtPlain } from '@/lib/accounting-format';
 import { parseAmount } from './parse-amount';
@@ -66,9 +66,65 @@ export default function NewJournalEntryPage() {
   const balanced =
     !hasUnparseableAmount && Math.abs(totalDebit - totalCredit) < 0.005 && totalDebit > 0;
 
-  const updateLine = (idx: number, patch: Partial<Line>) => setLines((c) => c.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
-  const addLine = () => setLines((c) => [...c, emptyLine()]);
-  const removeLine = (idx: number) => setLines((c) => (c.length > 2 ? c.filter((_, i) => i !== idx) : c));
+  const columns: EditableRowColumn<Line>[] = [
+    {
+      key: 'account',
+      header: 'Account',
+      width: '2fr',
+      render: (row, update, index) => (
+        <Combobox
+          options={accountOptions}
+          value={row.account_code}
+          onChange={(v) => update({ account_code: v })}
+          placeholder="Select account…"
+          searchPlaceholder="Search by code or name…"
+          testId={`combobox-account_code-${index}`}
+        />
+      ),
+    },
+    {
+      key: 'description',
+      header: 'Memo',
+      width: '2fr',
+      render: (row, update) => (
+        <Input value={row.description} onChange={(e) => update({ description: e.target.value })} placeholder="Optional" />
+      ),
+    },
+    {
+      key: 'debit',
+      header: 'Debit',
+      width: '140px',
+      align: 'right',
+      // Text, not number: a number input silently discards the group
+      // separators a lakh/crore reader types, so "40,00,000" lands as an
+      // empty cell. parseAmount strips them and validates. Typing a debit
+      // clears any credit on the same line, and vice versa.
+      render: (row, update) => (
+        <Input
+          inputMode="decimal"
+          value={row.debit_amount}
+          onChange={(e) => update({ debit_amount: e.target.value, credit_amount: '' })}
+          aria-invalid={parseAmount(row.debit_amount) === null}
+          className="text-right tabular-nums aria-[invalid=true]:border-destructive"
+        />
+      ),
+    },
+    {
+      key: 'credit',
+      header: 'Credit',
+      width: '140px',
+      align: 'right',
+      render: (row, update) => (
+        <Input
+          inputMode="decimal"
+          value={row.credit_amount}
+          onChange={(e) => update({ credit_amount: e.target.value, debit_amount: '' })}
+          aria-invalid={parseAmount(row.credit_amount) === null}
+          className="text-right tabular-nums aria-[invalid=true]:border-destructive"
+        />
+      ),
+    },
+  ];
 
   const submit = async () => {
     setError(null);
@@ -111,90 +167,49 @@ export default function NewJournalEntryPage() {
       <PageHeader title="New Manual Journal Entry" crumb="New" />
 
       <Card className="mb-4">
-        <CardContent className="space-y-4 pt-6">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div className="space-y-1.5">
-              <Label>Entry Date</Label>
-              <Input type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} className="tabular-nums" />
-              {periodLabel && (
-                <p className="text-xs text-muted-foreground">Posts to period {periodLabel}</p>
-              )}
-            </div>
-            <div className="space-y-1.5">
-              <Label>Book Type</Label>
-              <select value={bookType} onChange={(e) => setBookType(e.target.value as 'PACCI' | 'KATCHI')} className={SELECT_CLASS + ' h-9'}>
-                <option value="PACCI">PACCI (Official)</option>
-                {isOwner && <option value="KATCHI">KATCHI (Internal — OWNER only)</option>}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Status</Label>
-              <select value={postingStatus} onChange={(e) => setPostingStatus(e.target.value as 'AUTO_DRAFT' | 'POSTED')} className={SELECT_CLASS + ' h-9'}>
-                <option value="POSTED">Post to ledger</option>
-                <option value="AUTO_DRAFT">Save as draft</option>
-              </select>
-              {postingStatus === 'AUTO_DRAFT' && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  Drafts are not in any report until posted from the entry page.
-                </p>
-              )}
-            </div>
+        <CardContent className="grid grid-cols-1 gap-3 p-4 md:grid-cols-4">
+          <div className="space-y-1">
+            <Label>Entry Date</Label>
+            <Input type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} className="tabular-nums" />
+            {periodLabel && (
+              <p className="text-2xs text-muted-foreground">Posts to period {periodLabel}</p>
+            )}
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
+            <Label>Book Type</Label>
+            <select value={bookType} onChange={(e) => setBookType(e.target.value as 'PACCI' | 'KATCHI')} className={SELECT_CLASS}>
+              <option value="PACCI">PACCI (Official)</option>
+              {isOwner && <option value="KATCHI">KATCHI (Internal — OWNER only)</option>}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label>Status</Label>
+            <select value={postingStatus} onChange={(e) => setPostingStatus(e.target.value as 'AUTO_DRAFT' | 'POSTED')} className={SELECT_CLASS}>
+              <option value="POSTED">Post to ledger</option>
+              <option value="AUTO_DRAFT">Save as draft</option>
+            </select>
+            {postingStatus === 'AUTO_DRAFT' && (
+              <p className="text-2xs text-amber-600 dark:text-amber-400">
+                Drafts are not in any report until posted.
+              </p>
+            )}
+          </div>
+          <div className="space-y-1">
             <Label>Description</Label>
             <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Reclassify Q1 storage adjustment" />
           </div>
         </CardContent>
       </Card>
 
-      <Card className="mb-4">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-72">Account</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead className="w-32 text-right">Debit</TableHead>
-              <TableHead className="w-32 text-right">Credit</TableHead>
-              <TableHead className="w-8" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {lines.map((l, idx) => (
-              <TableRow key={idx}>
-                <TableCell>
-                  <Combobox
-                    options={accountOptions}
-                    value={l.account_code}
-                    onChange={(v) => updateLine(idx, { account_code: v })}
-                    placeholder="Select account…"
-                    searchPlaceholder="Search by code or name…"
-                    testId={`combobox-account_code-${idx}`}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Input value={l.description} onChange={(e) => updateLine(idx, { description: e.target.value })} placeholder="Optional" className="h-8" />
-                </TableCell>
-                <TableCell>
-                  {/* Text, not number: a number input silently discards the group
-                      separators a lakh/crore reader types, so "40,00,000" lands
-                      as an empty cell. parseAmount strips them and validates. */}
-                  <Input inputMode="decimal" value={l.debit_amount} onChange={(e) => updateLine(idx, { debit_amount: e.target.value, credit_amount: '' })} aria-invalid={parseAmount(l.debit_amount) === null} className="h-8 text-right tabular-nums aria-[invalid=true]:border-destructive" />
-                </TableCell>
-                <TableCell>
-                  <Input inputMode="decimal" value={l.credit_amount} onChange={(e) => updateLine(idx, { credit_amount: e.target.value, debit_amount: '' })} aria-invalid={parseAmount(l.credit_amount) === null} className="h-8 text-right tabular-nums aria-[invalid=true]:border-destructive" />
-                </TableCell>
-                <TableCell>
-                  {lines.length > 2 && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeLine(idx)} aria-label="Remove line"><X className="h-4 w-4" /></Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-        <div className="flex items-center justify-between border-t bg-muted/30 px-4 py-3 text-sm">
-          <Button variant="link" className="h-auto p-0" onClick={addLine}><Plus className="h-4 w-4" aria-hidden />Add line</Button>
-          <div className="flex items-center gap-6">
+      <EditableRows
+        rows={lines}
+        onChange={setLines}
+        columns={columns}
+        newRow={emptyLine}
+        addLabel="Add line"
+        minRows={2}
+        footer={
+          <div className="flex items-center gap-6 text-sm">
             <span className="tabular-nums">Dr {fmtPlain(totalDebit, 2)}</span>
             <span className="tabular-nums">Cr {fmtPlain(totalCredit, 2)}</span>
             <span className={`inline-flex items-center gap-1.5 font-medium ${balanced ? 'text-green-600' : 'text-destructive'}`}>
@@ -206,12 +221,12 @@ export default function NewJournalEntryPage() {
                   : `Diff ${fmtPlain(Math.abs(totalDebit - totalCredit), 2)}`}
             </span>
           </div>
-        </div>
-      </Card>
+        }
+      />
 
-      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
+      {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
 
-      <div className="flex gap-3">
+      <div className="mt-4 flex gap-3">
         <Button onClick={submit} disabled={submitting || !balanced}>
           {submitting ? 'Saving…' : postingStatus === 'POSTED' ? 'Post Entry' : 'Save Draft'}
         </Button>

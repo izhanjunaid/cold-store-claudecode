@@ -62,27 +62,27 @@ export default function CashFlowPage() {
 
   const Section = ({ title, lines, total }: { title: string; lines: Line[]; total: number }) => (
     <>
-      <TableRow className="bg-muted/50">
-        <TableCell colSpan={2} className="text-xs font-semibold uppercase tracking-wide">{title}</TableCell>
+      <TableRow className="h-7 bg-muted/50">
+        <TableCell colSpan={2} className="py-1 text-xs font-semibold uppercase tracking-wide">{title}</TableCell>
       </TableRow>
       {lines.length === 0 && (
-        <TableRow>
-          <TableCell colSpan={2} className="pl-6 text-xs text-muted-foreground">No movements in this period.</TableCell>
+        <TableRow className="h-7">
+          <TableCell colSpan={2} className="py-1 pl-6 text-xs text-muted-foreground">No movements in this period.</TableCell>
         </TableRow>
       )}
       {lines.map((l) => (
-        <TableRow key={`${title}-${l.account_code}`}>
-          <TableCell className="pl-6">
+        <TableRow key={`${title}-${l.account_code}`} className="h-7">
+          <TableCell className="py-1 pl-6">
             <span className="text-xs text-muted-foreground">{l.account_code}</span> {l.account_name}
           </TableCell>
-          <TableCell className={cn('text-right tabular-nums', l.amount_pkr < 0 && 'text-destructive')}>
+          <TableCell className={cn('py-1 text-right tabular-nums', l.amount_pkr < 0 && 'text-destructive')}>
             {formatMoney(l.amount_pkr)}
           </TableCell>
         </TableRow>
       ))}
-      <TableRow className="font-medium">
-        <TableCell>Net cash from {title.toLowerCase()}</TableCell>
-        <TableCell className={cn('text-right tabular-nums', total < 0 && 'text-destructive')}>
+      <TableRow className="h-7 font-medium">
+        <TableCell className="py-1">Net cash from {title.toLowerCase()}</TableCell>
+        <TableCell className={cn('py-1 text-right tabular-nums', total < 0 && 'text-destructive')}>
           {formatMoney(total)}
         </TableCell>
       </TableRow>
@@ -98,13 +98,13 @@ export default function CashFlowPage() {
 
       <OpeningBalanceNotice context="statement" />
 
-      <Card className="mb-4 p-4">
+      <Card className="mb-4 p-3">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="cf-from">From</Label>
             <Input id="cf-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-44" />
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="cf-to">To</Label>
             <Input id="cf-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-44" />
           </div>
@@ -131,32 +131,32 @@ export default function CashFlowPage() {
                 <Section title="Investing activities" lines={data.investing_lines} total={data.total_investing_pkr} />
                 <Section title="Financing activities" lines={data.financing_lines} total={data.total_financing_pkr} />
 
-                <TableRow className="border-t-2 font-semibold">
-                  <TableCell>Net change in cash</TableCell>
-                  <TableCell className={cn('text-right tabular-nums', data.net_change_pkr < 0 && 'text-destructive')}>
+                <TableRow className="h-7 border-t-2 font-semibold">
+                  <TableCell className="py-1">Net change in cash</TableCell>
+                  <TableCell className={cn('py-1 text-right tabular-nums', data.net_change_pkr < 0 && 'text-destructive')}>
                     {formatMoney(data.net_change_pkr)}
                   </TableCell>
                 </TableRow>
-                <TableRow>
-                  <TableCell>Cash and cash equivalents, opening</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(data.opening_cash_pkr)}</TableCell>
+                <TableRow className="h-7">
+                  <TableCell className="py-1">Cash and cash equivalents, opening</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{formatMoney(data.opening_cash_pkr)}</TableCell>
                 </TableRow>
-                <TableRow className="font-semibold">
-                  <TableCell>Cash and cash equivalents, closing</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatMoney(data.closing_cash_pkr)}</TableCell>
+                <TableRow className="h-7 font-semibold">
+                  <TableCell className="py-1">Cash and cash equivalents, closing</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{formatMoney(data.closing_cash_pkr)}</TableCell>
                 </TableRow>
 
-                <TableRow className="bg-muted/50">
-                  <TableCell colSpan={2} className="text-xs font-semibold uppercase tracking-wide">
+                <TableRow className="h-7 bg-muted/50">
+                  <TableCell colSpan={2} className="py-1 text-xs font-semibold uppercase tracking-wide">
                     Composition of cash and cash equivalents
                   </TableCell>
                 </TableRow>
                 {data.cash_composition.map((l) => (
-                  <TableRow key={`comp-${l.account_code}`}>
-                    <TableCell className="pl-6">
+                  <TableRow key={`comp-${l.account_code}`} className="h-7">
+                    <TableCell className="py-1 pl-6">
                       <span className="text-xs text-muted-foreground">{l.account_code}</span> {l.account_name}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{formatMoney(l.amount_pkr)}</TableCell>
+                    <TableCell className="py-1 text-right tabular-nums">{formatMoney(l.amount_pkr)}</TableCell>
                   </TableRow>
                 ))}
               </>

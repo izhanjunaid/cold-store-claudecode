@@ -22,6 +22,9 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 import { suggestNextCode } from './next-code';
+import { fmtAcct } from '@/lib/accounting-format';
+import { formatDate } from '@/lib/format';
+import { cn } from '@/lib/utils';
 
 import { DataTableSkeleton } from '@/components/data-table';
 interface Account {
@@ -35,6 +38,11 @@ interface Account {
   statement_section: string | null;
   is_system_account: boolean;
   is_active: boolean;
+}
+interface TbRow {
+  account_code: string;
+  debit_balance_pkr: number;
+  credit_balance_pkr: number;
 }
 
 const CLASS_TONE: Record<string, 'info' | 'warning' | 'success' | 'danger' | 'neutral'> = {
@@ -96,7 +104,7 @@ const SECTION_LABEL: Record<string, string> = {
 };
 
 const SELECT_CLASS =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 // Opens on the class the table is filtered to — adding an expense account from
 // the Expenses view should not start you on Assets.
@@ -128,6 +136,31 @@ export default function ChartOfAccountsPage() {
   const [draft, setDraft] = useState(emptyDraft());
   const [renaming, setRenaming] = useState<Account | null>(null);
   const [newName, setNewName] = useState('');
+
+  // Cumulative closing balance as of today — omitting date_from means TB
+  // treats every posting up to date_to as "opening", i.e. the full-history
+  // balance, not just this year's movement. TB defaults to the PACCI book,
+  // so the column header names the book rather than leaving it implied.
+  const [tbAsOf] = useState(() => new Date().toISOString().slice(0, 10));
+  const [balances, setBalances] = useState<Map<string, TbRow>>(new Map());
+
+  useEffect(() => {
+    apiClient<{ rows: TbRow[] }>(`/v1/accounting/trial-balance?date_to=${tbAsOf}`)
+      .then((tb) => setBalances(new Map((tb?.rows ?? []).map((r) => [r.account_code, r]))))
+      .catch(() => setBalances(new Map()));
+  }, [tbAsOf]);
+
+  // Signed on the account's own normal side, so a normal-debit account with a
+  // debit balance reads as a positive figure (matching every other statement
+  // in this module) rather than the raw debit-minus-credit difference. An
+  // account absent from the trial balance (no postings, or a HEADER, which
+  // never posts directly) defaults to 0 — rendered identically to an
+  // explicit zero balance via fmtAcct's em-dash convention.
+  const balanceFor = (a: Account): number => {
+    const r = balances.get(a.account_code);
+    if (!r) return 0;
+    return a.normal_balance === 'DEBIT' ? r.debit_balance_pkr - r.credit_balance_pkr : r.credit_balance_pkr - r.debit_balance_pkr;
+  };
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true);
@@ -345,44 +378,48 @@ export default function ChartOfAccountsPage() {
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search code or name…"
-        className="mb-3 h-9 max-w-xs"
+        className="mb-3 h-8 max-w-xs"
         aria-label="Search accounts"
       />
 
       <Card>
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Code</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Class</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Normal</TableHead>
-              <TableHead>Status</TableHead>
-              {canManage && <TableHead className="w-44 text-right">Actions</TableHead>}
+            <TableRow className="h-8 hover:bg-transparent">
+              <TableHead className="h-8">Code</TableHead>
+              <TableHead className="h-8">Name</TableHead>
+              <TableHead className="h-8">Class</TableHead>
+              <TableHead className="h-8">Type</TableHead>
+              <TableHead className="h-8">Normal</TableHead>
+              <TableHead className="h-8 text-right" title={`Cumulative closing balance as at ${formatDate(tbAsOf)}`}>
+                Balance (PACCI)
+              </TableHead>
+              <TableHead className="h-8">Status</TableHead>
+              {canManage && <TableHead className="h-8 w-44 text-right">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <DataTableSkeleton columns={canManage ? 7 : 6} rows={5} />
+              <DataTableSkeleton columns={canManage ? 8 : 7} rows={5} />
             ) : visibleAccounts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canManage ? 7 : 6} className="h-24 text-center text-muted-foreground">No accounts</TableCell>
+                <TableCell colSpan={canManage ? 8 : 7} className="h-24 text-center text-muted-foreground">No accounts</TableCell>
               </TableRow>
             ) : (
               visibleAccounts.map((a) => (
-                <TableRow key={a.id} className={a.account_type === 'HEADER' ? 'bg-muted/40 font-semibold' : ''}>
-                  <TableCell className="font-mono">{a.account_code}</TableCell>
-                  <TableCell>
+                <TableRow key={a.id} className={cn('h-7', a.account_type === 'HEADER' && 'bg-muted/40 font-semibold')}>
+                  <TableCell className="py-1 font-mono">{a.account_code}</TableCell>
+                  <TableCell className="py-1">
                     {a.account_type === 'DETAIL' && a.parent_account_code ? '↳ ' : ''}
                     {a.account_name}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-1">
                     <StatusBadge status={a.account_class} tone={CLASS_TONE[a.account_class] ?? 'neutral'} />
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{a.account_type}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{a.normal_balance}</TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell className="py-1 text-xs text-muted-foreground">{a.account_type}</TableCell>
+                  <TableCell className="py-1 text-xs text-muted-foreground">{a.normal_balance}</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{fmtAcct(balanceFor(a))}</TableCell>
+                  <TableCell className="py-1 text-xs">
                     {a.is_system_account ? (
                       <span className="text-blue-600">System</span>
                     ) : a.is_active ? (
@@ -392,7 +429,7 @@ export default function ChartOfAccountsPage() {
                     )}
                   </TableCell>
                   {canManage && (
-                    <TableCell className="text-right">
+                    <TableCell className="py-1 text-right">
                       {!a.is_system_account && (
                         <div className="flex justify-end gap-1">
                           <Button
@@ -443,7 +480,7 @@ export default function ChartOfAccountsPage() {
               the parent decides the code block. Asking for the code first (as
               this form used to) asks for the derived value before its inputs. */}
           <div className="space-y-3">
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label htmlFor="coa-class">Class</Label>
               <select
                 id="coa-class"
@@ -465,7 +502,7 @@ export default function ChartOfAccountsPage() {
                 ))}
               </select>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label htmlFor="coa-type">Type</Label>
               <select
                 id="coa-type"
@@ -486,7 +523,7 @@ export default function ChartOfAccountsPage() {
               </select>
             </div>
             {draft.type === 'DETAIL' ? (
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label htmlFor="coa-parent">
                   Parent (header){parentRequired && <span className="text-destructive"> *</span>}
                 </Label>
@@ -514,7 +551,7 @@ export default function ChartOfAccountsPage() {
                 )}
               </div>
             ) : (
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label htmlFor="coa-section">
                   Statement section
                   {sectionRequired && <span className="text-destructive"> *</span>}
@@ -540,7 +577,7 @@ export default function ChartOfAccountsPage() {
                 </p>
               </div>
             )}
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label htmlFor="coa-name">Account name <span className="text-destructive">*</span></Label>
               <Input
                 id="coa-name"
@@ -549,7 +586,7 @@ export default function ChartOfAccountsPage() {
                 placeholder="e.g. Generator Fuel"
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label htmlFor="coa-code">Account code <span className="text-destructive">*</span></Label>
               <Input
                 id="coa-code"
@@ -571,7 +608,7 @@ export default function ChartOfAccountsPage() {
             </div>
             <details className="rounded-md border px-3 py-2">
               <summary className="cursor-pointer text-sm text-muted-foreground">Advanced</summary>
-              <div className="mt-2 space-y-1.5">
+              <div className="mt-2 space-y-1">
                 <Label htmlFor="coa-normal">Normal balance</Label>
                 <select
                   id="coa-normal"
@@ -612,7 +649,7 @@ export default function ChartOfAccountsPage() {
               posting history do not change.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="coa-rename">New name</Label>
             <Input id="coa-rename" value={newName} onChange={(e) => setNewName(e.target.value)} />
           </div>

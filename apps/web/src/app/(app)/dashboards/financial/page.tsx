@@ -80,7 +80,7 @@ export default function FinancialDashboardPage() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatTile
           label="AR Outstanding"
           value={fmtPkr(financial?.ar_total_pkr ?? 0)}
@@ -100,7 +100,7 @@ export default function FinancialDashboardPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Receivables Aging</CardTitle>
@@ -108,7 +108,7 @@ export default function FinancialDashboardPage() {
           <CardContent>
             {aging && aging.buckets.total_pkr > 0 ? (
               <>
-                <div style={{ width: '100%', height: 260 }}>
+                <div style={{ width: '100%', height: 200 }}>
                   <ResponsiveContainer>
                     <PieChart>
                       <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90}>
@@ -142,20 +142,20 @@ export default function FinancialDashboardPage() {
             {top5.length ? (
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Party</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="text-right">Total Due</TableHead>
-                    <TableHead className="text-right">Oldest</TableHead>
+                  <TableRow className="h-8 hover:bg-transparent">
+                    <TableHead className="h-8">Party</TableHead>
+                    <TableHead className="h-8">Type</TableHead>
+                    <TableHead className="h-8 text-right">Total Due</TableHead>
+                    <TableHead className="h-8 text-right">Oldest</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {top5.map((p) => (
-                    <TableRow key={p.party_id} className="cursor-pointer" onClick={() => router.push(`/parties/${p.party_id}`)}>
-                      <TableCell className="font-medium">{p.party_name}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{p.party_type}</TableCell>
-                      <TableCell className="text-right font-mono tabular-nums">{fmtPkr(p.total_due_pkr)}</TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">{p.oldest_invoice_days}d</TableCell>
+                    <TableRow key={p.party_id} className="h-7 cursor-pointer" onClick={() => router.push(`/parties/${p.party_id}`)}>
+                      <TableCell className="py-1 font-medium">{p.party_name}</TableCell>
+                      <TableCell className="py-1 text-xs text-muted-foreground">{p.party_type}</TableCell>
+                      <TableCell className="py-1 text-right font-mono tabular-nums">{fmtPkr(p.total_due_pkr)}</TableCell>
+                      <TableCell className="py-1 text-right tabular-nums text-muted-foreground">{p.oldest_invoice_days}d</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
