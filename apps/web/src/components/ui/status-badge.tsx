@@ -31,6 +31,8 @@ const STATUS_TONES: Record<string, Tone> = {
   CANCELLED: 'muted',
   PENDING: 'warning',
   DISPATCHED: 'success',
+  // Payroll runs
+  REVERSED: 'danger',
   // Payments
   CLEARED: 'success',
   DISHONOURED: 'danger',

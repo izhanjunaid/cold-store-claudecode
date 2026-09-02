@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState, type DataTableColumn } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
+import { AssetSchedulePreview } from './asset-schedule-preview';
 
 import { formatDate } from '@/lib/format';
 interface FixedAssetSummary {
@@ -96,6 +97,7 @@ export default function FixedAssetListPage() {
         onPerPageChange={setPerPage}
         getRowId={(a) => a.id}
         onRowClick={(a) => router.push(`/accounting/fixed-assets/${a.id}`)}
+        renderExpanded={(a) => <AssetSchedulePreview assetId={a.id} />}
         filterValues={state.filters}
         onFilterChange={setFilter}
         onResetFilters={resetFilters}

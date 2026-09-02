@@ -84,7 +84,7 @@ export default function NewFixedAssetPage() {
     <div className="max-w-3xl">
       <PageHeader title="New Fixed Asset" crumb="New" />
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <Label>Asset Name <span className="text-destructive">*</span></Label>

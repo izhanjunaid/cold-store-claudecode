@@ -75,7 +75,7 @@ export default function NewEmployeePage() {
     <div className="max-w-3xl">
       <PageHeader title="New Employee" crumb="New" />
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
