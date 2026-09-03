@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
@@ -15,12 +15,17 @@ import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet';
 import { PageHeader } from '@/components/layout/page-header';
+import { EditableRows, type EditableRowColumn } from '@/components/form';
+import { JournalEntryPeek } from '@/components/accounting/journal-entry-peek';
 
 import { formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
 
 const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 interface LineItem {
   id: string;
   employee_id: string;
@@ -64,6 +69,55 @@ interface PayrollRun {
   } | null;
 }
 
+/** Client preview only — mirrors payroll-run.service.ts's updateLine formula exactly.
+ *  The server recomputes and validates (advance-recovery cap against the live
+ *  outstanding balance) authoritatively on save; this never invents its own cap. */
+function computeNetPay(l: LineItem): number {
+  return round2(l.gross_pay_pkr - l.eobi_employee_pkr - l.income_tax_pkr - l.other_deductions_pkr - l.advance_recovery_pkr);
+}
+
+function linesEqual(a: LineItem, b: LineItem | undefined): boolean {
+  if (!b) return false;
+  return (
+    a.gross_pay_pkr === b.gross_pay_pkr &&
+    a.income_tax_pkr === b.income_tax_pkr &&
+    a.advance_recovery_pkr === b.advance_recovery_pkr &&
+    a.days_worked === b.days_worked
+  );
+}
+
+/**
+ * A native `<input type="number">` sanitizes its `.value` to `""` for any
+ * intermediate string that isn't a complete valid number — "22." while
+ * typing "22.5", or a fully-cleared field. Binding that straight through
+ * `Number(e.target.value)` (as the modal this replaced never did — it kept
+ * string state and parsed once at submit) turns a decimal keystroke into a
+ * silent write of 0. This holds its own text buffer, resyncing from `value`
+ * only when it changes from outside (e.g. a refetch), and calls `onChange`
+ * only once the text actually parses — so an in-progress edit never
+ * corrupts draftLines, and a cleared field just stays undirtied instead of
+ * silently PATCHing nothing while the toast claims success.
+ */
+function NumCell({
+  value, onChange, step, min, disabled, className,
+}: {
+  value: number | null; onChange: (n: number) => void; step?: number; min?: number; disabled?: boolean; className?: string;
+}) {
+  const [text, setText] = useState(value === null ? '' : String(value));
+  useEffect(() => { setText(value === null ? '' : String(value)); }, [value]);
+  return (
+    <Input
+      type="number" step={step} min={min} disabled={disabled} className={className}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        const n = Number(e.target.value);
+        if (e.target.value !== '' && Number.isFinite(n)) onChange(n);
+      }}
+    />
+  );
+}
+
 export default function PayrollRunDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -74,6 +128,7 @@ export default function PayrollRunDetailPage() {
   const isAccountant = can(user, 'payroll.view');
   const canDraft = can(user, 'payroll.draft');
   const canReverse = can(user, 'payroll.reverse');
+  const canPeekJe = can(user, 'accounting.view');
 
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,58 +147,64 @@ export default function PayrollRunDetailPage() {
   const cashAccounts = accounts.filter(isCashOrBank);
   const [reverseReason, setReverseReason] = useState('');
   const [reversing, setReversing] = useState(false);
+  const [peekEntryId, setPeekEntryId] = useState<string | null>(null);
 
-  // Line editing. Until now nothing in the web app called
-  // PATCH /v1/payroll-runs/:id/lines/:lineId, so income tax and advance recovery
-  // could never be anything but the pre-filled value from the screen.
-  const [editLine, setEditLine] = useState<LineItem | null>(null);
-  const [editDays, setEditDays] = useState('');
-  const [editGross, setEditGross] = useState('');
-  const [editTax, setEditTax] = useState('');
-  const [editAdvance, setEditAdvance] = useState('');
-  const [editSaving, setEditSaving] = useState(false);
+  // Draft-run batch line editing. Seeded from the fetched run and reset every
+  // time a fresh run is fetched (including right after a save) — that reset
+  // is what clears "dirty" state, so no separate manual-reset path is needed.
+  const [draftLines, setDraftLines] = useState<LineItem[]>([]);
+  const [saving, setSaving] = useState(false);
 
-  function openEdit(l: LineItem) {
-    setEditLine(l);
-    setEditDays(l.days_worked === null ? '' : String(l.days_worked));
-    setEditGross(String(l.gross_pay_pkr));
-    setEditTax(String(l.income_tax_pkr));
-    setEditAdvance(String(l.advance_recovery_pkr));
-  }
-
-  async function saveLine() {
-    if (!editLine) return;
-    setEditSaving(true);
-    try {
-      await apiClient(`/v1/payroll-runs/${id}/lines/${editLine.id}`, {
-        method: 'PATCH',
-        body: {
-          gross_pay_pkr: Number(editGross),
-          income_tax_pkr: Number(editTax),
-          advance_recovery_pkr: Number(editAdvance),
-          ...(editLine.employee_type === 'DAILY_WAGE' && editDays !== ''
-            ? { days_worked: Number(editDays) }
-            : {}),
-        },
-      });
-      setEditLine(null);
-      toast.success('Line updated');
-      fetchRun();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Update failed');
-    } finally {
-      setEditSaving(false);
-    }
-  }
-
+  // Only the first fetch shows the full-page skeleton — a refetch after Save
+  // Changes shouldn't blank the whole grid the user is looking at. A ref
+  // (not state) so it doesn't churn fetchRun's identity or the load effect.
+  const hasLoadedRef = useRef(false);
   const fetchRun = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     try {
-      setRun(await apiClient<PayrollRun>(`/v1/payroll-runs/${id}`));
+      const data = await apiClient<PayrollRun>(`/v1/payroll-runs/${id}`);
+      setRun(data);
+      setDraftLines(data.line_items);
+      hasLoadedRef.current = true;
     } finally { setLoading(false); }
   }, [id]);
 
   useEffect(() => { fetchRun(); }, [fetchRun]);
+
+  const isDirty = run !== null && draftLines.some((l, i) => !linesEqual(l, run.line_items[i]));
+
+  async function saveChanges() {
+    if (!run) return;
+    setSaving(true);
+    try {
+      const dirty = draftLines.filter((l, i) => !linesEqual(l, run.line_items[i]));
+      const results = await Promise.allSettled(
+        dirty.map((l) =>
+          apiClient(`/v1/payroll-runs/${id}/lines/${l.id}`, {
+            method: 'PATCH',
+            body: {
+              gross_pay_pkr: l.gross_pay_pkr,
+              income_tax_pkr: l.income_tax_pkr,
+              advance_recovery_pkr: l.advance_recovery_pkr,
+              ...(run.payroll_type === 'DAILY_WAGES' && l.days_worked !== null ? { days_worked: l.days_worked } : {}),
+            },
+          }),
+        ),
+      );
+      const failedCount = results.filter((r) => r.status === 'rejected').length;
+      const okCount = results.length - failedCount;
+      if (okCount > 0) toast.success(`Saved ${okCount} line${okCount === 1 ? '' : 's'}`);
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          const line = dirty[i]!;
+          toast.error(`${line.employee_name}: ${r.reason instanceof Error ? r.reason.message : 'Save failed'}`);
+        }
+      });
+      await fetchRun();
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function finalize() {
     try {
@@ -221,6 +282,78 @@ export default function PayrollRunDetailPage() {
   if (loading) return <PageSkeleton />;
   if (!run) return <p className="text-destructive">Run not found</p>;
 
+  const editing = run.status === 'DRAFT' && canDraft;
+  const isDailyWage = run.payroll_type === 'DAILY_WAGES';
+
+  // Single source of truth for the KPI card, whether editing or not — while
+  // read-only, draftLines mirrors run.line_items exactly, so this is one code
+  // path rather than a branch that could show two disagreeing totals.
+  const totals = draftLines.reduce(
+    (acc, l) => {
+      acc.gross += l.gross_pay_pkr;
+      acc.deductions += l.eobi_employee_pkr + l.income_tax_pkr + l.other_deductions_pkr + l.advance_recovery_pkr;
+      acc.eobiEmployer += l.eobi_employer_pkr;
+      acc.net += computeNetPay(l);
+      return acc;
+    },
+    { gross: 0, deductions: 0, eobiEmployer: 0, net: 0 },
+  );
+
+  const lineColumns: EditableRowColumn<LineItem>[] = [
+    { key: 'employee', header: 'Employee', width: '2fr', render: (row) => <span className="font-medium">{row.employee_name}</span> },
+    ...(isDailyWage
+      ? [{
+          key: 'days',
+          header: 'Days',
+          width: '80px',
+          align: 'right' as const,
+          render: (row: LineItem, update: (patch: Partial<LineItem>) => void) => (
+            <NumCell value={row.days_worked} step={0.5} min={0} disabled={saving} className="h-8 text-right tabular-nums"
+              onChange={(n) => update({ days_worked: n })} />
+          ),
+        }]
+      : []),
+    {
+      key: 'gross', header: 'Gross', width: '120px', align: 'right',
+      render: (row, update) => (
+        <NumCell value={row.gross_pay_pkr} step={0.01} min={0} disabled={saving} className="h-8 text-right tabular-nums"
+          onChange={(n) => update({ gross_pay_pkr: n })} />
+      ),
+    },
+    { key: 'eobi', header: 'EOBI (E)', width: '90px', align: 'right', render: (row) => <span className="tabular-nums text-amber-600">{row.eobi_employee_pkr.toLocaleString()}</span> },
+    {
+      key: 'tax', header: 'Tax', width: '110px', align: 'right',
+      render: (row, update) => (
+        <NumCell value={row.income_tax_pkr} step={0.01} min={0} disabled={saving} className="h-8 text-right tabular-nums"
+          onChange={(n) => update({ income_tax_pkr: n })} />
+      ),
+    },
+    { key: 'other', header: 'Other', width: '90px', align: 'right', render: (row) => <span className="tabular-nums">{row.other_deductions_pkr.toLocaleString()}</span> },
+    {
+      key: 'advance', header: 'Advance', width: '110px', align: 'right',
+      render: (row, update) => (
+        <NumCell value={row.advance_recovery_pkr} step={0.01} min={0} disabled={saving} className="h-8 text-right tabular-nums"
+          onChange={(n) => update({ advance_recovery_pkr: n })} />
+      ),
+    },
+    { key: 'net', header: 'Net Pay', width: '120px', align: 'right', render: (row) => <span className="tabular-nums font-medium text-green-700">{computeNetPay(row).toLocaleString()}</span> },
+    ...(isAccountant
+      ? [{
+          key: 'slip', header: '', width: '56px', align: 'right' as const,
+          render: (row: LineItem) => (
+            <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => viewSlip(row.id)}>Slip</Button>
+          ),
+        }]
+      : []),
+  ];
+
+  const jeLink = (label: string, entryId: string) =>
+    canPeekJe ? (
+      <div>{label}: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => setPeekEntryId(entryId)}>{entryId.slice(0, 8)}…</Button></div>
+    ) : (
+      <div>{label}: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${entryId}`)}>{entryId.slice(0, 8)}…</Button></div>
+    );
+
   return (
     <div>
       <PageHeader
@@ -230,7 +363,9 @@ export default function PayrollRunDetailPage() {
         actions={
           <>
             {isManager && run.status === 'DRAFT' && (
-              <Button onClick={finalize}>Finalize (post JE-15{run.payroll_type === 'DAILY_WAGES' ? 'B' : ''})</Button>
+              <Button onClick={finalize} disabled={isDirty} title={isDirty ? 'Save changes before finalizing' : undefined}>
+                Finalize (post JE-15{run.payroll_type === 'DAILY_WAGES' ? 'B' : ''})
+              </Button>
             )}
             {isManager && run.status === 'FINALIZED' && <Button onClick={() => setShowPay(true)}>Pay (post JE-16)</Button>}
             {isOwner && run.status !== 'DRAFT' && !run.remittance_journal_entry_id && (
@@ -246,16 +381,16 @@ export default function PayrollRunDetailPage() {
       />
 
       <Card className="mb-4">
-        <CardContent className="pt-6">
+        <CardContent className="p-4">
           <div className="mb-4 flex items-center gap-2">
             <span className="font-mono text-sm text-muted-foreground">{run.run_number}</span>
-            <StatusBadge status={run.status} tone={run.status === 'REVERSED' ? 'danger' : undefined} />
+            <StatusBadge status={run.status} />
           </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Total Gross</div><div className="text-lg font-semibold tabular-nums">{formatMoney(run.total_gross_pkr)}</div></div>
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Deductions</div><div className="text-lg font-semibold tabular-nums text-amber-600">{formatMoney(run.total_deductions_pkr)}</div></div>
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Employer EOBI</div><div className="text-lg font-semibold tabular-nums">{formatMoney(run.total_employer_eobi_pkr)}</div></div>
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Net Payable</div><div className="text-lg font-semibold tabular-nums text-green-700">{formatMoney(run.total_net_payable_pkr)}</div></div>
+            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Total Gross{editing && isDirty ? ' (unsaved)' : ''}</div><div className="text-lg font-semibold tabular-nums">{formatMoney(totals.gross)}</div></div>
+            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Deductions{editing && isDirty ? ' (unsaved)' : ''}</div><div className="text-lg font-semibold tabular-nums text-amber-600">{formatMoney(totals.deductions)}</div></div>
+            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Employer EOBI</div><div className="text-lg font-semibold tabular-nums">{formatMoney(totals.eobiEmployer)}</div></div>
+            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Net Payable{editing && isDirty ? ' (unsaved)' : ''}</div><div className="text-lg font-semibold tabular-nums text-green-700">{formatMoney(totals.net)}</div></div>
           </div>
           {run.reconciliation && (
             <div
@@ -283,91 +418,71 @@ export default function PayrollRunDetailPage() {
             </div>
           )}
           <div className="mt-4 space-y-1 text-sm text-muted-foreground">
-            {run.payroll_journal_entry_id && <div>Payroll JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${run.payroll_journal_entry_id}`)}>{run.payroll_journal_entry_id.slice(0, 8)}…</Button></div>}
-            {run.payment_journal_entry_id && <div>Payment JE-16: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${run.payment_journal_entry_id}`)}>{run.payment_journal_entry_id.slice(0, 8)}…</Button></div>}
-            {run.remittance_journal_entry_id && <div>Remittance JE-16B: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${run.remittance_journal_entry_id}`)}>{run.remittance_journal_entry_id.slice(0, 8)}…</Button></div>}
+            {run.payroll_journal_entry_id && jeLink('Payroll JE', run.payroll_journal_entry_id)}
+            {run.payment_journal_entry_id && jeLink('Payment JE-16', run.payment_journal_entry_id)}
+            {run.remittance_journal_entry_id && jeLink('Remittance JE-16B', run.remittance_journal_entry_id)}
           </div>
         </CardContent>
       </Card>
 
       <Card>
-        <CardContent className="pt-6">
-          <h2 className="mb-3 text-sm font-semibold">Line Items ({run.line_items.length} employees)</h2>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Employee</TableHead>
-                <TableHead className="text-right">Days</TableHead>
-                <TableHead className="text-right">Gross</TableHead>
-                <TableHead className="text-right">EOBI (E)</TableHead>
-                <TableHead className="text-right">Tax</TableHead>
-                <TableHead className="text-right">Other</TableHead>
-                <TableHead className="text-right">Advance</TableHead>
-                <TableHead className="text-right">Net Pay</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {run.line_items.map((l) => (
-                <TableRow key={l.id}>
-                  <TableCell className="font-medium">{l.employee_name}</TableCell>
-                  <TableCell className="text-right tabular-nums">{l.days_worked ?? '—'}</TableCell>
-                  <TableCell className="text-right tabular-nums">{l.gross_pay_pkr.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums text-amber-600">{l.eobi_employee_pkr.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums">{l.income_tax_pkr.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums">{l.other_deductions_pkr.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums text-amber-600">{l.advance_recovery_pkr.toLocaleString()}</TableCell>
-                  <TableCell className="text-right font-medium tabular-nums text-green-700">{l.net_pay_pkr.toLocaleString()}</TableCell>
-                  <TableCell className="space-x-3 text-right">
-                    {canDraft && run.status === 'DRAFT' && (
-                      <Button variant="link" className="h-auto p-0" onClick={() => openEdit(l)}>Edit</Button>
-                    )}
-                    {isAccountant && <Button variant="link" className="h-auto p-0" onClick={() => viewSlip(l.id)}>Slip</Button>}
-                  </TableCell>
+        <CardContent className="p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Line Items ({run.line_items.length} employees)</h2>
+            {editing && isDirty && (
+              <Button size="sm" onClick={saveChanges} disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</Button>
+            )}
+          </div>
+
+          {editing ? (
+            <EditableRows
+              rows={draftLines}
+              onChange={setDraftLines}
+              columns={lineColumns}
+              // Unreachable: maxRows = current length hides Add immediately — a
+              // run's roster is fixed at draft creation, the API has no
+              // add-line endpoint.
+              newRow={() => draftLines[0]!}
+              removable={false}
+              maxRows={draftLines.length}
+              disabled={saving}
+            />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="h-8 hover:bg-transparent">
+                  <TableHead className="h-8">Employee</TableHead>
+                  <TableHead className="h-8 text-right">Days</TableHead>
+                  <TableHead className="h-8 text-right">Gross</TableHead>
+                  <TableHead className="h-8 text-right">EOBI (E)</TableHead>
+                  <TableHead className="h-8 text-right">Tax</TableHead>
+                  <TableHead className="h-8 text-right">Other</TableHead>
+                  <TableHead className="h-8 text-right">Advance</TableHead>
+                  <TableHead className="h-8 text-right">Net Pay</TableHead>
+                  <TableHead className="h-8" />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {run.line_items.map((l) => (
+                  <TableRow key={l.id} className="h-7">
+                    <TableCell className="py-1 font-medium">{l.employee_name}</TableCell>
+                    <TableCell className="py-1 text-right tabular-nums">{l.days_worked ?? '—'}</TableCell>
+                    <TableCell className="py-1 text-right tabular-nums">{l.gross_pay_pkr.toLocaleString()}</TableCell>
+                    <TableCell className="py-1 text-right tabular-nums text-amber-600">{l.eobi_employee_pkr.toLocaleString()}</TableCell>
+                    <TableCell className="py-1 text-right tabular-nums">{l.income_tax_pkr.toLocaleString()}</TableCell>
+                    <TableCell className="py-1 text-right tabular-nums">{l.other_deductions_pkr.toLocaleString()}</TableCell>
+                    <TableCell className="py-1 text-right tabular-nums text-amber-600">{l.advance_recovery_pkr.toLocaleString()}</TableCell>
+                    <TableCell className="py-1 text-right font-medium tabular-nums text-green-700">{l.net_pay_pkr.toLocaleString()}</TableCell>
+                    <TableCell className="py-1 text-right">
+                      {isAccountant && <Button variant="link" size="sm" className="h-auto p-0" onClick={() => viewSlip(l.id)}>Slip</Button>}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
-
-      <Dialog open={editLine !== null} onOpenChange={(o) => { if (!o) setEditLine(null); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Edit line — {editLine?.employee_name}</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Net pay is recomputed as gross − employee EOBI − tax − advance recovery. Only DRAFT runs can be edited.
-          </p>
-          <div className="space-y-3">
-            {editLine?.employee_type === 'DAILY_WAGE' && (
-              <div className="space-y-1.5">
-                <Label>Days worked</Label>
-                <Input type="number" step={0.5} min={0} value={editDays} onChange={(e) => setEditDays(e.target.value)} className="tabular-nums" />
-                <p className="text-xs text-muted-foreground">Gross is not recalculated automatically — adjust it below to match.</p>
-              </div>
-            )}
-            <div className="space-y-1.5">
-              <Label>Gross pay (PKR)</Label>
-              <Input type="number" step={0.01} min={0} value={editGross} onChange={(e) => setEditGross(e.target.value)} className="tabular-nums" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Income tax (PKR)</Label>
-              <Input type="number" step={0.01} min={0} value={editTax} onChange={(e) => setEditTax(e.target.value)} className="tabular-nums" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Advance recovery (PKR)</Label>
-              <Input type="number" step={0.01} min={0} value={editAdvance} onChange={(e) => setEditAdvance(e.target.value)} className="tabular-nums" />
-              <p className="text-xs text-muted-foreground">
-                Pre-filled from the employee&apos;s active advance instalment. Set to 0 to skip recovery this month; it
-                cannot exceed the outstanding balance.
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditLine(null)}>Cancel</Button>
-            <Button onClick={saveLine} disabled={editSaving}>{editSaving ? 'Saving…' : 'Save line'}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={showPay} onOpenChange={setShowPay}>
         <DialogContent>
@@ -442,6 +557,15 @@ export default function PayrollRunDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Sheet open={peekEntryId !== null} onOpenChange={(o) => !o && setPeekEntryId(null)}>
+        <SheetContent size="lg">
+          <SheetHeader>
+            <SheetTitle>Journal Entry</SheetTitle>
+          </SheetHeader>
+          <SheetBody>{peekEntryId && <JournalEntryPeek entryId={peekEntryId} />}</SheetBody>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

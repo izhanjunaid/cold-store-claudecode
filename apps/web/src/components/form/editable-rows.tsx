@@ -53,6 +53,12 @@ export interface EditableRowsProps<T> {
   footer?: React.ReactNode;
   disabled?: boolean;
   className?: string;
+  /**
+   * Set false for a fixed-roster editor (e.g. payroll-run lines, snapshotted
+   * at draft creation with no add/delete). Hides the trailing remove column
+   * entirely rather than just disabling it. Default true.
+   */
+  removable?: boolean;
 }
 
 /**
@@ -76,6 +82,7 @@ export function EditableRows<T>({
   footer,
   disabled,
   className,
+  removable = true,
 }: EditableRowsProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null);
   const focusNewRowRef = useRef(false);
@@ -122,7 +129,7 @@ export function EditableRows<T>({
     addRow(true);
   };
 
-  const gridTemplateColumns = `${columns.map((c) => c.width).join(' ')} auto`;
+  const gridTemplateColumns = `${columns.map((c) => c.width).join(' ')}${removable ? ' auto' : ''}`;
 
   return (
     <div className={cn('space-y-2', className)}>
@@ -137,7 +144,7 @@ export function EditableRows<T>({
                 {col.header}
               </span>
             ))}
-            <span aria-hidden />
+            {removable && <span aria-hidden />}
           </div>
           <div ref={containerRef}>
             {rows.map((row, index) => (
@@ -153,17 +160,19 @@ export function EditableRows<T>({
                     {col.render(row, (patch) => update(index, patch), index)}
                   </div>
                 ))}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 justify-self-end"
-                  disabled={disabled || !canRemoveRow(rows.length, minRows)}
-                  onClick={() => remove(index)}
-                  aria-label="Remove row"
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden />
-                </Button>
+                {removable && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 justify-self-end"
+                    disabled={disabled || !canRemoveRow(rows.length, minRows)}
+                    onClick={() => remove(index)}
+                    aria-label="Remove row"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                  </Button>
+                )}
               </div>
             ))}
           </div>

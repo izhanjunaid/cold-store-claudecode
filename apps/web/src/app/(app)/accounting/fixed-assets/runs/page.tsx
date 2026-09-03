@@ -76,10 +76,10 @@ export default function DepreciationRunsPage() {
       <Card>
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Period</TableHead>
-              <TableHead className="text-right">Asset Count</TableHead>
-              <TableHead className="text-right">Total Depreciation (PKR)</TableHead>
+            <TableRow className="h-8 hover:bg-transparent">
+              <TableHead className="h-8">Period</TableHead>
+              <TableHead className="h-8 text-right">Asset Count</TableHead>
+              <TableHead className="h-8 text-right">Total Depreciation (PKR)</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -89,10 +89,10 @@ export default function DepreciationRunsPage() {
               <TableRow><TableCell colSpan={3} className="h-24 text-center text-muted-foreground">No depreciation runs yet</TableCell></TableRow>
             ) : (
               runs.map((r) => (
-                <TableRow key={`${r.period_year}-${r.period_month}`}>
-                  <TableCell className="font-mono">{r.period_year}-{String(r.period_month).padStart(2, '0')}</TableCell>
-                  <TableCell className="text-right tabular-nums">{r.asset_count}</TableCell>
-                  <TableCell className="text-right tabular-nums font-medium">{r.total_depreciation_pkr.toLocaleString()}</TableCell>
+                <TableRow key={`${r.period_year}-${r.period_month}`} className="h-7">
+                  <TableCell className="py-1 font-mono">{r.period_year}-{String(r.period_month).padStart(2, '0')}</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{r.asset_count}</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums font-medium">{r.total_depreciation_pkr.toLocaleString()}</TableCell>
                 </TableRow>
               ))
             )}

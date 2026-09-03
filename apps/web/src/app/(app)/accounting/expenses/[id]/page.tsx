@@ -3,23 +3,20 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { toast } from 'sonner';
-import { assetAccountForPaymentMethod, DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
-import { useAccounts, isCashOrBank } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet';
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
+import { JournalEntryPeek } from '@/components/accounting/journal-entry-peek';
+import { ExpenseVoucherEditDialog, ExpenseVoucherPayDialog } from '../expense-voucher-dialogs';
 
 import { formatDate, formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
-const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 interface ExpenseVoucher {
   id: string;
@@ -46,19 +43,13 @@ export default function ExpenseVoucherDetailPage() {
   const confirm = useConfirm();
   const isManager = can(user, 'expenses.approve');
   const isAccountant = can(user, 'expenses.record');
+  const canPeekJe = can(user, 'accounting.view');
 
   const [v, setV] = useState<ExpenseVoucher | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPay, setShowPay] = useState(false);
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CHEQUE' | 'BANK_TRANSFER'>('BANK_TRANSFER');
-  // Default stays 1020 (bank) so an untouched dialog pays exactly as it did
-  // before this picker read the live chart.
-  const [assetAccount, setAssetAccount] = useState(DEFAULT_BANK_ACCOUNT_CODE);
-  const [taxWithheld, setTaxWithheld] = useState('');
-  const [withholdingSection, setWithholdingSection] = useState<'S153' | 'S155'>('S153');
-  const { data: accounts = [] } = useAccounts();
-  const cashAccounts = accounts.filter(isCashOrBank);
+  const [showEdit, setShowEdit] = useState(false);
+  const [peekEntryId, setPeekEntryId] = useState<string | null>(null);
 
   const fetchV = useCallback(async () => {
     setLoading(true);
@@ -85,26 +76,6 @@ export default function ExpenseVoucherDetailPage() {
     }
   }
 
-  async function pay() {
-    const withheld = Number(taxWithheld) || 0;
-    const ok = await action(
-      'pay',
-      {
-        payment_date: paymentDate,
-        payment_method: paymentMethod,
-        asset_account_code: assetAccount,
-        ...(withheld > 0
-          ? { tax_withheld_pkr: withheld, withholding_section: withholdingSection }
-          : {}),
-      },
-      'Voucher paid',
-    );
-    if (ok) {
-      setShowPay(false);
-      setTaxWithheld('');
-    }
-  }
-
   async function cancel() {
     if (await confirm({
       title: 'Cancel this voucher?',
@@ -127,6 +98,7 @@ export default function ExpenseVoucherDetailPage() {
         description={`${formatDate(v.voucher_date)} · Account ${v.expense_account_code}${v.vendor_name ? ` · ${v.vendor_name}` : ''}${v.reference_number ? ` · Ref ${v.reference_number}` : ''}`}
         actions={
           <>
+            {isAccountant && v.status === 'DRAFT' && <Button variant="outline" onClick={() => setShowEdit(true)}>Edit</Button>}
             {isManager && v.status === 'DRAFT' && <Button onClick={() => action('approve', {}, 'Approved')}>Approve</Button>}
             {isAccountant && v.status === 'APPROVED' && v.is_accrual && <Button onClick={() => action('accrue', {}, 'Accrued')}>Accrue (JE-17B)</Button>}
             {isAccountant && (v.status === 'APPROVED' || v.status === 'ACCRUED') && (
@@ -140,7 +112,7 @@ export default function ExpenseVoucherDetailPage() {
       />
 
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-4">
           <div className="mb-4 flex items-center gap-2">
             <span className="font-mono text-sm text-muted-foreground">{v.voucher_number}</span>
             <StatusBadge status={v.status} />
@@ -151,86 +123,23 @@ export default function ExpenseVoucherDetailPage() {
             <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Type</div><div>{v.is_accrual ? 'Accrual' : 'Direct'}</div></div>
           </div>
           <div className="mt-4 space-y-1 text-sm text-muted-foreground">
-            {v.accrual_journal_entry_id && <div>Accrual JE-17B: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${v.accrual_journal_entry_id}`)}>{v.accrual_journal_entry_id.slice(0, 8)}…</Button></div>}
-            {v.payment_journal_entry_id && <div>Payment JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${v.payment_journal_entry_id}`)}>{v.payment_journal_entry_id.slice(0, 8)}…</Button></div>}
+            {v.accrual_journal_entry_id && <div>Accrual JE-17B: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => (canPeekJe ? setPeekEntryId(v.accrual_journal_entry_id) : router.push(`/accounting/journal-entries/${v.accrual_journal_entry_id}`))}>{v.accrual_journal_entry_id.slice(0, 8)}…</Button></div>}
+            {v.payment_journal_entry_id && <div>Payment JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => (canPeekJe ? setPeekEntryId(v.payment_journal_entry_id) : router.push(`/accounting/journal-entries/${v.payment_journal_entry_id}`))}>{v.payment_journal_entry_id.slice(0, 8)}…</Button></div>}
           </div>
         </CardContent>
       </Card>
 
-      <Dialog open={showPay} onOpenChange={setShowPay}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Pay Expense Voucher</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label>Payment Date</Label>
-              <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="tabular-nums" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Payment Method</Label>
-              <select
-                value={paymentMethod}
-                onChange={(e) => {
-                  const m = e.target.value as 'CASH' | 'CHEQUE' | 'BANK_TRANSFER';
-                  setPaymentMethod(m);
-                  setAssetAccount(assetAccountForPaymentMethod(m));
-                }}
-                className={SELECT_CLASS}
-              >
-                <option value="CASH">Cash ({assetAccountForPaymentMethod('CASH')})</option>
-                <option value="CHEQUE">Cheque ({assetAccountForPaymentMethod('CHEQUE')})</option>
-                <option value="BANK_TRANSFER">
-                  Bank Transfer ({assetAccountForPaymentMethod('BANK_TRANSFER')})
-                </option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Asset Account</Label>
-              <select value={assetAccount} onChange={(e) => setAssetAccount(e.target.value)} className={SELECT_CLASS}>
-                {cashAccounts.map((a) => (
-                  <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.account_name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Tax Withheld (PKR, optional)</Label>
-              <Input
-                type="number"
-                min={0}
-                step={0.01}
-                value={taxWithheld}
-                onChange={(e) => setTaxWithheld(e.target.value)}
-                placeholder="0.00"
-                className="tabular-nums"
-              />
-            </div>
-            {Number(taxWithheld) > 0 && (
-              <div className="space-y-1.5">
-                <Label>Withheld Under</Label>
-                <select
-                  value={withholdingSection}
-                  onChange={(e) => setWithholdingSection(e.target.value as 'S153' | 'S155')}
-                  className={SELECT_CLASS}
-                >
-                  <option value="S153">s.153 — goods, services &amp; contracts (2071)</option>
-                  <option value="S155">s.155 — rent of immovable property (2072)</option>
-                </select>
-              </div>
-            )}
-            {Number(taxWithheld) > 0 && v.amount_pkr > 0 && (
-              <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
-                The supplier receives {formatMoney(v.amount_pkr - Number(taxWithheld))}; the{' '}
-                {formatMoney(Number(taxWithheld))} withheld is held as a liability until it is paid
-                over. The expense stays at {formatMoney(v.amount_pkr)} — withholding splits how the
-                cost is settled, it does not reduce it.
-              </p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowPay(false)}>Cancel</Button>
-            <Button onClick={pay}>Pay</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ExpenseVoucherPayDialog voucher={v} open={showPay} onOpenChange={setShowPay} onPaid={fetchV} />
+      <ExpenseVoucherEditDialog voucher={v} open={showEdit} onOpenChange={setShowEdit} onSaved={fetchV} />
+
+      <Sheet open={peekEntryId !== null} onOpenChange={(o) => !o && setPeekEntryId(null)}>
+        <SheetContent size="lg">
+          <SheetHeader>
+            <SheetTitle>Journal Entry</SheetTitle>
+          </SheetHeader>
+          <SheetBody>{peekEntryId && <JournalEntryPeek entryId={peekEntryId} />}</SheetBody>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

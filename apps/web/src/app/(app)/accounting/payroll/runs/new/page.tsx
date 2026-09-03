@@ -69,7 +69,7 @@ export default function NewPayrollRunPage() {
     <div className="max-w-2xl">
       <PageHeader title="New Payroll Run" crumb="New" />
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <p className="text-sm text-muted-foreground">
               A DRAFT run snapshots all active employees of the selected type at current pay rates, with EOBI auto-calculated for

@@ -127,26 +127,26 @@ export default function EmployeeAdvanceDetailPage() {
       />
 
       <Card className="mb-6">
-        <CardContent className="grid grid-cols-2 gap-6 pt-6 md:grid-cols-5">
+        <CardContent className="grid grid-cols-2 gap-4 p-4 md:grid-cols-5">
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Status</div>
             <div className="mt-1"><StatusBadge status={advance.status} /></div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Principal</div>
-            <div className="text-xl font-bold tabular-nums">{formatMoney(Number(advance.principal_pkr))}</div>
+            <div className="text-lg font-semibold tabular-nums">{formatMoney(Number(advance.principal_pkr))}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Instalment / month</div>
-            <div className="text-xl font-bold tabular-nums">{formatMoney(Number(advance.monthly_installment_pkr))}</div>
+            <div className="text-lg font-semibold tabular-nums">{formatMoney(Number(advance.monthly_installment_pkr))}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Recovered</div>
-            <div className="text-xl font-bold tabular-nums text-muted-foreground">{formatMoney(recovered)}</div>
+            <div className="text-lg font-semibold tabular-nums text-muted-foreground">{formatMoney(recovered)}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Balance Outstanding</div>
-            <div className={cn('text-xl font-bold tabular-nums', advance.balance_outstanding_pkr > 0 ? 'text-green-700' : 'text-muted-foreground')}>
+            <div className={cn('text-lg font-semibold tabular-nums', advance.balance_outstanding_pkr > 0 ? 'text-green-700' : 'text-muted-foreground')}>
               {formatMoney(Number(advance.balance_outstanding_pkr))}
             </div>
           </div>
@@ -196,18 +196,18 @@ export default function EmployeeAdvanceDetailPage() {
           {advance.recoveries && advance.recoveries.length > 0 ? (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Recovered via</TableHead>
+                <TableRow className="h-8 hover:bg-transparent">
+                  <TableHead className="h-8">Date</TableHead>
+                  <TableHead className="h-8 text-right">Amount</TableHead>
+                  <TableHead className="h-8">Recovered via</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {advance.recoveries.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>{formatDate(r.recovery_date)}</TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">{formatMoney(Number(r.amount_pkr))}</TableCell>
-                    <TableCell>
+                  <TableRow key={r.id} className="h-7">
+                    <TableCell className="py-1">{formatDate(r.recovery_date)}</TableCell>
+                    <TableCell className="py-1 text-right font-medium tabular-nums">{formatMoney(Number(r.amount_pkr))}</TableCell>
+                    <TableCell className="py-1">
                       <Button
                         variant="link"
                         className="h-auto p-0 font-mono"

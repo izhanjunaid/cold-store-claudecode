@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2 } from 'lucide-react';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
@@ -34,7 +35,11 @@ export default function IssueEmployeeAdvancePage() {
   const router = useRouter();
   const search = useSearchParams();
   const { user } = useAuthStore();
-  const isOwner = user?.role === 'OWNER';
+  // The permission matrix, not a hardcoded role — matches every other guard in
+  // this module and what the API already enforces server-side. A hardcoded
+  // 'OWNER' check would keep blocking a role the owner has since granted
+  // employee_advances.issue to via Settings → Permissions.
+  const canIssue = can(user, 'employee_advances.issue');
 
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [employeeId, setEmployeeId] = useState(search.get('employee_id') ?? '');
@@ -54,11 +59,11 @@ export default function IssueEmployeeAdvancePage() {
       .catch(() => {});
   }, []);
 
-  if (user && !isOwner) {
+  if (user && !canIssue) {
     return (
       <div>
         <PageHeader title="Issue Employee Advance" />
-        <p className="text-muted-foreground">OWNER role required to issue an employee advance.</p>
+        <p className="text-muted-foreground">You don&apos;t have permission to issue employee advances.</p>
       </div>
     );
   }
@@ -109,7 +114,7 @@ export default function IssueEmployeeAdvancePage() {
       <div className="max-w-xl">
         <PageHeader title="Advance Issued" crumb="Issued" />
         <Card>
-          <CardContent className="space-y-4 pt-6">
+          <CardContent className="space-y-4 p-4">
             <div className="flex items-center gap-2 text-green-600">
               <CheckCircle2 className="h-5 w-5" aria-hidden />
               <span className="font-medium">Advance issued successfully</span>

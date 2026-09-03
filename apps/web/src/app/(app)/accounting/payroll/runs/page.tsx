@@ -40,6 +40,7 @@ export default function PayrollRunsPage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const canAccess = !user || can(user, 'payroll.view');
+  const canCreate = can(user, 'payroll.draft');
 
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(FILTER_KEYS);
   const params = useMemo(() => ({ page: state.page, page_size: state.perPage, ...state.filters }), [state]);
@@ -66,12 +67,14 @@ export default function PayrollRunsPage() {
         title="Payroll Runs"
         description="Monthly salary and daily-wage payroll cycles"
         actions={
-          <Button asChild>
-            <Link href="/accounting/payroll/runs/new">
-              <Plus className="h-4 w-4" aria-hidden />
-              New Run
-            </Link>
-          </Button>
+          canCreate && (
+            <Button asChild>
+              <Link href="/accounting/payroll/runs/new">
+                <Plus className="h-4 w-4" aria-hidden />
+                New Run
+              </Link>
+            </Button>
+          )
         }
       />
       <DataTable

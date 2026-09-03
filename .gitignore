@@ -19,6 +19,7 @@ update.ps1.new
 /client-config.*.json
 test-results/
 .playwright-cli/
+.claude/skills/playwright-cli/
 cloudflared.exe
 cloudflared.out
 ngrok.out

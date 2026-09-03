@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { addRowTo, canRemoveRow, removeRowAt, updateRowAt } from './editable-rows';
+import { render, screen } from '@testing-library/react';
+import { addRowTo, canRemoveRow, removeRowAt, updateRowAt, EditableRows, type EditableRowColumn } from './editable-rows';
 
 interface Row {
   id: string;
@@ -41,5 +42,31 @@ describe('canRemoveRow', () => {
 
   it('defaults to removable when minRows is 0', () => {
     expect(canRemoveRow(1, 0)).toBe(true);
+  });
+});
+
+const columns: EditableRowColumn<Row>[] = [
+  { key: 'qty', header: 'Qty', width: '1fr', render: (row) => <span>{row.qty}</span> },
+];
+const rows: Row[] = [{ id: 'a', qty: 1 }, { id: 'b', qty: 2 }];
+
+describe('EditableRows — removable', () => {
+  it('renders a remove button per row by default', () => {
+    render(<EditableRows rows={rows} onChange={() => {}} columns={columns} newRow={() => ({ id: 'c', qty: 0 })} />);
+    expect(screen.getAllByLabelText('Remove row')).toHaveLength(2);
+  });
+
+  it('hides the remove column entirely when removable is false — a fixed-roster editor has no delete affordance', () => {
+    render(
+      <EditableRows
+        rows={rows}
+        onChange={() => {}}
+        columns={columns}
+        newRow={() => rows[0]!}
+        removable={false}
+        maxRows={rows.length}
+      />,
+    );
+    expect(screen.queryByLabelText('Remove row')).not.toBeInTheDocument();
   });
 });

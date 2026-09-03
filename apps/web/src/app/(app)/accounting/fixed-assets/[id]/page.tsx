@@ -13,7 +13,9 @@ import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet';
 import { PageHeader } from '@/components/layout/page-header';
+import { JournalEntryPeek } from '@/components/accounting/journal-entry-peek';
 
 import { formatDate, formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -65,6 +67,8 @@ export default function FixedAssetDetailPage() {
   const { user } = useAuthStore();
   const isOwner = can(user, 'fixed_assets.manage');
   const canReverseDisposal = can(user, 'fixed_assets.reverse');
+  const canPeekJe = can(user, 'accounting.view');
+  const [peekEntryId, setPeekEntryId] = useState<string | null>(null);
 
   const [asset, setAsset] = useState<FixedAsset | null>(null);
   const [loading, setLoading] = useState(true);
@@ -183,7 +187,7 @@ export default function FixedAssetDetailPage() {
       />
 
       <Card className="mb-4">
-        <CardContent className="pt-6">
+        <CardContent className="p-4">
           <div className="mb-4 flex items-center gap-2">
             <span className="font-mono text-sm text-muted-foreground">{asset.asset_number}</span>
             <StatusBadge status={asset.status} />
@@ -202,10 +206,10 @@ export default function FixedAssetDetailPage() {
               Asset acct <span className="font-mono">{asset.asset_account_code}</span> · Accum. depr. <span className="font-mono">{asset.accum_depr_account_code}</span> · Expense <span className="font-mono">{asset.depr_expense_account_code}</span>
             </div>
             {asset.purchase_journal_entry_id && (
-              <div>Purchase JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${asset.purchase_journal_entry_id}`)}>{asset.purchase_journal_entry_id.slice(0, 8)}…</Button></div>
+              <div>Purchase JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => (canPeekJe ? setPeekEntryId(asset.purchase_journal_entry_id) : router.push(`/accounting/journal-entries/${asset.purchase_journal_entry_id}`))}>{asset.purchase_journal_entry_id.slice(0, 8)}…</Button></div>
             )}
             {asset.disposal_journal_entry_id && (
-              <div>Disposal JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/accounting/journal-entries/${asset.disposal_journal_entry_id}`)}>{asset.disposal_journal_entry_id.slice(0, 8)}…</Button></div>
+              <div>Disposal JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => (canPeekJe ? setPeekEntryId(asset.disposal_journal_entry_id) : router.push(`/accounting/journal-entries/${asset.disposal_journal_entry_id}`))}>{asset.disposal_journal_entry_id.slice(0, 8)}…</Button></div>
             )}
             {asset.notes && <div>Notes: {asset.notes}</div>}
           </div>
@@ -219,12 +223,12 @@ export default function FixedAssetDetailPage() {
         </div>
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Period</TableHead>
-              <TableHead className="text-right">Opening NBV</TableHead>
-              <TableHead className="text-right">Depreciation</TableHead>
-              <TableHead className="text-right">Closing NBV</TableHead>
-              <TableHead>Posted At</TableHead>
+            <TableRow className="h-8 hover:bg-transparent">
+              <TableHead className="h-8">Period</TableHead>
+              <TableHead className="h-8 text-right">Opening NBV</TableHead>
+              <TableHead className="h-8 text-right">Depreciation</TableHead>
+              <TableHead className="h-8 text-right">Closing NBV</TableHead>
+              <TableHead className="h-8">Posted At</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -232,18 +236,27 @@ export default function FixedAssetDetailPage() {
               <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">No depreciation runs yet</TableCell></TableRow>
             ) : (
               asset.schedules.map((s) => (
-                <TableRow key={`${s.period_year}-${s.period_month}`}>
-                  <TableCell className="font-mono">{s.period_year}-{String(s.period_month).padStart(2, '0')}</TableCell>
-                  <TableCell className="text-right tabular-nums">{s.opening_nbv_pkr.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums text-amber-700">{s.depreciation_amount_pkr.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums font-medium">{s.closing_nbv_pkr.toLocaleString()}</TableCell>
-                  <TableCell className="text-muted-foreground">{s.posted_at?.slice(0, 19).replace('T', ' ') ?? '—'}</TableCell>
+                <TableRow key={`${s.period_year}-${s.period_month}`} className="h-7">
+                  <TableCell className="py-1 font-mono">{s.period_year}-{String(s.period_month).padStart(2, '0')}</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{s.opening_nbv_pkr.toLocaleString()}</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums text-amber-700">{s.depreciation_amount_pkr.toLocaleString()}</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums font-medium">{s.closing_nbv_pkr.toLocaleString()}</TableCell>
+                  <TableCell className="py-1 text-muted-foreground">{s.posted_at?.slice(0, 19).replace('T', ' ') ?? '—'}</TableCell>
                 </TableRow>
               ))
             )}
           </TableBody>
         </Table>
       </Card>
+
+      <Sheet open={peekEntryId !== null} onOpenChange={(o) => !o && setPeekEntryId(null)}>
+        <SheetContent size="lg">
+          <SheetHeader>
+            <SheetTitle>Journal Entry</SheetTitle>
+          </SheetHeader>
+          <SheetBody>{peekEntryId && <JournalEntryPeek entryId={peekEntryId} />}</SheetBody>
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={showCommission} onOpenChange={setShowCommission}>
         <DialogContent>

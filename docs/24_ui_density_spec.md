@@ -133,6 +133,27 @@ margin to spare.
 inline `Card` or a `Sheet`. No dedicated master-detail component was built — nothing named a
 consumer for one beyond what's already assemblable.
 
+**A detail page's actions default onto it whether they qualify or not — re-check the
+"Dedicated page" row's own criteria before keeping one, don't just keep it because a detail
+view already exists.** Once any `[id]` route is built for a record type, every new action for
+that record tends to land there by habit, even when none of the three "Dedicated page"
+triggers actually apply to that specific action. Concretely, for each action ask: is it more
+than a single no-field POST (Approve-style) or a small (~5-field) `Dialog`? Does the *record*
+have sub-navigation/tabs, or a genuine multi-step lifecycle (payroll runs: draft → finalize →
+pay → remit → reverse — correctly a dedicated page)? If not, the action belongs as a row
+action on the *list* instead — Payroll (Module 2) found this auditing the expense-voucher
+detail page: Approve/Accrue/Cancel are single POSTs, Edit/Pay are small dialogs already built
+for the detail page, and the voucher has no sub-navigation or multi-step flow — so all five
+moved to row actions on `expenses/page.tsx`, sharing the *same* `Dialog` components with the
+detail page (`expense-voucher-dialogs.tsx`) rather than duplicating them, and the detail page
+became a fallback (JE-peek links, a bookmarkable URL) instead of the primary way to act on a
+voucher. This removes a full-page navigation from the most common expense workflow without
+touching Foundation's decision table itself — the table was already right, the miss was not
+re-applying it once a page already existed. A row's actions need `size="sm"`/`ghost` buttons
+(compact-row ceiling, §3) and every action handler must `e.stopPropagation()` (one wrapper
+`onClick` on the actions cell is enough) or it also fires the row's own navigate-to-detail
+click.
+
 **Explicit non-decisions** (recorded so no module invents its own):
 - **No stepper/wizard component.** No downstream flow was named that needs one; the existing
   multi-step flows (lot transfer, loan issue, payroll run) stay nested routes. Build one only
@@ -210,13 +231,14 @@ const columns: EditableRowColumn<LineItem>[] = [
 | `maxRows` | `number` | Add button hides at this count |
 | `footer` | `ReactNode` | Totals/remaining-counter, right-aligned next to Add |
 | `disabled` | `boolean` | Disables Add and every row's remove button |
+| `removable` | `boolean` | Default `true`. Set `false` for a fixed-roster editor (e.g. payroll-run lines, snapshotted at draft creation with no add/delete) — hides the trailing remove column entirely rather than disabling it. Added by Payroll (Module 2); default preserves every existing consumer unchanged. |
 
 **Behavior:** Enter on the last field of the last row appends a new row and focuses its first
 field — the ERP line-entry reflex. Every other Enter press is left alone, so if `EditableRows`
 is nested inside an `<EntrySheet>`, that ancestor's own field-to-field Enter-advance keeps
 working unmodified (verified via `entry-sheet.tsx`'s exported `isEnterAdvanceTarget`, reused
 rather than reimplemented). The pure row operations (`addRowTo`, `removeRowAt`, `updateRowAt`,
-`canRemoveRow`) are exported and unit-tested in `editable-rows.test.ts` — reuse them if a
+`canRemoveRow`) are exported and unit-tested in `editable-rows.test.tsx` — reuse them if a
 consumer needs the same array algebra outside the component.
 
 ## 8. What changed and why

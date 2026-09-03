@@ -42,7 +42,11 @@ export default function EmployeeAdvancesPage() {
   const canAccess = !user || can(user, 'employee_advances.view');
   const canIssue = can(user, 'employee_advances.issue');
 
-  const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(['status']);
+  // Advance count is small and bounded (one per employee at a time, at most) —
+  // 100 (the API's page_size max) effectively gets them all, so the StatTiles
+  // below (computed from this page only) reflect the true portfolio rather
+  // than silently being wrong past the old 20-row default.
+  const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(['status'], { defaultPerPage: 100 });
   const params = useMemo(() => ({ page: state.page, page_size: state.perPage, ...state.filters }), [state]);
 
   const { data, isLoading, isError } = useListQuery<AdvanceSummary>(
@@ -110,6 +114,7 @@ export default function EmployeeAdvancesPage() {
         perPage={state.perPage}
         onPageChange={setPage}
         onPerPageChange={setPerPage}
+        perPageOptions={[100]}
         getRowId={(a) => a.id}
         onRowClick={(a) => router.push(`/accounting/payroll/advances/${a.id}`)}
         filterValues={state.filters}

@@ -119,7 +119,7 @@ export default function EmployeeDetailPage() {
       />
 
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-4">
           <div className="mb-4 flex items-center gap-2">
             {emp.name_urdu && <UrduText className="text-lg">{emp.name_urdu}</UrduText>}
             <StatusBadge status={emp.is_active ? 'ACTIVE' : 'INACTIVE'} />
