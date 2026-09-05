@@ -4,14 +4,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Banknote, FileText, Plus, Trash2 } from 'lucide-react';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { StatusBadge } from '@/components/ui/status-badge';
 import {
@@ -23,6 +22,8 @@ import {
 } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
+import { RecordPaymentSheet } from '@/components/billing/record-payment-sheet';
+import { VoidInvoiceDialog } from '@/components/billing/void-invoice-dialog';
 
 import { formatDate, formatDateTime, formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -35,6 +36,13 @@ interface InvoiceLine {
   quantity: number;
   unit_price_pkr: number;
   amount_pkr: number;
+}
+interface LinkedPayment {
+  id: string;
+  payment_date: string;
+  payment_method: string;
+  receipt_number: string | null;
+  allocated_amount_pkr: number;
 }
 interface Invoice {
   id: string;
@@ -98,13 +106,14 @@ export default function InvoiceDetailPage() {
   const [adjDiscountValue, setAdjDiscountValue] = useState('');
   const [adjSubmitting, setAdjSubmitting] = useState(false);
 
+  const [showPay, setShowPay] = useState(false);
   const [showVoid, setShowVoid] = useState(false);
-  const [voidReason, setVoidReason] = useState('');
-  const [voidSubmitting, setVoidSubmitting] = useState(false);
 
   const [surcharges, setSurcharges] = useState<{ journal_entry_id: string; entry_date: string; amount_pkr: number; description: string }[]>([]);
   const [surchargeTotal, setSurchargeTotal] = useState(0);
   const [surchargeSubmitting, setSurchargeSubmitting] = useState(false);
+
+  const [linkedPayments, setLinkedPayments] = useState<LinkedPayment[]>([]);
 
   const canManage = can(user, 'invoices.manage');
   const canVoid = can(user, 'invoices.void');
@@ -134,6 +143,40 @@ export default function InvoiceDetailPage() {
     fetchInvoice();
     fetchSurcharges();
   }, [fetchInvoice, fetchSurcharges]);
+
+  // No /v1/payments filter targets an invoice directly — fetch the party's
+  // payments and keep only allocations against this invoice, same approach
+  // the party detail Ledger tab uses for its own party-scoped payment reads.
+  const fetchLinkedPayments = useCallback(async (partyId: string) => {
+    try {
+      const res = await apiClientList<{
+        id: string;
+        payment_date: string;
+        payment_method: string;
+        receipt_number: string | null;
+        allocations: { invoice_id: string; allocated_amount_pkr: number }[];
+      }>(`/v1/payments?party_id=${partyId}&page_size=100`);
+      setLinkedPayments(
+        res.data.flatMap((p) =>
+          p.allocations
+            .filter((a) => a.invoice_id === id)
+            .map((a) => ({
+              id: p.id,
+              payment_date: p.payment_date,
+              payment_method: p.payment_method,
+              receipt_number: p.receipt_number,
+              allocated_amount_pkr: a.allocated_amount_pkr,
+            })),
+        ),
+      );
+    } catch {
+      setLinkedPayments([]);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (invoice?.billing_party_id) fetchLinkedPayments(invoice.billing_party_id);
+  }, [invoice?.billing_party_id, fetchLinkedPayments]);
 
   async function handleAssessSurcharge() {
     setSurchargeSubmitting(true);
@@ -241,22 +284,6 @@ export default function InvoiceDetailPage() {
     }
   }
 
-  async function handleVoid() {
-    if (!invoice || !voidReason.trim()) return;
-    setVoidSubmitting(true);
-    try {
-      await apiClient(`/v1/invoices/${id}/void`, { method: 'POST', body: { reason: voidReason.trim() } });
-      toast.success('Invoice voided');
-      setShowVoid(false);
-      setVoidReason('');
-      await fetchInvoice();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to void invoice');
-    } finally {
-      setVoidSubmitting(false);
-    }
-  }
-
   async function handlePdf() {
     try {
       const token = localStorage.getItem('access_token');
@@ -295,7 +322,7 @@ export default function InvoiceDetailPage() {
               <Button onClick={handleFinalize}>Finalize Invoice</Button>
             )}
             {invoice.status === 'FINALIZED' && invoice.balance_due_pkr > 0 && (
-              <Button onClick={() => router.push(`/payments/new?party_id=${invoice.billing_party_id}`)}>
+              <Button onClick={() => setShowPay(true)}>
                 <Banknote className="h-4 w-4" aria-hidden />
                 Record Payment
               </Button>
@@ -314,7 +341,7 @@ export default function InvoiceDetailPage() {
       </div>
 
       <Card className="mb-4">
-        <CardContent className="grid grid-cols-2 gap-4 pt-6 text-sm md:grid-cols-3">
+        <CardContent className="grid grid-cols-2 gap-4 pt-4 text-sm md:grid-cols-3">
           <Info label="Billing Party" value={invoice.billing_party_name} />
           <Info
             label="Lot"
@@ -421,9 +448,37 @@ export default function InvoiceDetailPage() {
         </div>
       </Card>
 
+      {linkedPayments.length > 0 && (
+        <Card className="mt-4">
+          <div className="border-b px-4 py-3">
+            <h2 className="text-sm font-semibold">Linked Payments</h2>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Receipt #</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Method</TableHead>
+                <TableHead className="text-right">Applied</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {linkedPayments.map((p) => (
+                <TableRow key={`${p.id}-${p.allocated_amount_pkr}`} className="cursor-pointer" onClick={() => router.push(`/payments/${p.id}`)}>
+                  <TableCell className="font-mono text-primary-700">{p.receipt_number ?? p.id.slice(0, 8)}</TableCell>
+                  <TableCell>{formatDate(p.payment_date)}</TableCell>
+                  <TableCell>{p.payment_method.replace(/_/g, ' ')}</TableCell>
+                  <TableCell className="text-right tabular-nums font-medium text-green-700">{formatMoney(p.allocated_amount_pkr)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+
       {(surcharges.length > 0 || (canManage && invoice.status === 'FINALIZED' && invoice.balance_due_pkr > 0)) && (
         <Card className="mt-4">
-          <CardContent className="pt-6">
+          <CardContent className="pt-4">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-sm font-semibold">Late-Payment Surcharges</h3>
               {canManage && invoice.status === 'FINALIZED' && invoice.balance_due_pkr > 0 && (
@@ -462,27 +517,27 @@ export default function InvoiceDetailPage() {
             <DialogTitle>Add Line Item</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Type</Label>
               <select
                 value={lineType}
                 onChange={(e) => setLineType(e.target.value as 'SERVICE' | 'ADJUSTMENT')}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 <option value="SERVICE">Service</option>
                 <option value="ADJUSTMENT">Adjustment</option>
               </select>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Description</Label>
               <Input value={lineDesc} onChange={(e) => setLineDesc(e.target.value)} placeholder="e.g. Loading charge" />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Quantity</Label>
                 <Input type="number" min={0.01} step={0.01} value={lineQty} onChange={(e) => setLineQty(e.target.value)} className="tabular-nums" />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Unit Price (PKR){lineType === 'ADJUSTMENT' ? ' (±)' : ''}</Label>
                 <Input type="number" step={0.01} value={linePrice} onChange={(e) => setLinePrice(e.target.value)} className="tabular-nums" />
               </div>
@@ -504,23 +559,23 @@ export default function InvoiceDetailPage() {
             <DialogTitle>Discount &amp; GST</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>GST Rate (%)</Label>
               <Input type="number" min={0} max={100} step={0.5} value={adjGstRate} onChange={(e) => setAdjGstRate(e.target.value)} className="tabular-nums" />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Discount Type</Label>
                 <select
                   value={adjDiscountType}
                   onChange={(e) => setAdjDiscountType(e.target.value as 'PERCENT' | 'FIXED')}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="flex h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <option value="PERCENT">Percent (%)</option>
                   <option value="FIXED">Fixed (PKR)</option>
                 </select>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Value{adjDiscountType === 'PERCENT' ? ' (%)' : ' (PKR)'}</Label>
                 <Input type="number" min={0} step={0.01} value={adjDiscountValue} onChange={(e) => setAdjDiscountValue(e.target.value)} placeholder="No discount" className="tabular-nums" />
               </div>
@@ -547,34 +602,29 @@ export default function InvoiceDetailPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showVoid} onOpenChange={setShowVoid}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Void Invoice</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              This reverses the invoice&apos;s journal entry and marks it VOID. Only allowed while the
-              invoice is unpaid with no credit notes. This cannot be undone.
-            </p>
-            <div>
-              <Label htmlFor="void-reason">Reason</Label>
-              <Textarea
-                id="void-reason"
-                value={voidReason}
-                onChange={(e) => setVoidReason(e.target.value)}
-                placeholder="Why is this invoice being voided?"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowVoid(false)}>Cancel</Button>
-            <Button variant="destructive" disabled={!voidReason.trim() || voidSubmitting} onClick={handleVoid}>
-              {voidSubmitting ? 'Voiding…' : 'Void Invoice'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <RecordPaymentSheet
+        open={showPay}
+        onOpenChange={setShowPay}
+        partyId={invoice.billing_party_id}
+        partyName={invoice.billing_party_name}
+        invoiceId={invoice.id}
+        invoiceNumber={invoice.invoice_number}
+        invoiceBalance={invoice.balance_due_pkr}
+        onSuccess={() => {
+          setShowPay(false);
+          fetchInvoice();
+        }}
+      />
+      <VoidInvoiceDialog
+        open={showVoid}
+        onOpenChange={setShowVoid}
+        invoiceId={invoice.id}
+        invoiceNumber={invoice.invoice_number}
+        onSuccess={() => {
+          setShowVoid(false);
+          fetchInvoice();
+        }}
+      />
     </div>
   );
 }

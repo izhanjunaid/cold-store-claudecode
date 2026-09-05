@@ -17,7 +17,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layout/page-header';
-import { cn } from '@/lib/utils';
+import { StatTile } from '@/components/stat-tile';
 
 import { formatDate, formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -177,36 +177,27 @@ export default function LoanDetailPage() {
         }
       />
 
-      <Card className="mb-6">
-        <CardContent className="grid grid-cols-2 gap-6 pt-6 md:grid-cols-4">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Status</div>
-            <div className="mt-1"><StatusBadge status={loan.status} /></div>
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Principal</div>
-            <div className="text-xl font-bold tabular-nums">{formatMoney(Number(loan.principal_pkr))}</div>
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Balance Outstanding</div>
-            <div className={cn('text-xl font-bold tabular-nums', loan.balance_outstanding_pkr > 0 ? 'text-green-700' : 'text-muted-foreground')}>
-              {formatMoney(Number(loan.balance_outstanding_pkr))}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Source Account</div>
-            <div className="font-mono">{loan.source_asset_account_code}</div>
-          </div>
-        </CardContent>
-        {loan.status === 'WRITTEN_OFF' && loan.write_off_reason && (
-          <CardContent className="pt-0">
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              <strong>Write-off reason:</strong> {loan.write_off_reason}
-              {loan.write_off_at && <span className="ml-2">on {formatDate(loan.write_off_at)}</span>}
-            </div>
-          </CardContent>
-        )}
-      </Card>
+      <div className="mb-3">
+        <StatusBadge status={loan.status} />
+      </div>
+
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+        <StatTile size="compact" label="Principal" value={formatMoney(Number(loan.principal_pkr))} />
+        <StatTile
+          size="compact"
+          label="Balance Outstanding"
+          value={formatMoney(Number(loan.balance_outstanding_pkr))}
+          tone={loan.balance_outstanding_pkr > 0 ? 'positive' : 'default'}
+        />
+        <StatTile size="compact" label="Source Account" value={loan.source_asset_account_code} />
+      </div>
+
+      {loan.status === 'WRITTEN_OFF' && loan.write_off_reason && (
+        <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <strong>Write-off reason:</strong> {loan.write_off_reason}
+          {loan.write_off_at && <span className="ml-2">on {formatDate(loan.write_off_at)}</span>}
+        </div>
+      )}
 
       <Card>
         <CardHeader><CardTitle className="text-sm">Repayment History</CardTitle></CardHeader>
@@ -214,7 +205,7 @@ export default function LoanDetailPage() {
           {loan.repayments && loan.repayments.length > 0 ? (
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="h-8">
                   <TableHead>Date</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Method</TableHead>
@@ -224,12 +215,12 @@ export default function LoanDetailPage() {
               </TableHeader>
               <TableBody>
                 {loan.repayments.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>{formatDate(r.repayment_date)}</TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">{Number(r.amount_pkr).toLocaleString()}</TableCell>
-                    <TableCell>{r.payment_method.replace(/_/g, ' ')}</TableCell>
-                    <TableCell className="font-mono">{r.asset_account_code ?? '—'}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{r.journal_entry_id ? r.journal_entry_id.slice(0, 8) : '—'}</TableCell>
+                  <TableRow key={r.id} className="h-7">
+                    <TableCell className="py-1">{formatDate(r.repayment_date)}</TableCell>
+                    <TableCell className="py-1 text-right tabular-nums font-medium">{Number(r.amount_pkr).toLocaleString()}</TableCell>
+                    <TableCell className="py-1">{r.payment_method.replace(/_/g, ' ')}</TableCell>
+                    <TableCell className="py-1 font-mono">{r.asset_account_code ?? '—'}</TableCell>
+                    <TableCell className="py-1 font-mono text-xs text-muted-foreground">{r.journal_entry_id ? r.journal_entry_id.slice(0, 8) : '—'}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -244,16 +235,16 @@ export default function LoanDetailPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Record Repayment</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Date</Label>
               <Input type="date" value={repayDate} onChange={(e) => setRepayDate(e.target.value)} className="tabular-nums" />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Amount (PKR)</Label>
               <Input type="number" step={0.01} value={repayAmount} onChange={(e) => setRepayAmount(e.target.value)} className="tabular-nums" />
               <p className="text-xs text-muted-foreground">Outstanding: {formatMoney(Number(loan.balance_outstanding_pkr))}</p>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Method</Label>
               <div className="flex gap-2">
                 {(['CASH', 'BANK_TRANSFER'] as const).map((m) => (
@@ -278,13 +269,13 @@ export default function LoanDetailPage() {
             This posts JE-20 (DR 6080 Bad Debt / CR 1140 Peshgi AR) for the outstanding balance and marks the loan
             WRITTEN_OFF. This cannot be undone.
           </p>
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label>Reason <span className="text-destructive">*</span></Label>
             <Textarea value={writeOffReason} onChange={(e) => setWriteOffReason(e.target.value)} rows={3} placeholder="Bad debt — farmer relocated, unable to recover" />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setWriteOffModal(false)}>Cancel</Button>
-            <Button className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={submitWriteOff} disabled={writeOffLoading}>
+            <Button variant="destructive" onClick={submitWriteOff} disabled={writeOffLoading}>
               {writeOffLoading ? 'Writing off…' : 'Write Off'}
             </Button>
           </DialogFooter>
