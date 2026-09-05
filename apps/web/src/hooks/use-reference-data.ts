@@ -136,6 +136,7 @@ export interface AccountRef {
   account_class: string;
   account_type: 'HEADER' | 'DETAIL';
   parent_account_code: string | null;
+  normal_balance: 'DEBIT' | 'CREDIT';
   is_active: boolean;
 }
 

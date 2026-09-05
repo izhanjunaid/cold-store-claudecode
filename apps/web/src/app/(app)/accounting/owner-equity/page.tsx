@@ -28,6 +28,15 @@ const SELECT_CLASS =
 // Worked out by the statements rather than posted to.
 const DERIVED = new Set(['3020', '3030']);
 
+/**
+ * The opening-balance plug (opening-balance.service.ts). It is a system account
+ * — it cannot be renamed, deactivated or deleted — so on a facility with more
+ * than one owner it sits in this list looking exactly like a person's account.
+ * It stays selectable, because a single-owner facility has no other capital
+ * account; it is labelled instead of hidden.
+ */
+const PLUG = '3010';
+
 export default function OwnerEquityPage() {
   const canPost = useCan('accounting.post_journal');
   const { data: accounts } = useAccounts();
@@ -42,6 +51,11 @@ export default function OwnerEquityPage() {
 
   const equityAccounts = (accounts ?? []).filter(
     (a) => a.account_class === 'EQUITY' && !DERIVED.has(a.account_code),
+  );
+  // True exactly when the owners have their own capital accounts — which is
+  // also exactly when choosing the plug would be a mistake.
+  const hasOwnCapitalAccounts = equityAccounts.some(
+    (a) => a.account_code !== PLUG && a.normal_balance === 'CREDIT',
   );
   const cashAccounts = (accounts ?? []).filter((a) => a.parent_account_code === '1000');
 
@@ -121,12 +135,19 @@ export default function OwnerEquityPage() {
               {equityAccounts.map((a) => (
                 <option key={a.account_code} value={a.account_code}>
                   {a.account_code} — {a.account_name}
+                  {a.account_code === PLUG ? ' (opening balances)' : ''}
                 </option>
               ))}
             </select>
             <p className="text-xs text-muted-foreground">
               Each owner has their own. Add one under Chart of Accounts if it is missing.
             </p>
+            {hasOwnCapitalAccounts && (
+              <p className="text-xs text-muted-foreground">
+                <span className="font-mono">{PLUG}</span> is where opening balances balance to —
+                not a person. Use the owner&apos;s own account.
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
