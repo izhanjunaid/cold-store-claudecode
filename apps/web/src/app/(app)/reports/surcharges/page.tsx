@@ -10,9 +10,8 @@ import { can } from '@/lib/permissions';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/layout/page-header';
+import { DataTable, type DataTableColumn } from '@/components/data-table';
 import { formatCount } from '@/lib/format';
 
 const fmtPkr = formatCount;
@@ -60,6 +59,45 @@ export default function SurchargesReportPage() {
     applyMutation.mutate(s.invoice_id);
   }
 
+  const columns: DataTableColumn<SurchargeSuggestionType>[] = [
+      {
+        id: 'invoice', header: 'Invoice', enableHiding: false,
+        cell: (s) => <span className="font-mono text-primary-700">{s.invoice_number ?? s.invoice_id.slice(0, 8)}</span>,
+        csv: (s) => s.invoice_number ?? s.invoice_id,
+      },
+      { id: 'party', header: 'Party', cell: (s) => <span className="font-medium">{s.billing_party_name}</span>, csv: (s) => s.billing_party_name },
+      { id: 'invoice_date', header: 'Invoice date', cell: (s) => s.invoice_date, csv: (s) => s.invoice_date },
+      {
+        id: 'overdue', header: 'Overdue', numeric: true,
+        cell: (s) => <span className="text-destructive">{s.days_overdue}d</span>,
+        csv: (s) => s.days_overdue,
+      },
+      { id: 'months', header: 'Months', numeric: true, cell: (s) => s.chargeable_months, csv: (s) => s.chargeable_months },
+      { id: 'outstanding', header: 'Outstanding', numeric: true, cell: (s) => fmtPkr(s.base_outstanding_pkr), csv: (s) => s.base_outstanding_pkr },
+      {
+        id: 'suggested', header: 'Suggested', numeric: true,
+        cell: (s) => <span className="font-semibold">{fmtPkr(s.suggested_amount_pkr)}</span>,
+        csv: (s) => s.suggested_amount_pkr,
+        footer: (rows) => `${fmtPkr(rows.reduce((sum, r) => sum + r.suggested_amount_pkr, 0))} PKR`,
+      },
+      ...(canApply
+        ? [
+            {
+              id: 'actions',
+              header: '',
+              enableHiding: false,
+              cell: (s: SurchargeSuggestionType) => (
+                <div onClick={(e) => e.stopPropagation()}>
+                  <Button size="sm" onClick={() => handleApply(s)} disabled={applyMutation.isPending}>
+                    {applyingId === s.invoice_id ? 'Applying…' : 'Apply'}
+                  </Button>
+                </div>
+              ),
+            },
+          ]
+        : []),
+  ];
+
   if (!canView) {
     return (
       <div>
@@ -104,77 +142,21 @@ export default function SurchargesReportPage() {
           )}
         </Card>
       ) : (
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Invoice</TableHead>
-                <TableHead>Party</TableHead>
-                <TableHead className="text-right">Invoice date</TableHead>
-                <TableHead className="text-right">Overdue</TableHead>
-                <TableHead className="text-right">Months</TableHead>
-                <TableHead className="text-right">Outstanding</TableHead>
-                <TableHead className="text-right">Suggested</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell colSpan={8}>
-                      <Skeleton className="h-6 w-full" />
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : data?.suggestions.length ? (
-                data.suggestions.map((s) => (
-                  <TableRow key={s.invoice_id}>
-                    <TableCell>
-                      <button
-                        onClick={() => router.push(`/invoices/${s.invoice_id}`)}
-                        className="font-mono text-primary hover:underline"
-                      >
-                        {s.invoice_number ?? s.invoice_id.slice(0, 8)}
-                      </button>
-                    </TableCell>
-                    <TableCell className="font-medium">{s.billing_party_name}</TableCell>
-                    <TableCell className="text-right text-muted-foreground tabular-nums">
-                      {s.invoice_date}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-destructive">
-                      {s.days_overdue}d
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{s.chargeable_months}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">
-                      {fmtPkr(s.base_outstanding_pkr)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono font-semibold tabular-nums">
-                      {fmtPkr(s.suggested_amount_pkr)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {canApply && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleApply(s)}
-                          disabled={applyMutation.isPending}
-                        >
-                          {applyingId === s.invoice_id ? 'Applying…' : 'Apply'}
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-                    No overdue invoices are eligible for a surcharge.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Card>
+        <DataTable
+          columns={columns}
+          data={data?.suggestions ?? []}
+          meta={undefined}
+          isLoading={isLoading}
+          sort={null}
+          onSortChange={() => {}}
+          page={1}
+          perPage={500}
+          onPageChange={() => {}}
+          onPerPageChange={() => {}}
+          getRowId={(s) => s.invoice_id}
+          onRowClick={(s) => router.push(`/invoices/${s.invoice_id}`)}
+          emptyState={{ title: 'No overdue invoices are eligible for a surcharge.' }}
+        />
       )}
     </div>
   );

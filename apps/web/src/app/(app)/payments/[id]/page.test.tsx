@@ -26,7 +26,10 @@ vi.mock('@/lib/permissions', () => ({ can: () => true, useCan: () => true }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-vi.mock('@/components/form', () => ({ useConfirm: () => vi.fn().mockResolvedValue(true) }));
+// The Apply Advance panel now renders via the real EditableRows (no
+// ConfirmDialogProvider dependency remains on this page — Clear/Dishonour
+// are their own Dialogs, not useConfirm() — so @/components/form no longer
+// needs stubbing here).
 
 import PaymentDetailPage from './page';
 

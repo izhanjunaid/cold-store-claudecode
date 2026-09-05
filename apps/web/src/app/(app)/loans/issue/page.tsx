@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2 } from 'lucide-react';
-import { apiClient, apiClientList } from '@/lib/api-client';
+import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { can } from '@/lib/permissions';
+import { useParties } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Combobox } from '@/components/ui/combobox';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,11 +17,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/layout/page-header';
 
 import { formatMoney } from '@/lib/format';
-interface PartyOption {
-  id: string;
-  name: string;
-  party_type: string;
-}
 interface LoanCreated {
   id: string;
   loan_number: string;
@@ -31,13 +29,12 @@ export default function IssuePeshgiPage() {
   const router = useRouter();
   const search = useSearchParams();
   const { user } = useAuthStore();
-  const isOwner = user?.role === 'OWNER';
+  const isOwner = can(user, 'loans.issue');
+
+  const { data: parties = [] } = useParties();
+  const partyOptions = parties.map((p) => ({ value: p.id, label: p.name, hint: p.party_type }));
 
   const [partyId, setPartyId] = useState(search.get('party_id') ?? '');
-  const [partyName, setPartyName] = useState('');
-  const [partyQuery, setPartyQuery] = useState('');
-  const [partyResults, setPartyResults] = useState<PartyOption[]>([]);
-
   const [principal, setPrincipal] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK_TRANSFER'>('CASH');
   const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -46,33 +43,11 @@ export default function IssuePeshgiPage() {
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<LoanCreated | null>(null);
 
-  useEffect(() => {
-    if (partyId && !partyName) {
-      apiClient<{ name: string }>(`/v1/parties/${partyId}`).then((p) => setPartyName(p.name)).catch(() => {});
-    }
-  }, [partyId, partyName]);
-
-  useEffect(() => {
-    if (partyId || !partyQuery.trim() || partyQuery.length < 2) {
-      setPartyResults([]);
-      return;
-    }
-    const t = setTimeout(async () => {
-      try {
-        const res = await apiClientList<PartyOption>(`/v1/parties?search=${encodeURIComponent(partyQuery.trim())}&page_size=10`);
-        setPartyResults(res.data);
-      } catch {
-        setPartyResults([]);
-      }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [partyQuery, partyId]);
-
   if (user && !isOwner) {
     return (
       <div>
         <PageHeader title="Issue Peshgi" />
-        <p className="text-muted-foreground">OWNER role required to issue peshgi.</p>
+        <p className="text-muted-foreground">You don&apos;t have permission to issue peshgi.</p>
       </div>
     );
   }
@@ -115,7 +90,7 @@ export default function IssuePeshgiPage() {
             </div>
             <dl className="space-y-1 rounded-md border bg-muted/30 p-4 text-sm">
               <div className="flex justify-between"><dt className="text-muted-foreground">Loan No.</dt><dd className="font-mono">{created.loan_number}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted-foreground">Party</dt><dd>{created.party_name ?? partyName}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted-foreground">Party</dt><dd>{created.party_name ?? partyOptions.find((p) => p.value === partyId)?.label}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Principal</dt><dd className="tabular-nums">{formatMoney(Number(created.principal_pkr))}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Journal Entry</dt><dd className="font-mono text-xs">{created.issue_journal_entry_id ?? '—'}</dd></div>
             </dl>
@@ -139,40 +114,29 @@ export default function IssuePeshgiPage() {
 
         <EntrySheet>
           <EntryGroup title="Peshgi" columns={2}>
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className="space-y-1 sm:col-span-2">
               <Label>Party <span className="text-destructive">*</span></Label>
-              {partyId ? (
-                <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2">
-                  <span className="text-sm">{partyName || partyId}</span>
-                  <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={() => { setPartyId(''); setPartyName(''); setPartyQuery(''); }}>Change</Button>
-                </div>
-              ) : (
-                <div className="relative">
-                  <Input value={partyQuery} onChange={(e) => setPartyQuery(e.target.value)} placeholder="Search by name…" />
-                  {partyResults.length > 0 && (
-                    <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-popover shadow-md">
-                      {partyResults.map((p) => (
-                        <li key={p.id} onClick={() => { setPartyId(p.id); setPartyName(p.name); }} className="flex cursor-pointer justify-between px-3 py-2 text-sm hover:bg-accent">
-                          <span>{p.name}</span>
-                          <span className="text-xs text-muted-foreground">{p.party_type}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
+              <Combobox
+                options={partyOptions}
+                value={partyId}
+                onChange={setPartyId}
+                placeholder="Select party…"
+                searchPlaceholder="Search parties…"
+                testId="combobox-party_id"
+                className="h-8"
+              />
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Principal (PKR) <span className="text-destructive">*</span></Label>
               <Input type="number" step={0.01} min={0.01} value={principal} onChange={(e) => setPrincipal(e.target.value)} required className="tabular-nums" />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Issue date <span className="text-destructive">*</span></Label>
               <Input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} required className="tabular-nums" />
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Payment method <span className="text-destructive">*</span></Label>
               <div className="flex gap-2">
                 {(['CASH', 'BANK_TRANSFER'] as const).map((m) => (
@@ -182,7 +146,7 @@ export default function IssuePeshgiPage() {
                 ))}
               </div>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Notes</Label>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={1} />
             </div>

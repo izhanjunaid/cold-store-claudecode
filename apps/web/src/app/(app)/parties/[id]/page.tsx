@@ -5,6 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Pencil, Plus, UserX } from 'lucide-react';
 import { apiClient, apiClientList } from '@/lib/api-client';
+import { useAuthStore } from '@/stores/auth.store';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -12,9 +14,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { StatusBadge } from '@/components/ui/status-badge';
 import { UrduText } from '@/components/ui/urdu-text';
 import { PageHeader } from '@/components/layout/page-header';
+import { StatTile } from '@/components/stat-tile';
 import { useConfirm } from '@/components/form';
 import { useApiMutation } from '@/hooks/use-api-mutation';
 import { qk } from '@/lib/query-keys';
+import { RecordPaymentSheet } from '@/components/billing/record-payment-sheet';
+import { IssueLoanDialog } from '@/components/party/issue-loan-dialog';
 
 import { formatDate, formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -34,6 +39,8 @@ interface Party {
   is_active: boolean;
   notes: string | null;
   created_at: string;
+  /** Present only when credit_limit_pkr is set; the raw AR figure stays behind billing.view (see ledger). */
+  over_credit_limit?: boolean;
 }
 
 interface LotSummary {
@@ -90,7 +97,7 @@ const TABS = ['Active Lots', 'Invoices', 'Payments', 'Ledger', 'Peshgi'] as cons
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex justify-between gap-4 py-1.5">
+    <div className="flex justify-between gap-4 py-1">
       <dt className="text-sm text-muted-foreground">{label}</dt>
       <dd className="text-right text-sm font-medium text-foreground">{value}</dd>
     </div>
@@ -101,7 +108,13 @@ export default function PartyDetailPage() {
   const params = useParams();
   const router = useRouter();
   const confirm = useConfirm();
+  const { user } = useAuthStore();
   const partyId = params['id'] as string;
+  // Issuing peshgi now opens a dialog on this page instead of navigating to
+  // /loans/issue, so this page must carry the same gate that page's own
+  // `isOwner` check used to provide — otherwise the button shows to anyone
+  // and only the API's 403 stops them.
+  const canIssueLoan = can(user, 'loans.issue');
 
   const [party, setParty] = useState<Party | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,8 +123,13 @@ export default function PartyDetailPage() {
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
   const [payments, setPayments] = useState<PaymentSummary[]>([]);
   const [ledger, setLedger] = useState<LedgerData | null>(null);
+  const [ledgerError, setLedgerError] = useState(false);
   const [loans, setLoans] = useState<LoanSummary[]>([]);
+  const [loansError, setLoansError] = useState(false);
   const [tabLoaded, setTabLoaded] = useState<Record<string, boolean>>({});
+
+  const [showPay, setShowPay] = useState(false);
+  const [showIssueLoan, setShowIssueLoan] = useState(false);
 
   useEffect(() => {
     apiClient<Party>(`/v1/parties/${partyId}`)
@@ -119,6 +137,31 @@ export default function PartyDetailPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [partyId]);
+
+  // Outstanding, limit-used and active-peshgi answer "what does this party
+  // owe me" on arrival, so both fetch eagerly rather than waiting on a tab
+  // click. /ledger sits behind billing.view while this page itself is
+  // reachable by any authenticated user — a failure here is expected for a
+  // lower-tier viewer, so it's caught silently and the header simply omits
+  // the figure rather than showing a broken zero.
+  const refreshHeaderStats = useCallback(() => {
+    apiClient<LedgerData>(`/v1/parties/${partyId}/ledger`)
+      .then((d) => {
+        setLedger(d);
+        setLedgerError(false);
+      })
+      .catch(() => setLedgerError(true));
+    apiClientList<LoanSummary>(`/v1/loans?party_id=${partyId}&page_size=100`)
+      .then((res) => {
+        setLoans(res.data);
+        setLoansError(false);
+      })
+      .catch(() => setLoansError(true));
+  }, [partyId]);
+
+  useEffect(() => {
+    refreshHeaderStats();
+  }, [refreshHeaderStats]);
 
   const loadTab = useCallback(
     async (tab: string) => {
@@ -131,10 +174,6 @@ export default function PartyDetailPage() {
           setInvoices((await apiClientList<InvoiceSummary>(`/v1/invoices?party_id=${partyId}&page_size=100`)).data);
         } else if (tab === 'Payments') {
           setPayments((await apiClientList<PaymentSummary>(`/v1/payments?party_id=${partyId}&page_size=100`)).data);
-        } else if (tab === 'Ledger') {
-          setLedger(await apiClient<LedgerData>(`/v1/parties/${partyId}/ledger`));
-        } else if (tab === 'Peshgi') {
-          setLoans((await apiClientList<LoanSummary>(`/v1/loans?party_id=${partyId}&page_size=100`)).data);
         }
       } catch {
         /* handled */
@@ -146,6 +185,23 @@ export default function PartyDetailPage() {
   useEffect(() => {
     loadTab('Active Lots');
   }, [partyId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Direct re-fetch (not routed through loadTab's tabLoaded gate, which
+  // would no-op here: setTabLoaded is async, so a loadTab call in the same
+  // tick would still read the pre-update, already-loaded flag).
+  const refreshTransactionTabs = useCallback(async () => {
+    try {
+      setInvoices((await apiClientList<InvoiceSummary>(`/v1/invoices?party_id=${partyId}&page_size=100`)).data);
+    } catch {
+      /* handled */
+    }
+    try {
+      setPayments((await apiClientList<PaymentSummary>(`/v1/payments?party_id=${partyId}&page_size=100`)).data);
+    } catch {
+      /* handled */
+    }
+    setTabLoaded((prev) => ({ ...prev, Invoices: true, Payments: true }));
+  }, [partyId]);
 
   const deactivate = useApiMutation<unknown, void>({
     mutationFn: () => apiClient(`/v1/parties/${partyId}`, { method: 'DELETE' }),
@@ -166,6 +222,11 @@ export default function PartyDetailPage() {
 
   if (loading) return <PageSkeleton />;
   if (!party) return <p className="p-2 text-destructive">Party not found</p>;
+
+  const activeLoans = loans.filter((l) => l.status === 'ACTIVE');
+  const activeLoanBalance = activeLoans.reduce((s, l) => s + Number(l.balance_outstanding_pkr), 0);
+  const limitUsedPct =
+    party.credit_limit_pkr && ledger ? Math.round((ledger.closing_balance_pkr / party.credit_limit_pkr) * 100) : null;
 
   return (
     <div>
@@ -191,49 +252,58 @@ export default function PartyDetailPage() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Party Information</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="divide-y">
-              <Row
-                label="Type"
-                value={<StatusBadge status={party.party_type} />}
-              />
-              <Row label="Status" value={<StatusBadge status={party.is_active ? 'ACTIVE' : 'INACTIVE'} />} />
-              <Row label="Phone" value={party.phone_primary} />
-              {party.phone_secondary && <Row label="Phone (Alt)" value={party.phone_secondary} />}
-              {party.cnic && <Row label="CNIC" value={party.cnic} />}
-              {party.address && <Row label="Address" value={party.address} />}
-              {party.parent_arhti_name && <Row label="Linked Arhti" value={party.parent_arhti_name} />}
-              <Row label="Created" value={formatDate(party.created_at)} />
-            </dl>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Credit Profile</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="divide-y">
-              <Row
-                label="Credit Limit"
-                value={party.credit_limit_pkr ? `${formatMoney(party.credit_limit_pkr)}` : 'No limit set'}
-              />
-              <Row label="Credit Terms" value={`${party.credit_terms_days} days`} />
-            </dl>
-            {party.notes && (
-              <div className="mt-4 border-t pt-3">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Notes</p>
-                <p className="mt-1 text-sm text-foreground">{party.notes}</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatTile
+          size="compact"
+          label="Outstanding"
+          value={ledgerError ? '—' : ledger ? formatMoney(ledger.closing_balance_pkr) : '…'}
+          tone={ledger && ledger.closing_balance_pkr > 0 && party.over_credit_limit ? 'negative' : 'default'}
+        />
+        <StatTile
+          size="compact"
+          label="Credit Limit"
+          value={party.credit_limit_pkr ? formatMoney(party.credit_limit_pkr) : 'No limit'}
+          caption={limitUsedPct != null ? `${limitUsedPct}% used` : undefined}
+          tone={party.over_credit_limit ? 'negative' : 'default'}
+        />
+        <StatTile
+          size="compact"
+          label="Active Peshgi"
+          value={loansError ? '—' : formatMoney(activeLoanBalance)}
+          caption={loansError ? undefined : `${activeLoans.length} active`}
+        />
+        <StatTile size="compact" label="Credit Terms" value={`${party.credit_terms_days} days`} />
       </div>
+
+      {party.over_credit_limit && (
+        <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
+          Over credit limit — outstanding exceeds the {formatMoney(party.credit_limit_pkr)} limit set for this party.
+        </div>
+      )}
+
+      <Card className="mb-4">
+        <CardHeader>
+          <CardTitle className="text-sm">Party Information</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl className="divide-y">
+            <Row label="Type" value={<StatusBadge status={party.party_type} />} />
+            <Row label="Status" value={<StatusBadge status={party.is_active ? 'ACTIVE' : 'INACTIVE'} />} />
+            <Row label="Phone" value={party.phone_primary} />
+            {party.phone_secondary && <Row label="Phone (Alt)" value={party.phone_secondary} />}
+            {party.cnic && <Row label="CNIC" value={party.cnic} />}
+            {party.address && <Row label="Address" value={party.address} />}
+            {party.parent_arhti_name && <Row label="Linked Arhti" value={party.parent_arhti_name} />}
+            <Row label="Created" value={formatDate(party.created_at)} />
+          </dl>
+          {party.notes && (
+            <div className="mt-3 border-t pt-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Notes</p>
+              <p className="mt-1 text-sm text-foreground">{party.notes}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <Tabs value={activeTab} onValueChange={(t) => { setActiveTab(t); loadTab(t); }}>
@@ -258,7 +328,7 @@ export default function PartyDetailPage() {
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="h-8">
                       <TableHead>Lot #</TableHead>
                       <TableHead>Commodity</TableHead>
                       <TableHead className="text-right">Balance</TableHead>
@@ -267,11 +337,11 @@ export default function PartyDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {lots.map((lot) => (
-                      <TableRow key={lot.id} className="cursor-pointer" onClick={() => router.push(`/lots/${lot.id}`)}>
-                        <TableCell className="font-mono text-primary-700">{lot.lot_number}</TableCell>
-                        <TableCell>{lot.commodity_name ?? '—'}</TableCell>
-                        <TableCell className="text-right tabular-nums">{lot.current_balance_bags.toLocaleString()}</TableCell>
-                        <TableCell>{formatDate(lot.inbound_date)}</TableCell>
+                      <TableRow key={lot.id} className="h-7 cursor-pointer" onClick={() => router.push(`/lots/${lot.id}`)}>
+                        <TableCell className="py-1 font-mono text-primary-700">{lot.lot_number}</TableCell>
+                        <TableCell className="py-1">{lot.commodity_name ?? '—'}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums">{lot.current_balance_bags.toLocaleString()}</TableCell>
+                        <TableCell className="py-1">{formatDate(lot.inbound_date)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -285,7 +355,7 @@ export default function PartyDetailPage() {
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="h-8">
                       <TableHead>Invoice #</TableHead>
                       <TableHead>Lot</TableHead>
                       <TableHead>Date</TableHead>
@@ -296,13 +366,13 @@ export default function PartyDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {invoices.map((inv) => (
-                      <TableRow key={inv.id} className="cursor-pointer" onClick={() => router.push(`/invoices/${inv.id}`)}>
-                        <TableCell className="font-mono text-primary-700">{inv.invoice_number ?? 'Draft'}</TableCell>
-                        <TableCell className="font-mono text-muted-foreground">{inv.lot_number}</TableCell>
-                        <TableCell>{formatDate(inv.invoice_date)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{inv.total_pkr.toLocaleString()}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{inv.balance_due_pkr.toLocaleString()}</TableCell>
-                        <TableCell><StatusBadge status={inv.status} /></TableCell>
+                      <TableRow key={inv.id} className="h-7 cursor-pointer" onClick={() => router.push(`/invoices/${inv.id}`)}>
+                        <TableCell className="py-1 font-mono text-primary-700">{inv.invoice_number ?? 'Draft'}</TableCell>
+                        <TableCell className="py-1 font-mono text-muted-foreground">{inv.lot_number}</TableCell>
+                        <TableCell className="py-1">{formatDate(inv.invoice_date)}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums">{inv.total_pkr.toLocaleString()}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums font-medium">{inv.balance_due_pkr.toLocaleString()}</TableCell>
+                        <TableCell className="py-1"><StatusBadge status={inv.status} /></TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -312,7 +382,7 @@ export default function PartyDetailPage() {
 
             <TabsContent value="Payments" className="mt-0">
               <div className="mb-3 flex justify-end">
-                <Button size="sm" onClick={() => router.push(`/payments/new?party_id=${partyId}`)}>
+                <Button size="sm" onClick={() => setShowPay(true)}>
                   <Plus className="h-4 w-4" aria-hidden />
                   Record Payment
                 </Button>
@@ -322,7 +392,7 @@ export default function PartyDetailPage() {
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="h-8">
                       <TableHead>Date</TableHead>
                       <TableHead>Method</TableHead>
                       <TableHead>Reference</TableHead>
@@ -332,12 +402,12 @@ export default function PartyDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {payments.map((pay) => (
-                      <TableRow key={pay.id} className="cursor-pointer" onClick={() => router.push(`/payments/${pay.id}`)}>
-                        <TableCell>{formatDate(pay.payment_date)}</TableCell>
-                        <TableCell>{pay.payment_method}</TableCell>
-                        <TableCell className="font-mono text-muted-foreground">{pay.reference_number ?? '—'}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{pay.amount_pkr.toLocaleString()}</TableCell>
-                        <TableCell><StatusBadge status={pay.status} /></TableCell>
+                      <TableRow key={pay.id} className="h-7 cursor-pointer" onClick={() => router.push(`/payments/${pay.id}`)}>
+                        <TableCell className="py-1">{formatDate(pay.payment_date)}</TableCell>
+                        <TableCell className="py-1">{pay.payment_method}</TableCell>
+                        <TableCell className="py-1 font-mono text-muted-foreground">{pay.reference_number ?? '—'}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums font-medium">{pay.amount_pkr.toLocaleString()}</TableCell>
+                        <TableCell className="py-1"><StatusBadge status={pay.status} /></TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -346,7 +416,11 @@ export default function PartyDetailPage() {
             </TabsContent>
 
             <TabsContent value="Ledger" className="mt-0">
-              {!ledger ? (
+              {ledgerError ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  You don&apos;t have permission to view this party&apos;s ledger.
+                </p>
+              ) : !ledger ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">Loading ledger…</p>
               ) : ledger.entries.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">No ledger entries for this party.</p>
@@ -354,7 +428,7 @@ export default function PartyDetailPage() {
                 <>
                   <Table>
                     <TableHeader>
-                      <TableRow>
+                      <TableRow className="h-8">
                         <TableHead>Date</TableHead>
                         <TableHead>Type</TableHead>
                         <TableHead>Description</TableHead>
@@ -365,13 +439,13 @@ export default function PartyDetailPage() {
                     </TableHeader>
                     <TableBody>
                       {ledger.entries.map((e) => (
-                        <TableRow key={e.id}>
-                          <TableCell>{e.date}</TableCell>
-                          <TableCell><StatusBadge status={e.type} tone={e.type === 'INVOICE' ? 'warning' : 'success'} /></TableCell>
-                          <TableCell>{e.description}</TableCell>
-                          <TableCell className="text-right tabular-nums">{e.debit_pkr > 0 ? e.debit_pkr.toLocaleString() : '—'}</TableCell>
-                          <TableCell className="text-right tabular-nums">{e.credit_pkr > 0 ? e.credit_pkr.toLocaleString() : '—'}</TableCell>
-                          <TableCell className="text-right tabular-nums font-medium">{e.balance_pkr.toLocaleString()}</TableCell>
+                        <TableRow key={e.id} className="h-7">
+                          <TableCell className="py-1">{e.date}</TableCell>
+                          <TableCell className="py-1"><StatusBadge status={e.type} tone={e.type === 'INVOICE' ? 'warning' : 'success'} /></TableCell>
+                          <TableCell className="py-1">{e.description}</TableCell>
+                          <TableCell className="py-1 text-right tabular-nums">{e.debit_pkr > 0 ? e.debit_pkr.toLocaleString() : '—'}</TableCell>
+                          <TableCell className="py-1 text-right tabular-nums">{e.credit_pkr > 0 ? e.credit_pkr.toLocaleString() : '—'}</TableCell>
+                          <TableCell className="py-1 text-right tabular-nums font-medium">{e.balance_pkr.toLocaleString()}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -390,21 +464,23 @@ export default function PartyDetailPage() {
             <TabsContent value="Peshgi" className="mt-0">
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  {loans.length === 0
-                    ? 'No peshgi loans yet.'
-                    : `${loans.filter((l) => l.status === 'ACTIVE').length} active · ${loans.length} total`}
+                  {loansError
+                    ? "You don't have permission to view this party's peshgi loans."
+                    : loans.length === 0
+                      ? 'No peshgi loans yet.'
+                      : `${activeLoans.length} active · ${loans.length} total`}
                 </p>
-                <Button asChild size="sm">
-                  <Link href={`/loans/issue?party_id=${partyId}`}>
+                {canIssueLoan && (
+                  <Button size="sm" onClick={() => setShowIssueLoan(true)}>
                     <Plus className="h-4 w-4" aria-hidden />
                     Issue Peshgi
-                  </Link>
-                </Button>
+                  </Button>
+                )}
               </div>
               {loans.length > 0 && (
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="h-8">
                       <TableHead>Loan No.</TableHead>
                       <TableHead>Issued</TableHead>
                       <TableHead className="text-right">Principal</TableHead>
@@ -414,12 +490,12 @@ export default function PartyDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {loans.map((l) => (
-                      <TableRow key={l.id} className="cursor-pointer" onClick={() => router.push(`/loans/${l.id}`)}>
-                        <TableCell className="font-mono">{l.loan_number}</TableCell>
-                        <TableCell>{formatDate(l.issue_date)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{Number(l.principal_pkr).toLocaleString()}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{Number(l.balance_outstanding_pkr).toLocaleString()}</TableCell>
-                        <TableCell><StatusBadge status={l.status} /></TableCell>
+                      <TableRow key={l.id} className="h-7 cursor-pointer" onClick={() => router.push(`/loans/${l.id}`)}>
+                        <TableCell className="py-1 font-mono">{l.loan_number}</TableCell>
+                        <TableCell className="py-1">{formatDate(l.issue_date)}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums">{Number(l.principal_pkr).toLocaleString()}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums font-medium">{Number(l.balance_outstanding_pkr).toLocaleString()}</TableCell>
+                        <TableCell className="py-1"><StatusBadge status={l.status} /></TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -429,6 +505,28 @@ export default function PartyDetailPage() {
           </div>
         </Tabs>
       </Card>
+
+      <RecordPaymentSheet
+        open={showPay}
+        onOpenChange={setShowPay}
+        partyId={partyId}
+        partyName={party.name}
+        onSuccess={() => {
+          setShowPay(false);
+          refreshHeaderStats();
+          refreshTransactionTabs();
+        }}
+      />
+      <IssueLoanDialog
+        open={showIssueLoan}
+        onOpenChange={setShowIssueLoan}
+        partyId={partyId}
+        partyName={party.name}
+        onSuccess={() => {
+          setShowIssueLoan(false);
+          refreshHeaderStats();
+        }}
+      />
     </div>
   );
 }

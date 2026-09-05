@@ -1,22 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { hasMinRole } from '@/lib/rbac';
+import { useParties } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Combobox } from '@/components/ui/combobox';
 import { PageHeader } from '@/components/layout/page-header';
-
-interface PartyOption {
-  id: string;
-  name: string;
-  party_type: string;
-}
 
 function defaultRange() {
   const to = new Date();
@@ -30,31 +25,13 @@ export default function PartyStatementPickerPage() {
   const canView = can(user, 'reports.financial');
 
   const range = defaultRange();
-  const [partyQuery, setPartyQuery] = useState('');
-  const [partyResults, setPartyResults] = useState<PartyOption[]>([]);
   const [partyId, setPartyId] = useState('');
-  const [partyName, setPartyName] = useState('');
   const [dateFrom, setDateFrom] = useState(range.from);
   const [dateTo, setDateTo] = useState(range.to);
   const [bookType, setBookType] = useState<'PACCI' | 'KATCHI'>('PACCI');
 
-  useEffect(() => {
-    if (partyId || !partyQuery.trim() || partyQuery.length < 2) {
-      setPartyResults([]);
-      return;
-    }
-    const t = setTimeout(async () => {
-      try {
-        const res = await apiClientList<PartyOption>(
-          `/v1/parties?search=${encodeURIComponent(partyQuery.trim())}&page_size=10`,
-        );
-        setPartyResults(res.data);
-      } catch {
-        setPartyResults([]);
-      }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [partyQuery, partyId]);
+  const { data: parties = [] } = useParties();
+  const partyOptions = useMemo(() => parties.map((p) => ({ value: p.id, label: p.name })), [parties]);
 
   if (!canView) {
     return (
@@ -78,60 +55,25 @@ export default function PartyStatementPickerPage() {
       <Card>
         <CardContent className="pt-6">
           <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Party</Label>
-              {partyId ? (
-                <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2">
-                  <strong className="text-sm">{partyName}</strong>
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="h-auto p-0 text-xs"
-                    onClick={() => {
-                      setPartyId('');
-                      setPartyName('');
-                      setPartyQuery('');
-                    }}
-                  >
-                    Change
-                  </Button>
-                </div>
-              ) : (
-                <div className="relative">
-                  <Input
-                    value={partyQuery}
-                    onChange={(e) => setPartyQuery(e.target.value)}
-                    placeholder="Search by name (min 2 chars)…"
-                  />
-                  {partyResults.length > 0 && (
-                    <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-popover shadow-md">
-                      {partyResults.map((p) => (
-                        <li
-                          key={p.id}
-                          onClick={() => {
-                            setPartyId(p.id);
-                            setPartyName(p.name);
-                            setPartyResults([]);
-                            setPartyQuery('');
-                          }}
-                          className="cursor-pointer px-3 py-2 text-sm hover:bg-accent"
-                        >
-                          <strong>{p.name}</strong>{' '}
-                          <span className="text-xs text-muted-foreground">({p.party_type})</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
+              <Combobox
+                options={partyOptions}
+                value={partyId}
+                onChange={setPartyId}
+                placeholder="Select party…"
+                searchPlaceholder="Search parties…"
+                testId="combobox-party_id"
+                className="h-8"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Date from</Label>
                 <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="tabular-nums" />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Date to</Label>
                 <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="tabular-nums" />
               </div>

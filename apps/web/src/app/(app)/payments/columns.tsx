@@ -1,9 +1,11 @@
 import { StatusBadge } from '@/components/ui/status-badge';
 import type { DataTableColumn } from '@/components/data-table';
+import { PaymentRowActions } from './payment-row-actions';
 
-import { formatDate } from '@/lib/format';
+import { formatDate, formatMoney } from '@/lib/format';
 export interface PaymentRow {
   id: string;
+  party_id: string;
   party_name: string;
   payment_date: string;
   amount_pkr: number;
@@ -11,7 +13,17 @@ export interface PaymentRow {
   receipt_number: string | null;
   reference_number: string | null;
   status: 'RECORDED' | 'ALLOCATED' | 'ADVANCE' | 'DISHONOURED';
+  // Returned by the list (PaymentResponse), and what gates the Clear action.
+  clearance_status: 'NA' | 'PENDING' | 'CLEARED' | 'BOUNCED';
   allocations: { id: string }[];
+}
+
+export interface PaymentColumnHandlers {
+  /** `payments.record` — the key the API enforces on clear/dishonour/allocate. */
+  canRecord: boolean;
+  onClear: (payment: PaymentRow) => void;
+  onDishonour: (payment: PaymentRow) => void;
+  onApplyAdvance: (payment: PaymentRow) => void;
 }
 
 const METHOD_LABELS: Record<string, string> = {
@@ -27,6 +39,27 @@ const STATUS_TONE: Record<string, 'info' | 'success' | 'warning' | 'danger'> = {
   ADVANCE: 'warning',
   DISHONOURED: 'danger',
 };
+
+export function getPaymentColumns(
+  handlers: PaymentColumnHandlers,
+): DataTableColumn<PaymentRow>[] {
+  return [...paymentColumns,
+  {
+    id: 'actions',
+    header: '',
+    enableHiding: false,
+    cell: (p) => (
+      <PaymentRowActions
+        payment={p}
+        canRecord={handlers.canRecord}
+        onClear={handlers.onClear}
+        onDishonour={handlers.onDishonour}
+        onApplyAdvance={handlers.onApplyAdvance}
+      />
+    ),
+  },
+  ];
+}
 
 export const paymentColumns: DataTableColumn<PaymentRow>[] = [
   {
@@ -71,8 +104,10 @@ export const paymentColumns: DataTableColumn<PaymentRow>[] = [
     id: 'amount',
     header: 'Amount',
     numeric: true,
-    cell: (p) => <span className="font-medium">{p.amount_pkr.toLocaleString()}</span>,
+    cell: (p) => <span className="font-medium">{formatMoney(p.amount_pkr)}</span>,
     csv: (p) => p.amount_pkr,
+    // Totals the rows on screen, not the facility — the list is paginated.
+    footer: (rows) => formatMoney(rows.reduce((s, p) => s + p.amount_pkr, 0)),
   },
   { id: 'status', header: 'Status', cell: (p) => <StatusBadge status={p.status} tone={STATUS_TONE[p.status]} />, csv: (p) => p.status },
   {
