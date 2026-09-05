@@ -1822,3 +1822,30 @@ Every line in the above P&L is sourced from a journal entry in the GL. No manual
 | Peshgi Issued | Advance granted | JE-18 | Peshgi | DR 1140, CR 1010/1020 |
 | Peshgi Recovered | Advance repaid | JE-19 | Peshgi | DR 1010/1020, CR 1140 |
 
+## Equity for more than one owner
+
+The facility is an AOP with **two owners who contribute and withdraw separately**. The seed
+ships one capital account (`3010`, a system account and the opening-balance plug) and one
+drawings account (`3015`). Additional owners get their own pair, **created through Add
+Account rather than seeded** — the seed cannot know how many owners there are or what they
+are called, and `syncChartOfAccounts` is INSERT-only, so a guess would be permanent on
+every install.
+
+Convention:
+
+| | Class | Type | Normal balance | Notes |
+|---|---|---|---|---|
+| Owner's capital | EQUITY | DETAIL | CREDIT | one per owner |
+| Owner's drawings | EQUITY | DETAIL | DEBIT | one per owner, `is_contra: true` |
+
+Nothing downstream needs the codes. The balance sheet renders every equity DETAIL account,
+drawings are identified by being DEBIT-normal, and the statement of changes in equity gives
+each account its own column — which is how IFRS for SMEs **4.13** is satisfied, since it
+requires an entity without share capital to show the changes in each category of equity.
+
+**At go-live** each owner's opening capital is entered directly as an opening-balance
+`other_lines` entry (EQUITY is an allowed class; only `3010` is blocked, being the
+plug), and `3010` absorbs any residual.
+
+**Profit is not allocated between owners.** No written agreement sets a ratio, so the result
+stays undivided in retained earnings and the statement discloses that. See `docs/20`.

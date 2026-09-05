@@ -1,5 +1,9 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
-import type { ProfitLossQueryType, BalanceSheetQueryType } from '@coldchain/shared';
+import type {
+  ProfitLossQueryType,
+  BalanceSheetQueryType,
+  ChangesInEquityQueryType,
+} from '@coldchain/shared';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { fiscalYearStart } from './fiscal-year';
 
@@ -302,19 +306,162 @@ export class FinancialStatementsService {
 
     const [opening_equity_pkr, closing_equity_pkr] = await Promise.all([at(dayBefore), at(query.date_to)]);
 
-    // Drawings are contra-equity (3015 is DEBIT-normal), so the movement is
-    // debits less credits over the period.
-    const drawingLines = await this.fetchLines(facilityId, query.date_from, query.date_to, query.book_type);
-    const drawingSums = aggregate(drawingLines).get('3015');
-    const drawings_pkr = drawingSums ? round2(drawingSums.debit - drawingSums.credit) : 0;
+    // Drawings are contra-equity, so the movement is debits less credits over
+    // the period — across EVERY debit-normal equity account, not the one code
+    // the seed happens to ship. A second owner's drawings account is created,
+    // not seeded, and hardcoding '3015' silently dropped it: the same defect
+    // as the hardcoded EBITDA add-back this file already had to correct.
+    const periodSums = aggregate(
+      await this.fetchLines(facilityId, query.date_from, query.date_to, query.book_type),
+    );
+    const drawings_pkr = round2(
+      accounts
+        .filter(isDrawingsAccount)
+        .reduce((t, a) => {
+          const m = periodSums.get(a.accountCode);
+          return m ? t + (m.debit - m.credit) : t;
+        }, 0),
+    );
+
+    // Capital introduced in the period. Without this row the block cannot foot
+    // the moment an owner puts money in: closing equity carries the
+    // contribution and nothing discloses it.
+    const capital_introduced_pkr = round2(
+      accounts
+        .filter(isCapitalAccount)
+        .reduce((t, a) => {
+          const m = periodSums.get(a.accountCode);
+          return m ? t + (m.credit - m.debit) : t;
+        }, 0),
+    );
 
     const fyStartForTo = fiscalYearStart(new Date(query.date_to), fyStartMonth).toISOString().slice(0, 10);
 
     return {
       opening_equity_pkr,
+      capital_introduced_pkr,
       drawings_pkr,
       closing_equity_pkr,
       is_fiscal_year_to_date: query.date_from === fyStartForTo,
+      // IFRS for SMEs 6.4 permits the combined statement of income and retained
+      // earnings ONLY where the sole equity movements are profit or loss,
+      // distributions, prior-period error corrections and policy changes.
+      // Capital introduced is not among them, so its presence disqualifies the
+      // entity from presenting it and the statement of changes in equity is
+      // required instead. This is the standard's own test, not a judgement.
+      combined_statement_permitted: capital_introduced_pkr === 0,
+    };
+  }
+
+  /**
+   * Statement of changes in equity (IFRS for SMEs 6.2/6.3).
+   *
+   * One column per category of equity — 4.13 requires an entity without share
+   * capital to show the changes in each — where a category is simply an equity
+   * account. A second owner's capital account therefore becomes a column by
+   * being created, with no code change here.
+   *
+   * Every column foots by construction: closing is opening plus the movements,
+   * and the movement rows are derived from the same period aggregate. The
+   * retained-earnings and current-year columns take their movement as closing
+   * less opening, which absorbs the fiscal-year rollover between them — the two
+   * net to the period's result even when the range crosses a year end.
+   */
+  async getChangesInEquity(facilityId: string, query: ChangesInEquityQueryType) {
+    const accounts = await this.loadAccounts(facilityId);
+    const facility = await this.prisma.facility.findUniqueOrThrow({
+      where: { id: facilityId },
+      select: { settings: true },
+    });
+    const fyStartMonth = resolveFacilitySettings(facility.settings).fiscal_year_start_month;
+
+    const snapshotAt = async (asOfIso: string) => {
+      const fyStart = fiscalYearStart(new Date(asOfIso), fyStartMonth);
+      const [all, fy] = await Promise.all([
+        this.fetchLines(facilityId, undefined, asOfIso, query.book_type),
+        this.fetchLines(facilityId, fyStart.toISOString().slice(0, 10), asOfIso, query.book_type),
+      ]);
+      const sums = aggregate(all);
+      return { snap: equitySnapshot(accounts, sums, aggregate(fy)), sums };
+    };
+
+    const dayBefore = new Date(new Date(`${query.date_from}T00:00:00.000Z`).getTime() - 86400000)
+      .toISOString()
+      .slice(0, 10);
+
+    const [open, close, periodSums] = await Promise.all([
+      snapshotAt(dayBefore),
+      snapshotAt(query.date_to),
+      this.fetchLines(facilityId, query.date_from, query.date_to, query.book_type).then(aggregate),
+    ]);
+
+    const crAt = (sums: SumMap, code: string) => {
+      const s = sums.get(code);
+      return s ? round2(s.credit - s.debit) : 0;
+    };
+
+    const columns = accounts
+      .filter((a) => a.accountClass === 'EQUITY' && a.accountType === 'DETAIL')
+      .filter((a) => a.accountCode !== '3020' && a.accountCode !== '3030')
+      .map((a) => {
+        const opening_pkr = crAt(open.sums, a.accountCode);
+        const movement = crAt(periodSums, a.accountCode);
+        const drawings = isDrawingsAccount(a) ? movement : 0;
+        const introduced = isDrawingsAccount(a) ? 0 : movement;
+        return {
+          account_code: a.accountCode,
+          account_name: a.accountName,
+          opening_pkr,
+          capital_introduced_pkr: introduced,
+          drawings_pkr: drawings,
+          result_pkr: 0,
+          closing_pkr: round2(opening_pkr + movement),
+        };
+      })
+      // An account that never moved and carries nothing is noise on the face of
+      // a statement; one that moved to zero is not, and stays.
+      .filter((c) => c.opening_pkr !== 0 || c.closing_pkr !== 0 || c.capital_introduced_pkr !== 0 || c.drawings_pkr !== 0);
+
+    const derived = (
+      code: string,
+      name: string,
+      openingValue: number,
+      closingValue: number,
+    ) => ({
+      account_code: code,
+      account_name: name,
+      opening_pkr: round2(openingValue),
+      capital_introduced_pkr: 0,
+      drawings_pkr: 0,
+      result_pkr: round2(closingValue - openingValue),
+      closing_pkr: round2(closingValue),
+    });
+
+    columns.push(
+      derived('3020', 'Retained Earnings', open.snap.retained_earnings_pkr, close.snap.retained_earnings_pkr),
+      derived('3030', 'Result for the Period', open.snap.current_year_pl_pkr, close.snap.current_year_pl_pkr),
+    );
+
+    const sum = (pick: (c: (typeof columns)[number]) => number) =>
+      round2(columns.reduce((t, c) => t + pick(c), 0));
+
+    const total_closing_pkr = sum((c) => c.closing_pkr);
+
+    return {
+      date_from: query.date_from,
+      date_to: query.date_to,
+      columns,
+      total_opening_pkr: sum((c) => c.opening_pkr),
+      total_capital_introduced_pkr: sum((c) => c.capital_introduced_pkr),
+      total_drawings_pkr: sum((c) => c.drawings_pkr),
+      total_result_pkr: sum((c) => c.result_pkr),
+      total_closing_pkr,
+      is_reconciled: Math.abs(total_closing_pkr - close.snap.total_equity_pkr) < 0.005,
+      // No written profit-sharing agreement, so the result is not split between
+      // the owners. Inventing a ratio would put a fabricated figure on the face
+      // of a primary statement — the same reason a seasonal lot with no season
+      // end date is excluded from the revenue accrual rather than guessed at.
+      result_is_unallocated: true,
     };
   }
 
@@ -484,6 +631,26 @@ function aggregate(lines: { accountCode: string; debitAmount: unknown; creditAmo
     m.set(l.accountCode, cur);
   }
   return m;
+}
+
+/**
+ * Contra-equity: an owner's drawings account. Being DEBIT-normal is what makes
+ * it one, which is why this is a rule rather than a list of codes — the seeded
+ * 3015 is only the first, and a second owner's is created through the UI.
+ */
+function isDrawingsAccount(a: Account): boolean {
+  return a.accountClass === 'EQUITY' && a.accountType === 'DETAIL' && a.normalBalance === 'DEBIT';
+}
+
+/** An owner's capital account: equity that is not drawings and not derived. */
+function isCapitalAccount(a: Account): boolean {
+  return (
+    a.accountClass === 'EQUITY' &&
+    a.accountType === 'DETAIL' &&
+    a.normalBalance === 'CREDIT' &&
+    a.accountCode !== '3020' &&
+    a.accountCode !== '3030'
+  );
 }
 
 /** One statement line for a detail account, amount via `amt`. */

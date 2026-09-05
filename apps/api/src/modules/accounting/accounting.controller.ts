@@ -12,6 +12,7 @@ import {
   ProfitLossQuery,
   BalanceSheetQuery,
   CashFlowQuery,
+  ChangesInEquityQuery,
   LockPeriodRequest,
   UnlockPeriodRequest,
   CreateCreditNoteRequest,
@@ -296,6 +297,22 @@ export async function accountingRoutes(app: FastifyInstance) {
       const q = request.query as z.infer<typeof BalanceSheetQuery>;
       const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
       const data = await financials.getBalanceSheet(request.user!.facilityId, { ...q, book_type: bookType });
+      return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'GET',
+    url: '/v1/accounting/changes-in-equity',
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
+    schema: { querystring: ChangesInEquityQuery },
+    handler: async (request, reply) => {
+      const q = request.query as z.infer<typeof ChangesInEquityQuery>;
+      const bookType = resolveBookTypeForRead(request.user!.role, q.book_type);
+      const data = await financials.getChangesInEquity(request.user!.facilityId, {
+        ...q,
+        book_type: bookType,
+      });
       return sendSuccess(reply, data);
     },
   });

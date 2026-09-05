@@ -52,6 +52,7 @@ const groups: AcctGroup[] = [
       { title: 'Profit & Loss', href: '/accounting/reports/profit-loss', icon: FileBarChart, description: 'Revenue, cost of service, and net profit.' },
       { title: 'Balance Sheet', href: '/accounting/reports/balance-sheet', icon: FileBarChart, description: 'Assets = Liabilities + Equity, as of any date.' },
       { title: 'Cash Flow', href: '/accounting/reports/cash-flow', icon: FilePlus2, description: 'Where the money came from and went.' },
+      { title: 'Changes in Equity', href: '/accounting/reports/changes-in-equity', icon: FilePlus2, description: 'What each owner put in, took out, and is left with.' },
     ],
   },
   {
