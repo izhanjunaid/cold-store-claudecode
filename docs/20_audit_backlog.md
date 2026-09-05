@@ -421,3 +421,24 @@ on every install. Convention is in `docs/09`.
   no season end date is excluded from the revenue accrual rather than guessed at. Answer this
   and allocation becomes a real work item. Sits alongside **P2-9 gratuity** as a question
   only they can settle.
+
+### CLOSED PREVENTIVELY — owner pay had only one path, and it was the wrong one
+
+The owners intend to take a regular monthly amount plus more from profits. The obvious place
+to record that was payroll, and payroll was a trap: `EmployeeType` has no owner concept and
+`je-15-monthly-payroll.ts:39` posts every line to `6010 Salaries — Management & Office`,
+an EXPENSE account, unconditionally. Expense vouchers accept only EXPENSE and COST_OF_SERVICE
+accounts, so the sole correct route was a hand-written journal entry — friction that pushes a
+non-accountant straight back into payroll.
+
+Booking an owner's pay as salary understates profit, every P&L margin, and taxable income.
+**Income Tax Ordinance 2001 s.21(j)** disallows salary or other remuneration paid by an AOP to
+a member as a deduction, so it is the tax computation that would fail on assessment.
+
+**Found before it happened** — the owners were confirmed not yet on payroll, so no entries
+needed correcting. Built JE-30 with a screen at `/accounting/owner-equity`, and put a
+notice on the employee form pointing at it.
+
+The assertion that keeps it closed: **an owner's withdrawal must not change net profit**
+(`owner-equity.integration.test.ts`). That is s.21(j) written as a test, and it fails the
+moment anyone routes owner pay through an expense account again.

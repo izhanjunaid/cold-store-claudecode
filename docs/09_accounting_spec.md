@@ -1849,3 +1849,42 @@ plug), and `3010` absorbs any residual.
 
 **Profit is not allocated between owners.** No written agreement sets a ratio, so the result
 stays undivided in retained earnings and the statement discloses that. See `docs/20`.
+
+### An owner's pay is an appropriation, not an expense
+
+The owners take a regular monthly amount and sometimes more out of profits. **None of it is a
+business cost.** A member of an association of persons cannot be an employee of the
+association, so what they take is an appropriation of profit rather than an expense of earning
+it. The monthly amount and the ad-hoc extra are the same thing in accounting terms — only the
+note on the entry distinguishes them.
+
+Pakistani tax law is explicit rather than a matter of judgement. **Income Tax Ordinance 2001
+s.21(j)** disallows, in computing income from business, *"any profit on debt, brokerage,
+commission, salary or other remuneration paid by an association of persons to a member of the
+association"*.
+
+So booking owner pay as salary is wrong three times over: it understates profit, it drags
+operating profit and EBITDA down (6010 sits under `OPERATING_EXPENSE`, so every margin
+moves), and it understates taxable income — which is the part FBR disallows on assessment.
+
+**Record it with JE-30** (`POST /v1/accounting/owner-equity`, screen at
+`/accounting/owner-equity`):
+
+```
+Money out (drawing)      DR  owner's drawings account   CR  cash or bank
+Money in  (capital)      DR  cash or bank               CR  owner's capital account
+```
+
+The equity side must be an EQUITY DETAIL account and may not be `3020` or `3030`,
+which the statements work out rather than post to. The cash side is restricted to
+`1010`/`1020`/`1030`.
+
+**Payroll deliberately has no owner concept.** `EmployeeType` is `SALARIED |
+DAILY_WAGE` and JE-15 posts every line to `6010` unconditionally. No `isOwner` flag
+was added: nothing can tell an owner from a name, so the flag would only be as good as whoever
+set it, and having one invites building "pay an owner through payroll" — the very thing that
+must not exist. The employee form says so instead, and links here.
+
+**This does not settle how profit is split.** Drawings reduce each owner's equity
+individually, but the profit they are drawn against stays undivided until a ratio is agreed.
+See `docs/20`.

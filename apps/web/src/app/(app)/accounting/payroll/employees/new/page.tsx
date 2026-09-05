@@ -74,6 +74,21 @@ export default function NewEmployeePage() {
   return (
     <div className="max-w-3xl">
       <PageHeader title="New Employee" crumb="New" />
+
+      {/* An owner is not an employee. Payroll posts every line to 6010, an
+          expense account, so paying an owner here would understate profit and
+          taxable income alike — the tax ordinance disallows a member's pay as a
+          deduction. Say so where the mistake is made, and point at the way out. */}
+      <p className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed">
+        <span className="font-medium">Owners and partners are not employees.</span> What an owner
+        takes out is a share of profit, not a wage, so it must not go through payroll — recording
+        it here would understate the profit and the tax. Use{' '}
+        <a className="underline" href="/accounting/owner-equity">
+          Owner Capital &amp; Drawings
+        </a>{' '}
+        instead, even for a regular monthly amount.
+      </p>
+
       <Card>
         <CardContent className="p-4">
           <form onSubmit={handleSubmit} className="space-y-4">
