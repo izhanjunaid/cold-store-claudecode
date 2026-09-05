@@ -79,9 +79,11 @@ const BASE_PL = {
   total_unclassified_pkr: -500,
   has_unclassified: true,
   opening_equity_pkr: 2000,
+  capital_introduced_pkr: 0,
   drawings_pkr: 300,
   closing_equity_pkr: 1200,
   is_fiscal_year_to_date: true,
+  combined_statement_permitted: true,
 };
 
 describe('ProfitLossPage — unclassified accounts surface on the statement (F-6b)', () => {
@@ -114,7 +116,7 @@ describe('ProfitLossPage — statement of income and retained earnings', () => {
   it('shows opening equity, the result, drawings and closing equity', async () => {
     render(<ProfitLossPage />);
     await waitFor(() => expect(screen.getByText(/Owner's equity, opening/)).toBeTruthy());
-    expect(screen.getByText(/Less: owner's drawings/)).toBeTruthy();
+    expect(screen.getByText(/Less: owners' drawings/)).toBeTruthy();
     expect(screen.getByText(/Owner's equity, closing/)).toBeTruthy();
   });
 
@@ -143,5 +145,42 @@ describe('ProfitLossPage — the basis note states the policy actually in force'
     render(<ProfitLossPage />);
     await waitFor(() => expect(screen.getByText(/recognized as it is earned/)).toBeTruthy());
     expect(screen.queryByText(/no month-end accrual is made/)).toBeNull();
+  });
+});
+
+describe('ProfitLossPage — IFRS for SMEs 6.4 gates the combined statement', () => {
+  beforeEach(() => {
+    apiClient.mockReset();
+    apiClient.mockResolvedValue(BASE_PL);
+    accrualEnabled.mockReturnValue(false);
+  });
+
+  it('withdraws the equity block once an owner has put capital in', async () => {
+    // 6.4 permits combining the statements only where equity moved through
+    // profit, distributions, error corrections and policy changes. Capital
+    // introduced is none of those, so the block must go — and say where to look.
+    apiClient.mockResolvedValue({
+      ...BASE_PL,
+      capital_introduced_pkr: 500,
+      combined_statement_permitted: false,
+    });
+    render(<ProfitLossPage />);
+    await waitFor(() => expect(screen.getByText(/Net Loss/)).toBeTruthy());
+    expect(screen.queryByText(/Owner's equity, opening/)).toBeNull();
+    expect(screen.getByText(/not shown here/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Changes in Equity/ })).toBeTruthy();
+  });
+
+  it('keeps the block when no capital was introduced', async () => {
+    render(<ProfitLossPage />);
+    await waitFor(() => expect(screen.getByText(/Owner's equity, opening/)).toBeTruthy());
+    expect(screen.queryByText(/not shown here/)).toBeNull();
+  });
+
+  it("labels drawings for more than one owner", async () => {
+    // The row used to be tied to account 3015; with two owners it is a total
+    // across every drawings account, so it must not name one of them.
+    render(<ProfitLossPage />);
+    await waitFor(() => expect(screen.getByText(/owners' drawings/)).toBeTruthy());
   });
 });

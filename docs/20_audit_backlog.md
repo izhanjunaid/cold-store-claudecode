@@ -373,3 +373,51 @@ rows. Snapshot the facility's journal entries *before* the pass and assert
 against that baseline afterwards — the sweep is "everything not in the
 baseline", not "everything I can name".
 
+### FIXED — equity was built for one owner; the facility has two
+
+Phase 29 presented equity as a single owner's: one seeded `3010 Owner's Capital`, one
+seeded `3015 Owner's Drawings`, and the combined statement of income and retained
+earnings that IFRS for SMEs 6.4 permits. The owner has since confirmed **two owners who
+contribute and withdraw separately, in different amounts**. The question was open from
+2026-08-18 — *"sole proprietor, or AOP with how many partners?"* — and shipped unanswered.
+
+**Three defects, two of which were live for a single owner too.**
+
+1. **`equityRollforward` read one hardcoded account code.** Drawings came from
+   `aggregate(...).get('3015')`, so a second owner's drawings account was silently
+   dropped from the face of the P&L. Measured with two owners drawing 40,000 and 25,000,
+   the statement showed **40,000**. Same defect class as the hardcoded EBITDA add-back this
+   phase had already corrected once. Drawings are now derived from **every DEBIT-normal
+   equity account**, because being contra-equity is what makes an account a drawings
+   account — a rule rather than a list.
+2. **The rollforward could not foot once capital was introduced** — true with one owner.
+   Closing equity carried the contribution and no row disclosed it. A **Capital introduced**
+   figure now closes the identity.
+3. **IFRS for SMEs 6.4 was assumed to apply rather than tested.** It permits the combined
+   statement *only* where the sole equity movements are profit or loss, distributions,
+   prior-period error corrections and policy changes. Capital introduced is not among them,
+   so this entity is not eligible whenever an owner puts money in. The P&L block now hides
+   on `combined_statement_permitted` — the standard's own condition, not a judgement —
+   and points at the new statement.
+
+**Built: statement of changes in equity** (`GET /v1/accounting/changes-in-equity`,
+`/accounting/reports/changes-in-equity`). IFRS for SMEs **4.13** requires an entity
+without share capital to disclose the changes in *each category of equity*; each equity
+account is a category, so a second owner's accounts become columns by being created and no
+code needs to know their codes. Closing across the columns reconciles to
+`total_equity_pkr` on the balance sheet, carried as `is_reconciled` the way the cash
+flow statement does.
+
+**Per-owner accounts are created, not seeded.** We do not know the owners' names or how many
+there will be, and `syncChartOfAccounts` is INSERT-only — a guess would become permanent
+on every install. Convention is in `docs/09`.
+
+### OPEN — for the facility's accountant, not an engineering decision
+
+- **What profit-sharing ratio applies between the two owners, and from what date?** There is
+  no written agreement today, so the result is deliberately **not** allocated: it stays
+  undivided in retained earnings and the statement says so. Inventing a ratio would put a
+  fabricated figure on the face of a primary statement — the same reason a seasonal lot with
+  no season end date is excluded from the revenue accrual rather than guessed at. Answer this
+  and allocation becomes a real work item. Sits alongside **P2-9 gratuity** as a question
+  only they can settle.

@@ -424,9 +424,14 @@ export const ProfitLossResponse = z.object({
   // sheet's total_equity_pkr at date_to, but only when the range starts on the
   // fiscal-year start — equity carries FY-to-date profit, not range profit.
   opening_equity_pkr: z.number(),
+  capital_introduced_pkr: z.number(),
   drawings_pkr: z.number(),
   closing_equity_pkr: z.number(),
   is_fiscal_year_to_date: z.boolean(),
+  // False once an owner has put capital in during the period: IFRS for SMEs 6.4
+  // then no longer permits the combined statement, and the statement of changes
+  // in equity is the one to read.
+  combined_statement_permitted: z.boolean(),
 
   // Activity in accounts the header rollups could not place (F-6b);
   // amounts are signed as their contribution to net profit.
@@ -494,6 +499,58 @@ export const CashFlowQuery = z.object({
   book_type: BookType.optional(),
 });
 export type CashFlowQueryType = z.infer<typeof CashFlowQuery>;
+
+/**
+ * Statement of changes in equity (IFRS for SMEs 6.2/6.3).
+ *
+ * Required rather than optional for this entity: the combined statement of
+ * income and retained earnings that 6.4 permits is available only where the
+ * sole equity movements are profit or loss, distributions, prior-period error
+ * corrections and policy changes. Owner capital introduced is not among them,
+ * and this facility's owners contribute separately.
+ *
+ * One column per category of equity, which 4.13 requires an entity without
+ * share capital to show changes in. A category here is an equity account —
+ * so a second owner's capital account becomes a column by being created, with
+ * no code change.
+ */
+export const ChangesInEquityQuery = z.object({
+  date_from: dateOnly,
+  date_to: dateOnly,
+  book_type: BookType.optional(),
+});
+export type ChangesInEquityQueryType = z.infer<typeof ChangesInEquityQuery>;
+
+export const EquityColumn = z.object({
+  account_code: z.string(),
+  account_name: z.string(),
+  opening_pkr: z.number(),
+  capital_introduced_pkr: z.number(),
+  drawings_pkr: z.number(),
+  result_pkr: z.number(),
+  closing_pkr: z.number(),
+});
+
+export const ChangesInEquityResponse = z.object({
+  date_from: z.string(),
+  date_to: z.string(),
+  columns: z.array(EquityColumn),
+  total_opening_pkr: z.number(),
+  total_capital_introduced_pkr: z.number(),
+  total_drawings_pkr: z.number(),
+  total_result_pkr: z.number(),
+  total_closing_pkr: z.number(),
+  // Closing across the columns equals total_equity_pkr on the balance sheet at
+  // date_to. Both come from the same equity snapshot, so this can only go false
+  // if a later change makes them disagree — which is exactly what it is for.
+  is_reconciled: z.boolean(),
+  // No written profit-sharing agreement exists, so the result is NOT allocated
+  // between the owners. It stays undivided in retained earnings and the screen
+  // says so; inventing a ratio would put a fabricated figure on the face of a
+  // primary statement.
+  result_is_unallocated: z.boolean(),
+});
+export type ChangesInEquityResponseType = z.infer<typeof ChangesInEquityResponse>;
 
 export const BalanceSheetQuery = z.object({
   as_of_date: dateOnly,
