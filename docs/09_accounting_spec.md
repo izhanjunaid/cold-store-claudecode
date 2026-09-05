@@ -1843,6 +1843,28 @@ drawings are identified by being DEBIT-normal, and the statement of changes in e
 each account its own column — which is how IFRS for SMEs **4.13** is satisfied, since it
 requires an entity without share capital to show the changes in each category of equity.
 
+### Retiring the generic accounts when you move to per-owner ones
+
+The seed ships `3010 Owner's Capital` and `3015 Owner's Drawings`, which are right for
+a facility with one owner. Adding per-owner accounts without retiring these leaves **three**
+accounts meaning "capital" and three meaning "drawings", which is not a clean chart and invites
+posting to the wrong one.
+
+| Account | What to do | Why |
+|---|---|---|
+| `3015 Owner's Drawings` | **Delete it** (deactivate if it already carries entries) | Not a system account, and fully replaced by the per-owner drawings accounts |
+| `3010 Owner's Capital` | **Leave it alone** | `system: true` and hardcoded as `EQUITY_PLUG_ACCOUNT`; `coa.service.ts` refuses to delete, deactivate *or rename* it |
+
+`3010` is not a sixth owner. It is where the opening-balance entry balances to, and if each
+owner's opening capital is entered explicitly the plug ends at **zero** — at which point it
+disappears from the balance sheet and the statement of changes in equity by itself, since both
+drop zero-balance accounts. A non-zero plug is therefore a signal worth reading: the opening
+entry did not fully attribute to the owners.
+
+It stays visible in the Owner Capital & Drawings picker, because a single-owner facility has no
+other capital account to offer. It is labelled *(opening balances)* there, and once other
+capital accounts exist the screen says plainly not to use it.
+
 **At go-live** each owner's opening capital is entered directly as an opening-balance
 `other_lines` entry (EQUITY is an allowed class; only `3010` is blocked, being the
 plug), and `3010` absorbs any residual.
