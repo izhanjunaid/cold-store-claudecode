@@ -589,6 +589,34 @@ export const CreateCashTransferRequest = z.object({
 export type CreateCashTransferRequestType = z.infer<typeof CreateCashTransferRequest>;
 
 // ============================================================
+// Owner capital and drawings (JE-30)
+// ============================================================
+
+export const OwnerEquityDirection = z.enum(['CAPITAL_IN', 'DRAWING']);
+
+/**
+ * An owner putting money in, or taking money out.
+ *
+ * Never payroll and never an expense: a member of an association of persons
+ * cannot be its employee, so what they take is an appropriation of profit.
+ * Income Tax Ordinance 2001 s.21(j) disallows salary or other remuneration paid
+ * by an AOP to a member as a deduction, so booking it as a cost understates
+ * taxable income as well as profit.
+ */
+export const CreateOwnerEquityRequest = z.object({
+  movement_date: dateOnly,
+  direction: OwnerEquityDirection,
+  /** The owner's own capital or drawings account. */
+  equity_account_code: z.string().regex(/^[0-9]+$/),
+  /** Cash or bank — where the money actually moves. */
+  cash_account_code: z.string().regex(/^[0-9]+$/),
+  amount_pkr: z.number().positive(),
+  note: z.string().max(300).optional(),
+  book_type: BookType.optional().default('PACCI'),
+});
+export type CreateOwnerEquityRequestType = z.infer<typeof CreateOwnerEquityRequest>;
+
+// ============================================================
 // Withholding tax remittance (JE-29)
 // ============================================================
 

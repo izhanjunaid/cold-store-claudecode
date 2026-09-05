@@ -24,6 +24,7 @@ import {
   GstSettlementQuery,
   PostGstSettlementRequest,
   CreateCashTransferRequest,
+  CreateOwnerEquityRequest,
   RemitWithholdingRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
@@ -41,6 +42,7 @@ import { RevenueAccrualService } from './revenue-accrual.service';
 import { GstSettlementService } from './gst-settlement.service';
 import { WithholdingRemittanceService } from './withholding-remittance.service';
 import { buildJE27CashTransfer, CASH_TRANSFER_ACCOUNTS } from './templates/je-27-cash-transfer';
+import { buildJE30OwnerEquity, DERIVED_EQUITY_ACCOUNTS } from './templates/je-30-owner-equity';
 import { Errors } from '../../common/errors';
 
 const CodeParam = z.object({ code: z.string().regex(/^[0-9]+$/) });
@@ -423,6 +425,75 @@ export async function accountingRoutes(app: FastifyInstance) {
           amountPkr: body.amount_pkr,
           fromAccountCode: body.from_account_code,
           toAccountCode: body.to_account_code,
+          bookType: body.book_type,
+          userId: request.user!.userId,
+          note: body.note,
+        }),
+        { postingStatus: 'POSTED' },
+      );
+      const full = await journalEntry.getById(request.user!.facilityId, posted.id);
+      return sendSuccess(reply.status(201), full);
+    },
+  });
+
+  // ==========================================================
+  // OWNER CAPITAL AND DRAWINGS (JE-30)
+  // ==========================================================
+
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/owner-equity',
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
+    schema: { body: CreateOwnerEquityRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof CreateOwnerEquityRequest>;
+      assertKatchiWriteAllowed(request.user!.role, body.book_type);
+
+      const cashAllowed = CASH_TRANSFER_ACCOUNTS as readonly string[];
+      if (!cashAllowed.includes(body.cash_account_code)) {
+        throw Errors.VALIDATION_ERROR(
+          `Money must move to or from a cash or bank account (${cashAllowed.join(', ')}).`,
+          'cash_account_code',
+        );
+      }
+
+      // The equity side must be a real, postable equity account belonging to an
+      // owner. Retained earnings and the current-year result are computed by the
+      // statements rather than posted, so they are refused by name.
+      if ((DERIVED_EQUITY_ACCOUNTS as readonly string[]).includes(body.equity_account_code)) {
+        throw Errors.VALIDATION_ERROR(
+          `${body.equity_account_code} is worked out by the statements and cannot be posted to. Use the owner's own capital or drawings account.`,
+          'equity_account_code',
+        );
+      }
+      const equityAccount = await app.prisma.chartOfAccounts.findUnique({
+        where: {
+          facilityId_accountCode: {
+            facilityId: request.user!.facilityId,
+            accountCode: body.equity_account_code,
+          },
+        },
+        select: { accountClass: true, accountType: true, isActive: true },
+      });
+      if (!equityAccount || !equityAccount.isActive) {
+        throw Errors.VALIDATION_ERROR('That account does not exist, or is inactive.', 'equity_account_code');
+      }
+      if (equityAccount.accountClass !== 'EQUITY' || equityAccount.accountType !== 'DETAIL') {
+        throw Errors.VALIDATION_ERROR(
+          "An owner's money in or out belongs to an equity account. What an owner takes is a share of profit, not a business cost — booking it anywhere else understates both profit and taxable income (Income Tax Ordinance 2001 s.21(j)).",
+          'equity_account_code',
+        );
+      }
+
+      const posted = await journalEntry.post(
+        request.user!.facilityId,
+        request.user!.userId,
+        buildJE30OwnerEquity({
+          movementDate: new Date(body.movement_date),
+          amountPkr: body.amount_pkr,
+          direction: body.direction,
+          equityAccountCode: body.equity_account_code,
+          cashAccountCode: body.cash_account_code,
           bookType: body.book_type,
           userId: request.user!.userId,
           note: body.note,
