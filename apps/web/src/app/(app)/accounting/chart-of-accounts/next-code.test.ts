@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { suggestNextCode, type CodedAccount } from './next-code';
+// suggestNextCode moved to @coldchain/shared (the partner-create endpoint picks
+// codes by the same rule). The tests stay here, next to the form that is its
+// only UI consumer, because packages/shared has no test runner of its own.
+import { suggestNextCode, codeBlockFor, type CodedAccount } from '@coldchain/shared';
 
 const h = (code: string, cls: string): CodedAccount => ({
   account_code: code,
@@ -7,7 +10,7 @@ const h = (code: string, cls: string): CodedAccount => ({
   account_type: 'HEADER',
   parent_account_code: null,
 });
-const d = (code: string, cls: string, parent: string): CodedAccount => ({
+const d = (code: string, cls: string, parent: string | null): CodedAccount => ({
   account_code: code,
   account_class: cls,
   account_type: 'DETAIL',
@@ -91,5 +94,55 @@ describe('suggestNextCode', () => {
     expect(suggestNextCode(SEED, '9999')).toBe('');
     expect(suggestNextCode(SEED, '1010')).toBe('');
     expect(suggestNextCode(SEED, '')).toBe('');
+  });
+});
+
+// The case the whole equity restructure exists for. Before 3100/3200 shipped,
+// equity was the only class with no header, so the Add Account form had no
+// parent to derive from and a partner's code was invented by hand — which is
+// how the live chart ended up with 3011, 3035 and 3040 side by side.
+describe('suggestNextCode — partner equity', () => {
+  // The seeded equity chart: system plug and the two derived accounts sit at
+  // the root deliberately (they belong to no partner), with the partner blocks
+  // starting at 3100 and 3200.
+  const EQUITY: CodedAccount[] = [
+    d('3010', 'EQUITY', null),
+    d('3020', 'EQUITY', null),
+    d('3030', 'EQUITY', null),
+    h('3100', 'EQUITY'),
+    h('3200', 'EQUITY'),
+  ];
+
+  it('starts each partner block cleanly, ignoring whatever sits in 30xx', () => {
+    expect(suggestNextCode(EQUITY, '3100')).toBe('3110');
+    expect(suggestNextCode(EQUITY, '3200')).toBe('3210');
+  });
+
+  it('walks each block independently as partners are added', () => {
+    const twoPartners = [
+      ...EQUITY,
+      d('3110', 'EQUITY', '3100'), d('3120', 'EQUITY', '3100'),
+      d('3210', 'EQUITY', '3200'), d('3220', 'EQUITY', '3200'),
+    ];
+    expect(suggestNextCode(twoPartners, '3100')).toBe('3130');
+    expect(suggestNextCode(twoPartners, '3200')).toBe('3230');
+  });
+
+  // 3100's block must stop at 3200, or a third partner's capital account would
+  // be suggested a code that reads as a drawings account.
+  it('never lets a capital suggestion cross into the drawings block', () => {
+    const full: CodedAccount[] = [
+      h('3100', 'EQUITY'),
+      ...Array.from({ length: 9 }, (_, i) => d(String(3110 + i * 10), 'EQUITY', '3100')),
+      h('3200', 'EQUITY'),
+    ];
+    expect(suggestNextCode(full, '3100')).toBe('');
+  });
+
+  it('reports the block a header owns, for the hint under the code field', () => {
+    expect(codeBlockFor(EQUITY, '3100')).toEqual({ start: 3100, limit: 3200 });
+    // No header follows 3200, so it runs to the end of the class thousand.
+    expect(codeBlockFor(EQUITY, '3200')).toEqual({ start: 3200, limit: 4000 });
+    expect(codeBlockFor(EQUITY, '3010')).toBeNull();
   });
 });

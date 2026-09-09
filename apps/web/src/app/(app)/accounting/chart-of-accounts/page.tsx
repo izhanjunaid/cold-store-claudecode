@@ -21,7 +21,7 @@ import {
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
-import { suggestNextCode } from './next-code';
+import { suggestNextCode, codeBlockFor } from '@coldchain/shared';
 import { fmtAcct } from '@/lib/accounting-format';
 import { formatDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -200,12 +200,16 @@ export default function ChartOfAccountsPage() {
     () => allAccounts.filter((a) => a.account_type === 'HEADER' && a.account_class === draft.cls),
     [allAccounts, draft.cls],
   );
-  // Equity accounts sit at the root (built by class on the balance sheet);
-  // every other DETAIL class needs a header for the statements to place it. A
-  // HEADER never takes a parent — coa.service.ts rejects one outright, since
+  // Every DETAIL account names a header. Equity used to be exempt because it
+  // had none — which is exactly why a partner account had no parent to derive a
+  // code from and the owner had to invent one. The seed now ships 3100/3200, so
+  // the exemption survives only as a fallback for a facility whose equity
+  // headers were deleted, where requiring one would be a dead end. A HEADER
+  // never takes a parent — coa.service.ts rejects one outright, since
   // buildGroups/buildLines are one level deep and a nested header would
   // orphan its own children (phase/24).
-  const parentRequired = draft.type === 'DETAIL' && draft.cls !== 'EQUITY';
+  const parentRequired =
+    draft.type === 'DETAIL' && (draft.cls !== 'EQUITY' || headerOptions.length > 0);
   const sectionOptions = CLASS_SECTIONS[draft.cls] ?? [];
   // A header must declare its section, or every detail account beneath it
   // lands in the statements' unclassified bucket. Where the class allows
@@ -224,6 +228,10 @@ export default function ChartOfAccountsPage() {
   // to derive a slot from, so its code is typed, not suggested.
   const selectParent = (parent: string) =>
     setDraft((d) => ({ ...d, parent, code: parent ? suggestNextCode(allAccounts, parent) : '' }));
+
+  // The range the chosen header owns, so the hint can state it. A convention
+  // nobody can see is one the next person re-invents.
+  const codeBlock = draft.parent ? codeBlockFor(allAccounts, draft.parent) : null;
 
   // Mirrors the server's rules (shared CreateAccountRequest + coa.service) so
   // the failure arrives next to the field rather than as a toast after a POST.
@@ -601,7 +609,9 @@ export default function ChartOfAccountsPage() {
               ) : (
                 <p className="text-xs text-muted-foreground">
                   {draft.type === 'DETAIL'
-                    ? 'Suggested from the parent’s range. Editable now — permanent once the account has postings.'
+                    ? codeBlock
+                      ? `Codes under this header run ${codeBlock.start}–${codeBlock.limit - 1}. Editable now — permanent once the account has postings.`
+                      : 'Suggested from the parent’s range. Editable now — permanent once the account has postings.'
                     : 'A header has no parent to suggest from — pick a code in this class’s range. Permanent once the account has postings.'}
                 </p>
               )}

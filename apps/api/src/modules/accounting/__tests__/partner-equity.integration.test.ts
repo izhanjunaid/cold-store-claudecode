@@ -42,7 +42,14 @@ const prisma = new PrismaClient();
 // Owner B's pair, in the equity range but clear of everything the seed ships.
 const B_CAPITAL = '3061';
 const B_DRAWINGS = '3066';
-const OWNED_CODES = [B_CAPITAL, B_DRAWINGS];
+// Owner A's drawings account. Deliberately NOT the seeded 3015: that account is
+// not a system account, and docs/09 now tells an owner moving to per-owner
+// accounts to delete it — this suite started failing the moment someone did.
+// Nothing here should depend on a deletable account existing, and the point of
+// the file is that drawings are recognised by being DEBIT-normal rather than by
+// their code, so borrowing the seed's code proved nothing anyway.
+const A_DRAWINGS = '3056';
+const OWNED_CODES = [B_CAPITAL, B_DRAWINGS, A_DRAWINGS];
 
 // A year of its own, so no other suite's postings land inside the window.
 const FROM = '2044-01-01';
@@ -109,11 +116,14 @@ beforeAll(async () => {
   app = await getTestApp();
   token = (await loginAsRole(app, 'OWNER')).accessToken;
 
-  // Owner B's own capital and drawings accounts, created the way an owner
-  // creates them — nothing seeds these, and nothing may need to.
+  // Each owner's own capital and drawings accounts, created the way an owner
+  // creates them — nothing seeds these, and nothing may need to. Owner A keeps
+  // the seeded 3010 for capital because it is a system account that is always
+  // present; every other account this file posts to, it creates.
   for (const [code, name, normal] of [
     [B_CAPITAL, 'Owner B — Capital', 'CREDIT'],
     [B_DRAWINGS, 'Owner B — Drawings', 'DEBIT'],
+    [A_DRAWINGS, 'Owner A — Drawings', 'DEBIT'],
   ] as const) {
     await prisma.chartOfAccounts.upsert({
       where: { facilityId_accountCode: { facilityId: TEST_FACILITY_ID, accountCode: code } },
@@ -135,7 +145,7 @@ beforeAll(async () => {
   await post(`${ENTRY_PREFIX}A-CAP`, '2044-02-01', [['1010', 500000, 0], ['3010', 0, 500000]]);
   await post(`${ENTRY_PREFIX}B-CAP`, '2044-02-01', [['1010', 300000, 0], [B_CAPITAL, 0, 300000]]);
   // And each takes a different amount out.
-  await post(`${ENTRY_PREFIX}A-DRW`, '2044-06-01', [['3015', 40000, 0], ['1010', 0, 40000]]);
+  await post(`${ENTRY_PREFIX}A-DRW`, '2044-06-01', [[A_DRAWINGS, 40000, 0], ['1010', 0, 40000]]);
   await post(`${ENTRY_PREFIX}B-DRW`, '2044-06-01', [[B_DRAWINGS, 25000, 0], ['1010', 0, 25000]]);
 });
 
@@ -163,7 +173,7 @@ describe('statement of changes in equity (IFRS for SMEs 6.2/6.3, 4.13)', () => {
     const codes = d.columns.map((c: { account_code: string }) => c.account_code);
     expect(codes).toContain('3010');
     expect(codes).toContain(B_CAPITAL);
-    expect(codes).toContain('3015');
+    expect(codes).toContain(A_DRAWINGS);
     expect(codes).toContain(B_DRAWINGS);
   });
 
@@ -174,7 +184,7 @@ describe('statement of changes in equity (IFRS for SMEs 6.2/6.3, 4.13)', () => {
     expect(col('3010').capital_introduced_pkr).toBe(500000);
     expect(col(B_CAPITAL).capital_introduced_pkr).toBe(300000);
     // Drawings are a debit to a contra-equity account, so the movement is negative.
-    expect(col('3015').drawings_pkr).toBe(-40000);
+    expect(col(A_DRAWINGS).drawings_pkr).toBe(-40000);
     expect(col(B_DRAWINGS).drawings_pkr).toBe(-25000);
   });
 
@@ -216,8 +226,9 @@ describe('statement of changes in equity (IFRS for SMEs 6.2/6.3, 4.13)', () => {
 
 describe('the P&L block obeys IFRS for SMEs 6.4 rather than assuming it applies', () => {
   it('counts BOTH owners drawings, not just the seeded account', async () => {
-    // Against the shipped code this read -40000: '3015' was hardcoded, so owner
-    // B's 25,000 vanished from the face of the statement.
+    // Against the shipped code this read 0: '3015' was hardcoded, so neither
+    // owner's drawings reached the face of the statement once they had accounts
+    // of their own.
     const d = await pl();
     expect(d.drawings_pkr).toBe(65000);
   });

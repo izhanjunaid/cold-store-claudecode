@@ -1824,38 +1824,79 @@ Every line in the above P&L is sourced from a journal entry in the GL. No manual
 
 ## Equity for more than one owner
 
-The facility is an AOP with **two owners who contribute and withdraw separately**. The seed
-ships one capital account (`3010`, a system account and the opening-balance plug) and one
-drawings account (`3015`). Additional owners get their own pair, **created through Add
-Account rather than seeded** — the seed cannot know how many owners there are or what they
-are called, and `syncChartOfAccounts` is INSERT-only, so a guess would be permanent on
-every install.
+The facility is an AOP with **two owners who contribute and withdraw separately**. Each owner
+gets their own pair of accounts — capital and drawings — **created rather than seeded**: the
+seed cannot know how many owners there are or what they are called, and `syncChartOfAccounts`
+is INSERT-only, so a guess would be permanent on every install.
 
-Convention:
+### Where partner accounts live
 
-| | Class | Type | Normal balance | Notes |
-|---|---|---|---|---|
-| Owner's capital | EQUITY | DETAIL | CREDIT | one per owner |
-| Owner's drawings | EQUITY | DETAIL | DEBIT | one per owner, `is_contra: true` |
+```
+3100  Partners' Capital           HEADER   - one CREDIT DETAIL per partner (3110, 3120, ...)
+3200  Partners' Drawings          HEADER   - one DEBIT  DETAIL per partner (3210, 3220, ...)
 
-Nothing downstream needs the codes. The balance sheet renders every equity DETAIL account,
-drawings are identified by being DEBIT-normal, and the statement of changes in equity gives
-each account its own column — which is how IFRS for SMEs **4.13** is satisfied, since it
-requires an entity without share capital to show the changes in each category of equity.
+3010  Owner's Capital             DETAIL   - system; the opening-balance plug   (root)
+3020  Retained Earnings           DETAIL   - derived by the statements          (root)
+3030  Current Year Profit/(Loss)  DETAIL   - derived by the statements          (root)
+```
+
+Equity used to be the only class the seed gave no header, so its DETAIL accounts sat at the
+root and **Add Account had no parent to derive a code from** — which is why the first partner
+accounts on a live chart were numbered by hand, with no relation to one another. Choosing a
+header now fills the code in: pick *Partners' Capital* and the form offers `3110`, then
+`3120`; pick *Partners' Drawings* and it offers `3210`, then `3220`. The two blocks are
+separate deliberately — a capital suggestion can never wander into the drawings range, because
+`suggestNextCode` stops at the next header of the same class.
+
+The three seeded accounts stay at the root on purpose. They belong to no partner, and `3010`
+carries postings on any live box, where `guard_chart_of_accounts` would refuse to re-parent it.
+
+| | Class | Type | Parent | Normal balance | Name |
+|---|---|---|---|---|---|
+| Partner capital | EQUITY | DETAIL | `3100` | CREDIT | `<Name> — Capital` |
+| Partner drawings | EQUITY | DETAIL | `3200` | DEBIT (contra) | `<Name> — Drawings` |
+
+**The normal balance is what the engine reads, not the name.** A DEBIT-normal equity DETAIL
+account *is* a drawings account as far as every statement is concerned; a CREDIT-normal one
+that is not `3020`/`3030` *is* a capital account. So an account created on the wrong side is
+not a naming slip to tidy up later — it is a different account, and once anything posts to it
+`guard_chart_of_accounts` locks the normal balance permanently. Check the side before the
+first posting; after that the only remedy is a new account.
+
+The statement of changes in equity gives each of these accounts its own column, which is how
+IFRS for SMEs **4.13** is satisfied: an entity without share capital must show the changes in
+each category of equity.
+
+### Fixing partner accounts created before the headers existed
+
+A chart built before `3100`/`3200` shipped has its partner accounts at the root, possibly
+mis-sided and inconsistently named. **While an account has no postings it is free to delete**,
+so the fix is to delete and recreate rather than to live with it:
+
+| Symptom | Fix |
+|---|---|
+| Partner account at the root, no parent | Delete, then Add Account under `3100` or `3200` — the code fills itself in |
+| A partner with a drawings account but no capital account | Add the missing one; a partner always has both |
+| An account on the wrong normal side | Delete and recreate on the right side — the side cannot be edited |
+| A bare name (`umair`) rather than `Umair — Capital` | Rename in place; the name is the one field that is never locked |
+
+Check the account has no postings first: the Chart of Accounts row shows its balance, and
+Delete refuses with a message naming what is blocking it. An account that already carries
+entries is **deactivated**, not deleted, and a correctly-shaped replacement opened beside it.
 
 ### Retiring the generic accounts when you move to per-owner ones
 
-The seed ships `3010 Owner's Capital` and `3015 Owner's Drawings`, which are right for
-a facility with one owner. Adding per-owner accounts without retiring these leaves **three**
-accounts meaning "capital" and three meaning "drawings", which is not a clean chart and invites
-posting to the wrong one.
+The seed ships `3010 Owner's Capital` and `3015 Owner's Drawings`, which are right for a
+facility with one owner. Adding per-owner accounts without retiring these leaves several
+accounts meaning "capital" and several meaning "drawings", which invites posting to the wrong
+one.
 
 | Account | What to do | Why |
 |---|---|---|
 | `3015 Owner's Drawings` | **Delete it** (deactivate if it already carries entries) | Not a system account, and fully replaced by the per-owner drawings accounts |
 | `3010 Owner's Capital` | **Leave it alone** | `system: true` and hardcoded as `EQUITY_PLUG_ACCOUNT`; `coa.service.ts` refuses to delete, deactivate *or rename* it |
 
-`3010` is not a sixth owner. It is where the opening-balance entry balances to, and if each
+`3010` is not an extra owner. It is where the opening-balance entry balances to, and if each
 owner's opening capital is entered explicitly the plug ends at **zero** — at which point it
 disappears from the balance sheet and the statement of changes in equity by itself, since both
 drop zero-balance accounts. A non-zero plug is therefore a signal worth reading: the opening
@@ -1869,8 +1910,44 @@ capital accounts exist the screen says plainly not to use it.
 `other_lines` entry (EQUITY is an allowed class; only `3010` is blocked, being the
 plug), and `3010` absorbs any residual.
 
-**Profit is not allocated between owners.** No written agreement sets a ratio, so the result
-stays undivided in retained earnings and the statement discloses that. See `docs/20`.
+### Is partner capital equity at all?
+
+Worth recording, because it is assumed everywhere and asserted nowhere. **IFRS for SMEs 22.6**
+(and IAS 32.16A behind it) treats an instrument the holder can put back to the entity as a
+*financial liability* by default — so partners' capital, which partners can ask to have
+returned, is not automatically equity. It qualifies for the puttable-instrument exception here:
+partner capital is the most subordinated class of claim, it entitles the holder to a pro-rata
+share of net assets on liquidation, and it carries no obligation to pay a return.
+
+**Equity is therefore the right classification**, and it stops being right if the partners ever
+agree a fixed return on capital or a right to withdraw capital on demand — either would move the
+whole balance into liabilities. Revisit this if the partnership deed changes.
+
+### Admitting a partner later
+
+Three things happen, and only one of them is manual.
+
+1. **The new partner's capital contribution** is an ordinary JE-30 `CAPITAL_IN` against their
+   own new capital account. Nothing special.
+2. **The profit-sharing ratio changes from the admission date.** Held with an effective date, so
+   the year of admission splits at the old ratio up to that date and at the new ratio after it.
+   This is the part that is genuinely error-prone by hand, and the reason the ratio is dated
+   rather than held as a single current value.
+3. **Any premium the incoming partner pays over their share of book value** is a transfer
+   *between partners' capital accounts* — DR the existing partners' capital in their old
+   profit-sharing ratio, CR the incoming partner's. Posted as a manual journal entry: JE-30 has
+   a cash side by construction and cannot express an equity-to-equity move.
+
+**The textbook "goodwill method" is not available.** It recognises internally generated goodwill
+as an asset, which **IFRS for SMEs §18** prohibits. Only the bonus method above — which
+recognises no asset — is compliant. Revaluing property, plant and equipment on admission is a
+separate question and follows Section 17, not this.
+
+**Profit is not yet allocated between the owners.** No written agreement sets a ratio. Note that
+one is not strictly absent: **Partnership Act 1932 s.13(b)** gives partners equal shares unless
+they agree otherwise, and s.13(a) allows no salary unless agreed. Until the owners confirm a
+ratio and its effective date, the result stays undivided in retained earnings and the statement
+says so. See `docs/20`.
 
 ### An owner's pay is an appropriation, not an expense
 

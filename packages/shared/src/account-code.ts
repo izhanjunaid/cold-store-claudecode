@@ -10,6 +10,10 @@
  * The block runs from the parent's own code up to (not including) the next
  * header in the same class, which is what keeps a suggestion from landing under
  * the wrong heading — the failure the unique constraint cannot catch.
+ *
+ * Lives in `shared` rather than beside the Add Account form because the server
+ * picks codes by the same rule when it creates a partner's pair of accounts. Two
+ * implementations would drift, and a drifted code is permanent.
  */
 export interface CodedAccount {
   account_code: string;
@@ -20,14 +24,22 @@ export interface CodedAccount {
 
 const STEP = 10;
 
-export function suggestNextCode(accounts: CodedAccount[], parentCode: string): string {
+/**
+ * The range of codes a parent header owns: from its own code up to, but not
+ * including, `limit`. Exported so the form can name the range under the code
+ * field — the convention is only learnable if it is stated somewhere.
+ */
+export function codeBlockFor(
+  accounts: CodedAccount[],
+  parentCode: string,
+): { start: number; limit: number } | null {
   const parent = accounts.find(
     (a) => a.account_code === parentCode && a.account_type === 'HEADER',
   );
-  if (!parent) return '';
+  if (!parent) return null;
 
   const start = Number(parent.account_code);
-  if (!Number.isFinite(start)) return '';
+  if (!Number.isFinite(start)) return null;
 
   // Upper bound: the next header of this class. Without one the block is open
   // ended, so cap it at the end of the class's thousand (6000 -> 6999).
@@ -41,7 +53,14 @@ export function suggestNextCode(accounts: CodedAccount[], parentCode: string): s
     .map((a) => Number(a.account_code))
     .filter(Number.isFinite)
     .sort((a, b) => a - b)[0];
-  const limit = nextHeader ?? (Math.floor(start / 1000) + 1) * 1000;
+
+  return { start, limit: nextHeader ?? (Math.floor(start / 1000) + 1) * 1000 };
+}
+
+export function suggestNextCode(accounts: CodedAccount[], parentCode: string): string {
+  const block = codeBlockFor(accounts, parentCode);
+  if (!block) return '';
+  const { start, limit } = block;
 
   const taken = new Set(accounts.map((a) => Number(a.account_code)));
 

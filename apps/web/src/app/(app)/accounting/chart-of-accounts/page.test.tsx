@@ -414,3 +414,89 @@ describe('ChartOfAccountsPage — owner management', () => {
     expect(screen.getAllByRole('button', { name: /deactivate/i })).toHaveLength(1);
   });
 });
+
+// Equity used to be the one class exempt from naming a parent, because it was
+// the one class the seed gave no header. That exemption is why a partner's
+// account code had to be invented by hand.
+describe('ChartOfAccountsPage — partner equity accounts', () => {
+  const acct = (
+    account_code: string,
+    account_name: string,
+    account_type: 'HEADER' | 'DETAIL',
+    parent_account_code: string | null,
+    normal_balance = 'CREDIT',
+  ) => ({
+    id: 'a-' + account_code,
+    account_code,
+    account_name,
+    account_class: 'EQUITY',
+    account_type,
+    parent_account_code,
+    normal_balance,
+    is_system_account: true,
+    is_active: true,
+  });
+
+  const WITH_HEADERS = [
+    acct('3010', "Owner's Capital", 'DETAIL', null),
+    acct('3100', "Partners' Capital", 'HEADER', null),
+    acct('3200', "Partners' Drawings", 'HEADER', null),
+  ];
+
+  beforeEach(() => {
+    apiClient.mockReset();
+    confirmFn.mockClear();
+    role = 'OWNER';
+    permissions = [];
+  });
+
+  it('prefills a partner capital code from the header, and names the range', async () => {
+    apiClient.mockResolvedValue(WITH_HEADERS);
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Partners' Capital/)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+    fireEvent.change(screen.getByLabelText(/class/i), { target: { value: 'EQUITY' } });
+
+    // The whole point: no code has to be invented.
+    fireEvent.change(screen.getByLabelText(/parent/i), { target: { value: '3100' } });
+    expect((screen.getByLabelText(/account code/i) as HTMLInputElement).value).toBe('3110');
+    expect(screen.getByText(/Codes under this header run 3100.3199/)).toBeTruthy();
+
+    // Drawings are a separate block, so the two can never collide.
+    fireEvent.change(screen.getByLabelText(/parent/i), { target: { value: '3200' } });
+    expect((screen.getByLabelText(/account code/i) as HTMLInputElement).value).toBe('3210');
+  });
+
+  it('will not create a partner account adrift of both headers', async () => {
+    apiClient.mockResolvedValue(WITH_HEADERS);
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Partners' Capital/)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+    fireEvent.change(screen.getByLabelText(/class/i), { target: { value: 'EQUITY' } });
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Umair — Capital' } });
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '3011' } });
+
+    expect(screen.getByRole('button', { name: /create account/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/parent/i), { target: { value: '3100' } });
+    expect(screen.getByRole('button', { name: /create account/i })).not.toBeDisabled();
+  });
+
+  // The asymmetry that keeps the rule from becoming a dead end: a facility whose
+  // equity headers were deleted has nothing to select, and demanding one there
+  // would leave the owner unable to create any equity account at all.
+  it('still allows a root-level equity account where the facility has no equity header', async () => {
+    apiClient.mockResolvedValue([acct('3010', "Owner's Capital", 'DETAIL', null)]);
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Owner's Capital/)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+    fireEvent.change(screen.getByLabelText(/class/i), { target: { value: 'EQUITY' } });
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Umair — Capital' } });
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '3050' } });
+
+    expect(screen.getByRole('button', { name: /create account/i })).not.toBeDisabled();
+  });
+});
