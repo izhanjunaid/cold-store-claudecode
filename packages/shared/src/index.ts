@@ -26,3 +26,4 @@ export * from './schemas/permissions';
 export * from './schemas/audit';
 export * from './permissions';
 export * from './accounting-accounts';
+export * from './account-code';

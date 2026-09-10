@@ -159,4 +159,46 @@ describe('syncChartOfAccounts (runs on every client update)', () => {
     // And it stays a no-op from here.
     expect(await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID)).toBe(0);
   });
+
+  // Equity was the only class the seed gave no header, so its DETAIL accounts sat
+  // at the root and the Add Account form had no parent to derive a code from — the
+  // reason a live chart ended up with 3011, 3035 and 3040 invented by hand. These
+  // two must reach an already-seeded box for that to be fixed anywhere but a fresh
+  // install.
+  it('adds the partner equity headers to a facility seeded before them', async () => {
+    const HEADERS = ['3100', '3200'];
+    await prisma.chartOfAccounts.deleteMany({
+      where: { facilityId: SCRATCH_FACILITY_ID, accountCode: { in: HEADERS } },
+    });
+
+    expect(await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID)).toBe(HEADERS.length);
+
+    const added = await prisma.chartOfAccounts.findMany({
+      where: { facilityId: SCRATCH_FACILITY_ID, accountCode: { in: HEADERS } },
+      orderBy: { accountCode: 'asc' },
+    });
+    expect(added.map((a) => a.accountCode)).toEqual(HEADERS);
+
+    for (const a of added) {
+      expect(a.accountType).toBe('HEADER');
+      expect(a.accountClass).toBe('EQUITY');
+      expect(a.parentAccountCode).toBeNull();
+      // Class normal balance, not the contra side: a header never posts, and the
+      // drawings children carry DEBIT themselves — same shape as 4900/4910.
+      expect(a.normalBalance).toBe('CREDIT');
+      // coa.service's validateStatementSection rejects a section on an EQUITY
+      // header outright (equity aggregates by class), so seeding one would make
+      // the account unmaintainable through the API that created it.
+      expect(a.statementSection).toBeNull();
+    }
+
+    // The seeded equity accounts stay at the root: the system plug and the two
+    // derived accounts belong to no partner, and 3010 already carries postings on
+    // a real box, where guard_chart_of_accounts would refuse to re-parent it.
+    const roots = await prisma.chartOfAccounts.findMany({
+      where: { facilityId: SCRATCH_FACILITY_ID, accountCode: { in: ['3010', '3020', '3030'] } },
+    });
+    expect(roots).toHaveLength(3);
+    for (const a of roots) expect(a.parentAccountCode).toBeNull();
+  });
 });

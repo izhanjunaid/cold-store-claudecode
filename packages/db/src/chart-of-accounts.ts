@@ -7,8 +7,8 @@ import type { PrismaClient } from '@prisma/client';
  * journal entries to these account codes, so every facility — dev or production — needs
  * it. It is loaded by the clean `provision.ts` flow and by the dev `seed.ts`.
  *
- * NOTE: the dev seed (seed.ts) currently keeps its own inline copy for demo wiring; if
- * you change the standard chart, update both (or refactor seed.ts to import this).
+ * One definition: prisma/seed.ts, prisma/provision.ts and prisma/deploy.ts all read this
+ * array, so a change here reaches dev, clean installs and client updates alike.
  */
 export type StatementSectionSeed =
   | 'CURRENT_ASSET'
@@ -103,6 +103,20 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   { code: '2120', name: 'Loan from Director / Owner', cls: 'LIABILITY', type: 'DETAIL', parent: '2100', normal: 'CREDIT' },
 
   // CLASS 3: EQUITY
+  // Partner equity is grouped, like every other class. Without these headers
+  // equity was the only class whose DETAIL accounts sat at the root, which is
+  // why the Add Account form had no parent to derive a code from and an owner
+  // adding a second partner had to invent one. Both take the CLASS normal
+  // balance — a header never posts, and contra-ness lives on the DETAIL
+  // children, the same shape as 4900/4910 and 1300/1311.
+  //
+  // Deliberately 3100/3200 rather than 3000/3100: suggestNextCode runs a block
+  // from a header to the next header of the same class, so these yield clean
+  // 3110/3120... and 3210/3220... runs regardless of what the seed already
+  // occupies in 30xx — where the system plug and the two derived accounts live,
+  // belonging to no partner and so deliberately left at the root.
+  { code: '3100', name: "Partners' Capital", cls: 'EQUITY', type: 'HEADER', parent: null, normal: 'CREDIT', system: true },
+  { code: '3200', name: "Partners' Drawings", cls: 'EQUITY', type: 'HEADER', parent: null, normal: 'CREDIT', system: true },
   { code: '3010', name: "Owner's Capital", cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true },
   // A proprietor takes drawings constantly and had nowhere to post them but
   // against capital itself, which destroys the contributed-vs-withdrawn split
