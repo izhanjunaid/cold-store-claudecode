@@ -15,6 +15,7 @@ export const Errors = {
   AUTH_INVALID: (msg = 'Invalid or expired token') => new AppError('AUTH_INVALID', msg, 401),
   FORBIDDEN: (msg = 'Insufficient permissions') => new AppError('FORBIDDEN', msg, 403),
   PARTY_NOT_FOUND: () => new AppError('PARTY_NOT_FOUND', 'Party does not exist', 404),
+  PARTNER_NOT_FOUND: () => new AppError('PARTNER_NOT_FOUND', 'Owner does not exist', 404),
   LOT_NOT_FOUND: () => new AppError('LOT_NOT_FOUND', 'Lot does not exist', 404),
   LOT_CLOSED: () => new AppError('LOT_CLOSED', 'Lot is closed; no operations allowed', 409),
   LOT_BALANCE_INSUFFICIENT: (balance: number, requested: number) =>

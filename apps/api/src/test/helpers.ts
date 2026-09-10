@@ -13,6 +13,7 @@ import { authRoutes } from '../modules/auth/auth.controller';
 import { partyRoutes } from '../modules/party/party.controller';
 import { chamberRoutes } from '../modules/chamber/chamber.controller';
 import { commodityRoutes } from '../modules/commodity/commodity.controller';
+import { partnerRoutes } from '../modules/partners/partner.controller';
 import { ratePlanRoutes } from '../modules/rate-plan/rate-plan.controller';
 import { serviceChargeRoutes } from '../modules/service-charge/service-charge.controller';
 import { lotRoutes } from '../modules/lot/lot.controller';
@@ -75,6 +76,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(partyRoutes);
   await testApp.register(chamberRoutes);
   await testApp.register(commodityRoutes);
+  await testApp.register(partnerRoutes);
   await testApp.register(ratePlanRoutes);
   await testApp.register(serviceChargeRoutes);
   await testApp.register(lotRoutes);

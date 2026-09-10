@@ -76,6 +76,7 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
   { key: 'accounting.view', group: 'Accounting', label: 'View accounting', description: 'View chart of accounts, journals, general ledger, statements and fixed-asset registers.', defaultMinRole: 'ACCOUNTANT' },
   { key: 'accounting.manage_accounts', group: 'Accounting', label: 'Manage chart of accounts', description: 'Add or edit accounts in the chart of accounts.', defaultMinRole: 'OWNER' },
   { key: 'accounting.post_journal', group: 'Accounting', label: 'Post journal entries', description: 'Create, post and reverse journal entries; enter opening balances.', defaultMinRole: 'MANAGER' },
+  { key: 'accounting.manage_partners', group: 'Accounting', label: 'Manage owners', description: 'Add or retire an owner of the facility, and set the profit-sharing ratio. Adding an owner opens their capital and drawings accounts.', defaultMinRole: 'OWNER' },
   { key: 'accounting.period_lock', group: 'Accounting', label: 'Lock accounting periods', description: 'Close (lock) an accounting period.', defaultMinRole: 'MANAGER' },
   { key: 'accounting.period_unlock', group: 'Accounting', label: 'Unlock accounting periods', description: 'Re-open a locked accounting period.', defaultMinRole: 'OWNER' },
 

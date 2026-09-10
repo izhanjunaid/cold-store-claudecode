@@ -65,8 +65,8 @@ function plNetOver(accounts: Account[], window: SumMap): number {
 function equitySnapshot(accounts: Account[], sums: SumMap, fySums: SumMap) {
   const crAmt = (s: Sums) => s.credit - s.debit;
 
-  // Capital (3010), drawings (3015) and any other equity detail account.
-  // 3020 is folded into retained earnings below; 3030 is never posted.
+  // Every equity DETAIL account: the plug, and each owner's capital and
+  // drawings. 3020 is folded into retained earnings below; 3030 is never posted.
   const equity_lines = accounts
     .filter(
       (a) =>
