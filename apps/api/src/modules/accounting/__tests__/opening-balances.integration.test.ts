@@ -49,6 +49,55 @@ async function cleanup() {
   });
 }
 
+
+// Fixture postings for the date-ordering rule. Prefixed so cleanup() can find
+// them: leaving a POSTED entry behind in the shared facility would make every
+// later opening-balance test in this file 409 for the wrong reason.
+const ACTIVITY_PREFIX = 'OB-ACT-';
+
+async function postOrdinary(entryNumber: string, date: string) {
+  const d = new Date(date);
+  const user = await prisma.user.findFirstOrThrow({
+    where: { facilityId: TEST_FACILITY_ID },
+    select: { id: true },
+  });
+  await prisma.journalEntry.create({
+    data: {
+      facilityId: TEST_FACILITY_ID,
+      entryNumber,
+      entryDate: d,
+      entryType: 'ADJUSTMENT',
+      bookType: 'PACCI',
+      sourceTable: 'manual',
+      sourceId: TEST_FACILITY_ID,
+      description: 'opening-balance ordering fixture',
+      postingStatus: 'POSTED',
+      periodYear: d.getUTCFullYear(),
+      periodMonth: d.getUTCMonth() + 1,
+      createdBy: user.id,
+      lines: {
+        create: [
+          { lineNumber: 1, facilityId: TEST_FACILITY_ID, accountCode: '1010', debitAmount: 100, creditAmount: 0, description: 'fixture' },
+          { lineNumber: 2, facilityId: TEST_FACILITY_ID, accountCode: '4050', debitAmount: 0, creditAmount: 100, description: 'fixture' },
+        ],
+      },
+    },
+  });
+}
+
+async function clearActivity() {
+  await withGuardsDisabled(prisma, async () => {
+    const ids = (
+      await prisma.journalEntry.findMany({
+        where: { facilityId: TEST_FACILITY_ID, entryNumber: { startsWith: ACTIVITY_PREFIX } },
+        select: { id: true },
+      })
+    ).map((e) => e.id);
+    await prisma.journalEntryLine.deleteMany({ where: { journalEntryId: { in: ids } } });
+    await prisma.journalEntry.deleteMany({ where: { id: { in: ids } } });
+  });
+}
+
 beforeAll(async () => {
   app = await getTestApp();
   ownerToken = (await loginAsRole(app, 'OWNER')).accessToken;
@@ -318,5 +367,151 @@ describe('Gap 1 · opening balances', () => {
       where: { facilityId: TEST_FACILITY_ID, sourceTable: 'opening_balances', postingStatus: 'POSTED' },
     });
     expect(posted).toBe(1);
+  });
+});
+
+/**
+ * Opening balances are the position the facility started from. Before this, the
+ * only thing standing between an operator and an opening entry dated after
+ * months of live trading was the period lock — and the entry is immutable once
+ * posted, so a wrong date could only be undone by reversing it.
+ *
+ * The one-shot guard does not help: it stops a SECOND entry, not a wrongly
+ * dated first one.
+ */
+describe('opening balances may not be dated after the facility started trading', () => {
+  afterAll(clearActivity);
+
+  it('rejects a date later than the first posting, naming the entry in the way', async () => {
+    await cleanup();
+    await clearActivity();
+    await postOrdinary(`${ACTIVITY_PREFIX}1`, '2026-03-01');
+
+    const res = await enter(managerToken, { ...FULL_BODY(), as_of_date: '2026-06-30' });
+    expect(res.statusCode).toBe(409);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('OPENING_BALANCES_AFTER_ACTIVITY');
+    // The operator has to choose another date, so the message has to say which
+    // posting is in the way — not merely that something is.
+    expect(body.error.message).toContain(`${ACTIVITY_PREFIX}1`);
+    expect(body.error.message).toContain('2026-03-01');
+  });
+
+  it('allows the same day — setting up and trading on the cutover date is ordinary', async () => {
+    await cleanup();
+    await clearActivity();
+    await postOrdinary(`${ACTIVITY_PREFIX}2`, '2026-03-01');
+
+    const res = await enter(managerToken, { ...FULL_BODY(), as_of_date: '2026-03-01' });
+    expect(res.statusCode).toBe(201);
+    await cleanup();
+  });
+
+  it('allows an earlier date — the ordinary cutover', async () => {
+    await cleanup();
+    await clearActivity();
+    await postOrdinary(`${ACTIVITY_PREFIX}3`, '2026-03-01');
+
+    const res = await enter(managerToken, { ...FULL_BODY(), as_of_date: '2026-02-01' });
+    expect(res.statusCode).toBe(201);
+    await cleanup();
+  });
+
+  it('surfaces the blocking date on the status endpoint, so the screen can warn first', async () => {
+    await cleanup();
+    await clearActivity();
+    await postOrdinary(`${ACTIVITY_PREFIX}4`, '2026-03-01');
+
+    const body = JSON.parse((await status(managerToken)).body).data;
+    expect(body.earliest_posting_date).toBe('2026-03-01');
+    expect(body.earliest_posting_entry_number).toBe(`${ACTIVITY_PREFIX}4`);
+  });
+});
+
+/**
+ * The plug is 3010 by deliberate policy (docs/17 Finding 17): for a sole
+ * proprietor it simply IS their capital, so there is nothing to clear and no
+ * stale suspense account. That stops being true the moment the owners have
+ * accounts of their own — the plug then belongs to nobody, while still
+ * rendering on the balance sheet as though it were somebody's capital.
+ */
+describe('unattributed opening equity is only a question once there are partners', () => {
+  const PARTNER_CAPITAL = '3115';
+
+  const addPartnerAccount = () =>
+    prisma.chartOfAccounts.upsert({
+      where: { facilityId_accountCode: { facilityId: TEST_FACILITY_ID, accountCode: PARTNER_CAPITAL } },
+      create: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: PARTNER_CAPITAL,
+        accountName: 'Opening Test Partner — Capital',
+        accountClass: 'EQUITY',
+        accountType: 'DETAIL',
+        normalBalance: 'CREDIT',
+        isActive: true,
+      },
+      update: { isActive: true },
+    });
+
+  const removePartnerAccount = () =>
+    prisma.chartOfAccounts.deleteMany({
+      where: { facilityId: TEST_FACILITY_ID, accountCode: PARTNER_CAPITAL },
+    });
+
+  afterAll(async () => {
+    await cleanup();
+    await removePartnerAccount();
+  });
+
+  // The single-owner branch (null, because the plug IS that owner’s capital) is
+  // covered in equity-accounts.unit.test.ts instead: it depends on the facility
+  // having NO partner capital accounts, which the shared test facility cannot
+  // promise — any suite, or a developer, may have created one.
+
+  it('reports the residual once the owners have their own accounts', async () => {
+    await cleanup();
+    await addPartnerAccount();
+    const res = await enter(managerToken, FULL_BODY());
+    expect(res.statusCode).toBe(201);
+
+    const body = JSON.parse((await status(managerToken)).body).data;
+    // FULL_BODY is all assets, so the whole net position lands in the plug.
+    expect(body.unattributed_plug_pkr).toBe(370000);
+  });
+
+  it('reports zero once the entry attributes equity in full', async () => {
+    await cleanup();
+    await addPartnerAccount();
+    const res = await enter(managerToken, {
+      ...FULL_BODY(),
+      other_lines: [
+        ...FULL_BODY().other_lines,
+        { account_code: PARTNER_CAPITAL, debit_pkr: 0, credit_pkr: 370000, description: 'Opening capital' },
+      ],
+    });
+    expect(res.statusCode).toBe(201);
+
+    const body = JSON.parse((await status(managerToken)).body).data;
+    expect(body.unattributed_plug_pkr).toBe(0);
+  });
+
+  // One helper, two endpoints: the screen and the balance sheet must not tell an
+  // owner different things about the same rupees.
+  it('agrees with the balance sheet about the same figure', async () => {
+    await cleanup();
+    await addPartnerAccount();
+    await enter(managerToken, FULL_BODY());
+
+    const st = JSON.parse((await status(managerToken)).body).data;
+    const bs = JSON.parse(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/v1/accounting/balance-sheet?as_of_date=2026-12-31',
+          headers: authHeaders(ownerToken),
+        })
+      ).body,
+    ).data;
+    expect(bs.unattributed_opening_equity_pkr).toBe(st.unattributed_plug_pkr);
   });
 });

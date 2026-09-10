@@ -1039,6 +1039,77 @@ explicit unlock row (an OWNER-created reopen exception). Enforcement is in
 > before the first close. The opening-balances screen warns when the chosen as-of
 > date falls at or below the watermark.
 
+> **They must also predate the first posting.** The opening entry states the
+> position the facility *started from*, so anything already on the books before
+> that date would be counted twice. `enter()` rejects an as-of date later than the
+> earliest POSTED PACCI entry with `OPENING_BALANCES_AFTER_ACTIVITY` (409), naming
+> the entry in the way, and the screen says so before the form is filled. The
+> same day is allowed on purpose: setting the system up and recording the day's
+> first transaction before getting to opening balances is ordinary. Only PACCI
+> counts — a rough KATCHI note must not block a real cutover.
+>
+> The one-shot guard does not cover this. It stops a *second* entry, not a
+> wrongly dated first one, and posted entries are immutable by trigger — so
+> without the date check the only remedy was to reverse and start again.
+
+### Attributing opening equity to the owners
+
+The plug (`3010`) is deliberately the owner's capital account rather than a
+separate "Opening Balance Equity" account (`docs/17` Finding 17, `docs/21` §2): an
+OBE account that has to be cleared by hand afterwards is the classic source of
+stale suspense balances. **For a sole proprietor the plug simply *is* their
+capital, and there is nothing left to clear.**
+
+That holds only while there is one owner. With more than one, the plug can be
+nobody's capital, so opening equity has to be attributed explicitly:
+
+| Enter as an `other_lines` entry | For |
+|---|---|
+| Each owner's capital account (`3110`, `3120`, …) | What that owner had put in at the cutover date |
+| `3020 Retained Earnings` | Profits earned before the cutover — **IFRS for SMEs 35.10** puts transition adjustments in retained earnings, not inside a capital account |
+| Each owner's drawings account, if their paper books carry one | Current-year drawings at the cutover date |
+
+Anything not attributed lands in `3010`, where it belongs to no owner while
+appearing on the balance sheet as though it were somebody's capital. Aim to
+leave nothing there.
+
+**Where it shows.** Both the opening-balances screen and the balance sheet report
+the residual (`unattributed_plug_pkr` and `unattributed_opening_equity_pkr`), from
+one shared helper in `accounting/equity-accounts.ts` so they cannot disagree.
+Both are `null` — not zero — on a single-owner facility, where the question does
+not apply and a warning would be noise.
+
+**Clearing it after the fact** is an ordinary manual journal entry; nothing
+special is needed, since only HEADER and inactive accounts are barred from
+posting:
+
+```
+DR  3010 Owner's Capital          (the residual)
+  CR  3110 Junaid — Capital       (their agreed share)
+  CR  3120 Umair — Capital        (their agreed share)
+  CR  3020 Retained Earnings      (pre-cutover profits)
+```
+
+The software deliberately does **not** offer to do this automatically: the split
+between owners is theirs to agree, and inventing one would put a fabricated
+figure into equity.
+
+### Fixed assets need a register entry as well as a balance
+
+Depreciation runs off the **fixed-asset register**, not the ledger
+(`fixed-asset.service.ts` iterates `fixedAsset.findMany`). An opening balance
+keyed straight into `1310`/`1320`/`1330` therefore gives the account a balance
+and the register nothing: those assets never depreciate, and the register never
+ties back to the GL.
+
+Enter each asset in **Fixed Assets** as well. The opening-balances screen warns
+when a line targets a fixed-asset cost account — advisory rather than blocking,
+because entering the balance now and building the register afterwards is
+legitimate. Cost accounts are identified by rule (ASSET, DETAIL, parent `1300`,
+DEBIT-normal), which excludes the accumulated-depreciation contras beside them
+and picks up any asset account added later.
+
+
 ---
 
 ## 8. GST / Sales Tax Handling

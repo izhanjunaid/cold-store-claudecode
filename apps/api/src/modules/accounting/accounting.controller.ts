@@ -42,7 +42,8 @@ import { RevenueAccrualService } from './revenue-accrual.service';
 import { GstSettlementService } from './gst-settlement.service';
 import { WithholdingRemittanceService } from './withholding-remittance.service';
 import { buildJE27CashTransfer, CASH_TRANSFER_ACCOUNTS } from './templates/je-27-cash-transfer';
-import { buildJE30OwnerEquity, DERIVED_EQUITY_ACCOUNTS } from './templates/je-30-owner-equity';
+import { buildJE30OwnerEquity } from './templates/je-30-owner-equity';
+import { DERIVED_EQUITY_ACCOUNTS } from './equity-accounts';
 import { Errors } from '../../common/errors';
 
 const CodeParam = z.object({ code: z.string().regex(/^[0-9]+$/) });
