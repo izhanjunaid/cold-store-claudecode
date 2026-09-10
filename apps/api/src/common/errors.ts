@@ -72,6 +72,16 @@ export const Errors = {
       'Opening balances have already been entered; reverse the existing opening entry to redo them',
       409,
     ),
+  // Names the entry that blocks it, the way ACCOUNT_IN_USE names what holds an
+  // account: the opening entry is immutable once posted, so an operator who
+  // picks the wrong date can only undo it by reversing, and needs to know which
+  // posting to look at before they choose again.
+  OPENING_BALANCES_AFTER_ACTIVITY: (detail: string) =>
+    new AppError(
+      'OPENING_BALANCES_AFTER_ACTIVITY',
+      `Opening balances must be dated on or before the first posting: ${detail}`,
+      409,
+    ),
   VALIDATION_ERROR: (msg: string, field?: string) =>
     new AppError('VALIDATION_ERROR', msg, 400, field),
   INTERNAL_ERROR: (msg = 'Unexpected server error') =>

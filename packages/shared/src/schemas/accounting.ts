@@ -245,6 +245,14 @@ export const OpeningBalanceStatusResponse = z.object({
   journal_entry_id: z.string().uuid().nullable(),
   entry_number: z.string().nullable(),
   as_of_date: z.string().nullable(),
+  // The first PACCI posting on the books. Opening balances may not be dated
+  // after it, and the screen says so before the form is filled rather than
+  // after — the entry is immutable, so a wrong date costs a reversal.
+  earliest_posting_date: z.string().nullable(),
+  earliest_posting_entry_number: z.string().nullable(),
+  // Opening equity still sitting in the plug (3010 Opening Balance Equity),
+  // which belongs to no owner by definition. 0 is the healthy answer.
+  unattributed_plug_pkr: z.number(),
 });
 export type OpeningBalanceStatusResponseType = z.infer<typeof OpeningBalanceStatusResponse>;
 
@@ -478,6 +486,10 @@ export const BalanceSheetResponse = z.object({
   current_year_pl_pkr: z.number(),
   fiscal_year_start: z.string(),
   total_equity_pkr: z.number(),
+  // Part of the equity above, singled out: the opening-balance plug renders as
+  // an ordinary equity line, so an unattributed residual otherwise reads as
+  // somebody's capital. 0 once opening equity is attributed in full.
+  unattributed_opening_equity_pkr: z.number(),
   total_liabilities_and_equity_pkr: z.number(),
 
   // Balances the header rollups could not place (F-6b).

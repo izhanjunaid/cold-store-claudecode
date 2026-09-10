@@ -127,7 +127,7 @@ Realigned to the Prisma enum as part of finding 7 (it carried non-existent PREVI
 
 - **Credit notes increment `amountPaidPkr`** (a non-cash reduction represented through the paid field) — internally consistent; left as-is.
 - **Per-party opening *credit* balances** (client advances) can't be entered through `party_receivables` (positive-only); documented as a known limitation.
-- **Opening plug reuses `3010 Owner's Capital`** rather than a dedicated "Opening Balance Equity" account — acceptable policy, now documented.
+- **Opening plug reuses `3010 Owner's Capital`** rather than a dedicated "Opening Balance Equity" account — acceptable policy, now documented. **Reversed 2026-09-10** (`fix/opening-balance-guardrails`): the account was renamed to *Opening Balance Equity* and is now the plug only. The reasoning here held for a sole proprietor, where the plug simply is their capital and nothing needs clearing; it does not survive a second owner, and the objection to a dedicated account — that it goes stale unnoticed — was answered by reporting the residual on the balance sheet and the opening-balance screen. See `docs/09` §7.
 - **No payment void/refund endpoint** beyond cheque dishonour; **F-12** (CoA versioning), **F-14** (RLS) and audit Gaps 6 (bank reconciliation) and 8 (bad-debt allowance vs direct write-off) remain accepted deferrals.
 
 ---

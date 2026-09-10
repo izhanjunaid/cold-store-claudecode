@@ -422,6 +422,18 @@ on every install. Convention is in `docs/09`.
   and allocation becomes a real work item. Sits alongside **P2-9 gratuity** as a question
   only they can settle.
 
+- **Does IFRS for SMEs Section 35 apply to this facility, or only a bookkeeping migration?**
+  Section 35 governs first-time adoption of the *framework* — it requires an opening statement
+  of financial position at the date of transition, all transition adjustments recognised
+  directly in retained earnings (35.10), and a reconciliation of equity and profit from the
+  previous framework (35.12/35.13). Loading balances into new software is a different thing
+  and requires none of that. **Which case this is depends on what the facility’s books were
+  prepared under before ColdChain, and nothing in this repo records it.** If they were not on
+  IFRS for SMEs, both apply at once and the reconciliation disclosures are owed in the first
+  set of statements. **The question to put to them:** what basis were the previous accounts
+  prepared on, and is this the first period presented under IFRS for SMEs? Answer decides
+  whether a transition note is a real work item or a non-issue.
+
 ### CLOSED PREVENTIVELY — owner pay had only one path, and it was the wrong one
 
 The owners intend to take a regular monthly amount plus more from profits. The obvious place

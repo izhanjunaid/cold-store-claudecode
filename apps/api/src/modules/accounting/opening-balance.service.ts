@@ -4,6 +4,7 @@ import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
 import { arAccountForParty, type JournalEntryLineDraft } from './templates/types';
 import type { JournalEntryService } from './journal-entry.service';
+import { EQUITY_PLUG_ACCOUNT, unattributedPlug } from './equity-accounts';
 
 /**
  * Guided opening balances (audit Gap 1): one balanced PACCI entry holding
@@ -29,7 +30,6 @@ const BLOCKED_OTHER_LINE_CODES = new Set(['1110', '1120', '1130', '1140', '1150'
 // 3010 is the plug account itself, so it must not be posted to directly. The
 // web already enforces both; mirror it server-side (phase/19 audit item 4).
 const OTHER_LINE_ALLOWED_CLASSES = new Set(['ASSET', 'LIABILITY', 'EQUITY']);
-const EQUITY_PLUG_ACCOUNT = '3010';
 const CASH_ACCOUNT = '1010';
 const BANK_ACCOUNT = '1020';
 
@@ -40,16 +40,42 @@ export class OpeningBalanceService {
   ) {}
 
   async getStatus(facilityId: string) {
-    const existing = await this.prisma.journalEntry.findFirst({
-      where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED', reversedById: null },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, entryNumber: true, entryDate: true },
-    });
+    const [existing, firstPosting, plugSums] = await Promise.all([
+      this.prisma.journalEntry.findFirst({
+        where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED', reversedById: null },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, entryNumber: true, entryDate: true },
+      }),
+      // Drives the same warn-before-the-form-is-filled treatment the period lock
+      // already gets: the entry is immutable once posted, so telling someone
+      // their date is impossible AFTER they have keyed every balance is too late.
+      this.prisma.journalEntry.findFirst({
+        where: { facilityId, postingStatus: 'POSTED', bookType: 'PACCI' },
+        orderBy: { entryDate: 'asc' },
+        select: { entryNumber: true, entryDate: true },
+      }),
+      this.prisma.journalEntryLine.aggregate({
+        where: {
+          facilityId,
+          accountCode: EQUITY_PLUG_ACCOUNT,
+          journalEntry: { postingStatus: 'POSTED', bookType: 'PACCI' },
+        },
+        _sum: { debitAmount: true, creditAmount: true },
+      }),
+    ]);
+
+    const plugCredit = Number(plugSums._sum.creditAmount ?? 0) - Number(plugSums._sum.debitAmount ?? 0);
+
     return {
       entered: existing !== null,
       journal_entry_id: existing?.id ?? null,
       entry_number: existing?.entryNumber ?? null,
       as_of_date: existing?.entryDate.toISOString().slice(0, 10) ?? null,
+      earliest_posting_date: firstPosting?.entryDate.toISOString().slice(0, 10) ?? null,
+      earliest_posting_entry_number: firstPosting?.entryNumber ?? null,
+      // Anything sitting in the plug is unattributed by definition — the account
+      // is no longer anybody's capital. Zero is the healthy answer.
+      unattributed_plug_pkr: unattributedPlug(plugCredit),
     };
   }
 
@@ -79,6 +105,32 @@ export class OpeningBalanceService {
         where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED', reversedById: null },
       });
       if (existing) throw Errors.OPENING_BALANCES_ALREADY_ENTERED();
+
+      // Opening balances are the position the facility started from, so nothing
+      // may already be posted before them. The one-shot check above stops a
+      // SECOND entry; it does nothing about a first one dated after months of
+      // live trading, which lands the starting position in the middle of the
+      // ledger. Posted entries are immutable by trigger, so the only remedy
+      // afterwards is a reversal — this has to be caught before the write.
+      //
+      // PACCI only: that is the book this entry posts to and the one every
+      // statement defaults to. A rough KATCHI note must not block a real cutover.
+      const firstPosting = await tx.journalEntry.findFirst({
+        where: { facilityId, postingStatus: 'POSTED', bookType: 'PACCI' },
+        orderBy: { entryDate: 'asc' },
+        select: { entryNumber: true, entryDate: true },
+      });
+      if (firstPosting) {
+        const firstDate = firstPosting.entryDate.toISOString().slice(0, 10);
+        // Strictly before, not on: setting the system up and entering the day's
+        // first transaction before getting to opening balances is ordinary, and
+        // rejecting it would be a false positive on a legitimate cutover day.
+        if (firstDate < body.as_of_date) {
+          throw Errors.OPENING_BALANCES_AFTER_ACTIVITY(
+            `${firstPosting.entryNumber} is already posted on ${firstDate}, before the ${body.as_of_date} you chose`,
+          );
+        }
+      }
 
       const otherCodes = [...new Set(body.other_lines.map((l) => l.account_code))];
       if (otherCodes.length > 0) {

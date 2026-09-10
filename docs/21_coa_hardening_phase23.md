@@ -49,6 +49,18 @@ account is a documented policy decision (`docs/17` Finding 17) and the right one
 separate OBE account that must be manually cleared later is a well-known source of
 stale suspense balances in QuickBooks migrations.
 
+> **Superseded (2026-09-10, `fix/opening-balance-guardrails`).** The conclusion above
+> holds for a **sole proprietor**, and for the reason given: the plug *is* that owner’s
+> capital, so nothing needs clearing and no suspense account goes stale. It does not
+> survive a second owner — the plug can then be nobody’s capital, and the premise fails
+> rather than the logic.
+>
+> The objection to a dedicated account was that it must be cleared by hand and **nobody
+> notices**. That half is now answered: the residual is reported on the opening-balance
+> screen and on the face of the balance sheet. So `3010` was renamed to **Opening Balance
+> Equity** and is the plug only; every owner, a sole one included, has a named capital
+> account under `3100`. No account does two jobs any more. See `docs/09` §7.
+
 **The defect was the one-shot guard.** `opening-balance.service.ts` did a `findFirst`
 for an existing POSTED entry and then posted — inside a transaction, but with no row
 lock, no advisory lock, and **no unique constraint behind it** (`@@index([sourceTable,

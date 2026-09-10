@@ -29,11 +29,17 @@ const SELECT_CLASS =
 const DERIVED = new Set(['3020', '3030']);
 
 /**
- * The opening-balance plug (opening-balance.service.ts). It is a system account
- * — it cannot be renamed, deactivated or deleted — so on a facility with more
- * than one owner it sits in this list looking exactly like a person's account.
- * It stays selectable, because a single-owner facility has no other capital
- * account; it is labelled instead of hidden.
+ * The opening-balance plug (opening-balance.service.ts) — 3010 Opening Balance
+ * Equity. Excluded from this list outright: it is not an owner, and posting a
+ * drawing or a contribution against it would put the movement somewhere nobody
+ * owns.
+ *
+ * It used to be offered here with an "(opening balances)" label instead, because
+ * it doubled as a sole proprietor's capital account and hiding it would have left
+ * that facility with an empty picker. Every owner now has a named account under
+ * 3100, so the label — a warning standing in for a barrier — is no longer the
+ * best available answer. Where the picker IS empty, the screen now says what to
+ * create rather than offering the wrong thing.
  */
 const PLUG = '3010';
 
@@ -50,12 +56,7 @@ export default function OwnerEquityPage() {
   const [posting, setPosting] = useState(false);
 
   const equityAccounts = (accounts ?? []).filter(
-    (a) => a.account_class === 'EQUITY' && !DERIVED.has(a.account_code),
-  );
-  // True exactly when the owners have their own capital accounts — which is
-  // also exactly when choosing the plug would be a mistake.
-  const hasOwnCapitalAccounts = equityAccounts.some(
-    (a) => a.account_code !== PLUG && a.normal_balance === 'CREDIT',
+    (a) => a.account_class === 'EQUITY' && !DERIVED.has(a.account_code) && a.account_code !== PLUG,
   );
   const cashAccounts = (accounts ?? []).filter((a) => a.parent_account_code === '1000');
 
@@ -135,17 +136,23 @@ export default function OwnerEquityPage() {
               {equityAccounts.map((a) => (
                 <option key={a.account_code} value={a.account_code}>
                   {a.account_code} — {a.account_name}
-                  {a.account_code === PLUG ? ' (opening balances)' : ''}
                 </option>
               ))}
             </select>
-            <p className="text-xs text-muted-foreground">
-              Each owner has their own. Add one under Chart of Accounts if it is missing.
-            </p>
-            {hasOwnCapitalAccounts && (
+            {equityAccounts.length === 0 ? (
+              // Nothing to offer is a real state now that the plug is excluded,
+              // and it has a specific remedy — so name it rather than leaving an
+              // empty dropdown to be puzzled over.
+              <p className="text-xs text-destructive">
+                No owner accounts exist yet. Add one per owner under Chart of Accounts —
+                capital under <span className="font-mono">3100</span>, drawings under{' '}
+                <span className="font-mono">3200</span>.
+              </p>
+            ) : (
               <p className="text-xs text-muted-foreground">
-                <span className="font-mono">{PLUG}</span> is where opening balances balance to —
-                not a person. Use the owner&apos;s own account.
+                Each owner has their own, capital under <span className="font-mono">3100</span> and
+                drawings under <span className="font-mono">3200</span>. Add one under Chart of
+                Accounts if it is missing.
               </p>
             )}
           </div>

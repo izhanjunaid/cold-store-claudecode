@@ -223,7 +223,7 @@ so nesting is refused at creation rather than silently mis-placed at report time
 
 | Code | Account Name | Type | Notes |
 |---|---|---|---|
-| 3010 | Owner's Capital | Detail | Initial and subsequent equity injections. Also the plug account for the guided opening-balance entry (there is no separate "Opening Balance Equity" account) |
+| 3010 | Opening Balance Equity | Detail | **The plug account for the guided opening-balance entry, and nothing else.** A balance here is opening equity not yet attributed to an owner. Each owner's own capital account lives under `3100` |
 | 3020 | Retained Earnings | Detail | Posted only by opening balances. On the balance sheet it is **presented** as posted 3020 + accumulated prior fiscal years' result — see §5.3 virtual closing |
 | 3030 | Current Year Profit / (Loss) | Detail | **Never posted to.** The balance sheet computes the current fiscal year's result live and presents it on this line |
 
@@ -827,7 +827,7 @@ LIABILITIES
   Total Liabilities                   XXX,XXX
 
 EQUITY
-  Owner's Capital                   X,XXX,XXX
+  Ali — Capital                     X,XXX,XXX
   Retained Earnings                   XXX,XXX
   Current Year Profit                 XXX,XXX
   Total Equity                      X,XXX,XXX
@@ -1038,6 +1038,81 @@ explicit unlock row (an OWNER-created reopen exception). Enforcement is in
 > `PERIOD_LOCKED` (409) until an OWNER reopens the period. Enter opening balances
 > before the first close. The opening-balances screen warns when the chosen as-of
 > date falls at or below the watermark.
+
+> **They must also predate the first posting.** The opening entry states the
+> position the facility *started from*, so anything already on the books before
+> that date would be counted twice. `enter()` rejects an as-of date later than the
+> earliest POSTED PACCI entry with `OPENING_BALANCES_AFTER_ACTIVITY` (409), naming
+> the entry in the way, and the screen says so before the form is filled. The
+> same day is allowed on purpose: setting the system up and recording the day's
+> first transaction before getting to opening balances is ordinary. Only PACCI
+> counts — a rough KATCHI note must not block a real cutover.
+>
+> The one-shot guard does not cover this. It stops a *second* entry, not a
+> wrongly dated first one, and posted entries are immutable by trigger — so
+> without the date check the only remedy was to reverse and start again.
+
+### Attributing opening equity to the owners
+
+`3010 Opening Balance Equity` is where the entry balances to, and nothing else.
+
+`docs/17` Finding 17 and `docs/21` §2 originally kept it as the owner's capital
+account, on the grounds that a separate OBE account has to be cleared by hand and
+becomes a stale suspense balance. **That objection rested on nobody noticing the
+leftover** — and the balance is now reported on this screen and on the face of the
+balance sheet, so noticing is no longer the problem. What did not survive was one
+account doing two jobs: as a sole proprietor's capital account *and* the plug, no
+name could be right for both, and with two owners the capital half belonged to
+nobody.
+
+So opening equity is attributed explicitly, by every facility including a
+single-owner one:
+
+| Enter as an `other_lines` entry | For |
+|---|---|
+| Each owner's capital account (`3110`, `3120`, …) | What that owner had put in at the cutover date |
+| `3020 Retained Earnings` | Profits earned before the cutover — **IFRS for SMEs 35.10** puts transition adjustments in retained earnings, not inside a capital account |
+| Each owner's drawings account, if their paper books carry one | Current-year drawings at the cutover date |
+
+Anything not attributed lands in `3010`, where it belongs to no owner. Aim to
+leave nothing there.
+
+**Where it shows.** Both the opening-balances screen and the balance sheet report
+the residual (`unattributed_plug_pkr` and `unattributed_opening_equity_pkr`), from
+one shared helper in `accounting/equity-accounts.ts` so they cannot disagree.
+**Zero is the healthy answer** and raises nothing; there is no "not applicable"
+case, because the plug is never anybody's capital.
+
+**Clearing it after the fact** is an ordinary manual journal entry; nothing
+special is needed, since only HEADER and inactive accounts are barred from
+posting:
+
+```
+DR  3010 Opening Balance Equity   (the residual)
+  CR  3110 Junaid — Capital       (their agreed share)
+  CR  3120 Umair — Capital        (their agreed share)
+  CR  3020 Retained Earnings      (pre-cutover profits)
+```
+
+The software deliberately does **not** offer to do this automatically: the split
+between owners is theirs to agree, and inventing one would put a fabricated
+figure into equity.
+
+### Fixed assets need a register entry as well as a balance
+
+Depreciation runs off the **fixed-asset register**, not the ledger
+(`fixed-asset.service.ts` iterates `fixedAsset.findMany`). An opening balance
+keyed straight into `1310`/`1320`/`1330` therefore gives the account a balance
+and the register nothing: those assets never depreciate, and the register never
+ties back to the GL.
+
+Enter each asset in **Fixed Assets** as well. The opening-balances screen warns
+when a line targets a fixed-asset cost account — advisory rather than blocking,
+because entering the balance now and building the register afterwards is
+legitimate. Cost accounts are identified by rule (ASSET, DETAIL, parent `1300`,
+DEBIT-normal), which excludes the accumulated-depreciation contras beside them
+and picks up any asset account added later.
+
 
 ---
 
@@ -1835,7 +1910,7 @@ is INSERT-only, so a guess would be permanent on every install.
 3100  Partners' Capital           HEADER   - one CREDIT DETAIL per partner (3110, 3120, ...)
 3200  Partners' Drawings          HEADER   - one DEBIT  DETAIL per partner (3210, 3220, ...)
 
-3010  Owner's Capital             DETAIL   - system; the opening-balance plug   (root)
+3010  Opening Balance Equity      DETAIL   - system; the opening-balance plug   (root)
 3020  Retained Earnings           DETAIL   - derived by the statements          (root)
 3030  Current Year Profit/(Loss)  DETAIL   - derived by the statements          (root)
 ```
@@ -1886,15 +1961,25 @@ entries is **deactivated**, not deleted, and a correctly-shaped replacement open
 
 ### Retiring the generic accounts when you move to per-owner ones
 
-The seed ships `3010 Owner's Capital` and `3015 Owner's Drawings`, which are right for a
-facility with one owner. Adding per-owner accounts without retiring these leaves several
-accounts meaning "capital" and several meaning "drawings", which invites posting to the wrong
-one.
+The seed ships `3015 Owner's Drawings`, which is right for a facility with one owner. Adding
+per-owner accounts without retiring it leaves several accounts meaning "drawings", which
+invites posting to the wrong one.
 
 | Account | What to do | Why |
 |---|---|---|
 | `3015 Owner's Drawings` | **Delete it** (deactivate if it already carries entries) | Not a system account, and fully replaced by the per-owner drawings accounts |
-| `3010 Owner's Capital` | **Leave it alone** | `system: true` and hardcoded as `EQUITY_PLUG_ACCOUNT`; `coa.service.ts` refuses to delete, deactivate *or rename* it |
+| `3010 Opening Balance Equity` | **Leave it, and keep it at zero** | It is the plug, not an owner. `system: true`, so `coa.service.ts` refuses to delete or deactivate it — and it should not be, since the opening-balance entry needs somewhere to balance to |
+
+**On an existing facility, `3010` may hold real capital.** It used to be called
+*Owner's Capital* and did two jobs at once — a sole proprietor's capital account **and** the
+plug. The update renames it, which leaves that capital under a name meaning "unattributed".
+That is deliberate and visible: both the balance sheet and the opening-balance screen report
+it until it is journalled to a named capital account under `3100`. One entry settles it:
+
+```
+DR  3010 Opening Balance Equity
+  CR  3110 <Owner> — Capital
+```
 
 `3010` is not an extra owner. It is where the opening-balance entry balances to, and if each
 owner's opening capital is entered explicitly the plug ends at **zero** — at which point it
@@ -1902,9 +1987,9 @@ disappears from the balance sheet and the statement of changes in equity by itse
 drop zero-balance accounts. A non-zero plug is therefore a signal worth reading: the opening
 entry did not fully attribute to the owners.
 
-It stays visible in the Owner Capital & Drawings picker, because a single-owner facility has no
-other capital account to offer. It is labelled *(opening balances)* there, and once other
-capital accounts exist the screen says plainly not to use it.
+It does **not** appear in the Owner Capital & Drawings picker: it is not an owner, and a
+drawing or contribution posted against it would land somewhere nobody owns. Where that picker
+is empty, the screen says which accounts to create rather than offering the wrong one.
 
 **At go-live** each owner's opening capital is entered directly as an opening-balance
 `other_lines` entry (EQUITY is an allowed class; only `3010` is blocked, being the

@@ -1,12 +1,5 @@
 import type { JournalEntryDraft } from './types';
 
-/**
- * Derived equity accounts. Retained earnings and the current-year result are
- * computed by the statements, never posted, so neither may be the equity side
- * of an owner movement.
- */
-export const DERIVED_EQUITY_ACCOUNTS = ['3020', '3030'] as const;
-
 export type OwnerEquityDirection = 'CAPITAL_IN' | 'DRAWING';
 
 type Input = {

@@ -22,6 +22,10 @@ interface OpeningStatus {
   journal_entry_id: string | null;
   entry_number: string | null;
   as_of_date: string | null;
+  earliest_posting_date: string | null;
+  earliest_posting_entry_number: string | null;
+  /** Opening equity not yet attributed to an owner. 0 once it has been. */
+  unattributed_plug_pkr: number;
 }
 interface Party {
   id: string;
@@ -33,6 +37,8 @@ interface Account {
   account_name: string;
   account_type: string;
   account_class: string;
+  parent_account_code: string | null;
+  normal_balance: 'DEBIT' | 'CREDIT';
   is_active: boolean;
 }
 interface ReceivableRow {
@@ -158,6 +164,38 @@ export default function OpeningBalancesPage() {
     })();
 
   const hasAnything = totals.debit > 0 || totals.credit > 0;
+
+  // Opening balances are the position the facility started from, so a date after
+  // the first posting is impossible. Say so before the form is filled, exactly
+  // as the period lock does above — the entry is immutable once posted, so
+  // finding out afterwards costs a reversal.
+  const blockedByActivity =
+    status?.earliest_posting_date !== null &&
+    status?.earliest_posting_date !== undefined &&
+    status.earliest_posting_date < asOfDate;
+
+  // Fixed-asset cost accounts, derived rather than listed: DEBIT-normal detail
+  // accounts under header 1300. That excludes the CREDIT-normal accumulated
+  // depreciation contras beside them, and picks up any asset account an owner
+  // adds later.
+  const fixedAssetCostCodes = useMemo(
+    () =>
+      new Set(
+        accounts
+          .filter(
+            (a) =>
+              a.account_class === 'ASSET' &&
+              a.account_type === 'DETAIL' &&
+              a.parent_account_code === '1300' &&
+              a.normal_balance === 'DEBIT',
+          )
+          .map((a) => a.account_code),
+      ),
+    [accounts],
+  );
+  const opensFixedAssets = others.some(
+    (o) => fixedAssetCostCodes.has(o.account_code) && (parseFloat(o.debit) || 0) > 0,
+  );
 
   const receivableColumns: EditableRowColumn<ReceivableRow>[] = [
     {
@@ -299,6 +337,22 @@ export default function OpeningBalancesPage() {
                   . If they were entered incorrectly, open that entry and reverse it — this screen
                   then unlocks for a fresh entry.
                 </p>
+                {/* The entry is done, so the guidance on the form can no longer
+                    help. This is the only place the residual gets surfaced to
+                    someone who already entered their balances — and it is the
+                    figure that reads on the balance sheet as a partner's
+                    capital while belonging to nobody. */}
+                {status.unattributed_plug_pkr !== 0 && (
+                  <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                    <span className="font-semibold tabular-nums">
+                      {formatMoney(Math.abs(status.unattributed_plug_pkr))}
+                    </span>{' '}
+                    of opening equity is still sitting in Opening Balance Equity (3010), which
+                    belongs to no owner. Post a journal entry moving it to the owners&apos; capital
+                    accounts under 3100 in whatever split they agree, and to Retained Earnings
+                    (3020) for profits earned before the cutover.
+                  </p>
+                )}
               </div>
             </div>
           </CardContent>
@@ -319,9 +373,12 @@ export default function OpeningBalancesPage() {
         <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
         <p>
           Enter what each party owes you, your cash and bank balances, and any other assets or
-          liabilities as of the day before you started using ColdChain. The difference posts to
-          Owner&apos;s Capital (3010) automatically. Outstanding peshgi is not entered here — issue
-          it through the Loans module so recovery tracking works.
+          liabilities as of the day before you started using ColdChain. Add an{' '}
+          <strong>other line</strong> for each owner&apos;s capital account, and put profits earned
+          before the cutover to Retained Earnings (3020). Anything left over lands in Opening
+          Balance Equity (3010), which belongs to no owner — so aim to leave nothing there.
+          Outstanding peshgi is not entered here — issue it through the Loans module so recovery
+          tracking works.
         </p>
       </div>
 
@@ -336,6 +393,21 @@ export default function OpeningBalancesPage() {
           Accounting is closed through {String(lockedThrough!.month).padStart(2, '0')}/
           {lockedThrough!.year}, so an entry dated {asOfDate} will be rejected. The owner must
           reopen that period first, or you can date the entry after the close.
+        </p>
+      )}
+
+      {blockedByActivity && (
+        <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          {status!.earliest_posting_entry_number} is already posted on{' '}
+          {status!.earliest_posting_date}, before the {asOfDate} you have chosen. Opening balances
+          are the position you started from, so they must be dated on or before your first entry.
+        </p>
+      )}
+
+      {opensFixedAssets && (
+        <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          Assets entered here get a ledger balance but no entry in the Fixed Asset register, so
+          they will not depreciate. Add each one under Fixed Assets as well.
         </p>
       )}
 
@@ -398,8 +470,8 @@ export default function OpeningBalancesPage() {
               Total credits <span className="font-semibold tabular-nums">{formatMoney(totals.credit)}</span>
             </span>
             {hasAnything && totals.plug !== 0 && (
-              <span className="ml-3 text-muted-foreground">
-                Owner&apos;s Capital {totals.plug > 0 ? 'credited' : 'debited'}{' '}
+              <span className="ml-3 text-amber-700 dark:text-amber-400">
+                Unattributed {totals.plug > 0 ? 'credit' : 'debit'}{' '}
                 <span className="font-semibold tabular-nums">{formatMoney(Math.abs(totals.plug))}</span>
               </span>
             )}

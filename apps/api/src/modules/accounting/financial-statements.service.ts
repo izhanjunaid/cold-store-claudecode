@@ -6,6 +6,16 @@ import type {
 } from '@coldchain/shared';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { fiscalYearStart } from './fiscal-year';
+import {
+  isDrawingsAccount,
+  isCapitalAccount,
+  unattributedPlug,
+  EQUITY_PLUG_ACCOUNT,
+  DERIVED_EQUITY_ACCOUNTS,
+} from './equity-accounts';
+
+/** Accounts the statements compute rather than read — never rendered as their own line. */
+const DERIVED = new Set<string>(DERIVED_EQUITY_ACCOUNTS);
 
 type Sums = { debit: number; credit: number };
 type SumMap = Map<string, Sums>;
@@ -62,8 +72,7 @@ function equitySnapshot(accounts: Account[], sums: SumMap, fySums: SumMap) {
       (a) =>
         a.accountClass === 'EQUITY' &&
         a.accountType === 'DETAIL' &&
-        a.accountCode !== '3020' &&
-        a.accountCode !== '3030',
+        !DERIVED.has(a.accountCode),
     )
     .map((a) => line(a, sums, crAmt))
     .filter((l) => l.amount_pkr !== 0);
@@ -402,7 +411,7 @@ export class FinancialStatementsService {
 
     const columns = accounts
       .filter((a) => a.accountClass === 'EQUITY' && a.accountType === 'DETAIL')
-      .filter((a) => a.accountCode !== '3020' && a.accountCode !== '3030')
+      .filter((a) => !DERIVED.has(a.accountCode))
       .map((a) => {
         const opening_pkr = crAt(open.sums, a.accountCode);
         const movement = crAt(periodSums, a.accountCode);
@@ -576,6 +585,15 @@ export class FinancialStatementsService {
       current_year_pl_pkr,
       fiscal_year_start: fyStartIso,
       total_equity_pkr,
+      // The plug renders above as an ordinary equity line, and nothing up there
+      // distinguishes it from an owner's own capital. Singling it out is the
+      // point: a balance here is opening equity nobody has attributed yet.
+      unattributed_opening_equity_pkr: unattributedPlug(
+        (() => {
+          const s = sums.get(EQUITY_PLUG_ACCOUNT);
+          return s ? s.credit - s.debit : 0;
+        })(),
+      ),
       total_liabilities_and_equity_pkr,
 
       unclassified_asset_lines,
@@ -631,26 +649,6 @@ function aggregate(lines: { accountCode: string; debitAmount: unknown; creditAmo
     m.set(l.accountCode, cur);
   }
   return m;
-}
-
-/**
- * Contra-equity: an owner's drawings account. Being DEBIT-normal is what makes
- * it one, which is why this is a rule rather than a list of codes — the seeded
- * 3015 is only the first, and a second owner's is created through the UI.
- */
-function isDrawingsAccount(a: Account): boolean {
-  return a.accountClass === 'EQUITY' && a.accountType === 'DETAIL' && a.normalBalance === 'DEBIT';
-}
-
-/** An owner's capital account: equity that is not drawings and not derived. */
-function isCapitalAccount(a: Account): boolean {
-  return (
-    a.accountClass === 'EQUITY' &&
-    a.accountType === 'DETAIL' &&
-    a.normalBalance === 'CREDIT' &&
-    a.accountCode !== '3020' &&
-    a.accountCode !== '3030'
-  );
 }
 
 /** One statement line for a detail account, amount via `amt`. */
