@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   isCapitalAccount,
   isDrawingsAccount,
-  hasPartnerCapitalAccounts,
   unattributedPlug,
   EQUITY_PLUG_ACCOUNT,
   type EquityAccountShape,
@@ -53,34 +52,26 @@ describe('what makes an equity account a partner’s', () => {
 });
 
 describe('unattributed opening equity', () => {
-  it('is not a question for a sole proprietor — the plug IS their capital', () => {
-    // docs/17 Finding 17: plugging into the owner's capital is deliberate, and
-    // for one owner it leaves nothing to clear. Warning here would be noise
-    // about the only equity account they have.
-    expect(unattributedPlug([PLUG, RETAINED, CURRENT_YEAR], 500000)).toBeNull();
-    expect(hasPartnerCapitalAccounts([PLUG, RETAINED, CURRENT_YEAR])).toBe(false);
+  // 3010 used to be a sole proprietor’s real capital account AND the plug, so
+  // whether a balance there mattered depended on the rest of the chart. It is
+  // now only the plug: every owner has a named account under 3100, so anything
+  // left here is unattributed by definition and no chart lookup is involved.
+  it('is whatever is sitting in the plug, rounded to paisa', () => {
+    expect(unattributedPlug(370000)).toBe(370000);
+    expect(unattributedPlug(1000.005)).toBe(1000.01);
   });
 
-  it('becomes one as soon as an owner has an account of their own', () => {
-    const chart = [PLUG, RETAINED, CURRENT_YEAR, acct('3110', 'CREDIT'), acct('3210', 'DEBIT')];
-    expect(hasPartnerCapitalAccounts(chart)).toBe(true);
-    expect(unattributedPlug(chart, 370000)).toBe(370000);
+  it('is zero — not a warning — once equity is attributed in full', () => {
+    expect(unattributedPlug(0)).toBe(0);
   });
 
-  it('reports zero rather than null once equity is attributed in full', () => {
-    // "attributed in full" is a real answer and worth being able to say; null
-    // means the question does not apply, which is a different thing.
-    const chart = [PLUG, acct('3110', 'CREDIT')];
-    expect(unattributedPlug(chart, 0)).toBe(0);
+  it('keeps a debit residual signed, so an over-attributed entry is visible too', () => {
+    expect(unattributedPlug(-5000)).toBe(-5000);
   });
 
-  it('is not fooled by a drawings account alone', () => {
-    // A facility part-way through setting partners up may have created drawings
-    // before capital. Drawings are not capital, so the question does not arise.
-    expect(hasPartnerCapitalAccounts([PLUG, acct('3210', 'DEBIT')])).toBe(false);
-  });
-
-  it('rounds to paisa, so the screen and the balance sheet cannot drift apart', () => {
-    expect(unattributedPlug([PLUG, acct('3110', 'CREDIT')], 1000.005)).toBe(1000.01);
+  // The plug is not one of the owners, so it must never be counted as a partner
+  // capital account by anything walking the chart.
+  it('is still an equity account the statements render when non-zero', () => {
+    expect(isCapitalAccount(PLUG)).toBe(true);
   });
 });

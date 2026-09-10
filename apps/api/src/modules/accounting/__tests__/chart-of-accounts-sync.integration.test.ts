@@ -160,6 +160,41 @@ describe('syncChartOfAccounts (runs on every client update)', () => {
     expect(await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID)).toBe(0);
   });
 
+  // The plug's rename is the only non-insert besides the 6110 re-parent, and the
+  // one that reaches every existing box: 3010 used to be called "Owner's Capital"
+  // while doing two jobs, and on a facility with more than one owner the capital
+  // half belonged to nobody.
+  it('renames the plug on an existing box, but never an owner-chosen name', async () => {
+    const nameOf = async () =>
+      (
+        await prisma.chartOfAccounts.findUnique({
+          where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '3010' } },
+        })
+      )?.accountName;
+
+    // A box one release behind still carries the old seeded name.
+    await prisma.chartOfAccounts.update({
+      where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '3010' } },
+      data: { accountName: "Owner's Capital" },
+    });
+    await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID);
+    expect(await nameOf()).toBe('Opening Balance Equity');
+
+    // An owner who named it themselves keeps their name — the update is scoped to
+    // the exact old seeded string, not "anything that isn't the new one".
+    await prisma.chartOfAccounts.update({
+      where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '3010' } },
+      data: { accountName: 'Capital Introduced by Proprietor' },
+    });
+    await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID);
+    expect(await nameOf()).toBe('Capital Introduced by Proprietor');
+
+    await prisma.chartOfAccounts.update({
+      where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '3010' } },
+      data: { accountName: 'Opening Balance Equity' },
+    });
+  });
+
   // Equity was the only class the seed gave no header, so its DETAIL accounts sat
   // at the root and the Add Account form had no parent to derive a code from — the
   // reason a live chart ended up with 3011, 3035 and 3040 invented by hand. These

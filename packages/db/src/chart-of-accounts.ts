@@ -117,7 +117,14 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   // belonging to no partner and so deliberately left at the root.
   { code: '3100', name: "Partners' Capital", cls: 'EQUITY', type: 'HEADER', parent: null, normal: 'CREDIT', system: true },
   { code: '3200', name: "Partners' Drawings", cls: 'EQUITY', type: 'HEADER', parent: null, normal: 'CREDIT', system: true },
-  { code: '3010', name: "Owner's Capital", cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true },
+  // Where the guided opening-balance entry balances to, and nothing else. It was
+  // called "Owner's Capital" while doing two jobs at once: a sole proprietor's real
+  // capital account AND the plug. One name cannot be right for both, and on a
+  // facility with two owners the capital half belongs to nobody — so the balance
+  // sheet showed a residual under a person's label. Every owner now gets a named
+  // account under 3100 instead, including a sole one, and this account means only
+  // "not yet attributed". A non-zero balance here is a to-do, not a figure.
+  { code: '3010', name: 'Opening Balance Equity', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true },
   // A proprietor takes drawings constantly and had nowhere to post them but
   // against capital itself, which destroys the contributed-vs-withdrawn split
   // the owner's tax computation depends on. DEBIT-normal: a contra-equity
@@ -276,6 +283,21 @@ export async function syncChartOfAccounts(
   } catch {
     // 6110 has postings — it stays under 6000, exactly as before phase/25.
   }
+
+  // The plug's name, for boxes seeded before it was separated from a real capital
+  // account. Scoped to the exact old name so an owner who renamed it themselves
+  // keeps theirs — the same rule as the 6110 re-parent above. Renaming is safe
+  // where 6110's re-parent is not: guard_chart_of_accounts locks code, class, type,
+  // parent and normal_balance, never the name, and no posting logic reads it.
+  //
+  // On a single-owner box this puts their real capital under a name that says
+  // "unattributed", which is deliberate and now visible: the balance sheet and the
+  // opening-balance screen both report it until they journal it to their own
+  // capital account under 3100. docs/09 has the two-line entry.
+  await prisma.chartOfAccounts.updateMany({
+    where: { facilityId, accountCode: '3010', accountName: "Owner's Capital" },
+    data: { accountName: 'Opening Balance Equity' },
+  });
 
   return missing.length;
 }

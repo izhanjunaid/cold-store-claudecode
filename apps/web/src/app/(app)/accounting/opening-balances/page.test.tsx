@@ -34,13 +34,13 @@ const acct = (
   is_active: true,
 });
 
-// A single-owner chart: the plug, the two derived accounts, cash, and the fixed
-// asset pair. Nothing here is a partner's own capital account.
+// A chart with no owner accounts yet: the plug, the two derived accounts, cash,
+// and the fixed-asset pair.
 const SOLE_OWNER_CHART = [
   acct('1010', 'Cash on Hand', 'ASSET', 'DEBIT', '1000'),
   acct('1310', 'Cold Storage Plant & Equipment', 'ASSET', 'DEBIT', '1300'),
   acct('1311', 'Accum. Depreciation — Plant & Equipment', 'ASSET', 'CREDIT', '1300'),
-  acct('3010', "Owner's Capital", 'EQUITY', 'CREDIT', null),
+  acct('3010', 'Opening Balance Equity', 'EQUITY', 'CREDIT', null),
   acct('3020', 'Retained Earnings', 'EQUITY', 'CREDIT', null),
   acct('3030', 'Current Year Profit / (Loss)', 'EQUITY', 'CREDIT', null),
 ];
@@ -54,7 +54,7 @@ const BASE_STATUS = {
   as_of_date: null,
   earliest_posting_date: null,
   earliest_posting_entry_number: null,
-  unattributed_plug_pkr: null,
+  unattributed_plug_pkr: 0,
 };
 
 function mount(status: Record<string, unknown>, chart = SOLE_OWNER_CHART) {
@@ -91,18 +91,20 @@ describe('OpeningBalancesPage — a date after the first posting is impossible',
 describe('OpeningBalancesPage — where equity is meant to go', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('tells a sole proprietor the difference simply posts to 3010', async () => {
+  // Unconditional now. While 3010 doubled as a sole proprietor's capital account
+  // this screen told them the difference simply posted there and said nothing
+  // about attribution — correct then, wrong once the plug is only a plug.
+  it('asks for a line per owner, and pre-cutover profit to retained earnings', async () => {
     mount({});
-    await waitFor(() => expect(screen.getByText(/posts to/)).toBeTruthy());
-    expect(screen.queryByText(/each owner's capital account/i)).toBeNull();
+    await waitFor(() => expect(screen.getByText(/each owner/i)).toBeTruthy());
+    // IFRS for SMEs 35.10 — transition adjustments belong in retained earnings,
+    // not inside a capital account.
+    expect(screen.getByText(/Retained Earnings \(3020\)/)).toBeTruthy();
   });
 
-  it('asks for per-owner attribution once the owners have their own accounts', async () => {
+  it('says the same on a facility that already has partner accounts', async () => {
     mount({}, PARTNER_CHART);
     await waitFor(() => expect(screen.getByText(/each owner/i)).toBeTruthy());
-    // Prior-year profit belongs in retained earnings, not inside a capital
-    // account — IFRS for SMEs 35.10.
-    expect(screen.getByText(/Retained Earnings \(3020\)/)).toBeTruthy();
   });
 });
 
@@ -122,18 +124,6 @@ describe('OpeningBalancesPage — a residual already posted', () => {
     );
     await waitFor(() => expect(screen.getByText(/belongs\s+to no owner/)).toBeTruthy());
     expect(screen.getByText(/370,000/)).toBeTruthy();
-  });
-
-  it('stays quiet when the plug is null — one owner, nothing to attribute', async () => {
-    mount({
-      entered: true,
-      as_of_date: '2026-01-01',
-      entry_number: 'JE-000001',
-      journal_entry_id: '11111111-1111-1111-1111-111111111111',
-      unattributed_plug_pkr: null,
-    });
-    await waitFor(() => expect(screen.getByText(/Opening balances were entered/)).toBeTruthy());
-    expect(screen.queryByText(/belongs\s+to no owner/)).toBeNull();
   });
 
   it('stays quiet at zero — attributed in full is not a warning', async () => {

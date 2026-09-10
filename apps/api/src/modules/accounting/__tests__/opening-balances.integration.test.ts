@@ -429,64 +429,32 @@ describe('opening balances may not be dated after the facility started trading',
 });
 
 /**
- * The plug is 3010 by deliberate policy (docs/17 Finding 17): for a sole
- * proprietor it simply IS their capital, so there is nothing to clear and no
- * stale suspense account. That stops being true the moment the owners have
- * accounts of their own — the plug then belongs to nobody, while still
- * rendering on the balance sheet as though it were somebody's capital.
+ * 3010 is the plug and nothing else now. While it was also called "Owner's
+ * Capital" a balance there was only sometimes a problem — it depended on whether
+ * the owners had accounts of their own — and both the endpoint and the screen had
+ * to work that out from the chart. Every owner has a named account under 3100, so
+ * anything sitting here is unattributed by definition.
  */
-describe('unattributed opening equity is only a question once there are partners', () => {
-  const PARTNER_CAPITAL = '3115';
+describe('unattributed opening equity', () => {
+  afterAll(cleanup);
 
-  const addPartnerAccount = () =>
-    prisma.chartOfAccounts.upsert({
-      where: { facilityId_accountCode: { facilityId: TEST_FACILITY_ID, accountCode: PARTNER_CAPITAL } },
-      create: {
-        facilityId: TEST_FACILITY_ID,
-        accountCode: PARTNER_CAPITAL,
-        accountName: 'Opening Test Partner — Capital',
-        accountClass: 'EQUITY',
-        accountType: 'DETAIL',
-        normalBalance: 'CREDIT',
-        isActive: true,
-      },
-      update: { isActive: true },
-    });
-
-  const removePartnerAccount = () =>
-    prisma.chartOfAccounts.deleteMany({
-      where: { facilityId: TEST_FACILITY_ID, accountCode: PARTNER_CAPITAL },
-    });
-
-  afterAll(async () => {
+  it('reports the whole net position when nothing attributes it', async () => {
     await cleanup();
-    await removePartnerAccount();
-  });
-
-  // The single-owner branch (null, because the plug IS that owner’s capital) is
-  // covered in equity-accounts.unit.test.ts instead: it depends on the facility
-  // having NO partner capital accounts, which the shared test facility cannot
-  // promise — any suite, or a developer, may have created one.
-
-  it('reports the residual once the owners have their own accounts', async () => {
-    await cleanup();
-    await addPartnerAccount();
     const res = await enter(managerToken, FULL_BODY());
     expect(res.statusCode).toBe(201);
 
     const body = JSON.parse((await status(managerToken)).body).data;
-    // FULL_BODY is all assets, so the whole net position lands in the plug.
+    // FULL_BODY is all assets, so the entire net position lands in the plug.
     expect(body.unattributed_plug_pkr).toBe(370000);
   });
 
   it('reports zero once the entry attributes equity in full', async () => {
     await cleanup();
-    await addPartnerAccount();
     const res = await enter(managerToken, {
       ...FULL_BODY(),
       other_lines: [
         ...FULL_BODY().other_lines,
-        { account_code: PARTNER_CAPITAL, debit_pkr: 0, credit_pkr: 370000, description: 'Opening capital' },
+        { account_code: '3020', debit_pkr: 0, credit_pkr: 370000, description: 'Pre-cutover results' },
       ],
     });
     expect(res.statusCode).toBe(201);
@@ -499,7 +467,6 @@ describe('unattributed opening equity is only a question once there are partners
   // owner different things about the same rupees.
   it('agrees with the balance sheet about the same figure', async () => {
     await cleanup();
-    await addPartnerAccount();
     await enter(managerToken, FULL_BODY());
 
     const st = JSON.parse((await status(managerToken)).body).data;

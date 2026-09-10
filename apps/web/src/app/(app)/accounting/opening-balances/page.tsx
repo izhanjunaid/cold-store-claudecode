@@ -16,7 +16,6 @@ import { EditableRows, FormActions, type EditableRowColumn } from '@/components/
 import { PageHeader } from '@/components/layout/page-header';
 import { formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
-import { cn } from '@/lib/utils';
 
 interface OpeningStatus {
   entered: boolean;
@@ -25,8 +24,8 @@ interface OpeningStatus {
   as_of_date: string | null;
   earliest_posting_date: string | null;
   earliest_posting_entry_number: string | null;
-  /** null on a single-owner facility, where the plug IS that owner's capital. */
-  unattributed_plug_pkr: number | null;
+  /** Opening equity not yet attributed to an owner. 0 once it has been. */
+  unattributed_plug_pkr: number;
 }
 interface Party {
   id: string;
@@ -174,23 +173,6 @@ export default function OpeningBalancesPage() {
     status?.earliest_posting_date !== null &&
     status?.earliest_posting_date !== undefined &&
     status.earliest_posting_date < asOfDate;
-
-  // Once the owners have capital accounts of their own, the plug can no longer
-  // be anybody's capital — whatever lands there is opening equity nobody has
-  // attributed. On a single-owner facility 3010 IS that owner's capital, so the
-  // question does not arise and saying anything would be noise. Same asymmetry
-  // as the owner-equity picker.
-  const hasPartnerCapital = useMemo(
-    () =>
-      accounts.some(
-        (a) =>
-          a.account_class === 'EQUITY' &&
-          a.account_type === 'DETAIL' &&
-          a.normal_balance === 'CREDIT' &&
-          !['3010', '3020', '3030'].includes(a.account_code),
-      ),
-    [accounts],
-  );
 
   // Fixed-asset cost accounts, derived rather than listed: DEBIT-normal detail
   // accounts under header 1300. That excludes the CREDIT-normal accumulated
@@ -360,15 +342,15 @@ export default function OpeningBalancesPage() {
                     someone who already entered their balances — and it is the
                     figure that reads on the balance sheet as a partner's
                     capital while belonging to nobody. */}
-                {status.unattributed_plug_pkr !== null && status.unattributed_plug_pkr !== 0 && (
+                {status.unattributed_plug_pkr !== 0 && (
                   <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
                     <span className="font-semibold tabular-nums">
                       {formatMoney(Math.abs(status.unattributed_plug_pkr))}
                     </span>{' '}
-                    of opening equity is still sitting in Owner&apos;s Capital (3010), which belongs
-                    to no owner now that each has their own account. Post a journal entry moving it
-                    to the owners&apos; capital accounts in whatever split they agree, and to
-                    Retained Earnings (3020) for profits earned before the cutover.
+                    of opening equity is still sitting in Opening Balance Equity (3010), which
+                    belongs to no owner. Post a journal entry moving it to the owners&apos; capital
+                    accounts under 3100 in whatever split they agree, and to Retained Earnings
+                    (3020) for profits earned before the cutover.
                   </p>
                 )}
               </div>
@@ -391,17 +373,10 @@ export default function OpeningBalancesPage() {
         <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
         <p>
           Enter what each party owes you, your cash and bank balances, and any other assets or
-          liabilities as of the day before you started using ColdChain.{' '}
-          {hasPartnerCapital ? (
-            <>
-              Add an <strong>other line</strong> for each owner&apos;s capital account, and put
-              profits earned before the cutover to Retained Earnings (3020). Anything left over
-              lands in Owner&apos;s Capital (3010), where it belongs to no owner — so aim to leave
-              nothing.
-            </>
-          ) : (
-            <>The difference posts to Owner&apos;s Capital (3010) automatically.</>
-          )}{' '}
+          liabilities as of the day before you started using ColdChain. Add an{' '}
+          <strong>other line</strong> for each owner&apos;s capital account, and put profits earned
+          before the cutover to Retained Earnings (3020). Anything left over lands in Opening
+          Balance Equity (3010), which belongs to no owner — so aim to leave nothing there.
           Outstanding peshgi is not entered here — issue it through the Loans module so recovery
           tracking works.
         </p>
@@ -495,11 +470,8 @@ export default function OpeningBalancesPage() {
               Total credits <span className="font-semibold tabular-nums">{formatMoney(totals.credit)}</span>
             </span>
             {hasAnything && totals.plug !== 0 && (
-              <span
-                className={cn('ml-3', hasPartnerCapital ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground')}
-              >
-                {hasPartnerCapital ? 'Unattributed' : "Owner's Capital"}{' '}
-                {totals.plug > 0 ? 'credited' : 'debited'}{' '}
+              <span className="ml-3 text-amber-700 dark:text-amber-400">
+                Unattributed {totals.plug > 0 ? 'credit' : 'debit'}{' '}
                 <span className="font-semibold tabular-nums">{formatMoney(Math.abs(totals.plug))}</span>
               </span>
             )}

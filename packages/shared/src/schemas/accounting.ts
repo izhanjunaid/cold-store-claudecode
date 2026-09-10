@@ -250,10 +250,9 @@ export const OpeningBalanceStatusResponse = z.object({
   // after — the entry is immutable, so a wrong date costs a reversal.
   earliest_posting_date: z.string().nullable(),
   earliest_posting_entry_number: z.string().nullable(),
-  // Opening equity still sitting in the plug that belongs to no owner.
-  // null where the facility has one owner, and the plug legitimately IS their
-  // capital account — there is nothing to attribute and nothing to warn about.
-  unattributed_plug_pkr: z.number().nullable(),
+  // Opening equity still sitting in the plug (3010 Opening Balance Equity),
+  // which belongs to no owner by definition. 0 is the healthy answer.
+  unattributed_plug_pkr: z.number(),
 });
 export type OpeningBalanceStatusResponseType = z.infer<typeof OpeningBalanceStatusResponse>;
 
@@ -488,10 +487,9 @@ export const BalanceSheetResponse = z.object({
   fiscal_year_start: z.string(),
   total_equity_pkr: z.number(),
   // Part of the equity above, singled out: the opening-balance plug renders as
-  // an ordinary equity line, so once the owners have accounts of their own an
-  // unattributed residual reads as somebody's capital. null on a single-owner
-  // facility, where the plug is that owner's capital and nothing is wrong.
-  unattributed_opening_equity_pkr: z.number().nullable(),
+  // an ordinary equity line, so an unattributed residual otherwise reads as
+  // somebody's capital. 0 once opening equity is attributed in full.
+  unattributed_opening_equity_pkr: z.number(),
   total_liabilities_and_equity_pkr: z.number(),
 
   // Balances the header rollups could not place (F-6b).

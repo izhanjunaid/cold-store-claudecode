@@ -585,12 +585,10 @@ export class FinancialStatementsService {
       current_year_pl_pkr,
       fiscal_year_start: fyStartIso,
       total_equity_pkr,
-      // The plug renders above as an ordinary equity line, which is exactly the
-      // problem once the owners have accounts of their own: a residual nobody
-      // has attributed reads on the face of the statement as somebody's capital.
-      // null on a single-owner facility, where the plug IS that owner's capital.
+      // The plug renders above as an ordinary equity line, and nothing up there
+      // distinguishes it from an owner's own capital. Singling it out is the
+      // point: a balance here is opening equity nobody has attributed yet.
       unattributed_opening_equity_pkr: unattributedPlug(
-        accounts,
         (() => {
           const s = sums.get(EQUITY_PLUG_ACCOUNT);
           return s ? s.credit - s.debit : 0;

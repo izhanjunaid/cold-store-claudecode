@@ -40,7 +40,7 @@ export class OpeningBalanceService {
   ) {}
 
   async getStatus(facilityId: string) {
-    const [existing, firstPosting, accounts, plugSums] = await Promise.all([
+    const [existing, firstPosting, plugSums] = await Promise.all([
       this.prisma.journalEntry.findFirst({
         where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED', reversedById: null },
         orderBy: { createdAt: 'desc' },
@@ -53,10 +53,6 @@ export class OpeningBalanceService {
         where: { facilityId, postingStatus: 'POSTED', bookType: 'PACCI' },
         orderBy: { entryDate: 'asc' },
         select: { entryNumber: true, entryDate: true },
-      }),
-      this.prisma.chartOfAccounts.findMany({
-        where: { facilityId, accountClass: 'EQUITY' },
-        select: { accountCode: true, accountClass: true, accountType: true, normalBalance: true },
       }),
       this.prisma.journalEntryLine.aggregate({
         where: {
@@ -77,9 +73,9 @@ export class OpeningBalanceService {
       as_of_date: existing?.entryDate.toISOString().slice(0, 10) ?? null,
       earliest_posting_date: firstPosting?.entryDate.toISOString().slice(0, 10) ?? null,
       earliest_posting_entry_number: firstPosting?.entryNumber ?? null,
-      // null where the facility has one owner and the plug is legitimately their
-      // capital; a figure — possibly 0 — once the owners have their own accounts.
-      unattributed_plug_pkr: unattributedPlug(accounts, plugCredit),
+      // Anything sitting in the plug is unattributed by definition — the account
+      // is no longer anybody's capital. Zero is the healthy answer.
+      unattributed_plug_pkr: unattributedPlug(plugCredit),
     };
   }
 

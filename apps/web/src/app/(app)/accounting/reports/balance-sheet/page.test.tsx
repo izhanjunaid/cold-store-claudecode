@@ -63,7 +63,7 @@ const BASE_BS = {
   ],
   unclassified_liability_lines: [],
   has_unclassified: true,
-  unattributed_opening_equity_pkr: null,
+  unattributed_opening_equity_pkr: 0,
 };
 
 describe('BalanceSheetPage — unclassified accounts surface on the statement (F-6b)', () => {
@@ -112,13 +112,6 @@ describe('BalanceSheetPage — unattributed opening equity', () => {
     await waitFor(() => expect(screen.getByText(/Total Assets/)).toBeTruthy());
     expect(screen.getByText(/has not been attributed to any owner/)).toBeTruthy();
     expect(screen.getByText(/370,000/)).toBeTruthy();
-  });
-
-  it('stays silent on a single-owner facility, where the plug IS that capital', async () => {
-    apiClient.mockResolvedValue({ ...BASE_BS, unattributed_opening_equity_pkr: null });
-    render(<BalanceSheetPage />);
-    await waitFor(() => expect(screen.getByText(/Total Assets/)).toBeTruthy());
-    expect(screen.queryByText(/has not been attributed/)).toBeNull();
   });
 
   it('stays silent once equity is attributed in full — zero is not a warning', async () => {

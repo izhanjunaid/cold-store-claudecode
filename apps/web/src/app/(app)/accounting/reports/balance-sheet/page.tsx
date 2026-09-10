@@ -49,8 +49,8 @@ interface BS {
   unclassified_asset_lines: Line[];
   unclassified_liability_lines: Line[];
   has_unclassified: boolean;
-  /** null on a single-owner facility, where the plug IS that owner’s capital. */
-  unattributed_opening_equity_pkr: number | null;
+  /** Opening equity not yet attributed to an owner. 0 once it has been. */
+  unattributed_opening_equity_pkr: number;
 }
 
 function groupMap(bs: BS | null): Map<string, number> {
@@ -229,16 +229,16 @@ export default function BalanceSheetPage() {
               <StatementRow emphasis="grand" label="Total Liabilities &amp; Equity" amount={data.total_liabilities_and_equity_pkr} prior={cmp?.total_liabilities_and_equity_pkr} />
             </StatementTable>
 
-            {data.unattributed_opening_equity_pkr !== null && data.unattributed_opening_equity_pkr !== 0 && (
+            {data.unattributed_opening_equity_pkr !== 0 && (
               // The plug is one of the equity rows above, and nothing up there
               // distinguishes it from a partner’s own capital — which is exactly
               // the trap once the owners have accounts of their own. Say so on
               // the face of the statement rather than leaving a reader to know.
               <p className="mt-3 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
                 Of the equity above, Rs {fmtAcct(Math.abs(data.unattributed_opening_equity_pkr))} sits in
-                the opening-balance account (3010) and has not been attributed to any owner. Post a
-                journal entry moving it to the owners’ capital accounts, and to Retained Earnings for
-                results earned before the cutover.
+                Opening Balance Equity (3010) and has not been attributed to any owner. Post a journal
+                entry moving it to the owners’ capital accounts under 3100, and to Retained Earnings
+                for results earned before the cutover.
               </p>
             )}
 

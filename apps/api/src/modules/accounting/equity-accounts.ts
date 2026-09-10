@@ -29,16 +29,20 @@ export type EquityAccountShape = {
 export const DERIVED_EQUITY_ACCOUNTS = ['3020', '3030'] as const;
 
 /**
- * Where the guided opening-balance entry balances to.
+ * Where the guided opening-balance entry balances to — and nothing else.
  *
- * Deliberately the seeded owner's capital account rather than a separate
- * "Opening Balance Equity" account (`docs/17` Finding 17, `docs/21` §2): an OBE
- * account that has to be cleared by hand afterwards is the classic source of
- * stale suspense balances. For a sole proprietor the plug simply *is* their
- * capital and there is nothing left to clear.
+ * `docs/17` Finding 17 and `docs/21` §2 kept this as the owner's capital account
+ * rather than a separate "Opening Balance Equity", because an OBE account that
+ * must be cleared by hand is the classic source of stale suspense balances. The
+ * objection was sound, but it rested on *nobody noticing* the leftover — and the
+ * balance is now reported on the opening-balance screen and on the face of the
+ * balance sheet, so noticing is no longer the problem.
  *
- * That reasoning holds only while there is one owner. With more than one, the
- * plug cannot be anybody's capital — see `isUnattributedPlug` below.
+ * What did not survive was the account doing two jobs. As a sole proprietor's
+ * real capital account AND the plug, no name could be right for both, and on a
+ * two-owner facility the capital half belonged to nobody. Every owner now has a
+ * named account under 3100 instead — a sole one included — and this account means
+ * only "not yet attributed".
  */
 export const EQUITY_PLUG_ACCOUNT = '3010';
 
@@ -60,38 +64,21 @@ export function isCapitalAccount(a: EquityAccountShape): boolean {
 }
 
 /**
- * True where a balance left sitting in the plug belongs to nobody.
+ * How much opening equity is sitting in the plug, unattributed.
  *
- * A facility with one owner has exactly one capital account — the plug — and a
- * balance there is that owner's capital, correctly stated and needing nothing
- * further. Once the owners have accounts of their own, anything still in the plug
- * is opening equity nobody has attributed, and it appears on the balance sheet
- * indistinguishable from a real partner's capital.
+ * There is no "not applicable" case any more. While 3010 was called Owner’s
+ * Capital it did two jobs — a sole proprietor’s real capital account AND the
+ * plug — so a balance there was only sometimes a problem, and this took the whole
+ * chart to work out which. Every owner now has a named account under 3100,
+ * including a sole one, so anything left here is unattributed by definition.
  *
- * The asymmetry is the point: warning a sole proprietor about the only equity
- * account they have would be noise, and the same shape is already shipped in the
- * owner-equity picker.
- */
-export function hasPartnerCapitalAccounts(accounts: EquityAccountShape[]): boolean {
-  return accounts.some((a) => isCapitalAccount(a) && a.accountCode !== EQUITY_PLUG_ACCOUNT);
-}
-
-/**
- * How much opening equity is sitting in the plug unattributed, or `null` where
- * the question does not apply (a facility with a single owner).
+ * Zero is the healthy answer and means attributed in full; it is not a warning.
  *
- * Callers reach the plug's balance differently — the balance sheet already has an
+ * Callers reach the balance differently — the balance sheet already has an
  * aggregate in hand, the opening-balance status endpoint queries for one — but
- * the *decision* of whether a balance counts as unattributed lives here, so the
- * two can never tell an owner different things about the same number.
- *
- * Zero is returned rather than null in the multi-partner case: "attributed in
- * full" is a meaningful answer and the caller may want to say so.
+ * they round it here, so the screen and the statement can never show an owner two
+ * different figures for the same rupees.
  */
-export function unattributedPlug(
-  accounts: EquityAccountShape[],
-  plugCreditBalance: number,
-): number | null {
-  if (!hasPartnerCapitalAccounts(accounts)) return null;
+export function unattributedPlug(plugCreditBalance: number): number {
   return Math.round(plugCreditBalance * 100) / 100;
 }
