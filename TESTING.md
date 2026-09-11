@@ -295,3 +295,9 @@ turbo test:coverage
 | UI components | >60% | React Testing Library |
 | E2E workflows | 7/7 | Playwright |
 | DB migrations | Up + down | Prisma CLI |
+
+> Live suite after Owner Equity (2026-09-11, `feat/partner-model`): **237 unit + 665 integration (api) + 207 unit (web) green**.
+> New this line: partner records and their accounts (9 integration), profit allocation (11 unit + 6 integration),
+> opening-balance date ordering and the unattributed plug (7 integration + 9 web), equity account rules (8 unit),
+> the Owners screen (7 web), the 4.13 disclosure (5 web), and the account-code suggester for partner blocks (4 unit).
+> The allocation and the opening-balance date guard were both mutation-checked: removing each fails its own tests.

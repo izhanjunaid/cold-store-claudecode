@@ -422,6 +422,14 @@ on every install. Convention is in `docs/09`.
   and allocation becomes a real work item. Sits alongside **P2-9 gratuity** as a question
   only they can settle.
 
+  **Update 2026-09-11 (`feat/partner-model`): the machinery now exists; only the answer is
+  missing.** Owners are records with their own accounts, and the ratio is stored as dated
+  weights, so answering this is data entry under Accounting → Owners rather than a work item.
+  Until it is answered the result stays undivided and the statement of changes in equity says
+  so — unchanged behaviour. Note also that the ratio was never strictly *absent*: Partnership
+  Act 1932 s.13(b) gives equal shares unless the partners agree otherwise, and the screen
+  offers that as a labelled default rather than applying it silently.
+
 - **Does IFRS for SMEs Section 35 apply to this facility, or only a bookkeeping migration?**
   Section 35 governs first-time adoption of the *framework* — it requires an opening statement
   of financial position at the date of transition, all transition adjustments recognised
