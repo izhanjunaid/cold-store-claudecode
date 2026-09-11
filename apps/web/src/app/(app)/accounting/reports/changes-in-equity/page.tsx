@@ -42,6 +42,22 @@ interface ChangesInEquity {
   total_closing_pkr: number;
   is_reconciled: boolean;
   result_is_unallocated: boolean;
+  /**
+   * Whose the period's result is — disclosed beside the columns, never inside
+   * them. Nothing is posted, so no owner's account balance has moved; folding it
+   * into a column would make this statement disagree with the balance sheet
+   * about the same accounts. null where no ratio has ever been agreed.
+   */
+  result_allocation: {
+    by_partner: {
+      partner_id: string;
+      partner_name: string;
+      capital_account_code: string;
+      amount_pkr: number;
+    }[];
+    unallocated_pkr: number;
+    windows: { from: string; to: string; result_pkr: number; ratio_from: string | null }[];
+  } | null;
 }
 
 const startOfYear = () => `${new Date().getUTCFullYear()}-01-01`;
@@ -190,12 +206,71 @@ export default function ChangesInEquityPage() {
         </div>
       </Card>
 
+      {/* IFRS for SMEs 4.13 asks for the changes in EACH category of equity, and
+          the result is the largest change of all. It is shown here rather than
+          in the columns because nothing has been posted: this is what each owner
+          is entitled to, not what has moved into their account. */}
+      {data?.result_allocation && data.result_allocation.by_partner.length > 0 && (
+        <Card className="mt-4">
+          <div className="p-4">
+            <h2 className="text-sm font-medium">Result attributable to each owner</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Their share of the period&apos;s result under the agreed ratio. It has not been
+              transferred into their capital accounts — no entry is posted for it, so the columns
+              above still show what each owner put in less what they took out.
+            </p>
+            <table className="mt-3 w-full text-sm">
+              <tbody>
+                {data.result_allocation.by_partner.map((p) => (
+                  <tr key={p.partner_id} className="border-t">
+                    <td className="py-1.5">
+                      {p.partner_name}{' '}
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {p.capital_account_code}
+                      </span>
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">{formatMoney(p.amount_pkr)}</td>
+                  </tr>
+                ))}
+                {data.result_allocation.unallocated_pkr !== 0 && (
+                  <tr className="border-t">
+                    <td className="py-1.5 text-amber-700 dark:text-amber-400">
+                      Undivided — earned before a ratio was agreed
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums text-amber-700 dark:text-amber-400">
+                      {formatMoney(data.result_allocation.unallocated_pkr)}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            {/* The second limb of 4.13: the rights attaching to each category —
+                which ratio applied, and over what. */}
+            {data.result_allocation.windows.length > 0 && (
+              <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                Ratio applied:{' '}
+                {data.result_allocation.windows
+                  .map((w) =>
+                    w.ratio_from
+                      ? `${w.from} to ${w.to} at the ratio agreed on ${w.ratio_from}`
+                      : `${w.from} to ${w.to} with no ratio agreed`,
+                  )
+                  .join('; ')}
+                . Partners&apos; capital is repayable on agreement between the owners rather than on
+                demand, which is what allows it to be presented as equity rather than a liability
+                (IFRS for SMEs 22.6).
+              </p>
+            )}
+          </div>
+        </Card>
+      )}
+
       {data && data.result_is_unallocated && data.columns.length > 0 && (
         <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-          The result for the period is not divided between the owners. No written agreement sets a
-          profit-sharing ratio, so it stays undivided in retained earnings — splitting it would put a
-          figure on the statement that nothing supports. Agree a ratio with your accountant and it can
-          be allocated from that date.
+          {data.result_allocation
+            ? 'Part of the result was earned before any ratio took effect and stays undivided in retained earnings.'
+            : 'The result for the period is not divided between the owners: no profit-sharing ratio has been agreed, and splitting it would put a figure on the statement that nothing supports. Add the owners under Accounting → Owners and set a ratio, and it is allocated from that date onward.'}
         </p>
       )}
     </div>
