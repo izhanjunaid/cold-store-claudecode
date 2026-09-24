@@ -125,12 +125,14 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   // account under 3100 instead, including a sole one, and this account means only
   // "not yet attributed". A non-zero balance here is a to-do, not a figure.
   { code: '3010', name: 'Opening Balance Equity', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true },
-  // A proprietor takes drawings constantly and had nowhere to post them but
-  // against capital itself, which destroys the contributed-vs-withdrawn split
-  // the owner's tax computation depends on. DEBIT-normal: a contra-equity
-  // account, so the balance sheet's credit-minus-debit sum presents it
-  // negative with no change to the statement code.
-  { code: '3015', name: "Owner's Drawings", cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'DEBIT' },
+  // NOT seeded: 3015 "Owner's Drawings". Every owner gets their own drawings
+  // account under 3200, created with their capital account when the partner is
+  // added — a generic one is only ever right for a facility with exactly one
+  // owner, and it was being resurrected on every update. sync is INSERT-only, so
+  // an account missing from this array is one it re-added the moment an owner
+  // deleted it, which is exactly what docs/09 told them to do. An existing 3015
+  // is left alone: with postings it keeps its history, without them it can be
+  // deleted and now stays deleted.
   { code: '3020', name: 'Retained Earnings', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT' },
   { code: '3030', name: 'Current Year Profit / (Loss)', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true },
 

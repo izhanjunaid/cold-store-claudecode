@@ -9,7 +9,7 @@ import { EQUITY_PLUG_ACCOUNT, unattributedPlug } from './equity-accounts';
 /**
  * Guided opening balances (audit Gap 1): one balanced PACCI entry holding
  * per-party AR lines, cash/bank, and any other balance-sheet lines, with the
- * difference plugged to 3010 Owner's Capital. One-shot — a facility carries
+ * difference plugged to 3010 Opening Balance Equity. One-shot — a facility carries
  * exactly one active opening entry; redoing it means reversing the first.
  */
 
@@ -20,9 +20,9 @@ import { EQUITY_PLUG_ACCOUNT, unattributedPlug } from './equity-accounts';
 // set — an opening balance there would be double-counted by the first accrual
 // and never cleared, since the accrual only ever reverses its own entries.
 //
-// Owner's Drawings (3015) is deliberately NOT blocked: a proprietor's paper
-// books often carry a current-year drawings figure at the cutover date, and
-// it is an ordinary equity line.
+// A drawings account is deliberately NOT blocked: paper books often carry a
+// current-year drawings figure at the cutover date, and it is an ordinary
+// equity line.
 const BLOCKED_OTHER_LINE_CODES = new Set(['1110', '1120', '1130', '1140', '1150', '1250']);
 
 // Opening balances belong on the balance sheet; a P&L-class opening line has no

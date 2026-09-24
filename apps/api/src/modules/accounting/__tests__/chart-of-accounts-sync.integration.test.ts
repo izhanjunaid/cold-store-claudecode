@@ -123,7 +123,7 @@ describe('syncChartOfAccounts (runs on every client update)', () => {
   // this covers: seeded before they existed, updated afterwards, and expected
   // to pick them up without anyone running a script by hand.
   it('brings a facility seeded before this release up to the new chart', async () => {
-    const NEW_CODES = ['1240', '1250', '1260', '2071', '2072', '3015'];
+    const NEW_CODES = ['1240', '1250', '1260', '2071', '2072'];
     await prisma.chartOfAccounts.deleteMany({
       where: { facilityId: SCRATCH_FACILITY_ID, accountCode: { in: NEW_CODES } },
     });
@@ -144,13 +144,6 @@ describe('syncChartOfAccounts (runs on every client update)', () => {
     expect(by('1250').parentAccountCode).toBe('1200');
     expect(by('1250').accountClass).toBe('ASSET');
 
-    // Drawings is contra-equity: DEBIT-normal, root-level like the rest of
-    // equity. The balance sheet sums equity as credit-minus-debit, so this
-    // presents negative with no change to the statement code.
-    expect(by('3015').accountClass).toBe('EQUITY');
-    expect(by('3015').normalBalance).toBe('DEBIT');
-    expect(by('3015').parentAccountCode).toBeNull();
-
     // Withholding stays split by section — the s.165 statement reports by
     // section, and separating one merged balance afterwards is guesswork.
     expect(by('2071').accountClass).toBe('LIABILITY');
@@ -158,6 +151,22 @@ describe('syncChartOfAccounts (runs on every client update)', () => {
 
     // And it stays a no-op from here.
     expect(await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID)).toBe(0);
+  });
+
+  // sync is INSERT-only, which means an account in the seed array comes BACK the
+  // moment an owner deletes it. 3015 was exactly that: docs/09 tells an owner
+  // moving to per-owner accounts to delete it, and the next nightly update put it
+  // straight back. It is no longer seeded, and this is the regression test.
+  it('does not resurrect a deleted drawings account', async () => {
+    await prisma.chartOfAccounts.deleteMany({
+      where: { facilityId: SCRATCH_FACILITY_ID, accountCode: '3015' },
+    });
+    await syncChartOfAccounts(prisma, SCRATCH_FACILITY_ID);
+
+    const back = await prisma.chartOfAccounts.findUnique({
+      where: { facilityId_accountCode: { facilityId: SCRATCH_FACILITY_ID, accountCode: '3015' } },
+    });
+    expect(back).toBeNull();
   });
 
   // The plug's rename is the only non-insert besides the 6110 re-parent, and the

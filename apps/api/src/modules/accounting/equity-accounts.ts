@@ -46,6 +46,10 @@ export const DERIVED_EQUITY_ACCOUNTS = ['3020', '3030'] as const;
  */
 export const EQUITY_PLUG_ACCOUNT = '3010';
 
+/** Where each owner's own accounts live. Seeded; a partner's pair is created under them. */
+export const PARTNER_CAPITAL_HEADER = '3100';
+export const PARTNER_DRAWINGS_HEADER = '3200';
+
 const DERIVED = new Set<string>(DERIVED_EQUITY_ACCOUNTS);
 
 /** Contra-equity: a partner's drawings account. Being DEBIT-normal is what makes it one. */

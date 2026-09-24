@@ -364,6 +364,8 @@ model Facility {
   payments       Payment[]
 
   chartOfAccounts ChartOfAccounts[]
+  partners        Partner[]
+  partnerShares   PartnerProfitShare[]
   journalEntries  JournalEntry[]
   creditNotes     CreditNote[]
   periodLocks     PeriodLock[]
@@ -868,10 +870,10 @@ model Payment {
   allocations    PaymentAllocation[]
   loanRepayments PartyLoanRepayment[] @relation("PartyLoanRepaymentPayment")
 
+  @@unique([facilityId, receiptNumber])
   @@index([facilityId, partyId])
   @@index([facilityId, status])
   @@index([facilityId, paymentDate])
-  @@unique([facilityId, receiptNumber])
   @@index([facilityId, paymentDate, status])
   @@map("payments")
 }
@@ -901,19 +903,19 @@ model PaymentAllocation {
 // ============================================================
 
 model ChartOfAccounts {
-  id                String        @id @default(uuid()) @db.Uuid
-  facilityId        String        @map("facility_id") @db.Uuid
-  accountCode       String        @map("account_code") @db.VarChar(10)
-  accountName       String        @map("account_name") @db.VarChar(200)
-  accountClass      AccountClass  @map("account_class")
-  accountType       AccountType   @map("account_type")
-  parentAccountCode String?       @map("parent_account_code") @db.VarChar(10)
-  normalBalance     NormalBalance @map("normal_balance")
+  id                String            @id @default(uuid()) @db.Uuid
+  facilityId        String            @map("facility_id") @db.Uuid
+  accountCode       String            @map("account_code") @db.VarChar(10)
+  accountName       String            @map("account_name") @db.VarChar(200)
+  accountClass      AccountClass      @map("account_class")
+  accountType       AccountType       @map("account_type")
+  parentAccountCode String?           @map("parent_account_code") @db.VarChar(10)
+  normalBalance     NormalBalance     @map("normal_balance")
   statementSection  StatementSection? @map("statement_section")
   cashFlowSection   CashFlowSection?  @map("cash_flow_section")
-  isSystemAccount   Boolean       @default(false) @map("is_system_account")
-  isActive          Boolean       @default(true) @map("is_active")
-  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  isSystemAccount   Boolean           @default(false) @map("is_system_account")
+  isActive          Boolean           @default(true) @map("is_active")
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz()
 
   facility          Facility           @relation(fields: [facilityId], references: [id])
   journalEntryLines JournalEntryLine[]
@@ -1486,4 +1488,59 @@ model LotMovement {
 
   @@index([lotId, movedAt])
   @@map("lot_movements")
+}
+
+/// An owner of the facility, and the two equity accounts that are theirs.
+///
+/// Before this, a partner was not a thing: the statements worked out whose an
+/// account was by reading its normal balance (DEBIT = drawings, CREDIT =
+/// capital). Nothing linked one owner's two accounts, and nothing knew a partner
+/// needed both — which is how a live chart ended up with an owner who had a
+/// drawings account, no capital account, and no way to notice.
+model Partner {
+  id                  String    @id @default(uuid()) @db.Uuid
+  facilityId          String    @map("facility_id") @db.Uuid
+  name                String    @db.VarChar(200)
+  /// EQUITY / DETAIL / CREDIT, under header 3100.
+  capitalAccountCode  String    @map("capital_account_code") @db.VarChar(10)
+  /// EQUITY / DETAIL / DEBIT, under header 3200.
+  drawingsAccountCode String    @map("drawings_account_code") @db.VarChar(10)
+  admittedOn          DateTime  @map("admitted_on") @db.Date
+  /// Set when they leave. Their accounts and history stay; only the profit
+  /// share stops, which the effective-dated share rows already express.
+  retiredOn           DateTime? @map("retired_on") @db.Date
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  facility Facility             @relation(fields: [facilityId], references: [id])
+  shares   PartnerProfitShare[]
+
+  /// One account belongs to one partner. Without these, two partners could name
+  /// the same account and every per-owner figure would double-count.
+  @@unique([facilityId, capitalAccountCode])
+  @@unique([facilityId, drawingsAccountCode])
+  @@unique([facilityId, name])
+  @@map("partners")
+}
+
+/// How the result is divided, from a date. Effective-dated rather than a single
+/// current value because the year a partner joins has to split at the old ratio
+/// up to the admission date and the new one after it — the part that is
+/// genuinely error-prone by hand.
+model PartnerProfitShare {
+  id            String   @id @default(uuid()) @db.Uuid
+  facilityId    String   @map("facility_id") @db.Uuid
+  partnerId     String   @map("partner_id") @db.Uuid
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  /// Relative weight, not a percentage: the allocator normalises over the
+  /// partners effective on the date, so 1/1 and 50/50 mean the same thing and
+  /// neither can fail to add to 100.
+  weight        Decimal  @db.Decimal(12, 4)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  facility Facility @relation(fields: [facilityId], references: [id])
+  partner  Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, effectiveFrom])
+  @@index([facilityId, effectiveFrom])
+  @@map("partner_profit_shares")
 }

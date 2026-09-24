@@ -1904,6 +1904,75 @@ gets their own pair of accounts — capital and drawings — **created rather th
 seed cannot know how many owners there are or what they are called, and `syncChartOfAccounts`
 is INSERT-only, so a guess would be permanent on every install.
 
+### An owner is a record, not something inferred
+
+Until `partners` existed, the statements worked out whose an equity account was by
+reading its **normal balance** — DEBIT meant drawings, CREDIT meant capital.
+Nothing linked one owner's two accounts, and nothing knew a partner needed both.
+That is how a live chart came to hold an owner with a drawings account, no
+capital account, and no way for anything to notice.
+
+**Add an owner under Accounting → Owners.** Doing so opens both of their accounts
+in one transaction — capital under `3100`, drawings under `3200`, codes taken from
+those blocks by the same suggester the Add Account form uses, named
+`<Name> — Capital` and `<Name> — Drawings`. **No code is ever chosen by hand, and
+half a partner is unrepresentable**: if any step fails, none of it happens.
+
+| Field | Meaning |
+|---|---|
+| `capital_account_code` | EQUITY / DETAIL / **CREDIT**, under `3100` |
+| `drawings_account_code` | EQUITY / DETAIL / **DEBIT** (contra), under `3200` |
+| `admitted_on` | When they joined. Does not by itself give them a share — the ratio does |
+| `retired_on` | When they left. Their accounts and history stay; only the ratio stops |
+
+Both codes are foreign keys into the chart with `ON DELETE RESTRICT`, so an
+account cannot be deleted out from under the statements that resolve per-owner
+figures through it, and each is unique per facility so two owners can never claim
+the same account and double-count.
+
+**Adopting accounts that already exist.** A facility that had per-owner accounts
+before this shipped supplies their codes when adding the owner, and they are taken
+over rather than duplicated. This is not a convenience: once anything has posted,
+`guard_chart_of_accounts` locks the account's structure and the journal-entry-line
+FK is `ON UPDATE RESTRICT`, so delete-and-recreate is impossible — without
+adoption the record could never be introduced on exactly the facilities that need
+it. Adoption checks the class, type and normal balance, and refuses an account
+another owner already holds.
+
+Where no partner records exist the statements fall back to reading the normal
+balance as before, so a facility that has not added its owners yet is unaffected.
+
+### Dividing the result
+
+The ratio is a set of **weights with a date**, not percentages: 3 and 1 mean the
+same as 75 and 25, and a set of weights cannot fail to add up to a whole. Each
+ratio applies from its date onward, so **the year an owner is admitted splits
+automatically** — the old ratio up to the admission date, the new one after it.
+That is the part nobody should be doing by hand, and the reason the ratio is dated
+rather than being a single current value.
+
+Setting a ratio replaces the whole window at that date. A ratio is read together;
+one stale row left beside two new ones would produce a split nobody chose.
+
+**Partnership Act 1932 s.13(b)** gives partners equal shares unless they agree
+otherwise. The screen offers that as a button and never applies it on its own —
+the statutory default is a fallback the owners choose, not an assumption the
+software makes for them.
+
+**Nothing is posted.** The statement of changes in equity discloses each owner's
+share *beside* the columns rather than inside them, because no entry moves profit
+into a capital account: retained earnings and the current-year result are computed
+rather than posted (virtual closing), a posted appropriation would double-count on
+top of them, and any later backdated entry would invalidate it. So a partner's
+column still shows what they put in less what they took out, and their share of
+the result is shown as the entitlement it is.
+
+The invariant that keeps this honest: **allocation moves nothing.** Total equity,
+the total result and `is_reconciled` are identical whether or not a ratio is set.
+Result earned before the first ratio was ever agreed stays undivided and keeps
+`result_is_unallocated` true, so the statement says so rather than dividing on a
+ratio that did not exist.
+
 ### Where partner accounts live
 
 ```

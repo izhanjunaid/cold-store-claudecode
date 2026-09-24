@@ -42,6 +42,7 @@ const groups: AcctGroup[] = [
       { title: 'Opening Balances', href: '/accounting/opening-balances', icon: FilePlus2, description: 'Bring balances forward at go-live.' },
       { title: 'Revenue Accrual', href: '/accounting/revenue-accrual', icon: FilePlus2, description: 'Recognise storage earned but not yet billed.' },
       { title: 'Cash Transfer', href: '/accounting/cash-transfers', icon: Wallet, description: 'Move money between cash, bank and wallet.' },
+      { title: 'Owners', href: '/accounting/partners', icon: Users, description: "Who owns the facility, the accounts that are theirs, and how the result is divided." },
       { title: 'Owner Capital & Drawings', href: '/accounting/owner-equity', icon: Wallet, description: "Money an owner puts in, or takes out. Never payroll." },
       { title: 'Sales Tax Settlement', href: '/accounting/gst-settlement', icon: Coins, description: 'Clear GST collected against input tax remitted.' },
     ],

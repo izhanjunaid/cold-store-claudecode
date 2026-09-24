@@ -7,6 +7,8 @@ import type {
 } from '@coldchain/shared';
 import { normalBalanceForClass } from '@coldchain/shared';
 
+type Tx = Prisma.TransactionClient;
+
 // The seed numbers every class by its leading digit (1 asset … 6 expense).
 // We reject only a code whose leading digit is *another* class's assigned
 // range — e.g. an EXPENSE numbered 1999 collides with assets. Unassigned
@@ -142,7 +144,21 @@ export class CoaService {
 
   async create(facilityId: string, body: CreateAccountRequestType) {
     // Transaction so the audit trigger sees the acting user (F-2b).
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction((tx) => this.createInTransaction(tx as Tx, facilityId, body));
+  }
+
+  /**
+   * The same creation, inside a transaction the caller already owns.
+   *
+   * Adding a partner creates two accounts and a partner row, and half a partner
+   * is exactly the state this project spent a week finding in a live chart — an
+   * owner with a drawings account and no capital account, invisible because
+   * nothing knew a partner needed both. Three separate transactions cannot
+   * promise that; one can. Same shape as journal-entry.service's
+   * postInTransaction, and for the same reason.
+   */
+  async createInTransaction(tx: Tx, facilityId: string, body: CreateAccountRequestType) {
+    {
       const exists = await tx.chartOfAccounts.findUnique({
         where: { facilityId_accountCode: { facilityId, accountCode: body.account_code } },
       });
@@ -209,7 +225,7 @@ export class CoaService {
         },
       });
       return format(created);
-    });
+    }
   }
 
   /**

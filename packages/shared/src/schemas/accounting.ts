@@ -560,6 +560,35 @@ export const ChangesInEquityResponse = z.object({
   // between the owners. It stays undivided in retained earnings and the screen
   // says so; inventing a ratio would put a fabricated figure on the face of a
   // primary statement.
+  // Whose the period’s result is. Disclosed beside the columns, never folded
+  // into them: nothing is posted, so no partner’s account balance has moved —
+  // and folding it in would make this statement disagree with the balance sheet
+  // about the same accounts. null where no ratio has ever been agreed.
+  result_allocation: z
+    .object({
+      by_partner: z.array(
+        z.object({
+          partner_id: z.string().uuid(),
+          partner_name: z.string(),
+          capital_account_code: z.string(),
+          amount_pkr: z.number(),
+        }),
+      ),
+      // Result earned before the first ratio took effect. Stays undivided, and
+      // keeps result_is_unallocated true so the statement says so.
+      unallocated_pkr: z.number(),
+      // One entry per stretch of the period under a single ratio — the 4.13
+      // disclosure of what applied when.
+      windows: z.array(
+        z.object({
+          from: z.string(),
+          to: z.string(),
+          result_pkr: z.number(),
+          ratio_from: z.string().nullable(),
+        }),
+      ),
+    })
+    .nullable(),
   result_is_unallocated: z.boolean(),
 });
 export type ChangesInEquityResponseType = z.infer<typeof ChangesInEquityResponse>;

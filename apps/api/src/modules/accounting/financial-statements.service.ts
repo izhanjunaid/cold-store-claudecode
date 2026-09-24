@@ -13,6 +13,7 @@ import {
   EQUITY_PLUG_ACCOUNT,
   DERIVED_EQUITY_ACCOUNTS,
 } from './equity-accounts';
+import { sliceByRatio, divideByWeight, type RatioWindow } from './equity-allocation';
 
 /** Accounts the statements compute rather than read — never rendered as their own line. */
 const DERIVED = new Set<string>(DERIVED_EQUITY_ACCOUNTS);
@@ -65,8 +66,8 @@ function plNetOver(accounts: Account[], window: SumMap): number {
 function equitySnapshot(accounts: Account[], sums: SumMap, fySums: SumMap) {
   const crAmt = (s: Sums) => s.credit - s.debit;
 
-  // Capital (3010), drawings (3015) and any other equity detail account.
-  // 3020 is folded into retained earnings below; 3030 is never posted.
+  // Every equity DETAIL account: the plug, and each owner's capital and
+  // drawings. 3020 is folded into retained earnings below; 3030 is never posted.
   const equity_lines = accounts
     .filter(
       (a) =>
@@ -455,6 +456,7 @@ export class FinancialStatementsService {
       round2(columns.reduce((t, c) => t + pick(c), 0));
 
     const total_closing_pkr = sum((c) => c.closing_pkr);
+    const result_allocation = await this.allocateResult(facilityId, query, accounts);
 
     return {
       date_from: query.date_from,
@@ -466,11 +468,89 @@ export class FinancialStatementsService {
       total_result_pkr: sum((c) => c.result_pkr),
       total_closing_pkr,
       is_reconciled: Math.abs(total_closing_pkr - close.snap.total_equity_pkr) < 0.005,
-      // No written profit-sharing agreement, so the result is not split between
-      // the owners. Inventing a ratio would put a fabricated figure on the face
-      // of a primary statement — the same reason a seasonal lot with no season
-      // end date is excluded from the revenue accrual rather than guessed at.
-      result_is_unallocated: true,
+      result_allocation,
+      // True while any part of the period's result belongs to nobody in
+      // particular — no ratio agreed at all, or one that starts mid-period.
+      result_is_unallocated:
+        result_allocation === null || result_allocation.unallocated_pkr !== 0,
+    };
+  }
+
+  /**
+   * Each owner's share of the period's result, or null where no ratio has ever
+   * been agreed.
+   *
+   * Disclosed beside the columns rather than folded into them — see
+   * equity-allocation.ts for why. Nothing here posts, and nothing here changes
+   * total equity: it says whose the result is, it does not move it.
+   */
+  private async allocateResult(
+    facilityId: string,
+    query: ChangesInEquityQueryType,
+    accounts: Account[],
+  ) {
+    const rows = await this.prisma.partnerProfitShare.findMany({
+      where: { facilityId },
+      orderBy: { effectiveFrom: 'asc' },
+      include: { partner: { select: { id: true, name: true, capitalAccountCode: true } } },
+    });
+    if (rows.length === 0) return null;
+
+    const byDate = new Map<string, RatioWindow>();
+    for (const r of rows) {
+      const key = r.effectiveFrom.toISOString().slice(0, 10);
+      const window = byDate.get(key) ?? { effective_from: key, shares: [] };
+      window.shares.push({
+        partner_id: r.partner.id,
+        partner_name: r.partner.name,
+        capital_account_code: r.partner.capitalAccountCode,
+        weight: Number(r.weight),
+      });
+      byDate.set(key, window);
+    }
+
+    const slices = sliceByRatio(query.date_from, query.date_to, [...byDate.values()]);
+    const totals = new Map<string, { name: string; code: string; amount: number }>();
+    let unallocated = 0;
+    const windows: { from: string; to: string; result_pkr: number; ratio_from: string | null }[] = [];
+
+    for (const slice of slices) {
+      // The result earned inside this slice alone. Ratio changes are rare, so
+      // this is a handful of queries at most.
+      const lines = await this.fetchLines(facilityId, slice.from, slice.to, query.book_type);
+      const result = round2(plNetOver(accounts, aggregate(lines)));
+      windows.push({
+        from: slice.from,
+        to: slice.to,
+        result_pkr: result,
+        ratio_from: slice.ratio?.effective_from ?? null,
+      });
+
+      if (!slice.ratio) {
+        unallocated = round2(unallocated + result);
+        continue;
+      }
+      for (const part of divideByWeight(result, slice.ratio.shares)) {
+        const share = slice.ratio.shares.find((x) => x.partner_id === part.partner_id)!;
+        const running = totals.get(part.partner_id) ?? {
+          name: share.partner_name,
+          code: share.capital_account_code,
+          amount: 0,
+        };
+        running.amount = round2(running.amount + part.amount_pkr);
+        totals.set(part.partner_id, running);
+      }
+    }
+
+    return {
+      by_partner: [...totals.entries()].map(([partner_id, v]) => ({
+        partner_id,
+        partner_name: v.name,
+        capital_account_code: v.code,
+        amount_pkr: v.amount,
+      })),
+      unallocated_pkr: unallocated,
+      windows,
     };
   }
 
