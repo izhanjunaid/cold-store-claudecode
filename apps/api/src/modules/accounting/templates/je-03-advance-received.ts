@@ -1,5 +1,5 @@
 import type { JournalEntryDraft } from './types';
-import { assetAccountForPaymentMethod, ACCOUNT_ADVANCE_RECEIPTS } from './types';
+import { assetAccountForPaymentMethod, SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 type Input = {
   paymentId: string;
@@ -40,7 +40,7 @@ export function buildJE03AdvanceReceived(input: Input): JournalEntryDraft {
         description: `${input.paymentMethod} advance from ${input.party.name}`,
       },
       {
-        accountCode: ACCOUNT_ADVANCE_RECEIPTS,
+        accountCode: SYSTEM_ACCOUNTS.CUSTOMER_ADVANCES,
         debitAmount: 0,
         creditAmount: amount,
         partyId: input.party.id,

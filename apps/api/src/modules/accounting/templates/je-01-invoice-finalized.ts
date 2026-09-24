@@ -1,10 +1,5 @@
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import {
-  arAccountForParty,
-  ACCOUNT_GST_PAYABLE,
-  ACCOUNT_DISCOUNTS_ALLOWED,
-  revenueAccountForCommodity,
-} from './types';
+import { defaultControlAccountForPartyType, SYSTEM_ACCOUNTS, defaultRevenueAccountForCommodity } from '@coldchain/shared';
 
 type InvoiceLineInput = {
   lineType: string;
@@ -51,7 +46,7 @@ type Input = {
  * That keeps the entry balanced and the GL transparent.
  */
 export function buildJE01InvoiceFinalized(input: Input): JournalEntryDraft {
-  const arAccount = arAccountForParty(input.billingParty.partyType);
+  const arAccount = defaultControlAccountForPartyType(input.billingParty.partyType);
   const lines: JournalEntryLineDraft[] = [];
 
   // Sum revenue by account
@@ -65,7 +60,7 @@ export function buildJE01InvoiceFinalized(input: Input): JournalEntryDraft {
     }
     let revenueCode: string;
     if (line.lineType === 'STORAGE') {
-      revenueCode = line.ratePlanRevenueCode ?? revenueAccountForCommodity(input.lot.commodityName);
+      revenueCode = line.ratePlanRevenueCode ?? defaultRevenueAccountForCommodity(input.lot.commodityName);
     } else if (line.lineType === 'SERVICE') {
       revenueCode = line.serviceChargeRevenueCode ?? '4150';
     } else {
@@ -111,7 +106,7 @@ export function buildJE01InvoiceFinalized(input: Input): JournalEntryDraft {
   const discount = input.discountAmountPkr ?? 0;
   if (discount > 0) {
     lines.push({
-      accountCode: ACCOUNT_DISCOUNTS_ALLOWED,
+      accountCode: SYSTEM_ACCOUNTS.DISCOUNTS_ALLOWED,
       debitAmount: round2(discount),
       creditAmount: 0,
       partyId: input.billingParty.id,
@@ -134,7 +129,7 @@ export function buildJE01InvoiceFinalized(input: Input): JournalEntryDraft {
 
   if (input.gstAmountPkr > 0) {
     lines.push({
-      accountCode: ACCOUNT_GST_PAYABLE,
+      accountCode: SYSTEM_ACCOUNTS.GST_OUTPUT,
       debitAmount: 0,
       creditAmount: round2(input.gstAmountPkr),
       partyId: input.billingParty.id,

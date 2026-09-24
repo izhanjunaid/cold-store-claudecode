@@ -28,3 +28,6 @@ export * from './schemas/partners';
 export * from './permissions';
 export * from './accounting-accounts';
 export * from './account-code';
+export * from './money';
+export * from './fiscal';
+export * from './chart';

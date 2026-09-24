@@ -2,9 +2,10 @@ import type { PrismaClient } from '@coldchain/db';
 import type { EnterOpeningBalancesRequestType } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
-import { arAccountForParty, type JournalEntryLineDraft } from './templates/types';
+import { type JournalEntryLineDraft } from './templates/types';
 import type { JournalEntryService } from './journal-entry.service';
 import { EQUITY_PLUG_ACCOUNT, unattributedPlug } from './equity-accounts';
+import { defaultControlAccountForPartyType } from '@coldchain/shared';
 
 /**
  * Guided opening balances (audit Gap 1): one balanced PACCI entry holding
@@ -167,7 +168,7 @@ export class OpeningBalanceService {
         const party = await tx.party.findFirst({ where: { id: pr.party_id, facilityId } });
         if (!party) throw Errors.VALIDATION_ERROR(`Party ${pr.party_id} not found`, 'party_receivables');
         lines.push({
-          accountCode: arAccountForParty(party.partyType),
+          accountCode: defaultControlAccountForPartyType(party.partyType),
           debitAmount: pr.amount_pkr,
           creditAmount: 0,
           partyId: party.id,

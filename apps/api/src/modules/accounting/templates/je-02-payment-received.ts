@@ -1,5 +1,5 @@
 import type { JournalEntryDraft } from './types';
-import { arAccountForParty, assetAccountForPaymentMethod, ACCOUNT_TAX_WITHHELD_RECEIVABLE } from './types';
+import { defaultControlAccountForPartyType, assetAccountForPaymentMethod, SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 type Input = {
   paymentId: string;
@@ -33,7 +33,7 @@ type Input = {
 export function buildJE02PaymentReceived(input: Input): JournalEntryDraft {
   const assetAccount =
     input.assetAccountCode ?? assetAccountForPaymentMethod(input.paymentMethod);
-  const arAccount = arAccountForParty(input.party.partyType);
+  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
   const amount = round2(input.amountPkr);
   const withheld = round2(input.taxWithheldPkr ?? 0);
   const cash = round2(amount - withheld);
@@ -57,7 +57,7 @@ export function buildJE02PaymentReceived(input: Input): JournalEntryDraft {
       ...(withheld > 0
         ? [
             {
-              accountCode: ACCOUNT_TAX_WITHHELD_RECEIVABLE,
+              accountCode: SYSTEM_ACCOUNTS.TAX_WITHHELD_RECEIVABLE,
               debitAmount: withheld,
               creditAmount: 0,
               partyId: input.party.id,

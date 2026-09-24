@@ -2,13 +2,13 @@ import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
 import { JournalEntryService } from '../accounting/journal-entry.service';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting/templates/types';
 import { generatePayrollRunNumber } from './payroll-number';
 import { buildJE15MonthlyPayroll } from './templates/je-15-monthly-payroll';
 import { buildJE15BDailyWages } from './templates/je-15b-daily-wages';
 import { buildJE16SalaryPayment } from './templates/je-16-salary-payment';
 import { buildJE16BGovtRemittance } from './templates/je-16b-govt-remittance';
 import { formatEmployee } from './employee.service';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 
 // EOBI rates per spec §11.2 (Pakistan, 2026 rates)
 const EOBI_EMPLOYEE_PER_MONTH = 375; // 1% of minimum wage

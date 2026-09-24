@@ -1,5 +1,5 @@
 import type { JournalEntryDraft } from './types';
-import { arAccountForParty, ACCOUNT_ADVANCE_RECEIPTS } from './types';
+import { defaultControlAccountForPartyType, SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 type Input = {
   paymentId: string;
@@ -20,7 +20,7 @@ type Input = {
  * Triggers when a previously-recorded ADVANCE payment is allocated against a finalized invoice.
  */
 export function buildJE04AdvanceApplied(input: Input): JournalEntryDraft {
-  const arAccount = arAccountForParty(input.party.partyType);
+  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
   const amount = round2(input.amountPkr);
   const invRef = input.invoiceNumber ?? input.invoiceId.slice(0, 8);
 
@@ -33,7 +33,7 @@ export function buildJE04AdvanceApplied(input: Input): JournalEntryDraft {
     description: `Advance applied to invoice ${invRef} — ${input.party.name}`,
     lines: [
       {
-        accountCode: ACCOUNT_ADVANCE_RECEIPTS,
+        accountCode: SYSTEM_ACCOUNTS.CUSTOMER_ADVANCES,
         debitAmount: amount,
         creditAmount: 0,
         partyId: input.party.id,

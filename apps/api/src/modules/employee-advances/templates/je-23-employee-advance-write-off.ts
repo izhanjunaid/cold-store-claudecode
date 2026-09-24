@@ -1,5 +1,5 @@
 import type { JournalEntryDraft } from '../../accounting/templates/types';
-import { ACCOUNT_BAD_DEBT } from '../../accounting/templates/types';
+import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 const ACCOUNT_EMPLOYEE_ADVANCES = '1230';
 
@@ -33,7 +33,7 @@ export function buildJE23EmployeeAdvanceWriteOff(input: Input): JournalEntryDraf
     description: `Advance write-off — ${input.advanceNumber} (${input.employeeName}): ${input.reason}`,
     lines: [
       {
-        accountCode: ACCOUNT_BAD_DEBT,
+        accountCode: SYSTEM_ACCOUNTS.BAD_DEBTS,
         debitAmount: amount,
         creditAmount: 0,
         description: `Bad debt expense — advance ${input.advanceNumber}`,

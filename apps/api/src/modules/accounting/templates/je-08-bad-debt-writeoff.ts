@@ -1,5 +1,5 @@
 import type { JournalEntryDraft } from './types';
-import { arAccountForParty, ACCOUNT_BAD_DEBT } from './types';
+import { defaultControlAccountForPartyType, SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 type Input = {
   invoiceId: string;
@@ -20,7 +20,7 @@ type Input = {
  * OWNER-only. Invoice status moves to WRITTEN_OFF; AR is removed; expense recognized.
  */
 export function buildJE08BadDebtWriteOff(input: Input): JournalEntryDraft {
-  const arAccount = arAccountForParty(input.party.partyType);
+  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
   const amount = round2(input.amountPkr);
   const invRef = input.invoiceNumber ?? input.invoiceId.slice(0, 8);
 
@@ -33,7 +33,7 @@ export function buildJE08BadDebtWriteOff(input: Input): JournalEntryDraft {
     description: `Bad debt write-off invoice ${invRef} — ${input.party.name}: ${input.reason}`,
     lines: [
       {
-        accountCode: ACCOUNT_BAD_DEBT,
+        accountCode: SYSTEM_ACCOUNTS.BAD_DEBTS,
         debitAmount: amount,
         creditAmount: 0,
         partyId: input.party.id,

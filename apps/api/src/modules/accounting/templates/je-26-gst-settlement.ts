@@ -1,5 +1,5 @@
 import type { JournalEntryDraft } from './types';
-import { ACCOUNT_GST_PAYABLE } from './types';
+import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 export const ACCOUNT_SALES_TAX_INPUT = '1260';
 
@@ -41,7 +41,7 @@ export function buildJE26GstSettlement(input: Input): JournalEntryDraft {
   const round = (n: number) => Math.round(n * 100) / 100;
   const lines: JournalEntryDraft['lines'] = [
     {
-      accountCode: ACCOUNT_GST_PAYABLE,
+      accountCode: SYSTEM_ACCOUNTS.GST_OUTPUT,
       debitAmount: round(input.outputTaxPkr),
       creditAmount: 0,
       description: `Output tax settled to ${input.taxPeriodEnd.toISOString().slice(0, 10)}`,

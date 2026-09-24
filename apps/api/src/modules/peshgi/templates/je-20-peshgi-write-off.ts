@@ -1,5 +1,5 @@
 import type { JournalEntryDraft } from '../../accounting/templates/types';
-import { ACCOUNT_BAD_DEBT } from '../../accounting/templates/types';
+import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 const ACCOUNT_PESHGI_AR = '1140';
 
@@ -33,7 +33,7 @@ export function buildJE20PeshgiWriteOff(input: Input): JournalEntryDraft {
     description: `Peshgi write-off — ${input.loanNumber} (${input.partyName}): ${input.reason}`,
     lines: [
       {
-        accountCode: ACCOUNT_BAD_DEBT,
+        accountCode: SYSTEM_ACCOUNTS.BAD_DEBTS,
         debitAmount: amount,
         creditAmount: 0,
         partyId: input.partyId,

@@ -4,12 +4,12 @@ import { JournalEntryService } from '../accounting/journal-entry.service';
 import { FixedAssetRepository } from './fixed-asset.repository';
 import { generateFixedAssetNumber } from './fixed-asset-number';
 import { ASSET_CATEGORY_ACCOUNT_DEFAULTS } from './templates/types';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting/templates/types';
 import { buildJE12AssetPurchase } from './templates/je-12-asset-purchase';
 import { buildJE13Depreciation } from './templates/je-13-depreciation';
 import { buildJE14AssetDisposal } from './templates/je-14-asset-disposal';
 import { buildJE28AssetImpairment } from './templates/je-28-asset-impairment';
 import { computeMonthlyDepreciation } from './depreciation-calc';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 
 type CreateInput = {
   asset_name: string;

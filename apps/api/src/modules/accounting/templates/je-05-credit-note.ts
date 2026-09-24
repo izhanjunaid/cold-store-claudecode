@@ -1,5 +1,5 @@
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import { arAccountForParty } from './types';
+import { defaultControlAccountForPartyType } from '@coldchain/shared';
 
 type Input = {
   creditNoteId: string;
@@ -20,7 +20,7 @@ type Input = {
  * Reverses revenue; reduces receivable. Multi-line credit notes can debit multiple revenue accounts.
  */
 export function buildJE05CreditNote(input: Input): JournalEntryDraft {
-  const arAccount = arAccountForParty(input.party.partyType);
+  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
   const lines: JournalEntryLineDraft[] = [];
   let total = 0;
 

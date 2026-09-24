@@ -1,5 +1,5 @@
 import type { JournalEntryDraft } from './types';
-import { DEFAULT_BANK_ACCOUNT_CODE } from './types';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 
 type Input = {
   paymentId: string;

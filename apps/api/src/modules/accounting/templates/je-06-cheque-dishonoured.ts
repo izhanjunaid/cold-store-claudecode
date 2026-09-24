@@ -1,10 +1,5 @@
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import {
-  ACCOUNT_ADVANCE_RECEIPTS,
-  ACCOUNT_TAX_WITHHELD_RECEIVABLE,
-  arAccountForParty,
-  assetAccountForPaymentMethod,
-} from './types';
+import { SYSTEM_ACCOUNTS, defaultControlAccountForPartyType, assetAccountForPaymentMethod } from '@coldchain/shared';
 
 type Input = {
   paymentId: string;
@@ -50,7 +45,7 @@ type Input = {
  * Posts as a REVERSAL entry referencing the original (the JE service handles reversed_by).
  */
 export function buildJE06ChequeDishonoured(input: Input): JournalEntryDraft {
-  const arAccount = arAccountForParty(input.party.partyType);
+  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
   const bankAccount = input.originalAssetAccountCode ?? assetAccountForPaymentMethod('CHEQUE');
   const amount = round2(input.amountPkr);
 
@@ -64,7 +59,7 @@ export function buildJE06ChequeDishonoured(input: Input): JournalEntryDraft {
 
   if (advanceRemainder > 0) {
     lines.push({
-      accountCode: ACCOUNT_ADVANCE_RECEIPTS,
+      accountCode: SYSTEM_ACCOUNTS.CUSTOMER_ADVANCES,
       debitAmount: advanceRemainder,
       creditAmount: 0,
       partyId: input.party.id,
@@ -84,7 +79,7 @@ export function buildJE06ChequeDishonoured(input: Input): JournalEntryDraft {
 
   if (withheld > 0) {
     lines.push({
-      accountCode: ACCOUNT_TAX_WITHHELD_RECEIVABLE,
+      accountCode: SYSTEM_ACCOUNTS.TAX_WITHHELD_RECEIVABLE,
       debitAmount: 0,
       creditAmount: withheld,
       partyId: input.party.id,

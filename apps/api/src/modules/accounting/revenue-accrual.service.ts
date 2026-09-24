@@ -3,13 +3,13 @@ import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
 import { computeStorageCharge } from '../invoice/storage-charge';
 import { resolveFacilitySettings } from '../facility/facility.service';
-import { revenueAccountForCommodity } from './templates/types';
 import {
   buildJE25RevenueAccrual,
   buildJE25Reversal,
   type AccrualLotShare,
 } from './templates/je-25-revenue-accrual';
 import type { JournalEntryService } from './journal-entry.service';
+import { defaultRevenueAccountForCommodity } from '@coldchain/shared';
 
 const SOURCE_TABLE = 'revenue_accrual';
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -158,7 +158,7 @@ export class RevenueAccrualService {
         bags: lot.currentBalanceBags,
         days_in_storage: earned.days,
         revenue_account_code:
-          lot.ratePlan.revenueAccountCode ?? revenueAccountForCommodity(lot.commodity.name),
+          lot.ratePlan.revenueAccountCode ?? defaultRevenueAccountForCommodity(lot.commodity.name),
         accrued_to_date_pkr: earned.amountPkr,
       });
     }
@@ -236,7 +236,7 @@ export class RevenueAccrualService {
         lotId: lot.id,
         lotNumber: lot.lotNumber,
         revenueAccountCode:
-          lot.ratePlan.revenueAccountCode ?? revenueAccountForCommodity(lot.commodity.name),
+          lot.ratePlan.revenueAccountCode ?? defaultRevenueAccountForCommodity(lot.commodity.name),
         amountPkr: earned.amountPkr,
       });
     }
