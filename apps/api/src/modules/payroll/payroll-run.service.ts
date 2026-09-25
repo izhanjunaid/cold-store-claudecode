@@ -1,6 +1,7 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
+import { lockRow } from '../../common/row-lock';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { generatePayrollRunNumber } from './payroll-number';
 import { buildJE15MonthlyPayroll } from './templates/je-15-monthly-payroll';
@@ -8,22 +9,11 @@ import { buildJE15BDailyWages } from './templates/je-15b-daily-wages';
 import { buildJE16SalaryPayment } from './templates/je-16-salary-payment';
 import { buildJE16BGovtRemittance } from './templates/je-16b-govt-remittance';
 import { formatEmployee } from './employee.service';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
+import { DEFAULT_BANK_ACCOUNT_CODE, MONEY_EPSILON } from '@coldchain/shared';
 
 // EOBI rates per spec §11.2 (Pakistan, 2026 rates)
 const EOBI_EMPLOYEE_PER_MONTH = 375; // 1% of minimum wage
 const EOBI_EMPLOYER_PER_MONTH = 1875; // 5% of minimum wage
-
-type Tx = Prisma.TransactionClient;
-
-/** Row-lock a run so a status read and the JE post that follows cannot interleave. */
-async function lockPayrollRun(tx: Tx, facilityId: string, runId: string): Promise<void> {
-  await tx.$queryRawUnsafe(
-    `SELECT id FROM payroll_runs WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-    runId,
-    facilityId,
-  );
-}
 
 export class PayrollRunService {
   constructor(
@@ -153,13 +143,13 @@ export class PayrollRunService {
   }
 
   async updateLine(facilityId: string, runId: string, lineId: string, body: any) {
-    const run = await this.prisma.payrollRun.findFirst({ where: { facilityId, id: runId } });
-    if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
-    if (run.status !== 'DRAFT') {
-      throw Errors.PAYROLL_RUN_INVALID_STATUS('Cannot edit lines of a non-DRAFT run');
-    }
-
     return this.prisma.$transaction(async (tx) => {
+      if (!(await lockRow(tx, 'payroll_runs', runId, facilityId))) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      const run = await tx.payrollRun.findFirstOrThrow({ where: { facilityId, id: runId } });
+      if (run.status !== 'DRAFT') {
+        throw Errors.PAYROLL_RUN_INVALID_STATUS('Cannot edit lines of a non-DRAFT run');
+      }
+
       const line = await tx.payrollLineItem.findFirst({
         where: { id: lineId, payrollRunId: runId },
       });
@@ -231,6 +221,9 @@ export class PayrollRunService {
 
   async finalize(facilityId: string, userId: string, runId: string) {
     return this.prisma.$transaction(async (tx) => {
+      // A double-click used to post the payroll twice: both requests read DRAFT
+      // before either wrote (docs/25 C-13).
+      await lockRow(tx, 'payroll_runs', runId, facilityId);
       const run = await tx.payrollRun.findFirst({
         where: { facilityId, id: runId },
         include: { lineItems: true },
@@ -308,24 +301,29 @@ export class PayrollRunService {
       });
 
       // Recovery does not post its own journal entry — it rode inside the entry just
-      // posted, as the 1230 credit line above. This settles the subledger side: one
+      // posted, as the 1230 credit line. This settles the subledger side: one
       // EmployeeAdvanceRecovery row per line that carried a recovery, the advance
       // balance decremented, and the advance closed once it reaches zero.
-      for (const line of run.lineItems) {
-        const recoveryAmount = Number(line.advanceRecoveryPkr);
-        if (recoveryAmount <= 0.005) continue;
+      //
+      // Each advance is locked and re-read here. Two drafts (January and February)
+      // pre-fill from the same balance, so the second finalize must check the
+      // balance as it stands now, not as it stood when its draft was made (C-14).
+      // Locks are taken in id order so two finalizes cannot deadlock.
+      const recoveringLines = run.lineItems.filter((l) => Number(l.advanceRecoveryPkr) > MONEY_EPSILON);
+      const candidates = await tx.employeeAdvance.findMany({
+        where: { facilityId, employeeId: { in: recoveringLines.map((l) => l.employeeId) }, status: 'ACTIVE' },
+        select: { id: true },
+        orderBy: { id: 'asc' },
+      });
+      for (const c of candidates) await lockRow(tx, 'employee_advances', c.id, facilityId);
 
+      for (const line of recoveringLines) {
+        const recoveryAmount = Number(line.advanceRecoveryPkr);
         const advance = await tx.employeeAdvance.findFirst({
           where: { facilityId, employeeId: line.employeeId, status: 'ACTIVE' },
         });
-        if (!advance) {
-          // Line carried a recovery amount but the employee has no active advance to
-          // apply it to — the advance must have been written off or fully recovered
-          // by another path since this line was last edited. Refuse rather than post
-          // a recovery against nothing.
-          throw Errors.VALIDATION_ERROR(
-            `Line for employee ${line.employeeId} has an advance recovery but no matching ACTIVE advance`,
-          );
+        if (!advance || recoveryAmount > Number(advance.balanceOutstandingPkr) + MONEY_EPSILON) {
+          throw Errors.EMPLOYEE_ADVANCE_OVER_RECOVERY();
         }
 
         await tx.employeeAdvanceRecovery.create({
@@ -344,7 +342,7 @@ export class PayrollRunService {
           where: { id: advance.id },
           data: {
             balanceOutstandingPkr: newBalance,
-            status: newBalance <= 0.005 ? 'RECOVERED' : 'ACTIVE',
+            status: newBalance <= MONEY_EPSILON ? 'RECOVERED' : 'ACTIVE',
           },
         });
       }
@@ -365,6 +363,7 @@ export class PayrollRunService {
 
   async pay(facilityId: string, userId: string, runId: string, body: any) {
     return this.prisma.$transaction(async (tx) => {
+      await lockRow(tx, 'payroll_runs', runId, facilityId);
       const run = await tx.payrollRun.findFirst({ where: { facilityId, id: runId } });
       if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
       if (run.status !== 'FINALIZED') {
@@ -399,7 +398,7 @@ export class PayrollRunService {
 
   async remit(facilityId: string, userId: string, runId: string, body: any) {
     return this.prisma.$transaction(async (tx) => {
-      await lockPayrollRun(tx, facilityId, runId);
+      await lockRow(tx, 'payroll_runs', runId, facilityId);
 
       const run = await tx.payrollRun.findFirst({ where: { facilityId, id: runId } });
       if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
@@ -475,7 +474,7 @@ export class PayrollRunService {
    */
   async reverse(facilityId: string, userId: string, runId: string, body: any) {
     return this.prisma.$transaction(async (tx) => {
-      await lockPayrollRun(tx, facilityId, runId);
+      await lockRow(tx, 'payroll_runs', runId, facilityId);
 
       const run = await tx.payrollRun.findFirst({ where: { facilityId, id: runId } });
       if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
@@ -501,11 +500,7 @@ export class PayrollRunService {
         where: { payrollRunId: runId, voidedAt: null },
       });
       for (const recovery of recoveries) {
-        await tx.$queryRawUnsafe(
-          `SELECT id FROM employee_advances WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-          recovery.advanceId,
-          facilityId,
-        );
+        await lockRow(tx, 'employee_advances', recovery.advanceId, facilityId);
         const advance = await tx.employeeAdvance.findFirstOrThrow({
           where: { id: recovery.advanceId, facilityId },
         });
