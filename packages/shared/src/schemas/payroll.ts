@@ -6,7 +6,7 @@ const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 
 export const EmployeeType = z.enum(['SALARIED', 'DAILY_WAGE']);
 export const PayrollType = z.enum(['MONTHLY_SALARY', 'DAILY_WAGES']);
-export const PayrollRunStatus = z.enum(['DRAFT', 'FINALIZED', 'PAID']);
+export const PayrollRunStatus = z.enum(['DRAFT', 'FINALIZED', 'PAID', 'REVERSED']);
 
 export const CreateEmployeeRequest = z
   .object({
@@ -116,6 +116,13 @@ export const ReversePayrollRunRequest = z.object({
   reversal_date: dateOnly.optional(),
 });
 export type ReversePayrollRunRequestType = z.infer<typeof ReversePayrollRunRequest>;
+
+/** Void a salary payment made in error: reverses JE-16 and returns the run to FINALIZED (docs/25 C-15). */
+export const VoidPayrollPaymentRequest = z.object({
+  reason: z.string().min(1).max(400),
+  void_date: dateOnly.optional(),
+});
+export type VoidPayrollPaymentRequestType = z.infer<typeof VoidPayrollPaymentRequest>;
 
 export const RemitGovtRequest = z.object({
   remittance_date: dateOnly,

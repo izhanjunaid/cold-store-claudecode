@@ -10,6 +10,7 @@ import {
   PayPayrollRequest,
   RemitGovtRequest,
   ReversePayrollRunRequest,
+  VoidPayrollPaymentRequest,
   PayrollRunListQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
@@ -213,6 +214,21 @@ export async function payrollRoutes(app: FastifyInstance) {
       const existing = await runs.getById(request.user!.facilityId, id);
       assertKatchiWriteAllowed(request.user!.role, existing.book_type);
       const data = await runs.reverse(request.user!.facilityId, request.user!.userId, id, body);
+      return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/payroll-runs/:id/void-payment',
+    preHandler: [app.authenticate, app.requirePermission('payroll.reverse')],
+    schema: { params: IdParam, body: VoidPayrollPaymentRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof VoidPayrollPaymentRequest>;
+      const existing = await runs.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
+      const data = await runs.voidPayment(request.user!.facilityId, request.user!.userId, id, body);
       return sendSuccess(reply, data);
     },
   });

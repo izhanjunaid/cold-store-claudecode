@@ -179,3 +179,94 @@ describe('C-14 — an advance cannot be recovered past its balance across two dr
     expect((await prisma.payrollRun.findUniqueOrThrow({ where: { id: feb.id } })).status).toBe('DRAFT');
   });
 });
+
+const reverse = (runId: string, payload: Record<string, unknown> = { reason: 'posted in error', reversal_date: '2028-12-31' }) =>
+  app.inject({ method: 'POST', url: `/v1/payroll-runs/${runId}/reverse`, headers: authHeaders(ownerToken), payload });
+const voidPayment = (runId: string, payload: Record<string, unknown> = { reason: 'paid from the wrong account' }) =>
+  app.inject({ method: 'POST', url: `/v1/payroll-runs/${runId}/void-payment`, headers: authHeaders(ownerToken), payload });
+
+describe('C-15 — reversing a run undoes the accrual; voiding a payment is its own action', () => {
+  it('a PAID run cannot be reversed: the salary cash really left', async () => {
+    await salaried(30000);
+    const run = await draft(2028, 5);
+    expect((await finalize(run.id)).statusCode).toBe(200);
+    expect((await pay(run.id, '2028-06-01')).statusCode).toBe(200);
+
+    const res = await reverse(run.id);
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('PAYROLL_RUN_NOT_REVERSIBLE');
+    expect(await entriesOf(run.id, 'REVERSAL')).toHaveLength(0);
+    expect((await prisma.payrollRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe('PAID');
+  });
+
+  it('voiding the payment mirrors JE-16 only, returns the run to FINALIZED, and it can be paid again', async () => {
+    await salaried(30000);
+    const run = await draft(2028, 6);
+    expect((await finalize(run.id)).statusCode).toBe(200);
+    const paid = JSON.parse((await pay(run.id, '2028-07-01')).body).data;
+
+    const res = await voidPayment(run.id, { reason: 'paid from the wrong account', void_date: '2028-07-02' });
+    expect(res.statusCode, res.body).toBe(200);
+    const after = JSON.parse(res.body).data;
+    expect(after.status).toBe('FINALIZED');
+    expect(after.payment_journal_entry_id).toBeNull();
+    expect(after.paid_at).toBeNull();
+
+    const original = await prisma.journalEntry.findUniqueOrThrow({ where: { id: paid.payment_journal_entry_id } });
+    expect(original.reversedById).toBeTruthy();
+    const mirrors = await entriesOf(run.id, 'REVERSAL');
+    expect(mirrors).toHaveLength(1);
+    expect(mirrors[0]!.id).toBe(original.reversedById);
+    // The accrual stands untouched.
+    const accrual = await prisma.journalEntry.findUniqueOrThrow({ where: { id: after.payroll_journal_entry_id } });
+    expect(accrual.reversedById).toBeNull();
+
+    expect((await pay(run.id, '2028-07-03')).statusCode).toBe(200);
+    expect(await entriesOf(run.id, 'PAYROLL_PAYMENT')).toHaveLength(2);
+  });
+
+  it('a payment can only be voided on a PAID run', async () => {
+    await salaried(30000);
+    const run = await draft(2028, 7);
+    expect((await finalize(run.id)).statusCode).toBe(200);
+    const res = await voidPayment(run.id);
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('PAYROLL_RUN_INVALID_STATUS');
+  });
+
+  it('reversing an unpaid run records the cancellation on the run, not in its notes', async () => {
+    await salaried(30000);
+    const run = await draft(2028, 8);
+    expect((await finalize(run.id)).statusCode).toBe(200);
+
+    const res = await reverse(run.id, { reason: 'wrong month', reversal_date: '2028-09-01' });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body).data;
+    expect(body.status).toBe('REVERSED');
+    expect(body.void_reason).toBe('wrong month');
+    expect(body.voided_at).toBeTruthy();
+
+    const row = await prisma.payrollRun.findUniqueOrThrow({ where: { id: run.id } });
+    expect(row.notes).toBeNull();
+    expect(row.voidedBy).toBeTruthy();
+    expect(await entriesOf(run.id, 'REVERSAL')).toHaveLength(1);
+  });
+
+  it('a remitted run cannot be reversed: the remittance cash left too', async () => {
+    await salaried(30000);
+    const run = await draft(2028, 9);
+    expect((await finalize(run.id)).statusCode).toBe(200);
+    const remit = await app.inject({
+      method: 'POST',
+      url: `/v1/payroll-runs/${run.id}/remit`,
+      headers: authHeaders(ownerToken),
+      payload: { remittance_date: '2028-10-05', remit_employee_eobi_pkr: 375, remit_employer_eobi_pkr: 1875 },
+    });
+    expect(remit.statusCode, remit.body).toBe(201);
+
+    const res = await reverse(run.id);
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('PAYROLL_RUN_NOT_REVERSIBLE');
+    expect(await entriesOf(run.id, 'REVERSAL')).toHaveLength(0);
+  });
+});

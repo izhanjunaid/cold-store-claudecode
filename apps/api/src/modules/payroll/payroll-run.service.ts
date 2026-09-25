@@ -458,21 +458,14 @@ export class PayrollRunService {
   }
 
   /**
-   * Reverse a finalized or paid run posted in error (audit P1-3).
-   *
-   * Mirrors the invoice VOID pattern: post a reversing entry for each journal entry the
-   * run produced, cross-link both ways, and move the run to REVERSED — rather than
-   * mutating posted rows, which the DB guard triggers forbid outright. The generic
-   * `JournalEntryService.reverse` cannot be used here: it rejects any entry whose
-   * sourceTable is not 'manual'/'opening_balances', and payroll templates stamp
-   * 'payroll_runs'. That restriction is deliberate — system entries are meant to be
-   * corrected through their own flow, which is what this is.
-   *
-   * All of the run's entries are reversed together (payroll, payment, remittance).
-   * Reversing only some of them would leave the run half-posted with no way to express
-   * that state.
+   * Reverse a run finalized in error: undo its accrual (JE-15) and any advance
+   * recoveries it made. Only while it is unpaid — a paid run's salary cash really
+   * left, so reversing the payment along with the accrual pretended it had not
+   * (docs/25 C-15). A paid run's payment is voided first (voidPayment); a remitted
+   * run cannot be reversed, because the remittance is real cash paid to the
+   * government and has no void of its own here.
    */
-  async reverse(facilityId: string, userId: string, runId: string, body: any) {
+  async reverse(facilityId: string, userId: string, runId: string, body: { reason: string; reversal_date?: string }) {
     return this.prisma.$transaction(async (tx) => {
       await lockRow(tx, 'payroll_runs', runId, facilityId);
 
@@ -486,18 +479,22 @@ export class PayrollRunService {
       if (run.status === 'REVERSED') {
         throw Errors.PAYROLL_RUN_NOT_REVERSIBLE('This run has already been reversed');
       }
+      if (run.status === 'PAID') {
+        throw Errors.PAYROLL_RUN_NOT_REVERSIBLE('This run has been paid; void the salary payment first');
+      }
+      if (run.remittanceJournalEntryId) {
+        throw Errors.PAYROLL_RUN_NOT_REVERSIBLE(
+          'EOBI / tax for this run has already been paid to the government; the run cannot be reversed',
+        );
+      }
 
-      const reversalDate = body?.reversal_date ? new Date(body.reversal_date) : new Date();
-
-      // Unwind advance recoveries BEFORE reversing the journal entries (phase 21).
-      // Getting this wrong silently forgives an employee's debt: the balance would
-      // stay reduced while the payroll that reduced it has been undone. Follows the
-      // same shape as PaymentService.dishonour() unwinding loan allocations: capture
-      // the affected rows first (they are the source of the amounts), lock each
-      // parent before mutating its balance, restore balance and status, THEN
-      // soft-void the child rows so the audit trail survives — never delete them.
+      // Unwind advance recoveries (phase 21). Getting this wrong silently forgives an
+      // employee's debt: the balance would stay reduced while the payroll that
+      // reduced it has been undone. Lock each advance (in id order) before restoring
+      // its balance, then soft-void the recovery rows so the audit trail survives.
       const recoveries = await tx.employeeAdvanceRecovery.findMany({
         where: { payrollRunId: runId, voidedAt: null },
+        orderBy: { advanceId: 'asc' },
       });
       for (const recovery of recoveries) {
         await lockRow(tx, 'employee_advances', recovery.advanceId, facilityId);
@@ -511,15 +508,10 @@ export class PayrollRunService {
               Number(advance.balanceOutstandingPkr) + Number(recovery.amountPkr),
             ),
             // Only a RECOVERED advance can have been closed by this run's recovery;
-            // WRITTEN_OFF is a separate, OWNER-only decision this reversal must not undo.
-            //
-            // Edge case, left as-is rather than built out further: if the advance was
-            // later written off (for whatever remained after this recovery), restoring
-            // the balance here while the status stays WRITTEN_OFF is not a bug — the
-            // write-off's JE-23 only covered what was outstanding at write-off time, so
-            // the restored amount was genuinely never written off. The GL stays correct;
-            // the subledger just cannot express "partly written off, partly reopened" as
-            // a single status. There is no un-write-off flow to reconcile this further.
+            // WRITTEN_OFF is a separate decision this reversal must not undo. If the
+            // advance was later written off, the restored amount was genuinely never
+            // written off (JE-23 covered only what was outstanding then), so the GL
+            // stays correct; the status just cannot say "partly written off".
             status: advance.status === 'RECOVERED' ? 'ACTIVE' : advance.status,
           },
         });
@@ -529,32 +521,46 @@ export class PayrollRunService {
         });
       }
 
-      // Reverse in the opposite order to posting, so the ledger reads as an unwind.
-      const entryIds = [
-        run.remittanceJournalEntryId,
-        run.paymentJournalEntryId,
-        run.payrollJournalEntryId,
-      ].filter((id): id is string => Boolean(id));
-
-      for (const originalId of entryIds) {
-        const original = await tx.journalEntry.findFirstOrThrow({
-          where: { id: originalId, facilityId },
-          select: { reversedById: true },
-        });
-        if (original.reversedById) continue;
-        await this.journalEntry.reverseInTransaction(tx, facilityId, userId, originalId, {
+      if (run.payrollJournalEntryId) {
+        await this.journalEntry.reverseInTransaction(tx, facilityId, userId, run.payrollJournalEntryId, {
           reason: `payroll ${run.runNumber} reversed — ${body.reason}`,
-          date: reversalDate,
+          date: body.reversal_date ? new Date(body.reversal_date) : undefined,
         });
       }
 
-      const tag = `[REVERSED ${reversalDate.toISOString().slice(0, 10)}]: ${body.reason}`;
       await tx.payrollRun.update({
         where: { id: runId },
-        data: {
-          status: 'REVERSED',
-          notes: run.notes ? `${run.notes}\n${tag}` : tag,
-        },
+        data: { status: 'REVERSED', voidedAt: new Date(), voidedBy: userId, voidReason: body.reason },
+      });
+
+      return this.getByIdInternal(facilityId, runId, tx);
+    });
+  }
+
+  /**
+   * Void a salary payment made in error (wrong account, wrong date): reverse JE-16
+   * and return the run to FINALIZED so it can be paid again. The accrual stands.
+   */
+  async voidPayment(facilityId: string, userId: string, runId: string, body: { reason: string; void_date?: string }) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockRow(tx, 'payroll_runs', runId, facilityId);
+
+      const run = await tx.payrollRun.findFirst({ where: { facilityId, id: runId } });
+      if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      if (run.status !== 'PAID' || !run.paymentJournalEntryId) {
+        throw Errors.PAYROLL_RUN_INVALID_STATUS('Only a PAID run has a salary payment to void');
+      }
+
+      await this.journalEntry.reverseInTransaction(tx, facilityId, userId, run.paymentJournalEntryId, {
+        reason: `salary payment for ${run.runNumber} voided — ${body.reason}`,
+        date: body.void_date ? new Date(body.void_date) : undefined,
+      });
+
+      // The reversed payment still points at this run through its source; the run's
+      // own pointer is cleared so the next payment can take it.
+      await tx.payrollRun.update({
+        where: { id: runId },
+        data: { status: 'FINALIZED', paymentJournalEntryId: null, paidAt: null },
       });
 
       return this.getByIdInternal(facilityId, runId, tx);
@@ -701,6 +707,8 @@ function formatRun(r: any) {
     finalized_at: r.finalizedAt?.toISOString() ?? null,
     paid_at: r.paidAt?.toISOString() ?? null,
     notes: r.notes,
+    voided_at: r.voidedAt?.toISOString() ?? null,
+    void_reason: r.voidReason ?? null,
     created_at: r.createdAt.toISOString(),
     line_items: (r.lineItems ?? []).map((l: any) => ({
       id: l.id,
