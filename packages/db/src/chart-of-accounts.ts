@@ -32,25 +32,47 @@ export type CoaSeed = {
   system?: boolean;
   /** HEADER only — which statement section its children roll up into (phase/24). Absent = unclassified bucket. */
   section?: StatementSectionSeed;
+  /** Cash or a bank/wallet account (is_cash_equivalent). */
+  cash?: boolean;
+  /** false: only the account's own documents or automated flow may post to it (allow_manual_posting). */
+  manual?: false;
+  /** Every line must name a party (requires_party). */
+  party?: boolean;
 };
+
+/** The columns a seed row sets — shared by seed and sync so the two cannot drift. */
+function rowData(a: CoaSeed) {
+  return {
+    accountName: a.name,
+    accountClass: a.cls,
+    accountType: a.type,
+    parentAccountCode: a.parent,
+    normalBalance: a.normal,
+    isSystemAccount: a.system ?? false,
+    statementSection: a.section ?? null,
+    isCashEquivalent: a.cash ?? false,
+    allowManualPosting: a.manual ?? true,
+    requiresParty: a.party ?? false,
+  };
+}
 
 export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   // CLASS 1: ASSETS
   { code: '1000', name: 'Cash & Bank', cls: 'ASSET', type: 'HEADER', parent: null, normal: 'DEBIT', system: true, section: 'CURRENT_ASSET' },
-  { code: '1010', name: 'Cash on Hand', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true },
-  { code: '1025', name: 'Cheques in Hand (Under Collection)', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true },
-  { code: '1020', name: 'Bank Account — Main', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true },
-  { code: '1030', name: 'Mobile Wallet Receipts', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true },
+  { code: '1010', name: 'Cash on Hand', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true, cash: true },
+  { code: '1025', name: 'Cheques in Hand (Under Collection)', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true, manual: false },
+  { code: '1020', name: 'Bank Account — Main', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true, cash: true },
+  { code: '1030', name: 'Mobile Wallet Receipts', cls: 'ASSET', type: 'DETAIL', parent: '1000', normal: 'DEBIT', system: true, cash: true },
   { code: '1100', name: 'Trade Receivables', cls: 'ASSET', type: 'HEADER', parent: null, normal: 'DEBIT', system: true, section: 'CURRENT_ASSET' },
-  { code: '1110', name: 'Receivable — Farmers', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true },
-  { code: '1120', name: 'Receivable — Traders', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true },
-  { code: '1130', name: 'Receivable — Arhtis', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true },
-  { code: '1140', name: 'Receivable — Peshgi (Loans)', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true },
-  { code: '1150', name: 'Receivable — Other', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true },
+  { code: '1110', name: 'Receivable — Farmers', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true, party: true },
+  { code: '1120', name: 'Receivable — Traders', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true, party: true },
+  { code: '1130', name: 'Receivable — Arhtis', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true, party: true },
+  { code: '1140', name: 'Receivable — Peshgi (Loans)', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true, manual: false, party: true },
+  { code: '1150', name: 'Receivable — Other', cls: 'ASSET', type: 'DETAIL', parent: '1100', normal: 'DEBIT', system: true, party: true },
   { code: '1200', name: 'Other Current Assets', cls: 'ASSET', type: 'HEADER', parent: null, normal: 'DEBIT', system: true, section: 'CURRENT_ASSET' },
   { code: '1210', name: 'Advance Payments to Suppliers', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
   { code: '1220', name: 'Prepaid Electricity (Security Deposit)', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
-  { code: '1230', name: 'Advances to Employees', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
+  { code: '1230', name: 'Advances to Employees', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT', manual: false },
   // Tax customers withhold from payments to us under s.153. It is an advance
   // of our own income tax, not a discount — without this account the withheld
   // amount silently becomes an unexplained shortfall in the party's AR.
@@ -58,7 +80,7 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   // Contra-entry for the monthly storage-revenue accrual (JE-25). Deliberately
   // under 1200 and not under 1100 Trade Receivables: it is not owed by anyone
   // yet, so it must never reach AR ageing or the AR control accounts.
-  { code: '1250', name: 'Accrued Storage Revenue (Unbilled)', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT', system: true },
+  { code: '1250', name: 'Accrued Storage Revenue (Unbilled)', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT', system: true, manual: false },
   // Only used where the facility is registered for provincial sales tax on
   // services; harmless and unposted otherwise.
   { code: '1260', name: 'Sales Tax — Input / Adjustable', cls: 'ASSET', type: 'DETAIL', parent: '1200', normal: 'DEBIT' },
@@ -82,13 +104,21 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   // depreciation. One shared account rather than one per class is the
   // proportionate choice at this scale.
   { code: '1370', name: 'Accum. Impairment — Fixed Assets', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT', system: true },
+  // Furniture, fixtures and anything that is not plant, building, vehicle or
+  // computer. OTHER-category assets used to post to 1310 Cold Storage Plant and
+  // depreciate into 6100 Miscellaneous (docs/25 C-34).
+  { code: '1380', name: 'Furniture, Fixtures & Other Equipment', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'DEBIT', system: true },
+  { code: '1381', name: 'Accum. Depreciation — Furniture & Other', cls: 'ASSET', type: 'DETAIL', parent: '1300', normal: 'CREDIT', system: true },
 
   // CLASS 2: LIABILITIES
   { code: '2000', name: 'Current Liabilities', cls: 'LIABILITY', type: 'HEADER', parent: null, normal: 'CREDIT', system: true, section: 'CURRENT_LIABILITY' },
-  { code: '2010', name: 'Advance Receipts from Clients', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
+  { code: '2010', name: 'Advance Receipts from Clients', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true, manual: false, party: true },
   { code: '2020', name: 'GST Payable — Output Tax', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
-  { code: '2030', name: 'Salaries Payable', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
+  { code: '2030', name: 'Salaries Payable', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true, manual: false },
   { code: '2040', name: 'Utility Bills Payable', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
+  // What the facility owes its suppliers, by supplier. Before payables existed every
+  // accrued bill — rent, repairs, refrigerant — credited 2040 above (docs/25 C-01).
+  { code: '2050', name: 'Trade Payables — Suppliers', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true, party: true },
   { code: '2060', name: 'EOBI Payable — Employee Portion', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
   { code: '2061', name: 'EOBI Payable — Employer Portion', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
   { code: '2070', name: 'Income Tax Withheld — Salaries (s.149)', cls: 'LIABILITY', type: 'DETAIL', parent: '2000', normal: 'CREDIT', system: true },
@@ -133,8 +163,8 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   // deleted it, which is exactly what docs/09 told them to do. An existing 3015
   // is left alone: with postings it keeps its history, without them it can be
   // deleted and now stays deleted.
-  { code: '3020', name: 'Retained Earnings', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT' },
-  { code: '3030', name: 'Current Year Profit / (Loss)', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true },
+  { code: '3020', name: 'Retained Earnings', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', manual: false },
+  { code: '3030', name: 'Current Year Profit / (Loss)', cls: 'EQUITY', type: 'DETAIL', parent: null, normal: 'CREDIT', system: true, manual: false },
 
   // CLASS 4: REVENUE
   { code: '4000', name: 'Storage Revenue', cls: 'REVENUE', type: 'HEADER', parent: null, normal: 'CREDIT', system: true, section: 'REVENUE' },
@@ -152,7 +182,7 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   { code: '4200', name: 'Other Income', cls: 'REVENUE', type: 'HEADER', parent: null, normal: 'CREDIT', system: true, section: 'OTHER_INCOME' },
   { code: '4210', name: 'Late Payment Surcharge', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT' },
   { code: '4220', name: 'Damage Settlement Received', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT' },
-  { code: '4230', name: 'Gain on Disposal of Asset', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT', system: true },
+  { code: '4230', name: 'Gain on Disposal of Asset', cls: 'REVENUE', type: 'DETAIL', parent: '4200', normal: 'CREDIT', system: true, manual: false },
   { code: '4900', name: 'Contra Revenue', cls: 'REVENUE', type: 'HEADER', parent: null, normal: 'CREDIT', system: true, section: 'CONTRA_REVENUE' },
   { code: '4910', name: 'Discounts Allowed', cls: 'REVENUE', type: 'DETAIL', parent: '4900', normal: 'DEBIT', system: true },
 
@@ -160,35 +190,42 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   { code: '5000', name: 'Direct Operating Costs', cls: 'COST_OF_SERVICE', type: 'HEADER', parent: null, normal: 'DEBIT', system: true, section: 'COST_OF_SERVICE' },
   { code: '5010', name: 'Electricity — Refrigeration', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
   { code: '5020', name: 'Electricity — Facility (Non-Refrig.)', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
-  { code: '5030', name: 'Direct Labor — Loaders & Handlers', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT', system: true },
-  { code: '5035', name: 'Employer EOBI — Direct Labor', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT', system: true },
-  { code: '5040', name: 'Depreciation — Cold Plant', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT', system: true },
+  { code: '5030', name: 'Direct Labor — Loaders & Handlers', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT', system: true, manual: false },
+  { code: '5035', name: 'Employer EOBI — Direct Labor', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT', system: true, manual: false },
+  { code: '5040', name: 'Depreciation — Cold Plant', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT', system: true, manual: false },
   { code: '5050', name: 'Refrigerant & Consumables', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
   { code: '5060', name: 'Packaging & Materials', cls: 'COST_OF_SERVICE', type: 'DETAIL', parent: '5000', normal: 'DEBIT' },
 
   // CLASS 6: OPERATING EXPENSES (Indirect)
   { code: '6000', name: 'Indirect / Overhead Expenses', cls: 'EXPENSE', type: 'HEADER', parent: null, normal: 'DEBIT', system: true, section: 'OPERATING_EXPENSE' },
-  { code: '6010', name: 'Salaries — Management & Office', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
-  { code: '6015', name: 'Employer EOBI — Management & Office', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
+  { code: '6010', name: 'Salaries — Management & Office', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
+  { code: '6015', name: 'Employer EOBI — Management & Office', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
   { code: '6020', name: 'Rent', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
   { code: '6030', name: 'Maintenance & Repairs', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
   { code: '6040', name: 'Fuel & Vehicle', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
   { code: '6050', name: 'Insurance', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
   { code: '6060', name: 'Communication', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
   { code: '6070', name: 'Computer & Software', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
-  { code: '6080', name: 'Bad Debt Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
+  { code: '6080', name: 'Bad Debt Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
   { code: '6090', name: 'Bank Charges', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
   { code: '6100', name: 'Miscellaneous', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
-  { code: '6120', name: 'Depreciation — Building', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
-  { code: '6130', name: 'Depreciation — Vehicles', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
-  { code: '6140', name: 'Amortisation — Software', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
+  { code: '6120', name: 'Depreciation — Building', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
+  { code: '6130', name: 'Depreciation — Vehicles', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
+  { code: '6140', name: 'Amortisation — Software', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
   { code: '6150', name: 'Spoilage / Damage Compensation Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
-  { code: '6160', name: 'Impairment Loss — Fixed Assets', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
+  { code: '6160', name: 'Impairment Loss — Fixed Assets', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
+  // Computer hardware depreciated into 6140 "Amortisation — Software" and OTHER
+  // assets into 6100 Miscellaneous, which the EBITDA add-back then swallowed whole
+  // (docs/25 C-34, L-21).
+  { code: '6170', name: 'Depreciation — Computers', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
+  { code: '6180', name: 'Depreciation — Furniture & Other', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
+  // A forgiven staff advance is an employee benefit, not a customer bad debt (C-27).
+  { code: '6190', name: 'Staff Welfare & Benefits', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
 
   // CLASS 6 (continued): NON-OPERATING EXPENSES — below operating profit,
   // same idea as 4200 Other Income on the revenue side (phase/25).
   { code: '6900', name: 'Non-Operating Expenses', cls: 'EXPENSE', type: 'HEADER', parent: null, normal: 'DEBIT', system: true, section: 'OTHER_EXPENSE' },
-  { code: '6110', name: 'Loss on Disposal of Asset', cls: 'EXPENSE', type: 'DETAIL', parent: '6900', normal: 'DEBIT', system: true },
+  { code: '6110', name: 'Loss on Disposal of Asset', cls: 'EXPENSE', type: 'DETAIL', parent: '6900', normal: 'DEBIT', system: true, manual: false },
 ];
 
 /** Upsert the standard chart of accounts for a facility. Returns the number of accounts. */
@@ -199,26 +236,8 @@ export async function seedChartOfAccounts(
   for (const a of CHART_OF_ACCOUNTS) {
     await prisma.chartOfAccounts.upsert({
       where: { facilityId_accountCode: { facilityId, accountCode: a.code } },
-      update: {
-        accountName: a.name,
-        accountClass: a.cls,
-        accountType: a.type,
-        parentAccountCode: a.parent,
-        normalBalance: a.normal,
-        isSystemAccount: a.system ?? false,
-        statementSection: a.section ?? null,
-      },
-      create: {
-        facilityId,
-        accountCode: a.code,
-        accountName: a.name,
-        accountClass: a.cls,
-        accountType: a.type,
-        parentAccountCode: a.parent,
-        normalBalance: a.normal,
-        isSystemAccount: a.system ?? false,
-        statementSection: a.section ?? null,
-      },
+      update: rowData(a),
+      create: { facilityId, accountCode: a.code, ...rowData(a) },
     });
   }
   return CHART_OF_ACCOUNTS.length;
@@ -230,10 +249,15 @@ export async function seedChartOfAccounts(
  *
  * INSERT-only, unlike seedChartOfAccounts above. An owner may rename or re-parent
  * their own accounts, so upserting the whole array against a live facility would
- * clobber those edits — the reason accounts 1230, 1025 and 6900 each shipped as a
- * separate hand-run backfill script instead. An account that is *missing* cannot
- * carry any edits, so adding it is always safe, and one rule covers every future
- * account with no new script.
+ * clobber those edits. An account that is *missing* cannot carry any edits, so
+ * adding it is always safe, and one rule covers every future account.
+ *
+ * It refuses — and so fails the deploy, which the settings screen reports — when a
+ * code the seed claims is already occupied by an account of a different class or
+ * type. The registry posts to that code by role; adopting an owner's unrelated
+ * account there would post, say, supplier payables into their "Misc. income".
+ * Renumber the owner's account first (scripts/preupdate-checks-consolidation.sql
+ * C20 lists them).
  *
  * ponytail: an owner who deleted an unused non-system account will see it return on
  * the next update. Cosmetic; the alternative — an account missing that the posting
@@ -244,58 +268,47 @@ export async function syncChartOfAccounts(
   prisma: PrismaClient,
   facilityId: string,
 ): Promise<number> {
-  const present = new Set(
-    (
-      await prisma.chartOfAccounts.findMany({
-        where: { facilityId },
-        select: { accountCode: true },
-      })
-    ).map((a) => a.accountCode),
-  );
+  const existing = await prisma.chartOfAccounts.findMany({
+    where: { facilityId },
+    select: { accountCode: true, accountClass: true, accountType: true },
+  });
+  const byCode = new Map(existing.map((a) => [a.accountCode, a]));
 
-  const missing = CHART_OF_ACCOUNTS.filter((a) => !present.has(a.code));
+  const collisions = CHART_OF_ACCOUNTS.filter((a) => {
+    const found = byCode.get(a.code);
+    return found && (found.accountClass !== a.cls || found.accountType !== a.type);
+  });
+  if (collisions.length > 0) {
+    throw new Error(
+      `Chart of accounts: ${collisions.map((a) => a.code).join(', ')} already exist with a different class or type ` +
+        `than the system account this release needs at that code. Renumber them, then update again.`,
+    );
+  }
+
+  const missing = CHART_OF_ACCOUNTS.filter((a) => !byCode.has(a.code));
   for (const a of missing) {
-    await prisma.chartOfAccounts.create({
-      data: {
-        facilityId,
-        accountCode: a.code,
-        accountName: a.name,
-        accountClass: a.cls,
-        accountType: a.type,
-        parentAccountCode: a.parent,
-        normalBalance: a.normal,
-        isSystemAccount: a.system ?? false,
-        statementSection: a.section ?? null,
-      },
-    });
+    await prisma.chartOfAccounts.create({ data: { facilityId, accountCode: a.code, ...rowData(a) } });
   }
 
   // The one structural fixup that is not an insert: 6110 Loss on Disposal moved from
-  // 6000 (operating) to 6900 (non-operating) in phase/25, so that disposing of an
-  // asset at a loss lands on the same side of the operating-profit line as disposing
-  // at a gain. Scoped to accounts still at the exact old parent, so an owner who
-  // moved it themselves is left alone; guard_chart_of_accounts (migration 0002)
-  // rejects the change where 6110 already carries postings, which is the correct
-  // outcome — no silent restatement of a closed period.
-  try {
+  // 6000 (operating) to 6900 (non-operating) in phase/25, so a loss on disposal lands
+  // on the same side of operating profit as a gain. guard_chart_of_accounts forbids
+  // re-parenting an account with postings — correctly, that would restate a closed
+  // period — so it is only attempted where 6110 has none. (This used to be a
+  // try/catch that swallowed every error, not just that one.) A facility whose 6110
+  // already carries postings keeps it under 6000, visibly, on its chart.
+  const lossPosted = await prisma.journalEntryLine.count({ where: { facilityId, accountCode: '6110' } });
+  if (lossPosted === 0) {
     await prisma.chartOfAccounts.updateMany({
       where: { facilityId, accountCode: '6110', parentAccountCode: '6000' },
       data: { parentAccountCode: '6900' },
     });
-  } catch {
-    // 6110 has postings — it stays under 6000, exactly as before phase/25.
   }
 
   // The plug's name, for boxes seeded before it was separated from a real capital
-  // account. Scoped to the exact old name so an owner who renamed it themselves
-  // keeps theirs — the same rule as the 6110 re-parent above. Renaming is safe
-  // where 6110's re-parent is not: guard_chart_of_accounts locks code, class, type,
-  // parent and normal_balance, never the name, and no posting logic reads it.
-  //
-  // On a single-owner box this puts their real capital under a name that says
-  // "unattributed", which is deliberate and now visible: the balance sheet and the
-  // opening-balance screen both report it until they journal it to their own
-  // capital account under 3100. docs/09 has the two-line entry.
+  // account. Scoped to the exact old name so an owner who renamed it keeps theirs.
+  // Renaming is safe where re-parenting is not: the guard never locks a name, and no
+  // posting logic reads it.
   await prisma.chartOfAccounts.updateMany({
     where: { facilityId, accountCode: '3010', accountName: "Owner's Capital" },
     data: { accountName: 'Opening Balance Equity' },

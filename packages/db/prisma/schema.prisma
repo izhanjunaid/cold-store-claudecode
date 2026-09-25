@@ -45,6 +45,7 @@ enum PartyType {
   ARHTI
   BUYER
   OTHER
+  SUPPLIER
 }
 
 enum TemperatureSource {
@@ -123,6 +124,7 @@ enum InvoiceLineType {
   SERVICE
   ADJUSTMENT
   ADVANCE_APPLIED
+  SURCHARGE
 }
 
 // ============================================================
@@ -226,8 +228,19 @@ enum EntryType {
   EMPLOYEE_ADVANCE_ISSUE
   EMPLOYEE_ADVANCE_WRITE_OFF
   CHEQUE_CLEARED
+  OPENING_BALANCE
+  OWNER_EQUITY
+  CASH_TRANSFER
+  IMPAIRMENT
+  BILL
+  SUPPLIER_PAYMENT
+  TAX_REMITTANCE
+  LATE_PAYMENT_SURCHARGE
 }
 
+// REVERSED is retired: a reversed entry stays POSTED and records reversed_by
+// (migration 0025). CHECK journal_entries_no_reversed_status (0030) forbids it;
+// the value itself is dropped in Release 2 (expand-only releases).
 enum PostingStatus {
   AUTO_DRAFT
   POSTED
@@ -293,6 +306,28 @@ enum ExpenseVoucherStatus {
   ACCRUED
   PAID
   CANCELLED
+  CONVERTED
+}
+
+// ============================================================
+// ENUMS (Accounting consolidation — docs/25)
+// ============================================================
+
+enum BillStatus {
+  DRAFT
+  POSTED
+  VOID
+}
+
+enum WithholdingSection {
+  S149
+  S153
+  S155
+}
+
+enum OwnerEquityDirection {
+  CAPITAL_IN
+  DRAWING
 }
 
 enum ExpensePaymentMethod {
@@ -381,6 +416,12 @@ model Facility {
   racks             Rack[]
   lotRackPlacements LotRackPlacement[]
   lotMovements      LotMovement[]
+
+  bills                Bill[]
+  supplierPayments     SupplierPayment[]
+  taxRemittances       TaxRemittance[]
+  cashTransfers        CashTransfer[]
+  ownerEquityMovements OwnerEquityMovement[]
 
   @@map("facilities")
 }
@@ -516,6 +557,14 @@ model Party {
   notes           String?   @db.Text
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   createdBy       String    @map("created_by") @db.Uuid
+  /// The receivable (or, for a supplier, payable) control account every one of this
+  /// party's postings uses. Stamped once at creation from the party type and frozen
+  /// after the first posting — the type can change, the account cannot (docs/25 R-01).
+  /// Nullable only for rows an older image inserts; a trigger fills those.
+  controlAccountCode String?  @map("control_account_code") @db.VarChar(10)
+  ntn                String?  @db.VarChar(20)
+  /// On the FBR Active Taxpayers List — decides the s.153 withholding rate.
+  isAtlFiler         Boolean  @default(false) @map("is_atl_filer")
 
   facility               Facility           @relation(fields: [facilityId], references: [id])
   parentArhti            Party?             @relation("PartyArhtiLink", fields: [parentArhtiId], references: [id])
@@ -533,6 +582,8 @@ model Party {
   partyLoans             PartyLoan[]
   gatePassesDeposited    GatePass[]         @relation("GatePassDepositor")
   outboundOwnerSnapshots OutboundEvent[]    @relation("OutboundOwnerSnapshot")
+  bills                  Bill[]
+  supplierPayments       SupplierPayment[]
 
   @@index([facilityId, phonePrimary])
   @@index([facilityId, partyType])
@@ -546,6 +597,9 @@ model Commodity {
   unitLabel               String  @map("unit_label") @db.VarChar(20)
   defaultStorageDaysAlert Int?    @map("default_storage_days_alert")
   isActive                Boolean @default(true) @map("is_active")
+  /// Where this commodity's storage revenue posts, unless a rate plan overrides it.
+  /// Stamped at creation; posting never looks a commodity up by name (docs/25 L-28).
+  revenueAccountCode      String? @map("revenue_account_code") @db.VarChar(10)
 
   varieties Variety[]
   chambers  Chamber[]  @relation("ChamberCommodityRestriction")
@@ -793,8 +847,15 @@ model Invoice {
   notes             String?       @db.Text
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz()
   createdBy         String        @map("created_by") @db.Uuid
+  voidedAt          DateTime?     @map("voided_at") @db.Timestamptz()
+  voidedBy          String?       @map("voided_by") @db.Uuid
+  voidReason        String?       @map("void_reason") @db.Text
+  /// Set on a late-payment surcharge invoice: the overdue invoice it charges on.
+  surchargeOfInvoiceId String?    @map("surcharge_of_invoice_id") @db.Uuid
 
   facility        Facility            @relation(fields: [facilityId], references: [id])
+  surchargeOf     Invoice?            @relation("InvoiceSurcharge", fields: [surchargeOfInvoiceId], references: [id])
+  surcharges      Invoice[]           @relation("InvoiceSurcharge")
   lot             Lot                 @relation(fields: [lotId], references: [id])
   outboundEvent   OutboundEvent?      @relation(fields: [outboundEventId], references: [id])
   billingParty    Party               @relation("InvoiceBillingParty", fields: [billingPartyId], references: [id])
@@ -828,9 +889,10 @@ model InvoiceLineItem {
   sortOrder       Int             @default(0) @map("sort_order")
   createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz()
 
-  invoice       Invoice        @relation(fields: [invoiceId], references: [id])
-  serviceCharge ServiceCharge? @relation(fields: [serviceChargeId], references: [id])
-  ratePlan      RatePlan?      @relation(fields: [ratePlanId], references: [id])
+  invoice         Invoice              @relation(fields: [invoiceId], references: [id])
+  serviceCharge   ServiceCharge?       @relation(fields: [serviceChargeId], references: [id])
+  ratePlan        RatePlan?            @relation(fields: [ratePlanId], references: [id])
+  creditNoteLines CreditNoteLineItem[]
 
   @@index([invoiceId])
   @@map("invoice_line_items")
@@ -912,13 +974,31 @@ model ChartOfAccounts {
   parentAccountCode String?           @map("parent_account_code") @db.VarChar(10)
   normalBalance     NormalBalance     @map("normal_balance")
   statementSection  StatementSection? @map("statement_section")
+  /// Deprecated (docs/25 L-19): no longer read — the cash-flow section is derived
+  /// from the header's statement section. Dropped in Release 2.
   cashFlowSection   CashFlowSection?  @map("cash_flow_section")
   isSystemAccount   Boolean           @default(false) @map("is_system_account")
   isActive          Boolean           @default(true) @map("is_active")
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  /// Cash or a bank/wallet account: what every "paid from" picker offers and what the
+  /// cash-flow statement counts. Frozen once the account has postings.
+  isCashEquivalent   Boolean @default(false) @map("is_cash_equivalent")
+  /// False on balances only their own documents may move (cheques in hand, accrued
+  /// revenue, salaries payable, peshgi, advances, derived equity).
+  allowManualPosting Boolean @default(true) @map("allow_manual_posting")
+  /// Every line must name a party (receivable and payable control accounts), so the
+  /// sub-ledger always ties to the ledger. Frozen once the account has postings.
+  requiresParty      Boolean @default(false) @map("requires_party")
 
-  facility          Facility           @relation(fields: [facilityId], references: [id])
-  journalEntryLines JournalEntryLine[]
+  facility            Facility              @relation(fields: [facilityId], references: [id])
+  journalEntryLines   JournalEntryLine[]
+  billLines           BillLine[]
+  supplierPayments    SupplierPayment[]
+  taxRemittancesOwed  TaxRemittance[]       @relation("TaxRemittanceLiability")
+  taxRemittancesPaid  TaxRemittance[]       @relation("TaxRemittancePaidFrom")
+  cashTransfersOut    CashTransfer[]        @relation("CashTransferFrom")
+  cashTransfersIn     CashTransfer[]        @relation("CashTransferTo")
+  ownerEquityMovements OwnerEquityMovement[]
 
   @@unique([facilityId, accountCode])
   @@index([facilityId, accountClass])
@@ -928,7 +1008,8 @@ model ChartOfAccounts {
 model JournalEntry {
   id            String        @id @default(uuid()) @db.Uuid
   facilityId    String        @map("facility_id") @db.Uuid
-  entryNumber   String        @map("entry_number") @db.VarChar(20)
+  /// Assigned when the entry is posted; a draft has none (docs/25 L-13).
+  entryNumber   String?       @map("entry_number") @db.VarChar(20)
   entryDate     DateTime      @map("entry_date") @db.Date
   entryType     EntryType     @map("entry_type")
   bookType      BookType      @default(PACCI) @map("book_type")
@@ -963,6 +1044,11 @@ model JournalEntry {
   partyLoanRepayment      PartyLoanRepayment?    @relation("PartyLoanRepaymentJE")
   employeeAdvanceIssue    EmployeeAdvance?       @relation("EmployeeAdvanceIssueJE")
   employeeAdvanceWriteOff EmployeeAdvance?       @relation("EmployeeAdvanceWriteOffJE")
+  bill                    Bill?
+  supplierPayment         SupplierPayment?
+  taxRemittance           TaxRemittance?
+  cashTransfer            CashTransfer?
+  ownerEquityMovement     OwnerEquityMovement?
 
   @@unique([facilityId, entryNumber])
   @@index([facilityId, entryDate])
@@ -1011,6 +1097,11 @@ model CreditNote {
   notes             String?          @db.Text
   createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz()
   createdBy         String           @map("created_by") @db.Uuid
+  /// The output tax this credit note reverses, pro-rata from the original invoice.
+  gstAmountPkr      Decimal          @default(0) @map("gst_amount_pkr") @db.Decimal(12, 2)
+  voidedAt          DateTime?        @map("voided_at") @db.Timestamptz()
+  voidedBy          String?          @map("voided_by") @db.Uuid
+  voidReason        String?          @map("void_reason") @db.Text
 
   facility        Facility             @relation(fields: [facilityId], references: [id])
   originalInvoice Invoice              @relation("CreditNoteOriginalInvoice", fields: [originalInvoiceId], references: [id])
@@ -1032,8 +1123,11 @@ model CreditNoteLineItem {
   description        String  @db.VarChar(300)
   amountPkr          Decimal @map("amount_pkr") @db.Decimal(12, 2)
   sortOrder          Int     @default(0) @map("sort_order")
+  /// The invoice line this reverses; its revenue account comes from there.
+  invoiceLineItemId  String? @map("invoice_line_item_id") @db.Uuid
 
-  creditNote CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  creditNote      CreditNote       @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  invoiceLineItem InvoiceLineItem? @relation(fields: [invoiceLineItemId], references: [id])
 
   @@index([creditNoteId])
   @@map("credit_note_line_items")
@@ -1089,6 +1183,12 @@ model FixedAsset {
   notes                      String?            @db.Text
   createdAt                  DateTime           @default(now()) @map("created_at") @db.Timestamptz()
   createdBy                  String             @map("created_by") @db.Uuid
+  /// Brought onto the register at go-live: cost and accumulated depreciation are
+  /// already in the opening-balance entry, so it has no purchase entry (docs/25 C-30).
+  isOpeningBalance           Boolean            @default(false) @map("is_opening_balance")
+  voidedAt                   DateTime?          @map("voided_at") @db.Timestamptz()
+  voidedBy                   String?            @map("voided_by") @db.Uuid
+  voidReason                 String?            @map("void_reason") @db.Text
 
   facility             Facility               @relation(fields: [facilityId], references: [id])
   createdByUser        User                   @relation("FixedAssetCreatedBy", fields: [createdBy], references: [id])
@@ -1141,6 +1241,9 @@ model Employee {
   notes             String?      @db.Text
   createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz()
   createdBy         String       @map("created_by") @db.Uuid
+  /// Where this person's pay is expensed — by what they do, not how they are paid
+  /// (docs/25 C-16). Defaults from employee type; a trigger fills older-image inserts.
+  costAccountCode   String?      @map("cost_account_code") @db.VarChar(10)
 
   facility      Facility          @relation(fields: [facilityId], references: [id])
   createdByUser User              @relation("EmployeeCreatedBy", fields: [createdBy], references: [id])
@@ -1175,6 +1278,9 @@ model PayrollRun {
   paidAt                   DateTime?        @map("paid_at") @db.Timestamptz()
   notes                    String?          @db.Text
   createdAt                DateTime         @default(now()) @map("created_at") @db.Timestamptz()
+  voidedAt                 DateTime?        @map("voided_at") @db.Timestamptz()
+  voidedBy                 String?          @map("voided_by") @db.Uuid
+  voidReason               String?          @map("void_reason") @db.Text
 
   facility               Facility                  @relation(fields: [facilityId], references: [id])
   finalizedByUser        User?                     @relation("PayrollRunFinalizedBy", fields: [finalizedBy], references: [id])
@@ -1307,6 +1413,7 @@ model ExpenseVoucher {
   approvedByUser      User?         @relation("ExpenseVoucherApprovedBy", fields: [approvedBy], references: [id])
   accrualJournalEntry JournalEntry? @relation("ExpenseVoucherAccrualJE", fields: [accrualJournalEntryId], references: [id])
   paymentJournalEntry JournalEntry? @relation("ExpenseVoucherPaymentJE", fields: [paymentJournalEntryId], references: [id])
+  convertedToBill     Bill?
 
   @@unique([facilityId, voucherNumber])
   @@index([facilityId, status])
@@ -1510,9 +1617,12 @@ model Partner {
   /// share stops, which the effective-dated share rows already express.
   retiredOn           DateTime? @map("retired_on") @db.Date
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  /// Lets payroll refuse to employ an owner: an owner's pay is a drawing (C-21).
+  cnic                String?   @db.VarChar(15)
 
-  facility Facility             @relation(fields: [facilityId], references: [id])
-  shares   PartnerProfitShare[]
+  facility        Facility              @relation(fields: [facilityId], references: [id])
+  shares          PartnerProfitShare[]
+  equityMovements OwnerEquityMovement[]
 
   /// One account belongs to one partner. Without these, two partners could name
   /// the same account and every per-owner figure would double-count.
@@ -1543,4 +1653,216 @@ model PartnerProfitShare {
   @@unique([partnerId, effectiveFrom])
   @@index([facilityId, effectiveFrom])
   @@map("partner_profit_shares")
+}
+
+// ============================================================
+// ACCOUNTING CONSOLIDATION (docs/25) — migrations 0027–0030
+//
+// Composite foreign keys to chart_of_accounts on pre-existing config columns
+// (rate_plans, service_charges, payments, fixed_assets, expense_vouchers,
+// party_loans, employee_advances) exist in SQL only (0030): Prisma cannot model
+// an optional relation over [facilityId (required), code (optional)]. The same
+// is true of partners since 0026. User references on the tables below
+// (created_by, voided_by) are SQL foreign keys kept as plain scalars here, the
+// same as payment_allocations.voided_by.
+// ============================================================
+
+/// A supplier bill: what the facility owes, recognised on the bill date
+/// (docs/25 C-01/C-02). Posting credits the supplier control account (Trade
+/// Payables) with the supplier on the line; payment state is derived from
+/// supplier_payment_allocations, never stored.
+model Bill {
+  id                     String     @id @default(uuid()) @db.Uuid
+  facilityId             String     @map("facility_id") @db.Uuid
+  billNumber             String?    @map("bill_number") @db.VarChar(20)
+  supplierPartyId        String     @map("supplier_party_id") @db.Uuid
+  billDate               DateTime   @map("bill_date") @db.Date
+  dueDate                DateTime?  @map("due_date") @db.Date
+  supplierReference      String?    @map("supplier_reference") @db.VarChar(100)
+  description            String     @db.VarChar(500)
+  subtotalPkr            Decimal    @map("subtotal_pkr") @db.Decimal(14, 2)
+  inputTaxPkr            Decimal    @default(0) @map("input_tax_pkr") @db.Decimal(14, 2)
+  totalPkr               Decimal    @map("total_pkr") @db.Decimal(14, 2)
+  status                 BillStatus @default(DRAFT)
+  bookType               BookType   @default(PACCI) @map("book_type")
+  journalEntryId         String?    @unique @map("journal_entry_id") @db.Uuid
+  /// Set when the bill was converted from a pre-payables accrued expense voucher.
+  legacyExpenseVoucherId String?    @unique @map("legacy_expense_voucher_id") @db.Uuid
+  voidedAt               DateTime?  @map("voided_at") @db.Timestamptz()
+  voidedBy               String?    @map("voided_by") @db.Uuid
+  voidReason             String?    @map("void_reason") @db.Text
+  notes                  String?    @db.Text
+  createdAt              DateTime   @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy              String     @map("created_by") @db.Uuid
+
+  facility             Facility                    @relation(fields: [facilityId], references: [id])
+  supplier             Party                       @relation(fields: [supplierPartyId], references: [id])
+  journalEntry         JournalEntry?               @relation(fields: [journalEntryId], references: [id])
+  legacyExpenseVoucher ExpenseVoucher?             @relation(fields: [legacyExpenseVoucherId], references: [id])
+  lines                BillLine[]
+  allocations          SupplierPaymentAllocation[]
+
+  @@unique([facilityId, billNumber], map: "bills_facility_number_key")
+  @@index([facilityId, supplierPartyId], map: "bills_facility_supplier_idx")
+  @@index([facilityId, status], map: "bills_facility_status_idx")
+  @@index([facilityId, billDate], map: "bills_facility_date_idx")
+  @@map("bills")
+}
+
+model BillLine {
+  id                 String  @id @default(uuid()) @db.Uuid
+  billId             String  @map("bill_id") @db.Uuid
+  facilityId         String  @map("facility_id") @db.Uuid
+  lineNumber         Int     @map("line_number")
+  expenseAccountCode String  @map("expense_account_code") @db.VarChar(10)
+  description        String  @db.VarChar(300)
+  amountPkr          Decimal @map("amount_pkr") @db.Decimal(14, 2)
+
+  bill    Bill            @relation(fields: [billId], references: [id], onDelete: Cascade)
+  account ChartOfAccounts @relation(fields: [facilityId, expenseAccountCode], references: [facilityId, accountCode], onDelete: Restrict, onUpdate: Restrict, map: "bill_lines_account_fkey")
+
+  @@unique([billId, lineNumber], map: "bill_lines_bill_line_key")
+  @@map("bill_lines")
+}
+
+/// A payment to a supplier. Gross settles the supplier account; the supplier
+/// receives gross less the tax withheld, which is owed to the FBR (docs/25 C-09).
+model SupplierPayment {
+  id                 String              @id @default(uuid()) @db.Uuid
+  facilityId         String              @map("facility_id") @db.Uuid
+  paymentNumber      String?             @map("payment_number") @db.VarChar(20)
+  supplierPartyId    String              @map("supplier_party_id") @db.Uuid
+  paymentDate        DateTime            @map("payment_date") @db.Date
+  paymentMethod      PaymentMethod       @map("payment_method")
+  assetAccountCode   String              @map("asset_account_code") @db.VarChar(10)
+  grossAmountPkr     Decimal             @map("gross_amount_pkr") @db.Decimal(14, 2)
+  withholdingSection WithholdingSection? @map("withholding_section")
+  withholdingRatePct Decimal?            @map("withholding_rate_pct") @db.Decimal(5, 2)
+  withholdingPkr     Decimal             @default(0) @map("withholding_pkr") @db.Decimal(14, 2)
+  netPaidPkr         Decimal             @map("net_paid_pkr") @db.Decimal(14, 2)
+  certificateNumber  String?             @map("certificate_number") @db.VarChar(50)
+  referenceNumber    String?             @map("reference_number") @db.VarChar(100)
+  bookType           BookType            @default(PACCI) @map("book_type")
+  journalEntryId     String?             @unique @map("journal_entry_id") @db.Uuid
+  voidedAt           DateTime?           @map("voided_at") @db.Timestamptz()
+  voidedBy           String?             @map("voided_by") @db.Uuid
+  voidReason         String?             @map("void_reason") @db.Text
+  notes              String?             @db.Text
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy          String              @map("created_by") @db.Uuid
+
+  facility     Facility                    @relation(fields: [facilityId], references: [id])
+  supplier     Party                       @relation(fields: [supplierPartyId], references: [id])
+  account      ChartOfAccounts             @relation(fields: [facilityId, assetAccountCode], references: [facilityId, accountCode], onDelete: Restrict, onUpdate: Restrict, map: "supplier_payments_account_fkey")
+  journalEntry JournalEntry?               @relation(fields: [journalEntryId], references: [id])
+  allocations  SupplierPaymentAllocation[]
+
+  @@unique([facilityId, paymentNumber], map: "supplier_payments_facility_number_key")
+  @@index([facilityId, supplierPartyId], map: "supplier_payments_facility_supplier_idx")
+  @@index([facilityId, paymentDate], map: "supplier_payments_facility_date_idx")
+  @@map("supplier_payments")
+}
+
+model SupplierPaymentAllocation {
+  id                 String    @id @default(uuid()) @db.Uuid
+  supplierPaymentId  String    @map("supplier_payment_id") @db.Uuid
+  billId             String    @map("bill_id") @db.Uuid
+  allocatedAmountPkr Decimal   @map("allocated_amount_pkr") @db.Decimal(14, 2)
+  voidedAt           DateTime? @map("voided_at") @db.Timestamptz()
+  voidedBy           String?   @map("voided_by") @db.Uuid
+
+  supplierPayment SupplierPayment @relation(fields: [supplierPaymentId], references: [id])
+  bill            Bill            @relation(fields: [billId], references: [id])
+
+  @@index([supplierPaymentId], map: "supplier_payment_allocations_payment_idx")
+  @@index([billId], map: "supplier_payment_allocations_bill_idx")
+  @@map("supplier_payment_allocations")
+}
+
+/// One statutory liability paid over for one period: EOBI (2060/2061), s.149
+/// (2070), s.153 (2071), s.155 (2072). Replaces per-payroll-run remittance and
+/// the document-less JE-29 (docs/25 C-10).
+model TaxRemittance {
+  id                   String    @id @default(uuid()) @db.Uuid
+  facilityId           String    @map("facility_id") @db.Uuid
+  liabilityAccountCode String    @map("liability_account_code") @db.VarChar(10)
+  periodYear           Int       @map("period_year")
+  periodMonth          Int       @map("period_month")
+  remittanceDate       DateTime  @map("remittance_date") @db.Date
+  amountPkr            Decimal   @map("amount_pkr") @db.Decimal(14, 2)
+  paidFromAccountCode  String    @map("paid_from_account_code") @db.VarChar(10)
+  /// The FBR / EOBI computerised payment receipt (CPR / challan) number.
+  challanNumber        String?   @map("challan_number") @db.VarChar(50)
+  bookType             BookType  @default(PACCI) @map("book_type")
+  journalEntryId       String?   @unique @map("journal_entry_id") @db.Uuid
+  voidedAt             DateTime? @map("voided_at") @db.Timestamptz()
+  voidedBy             String?   @map("voided_by") @db.Uuid
+  voidReason           String?   @map("void_reason") @db.Text
+  notes                String?   @db.Text
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy            String    @map("created_by") @db.Uuid
+
+  facility         Facility        @relation(fields: [facilityId], references: [id])
+  liabilityAccount ChartOfAccounts @relation("TaxRemittanceLiability", fields: [facilityId, liabilityAccountCode], references: [facilityId, accountCode], onDelete: Restrict, onUpdate: Restrict, map: "tax_remittances_liability_fkey")
+  paidFromAccount  ChartOfAccounts @relation("TaxRemittancePaidFrom", fields: [facilityId, paidFromAccountCode], references: [facilityId, accountCode], onDelete: Restrict, onUpdate: Restrict, map: "tax_remittances_paid_from_fkey")
+  journalEntry     JournalEntry?   @relation(fields: [journalEntryId], references: [id])
+
+  @@index([facilityId, liabilityAccountCode, periodYear, periodMonth], map: "tax_remittances_facility_period_idx")
+  @@map("tax_remittances")
+}
+
+/// Money moved between two of the facility's own cash-equivalent accounts
+/// (docs/25 C-44) — a document, so it has a history and can be voided.
+model CashTransfer {
+  id              String    @id @default(uuid()) @db.Uuid
+  facilityId      String    @map("facility_id") @db.Uuid
+  transferDate    DateTime  @map("transfer_date") @db.Date
+  fromAccountCode String    @map("from_account_code") @db.VarChar(10)
+  toAccountCode   String    @map("to_account_code") @db.VarChar(10)
+  amountPkr       Decimal   @map("amount_pkr") @db.Decimal(14, 2)
+  reference       String?   @db.VarChar(100)
+  notes           String?   @db.Text
+  bookType        BookType  @default(PACCI) @map("book_type")
+  journalEntryId  String?   @unique @map("journal_entry_id") @db.Uuid
+  voidedAt        DateTime? @map("voided_at") @db.Timestamptz()
+  voidedBy        String?   @map("voided_by") @db.Uuid
+  voidReason      String?   @map("void_reason") @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy       String    @map("created_by") @db.Uuid
+
+  facility     Facility        @relation(fields: [facilityId], references: [id])
+  fromAccount  ChartOfAccounts @relation("CashTransferFrom", fields: [facilityId, fromAccountCode], references: [facilityId, accountCode], onDelete: Restrict, onUpdate: Restrict, map: "cash_transfers_from_fkey")
+  toAccount    ChartOfAccounts @relation("CashTransferTo", fields: [facilityId, toAccountCode], references: [facilityId, accountCode], onDelete: Restrict, onUpdate: Restrict, map: "cash_transfers_to_fkey")
+  journalEntry JournalEntry?   @relation(fields: [journalEntryId], references: [id])
+
+  @@index([facilityId, transferDate], map: "cash_transfers_facility_date_idx")
+  @@map("cash_transfers")
+}
+
+/// An owner putting money in or taking it out (docs/25 L-23). The equity account
+/// is derived from the partner and the direction, never chosen separately.
+model OwnerEquityMovement {
+  id              String               @id @default(uuid()) @db.Uuid
+  facilityId      String               @map("facility_id") @db.Uuid
+  partnerId       String               @map("partner_id") @db.Uuid
+  direction       OwnerEquityDirection
+  movementDate    DateTime             @map("movement_date") @db.Date
+  amountPkr       Decimal              @map("amount_pkr") @db.Decimal(14, 2)
+  cashAccountCode String               @map("cash_account_code") @db.VarChar(10)
+  note            String?              @db.VarChar(300)
+  bookType        BookType             @default(PACCI) @map("book_type")
+  journalEntryId  String?              @unique @map("journal_entry_id") @db.Uuid
+  voidedAt        DateTime?            @map("voided_at") @db.Timestamptz()
+  voidedBy        String?              @map("voided_by") @db.Uuid
+  voidReason      String?              @map("void_reason") @db.Text
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz()
+  createdBy       String               @map("created_by") @db.Uuid
+
+  facility     Facility        @relation(fields: [facilityId], references: [id])
+  partner      Partner         @relation(fields: [partnerId], references: [id])
+  cashAccount  ChartOfAccounts @relation(fields: [facilityId, cashAccountCode], references: [facilityId, accountCode], onDelete: Restrict, onUpdate: Restrict, map: "owner_equity_movements_cash_fkey")
+  journalEntry JournalEntry?   @relation(fields: [journalEntryId], references: [id])
+
+  @@index([facilityId, partnerId], map: "owner_equity_movements_facility_partner_idx")
+  @@map("owner_equity_movements")
 }
