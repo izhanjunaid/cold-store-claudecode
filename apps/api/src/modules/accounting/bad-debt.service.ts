@@ -2,6 +2,7 @@ import type { PrismaClient } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from './journal-entry.service';
 import { buildJE08BadDebtWriteOff } from './templates/je-08-bad-debt-writeoff';
+import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 import type { BadDebtWriteOffRequestType } from '@coldchain/shared';
 
 export class BadDebtService {
@@ -18,7 +19,7 @@ export class BadDebtService {
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.invoice.findFirst({
         where: { id: body.invoice_id, facilityId },
-        include: { billingParty: { select: { id: true, name: true, partyType: true } } },
+        include: { billingParty: { select: RECEIVABLE_PARTY_SELECT } },
       });
       if (!invoice) throw Errors.INVOICE_NOT_FOUND();
       if (invoice.status !== 'FINALIZED') throw Errors.INVOICE_NOT_FINALIZED();
@@ -38,7 +39,7 @@ export class BadDebtService {
         amountPkr: outstanding,
         reason: body.reason,
         bookType: invoice.bookType as 'PACCI' | 'KATCHI',
-        party: invoice.billingParty,
+        party: receivableParty(invoice.billingParty),
       });
 
       const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {

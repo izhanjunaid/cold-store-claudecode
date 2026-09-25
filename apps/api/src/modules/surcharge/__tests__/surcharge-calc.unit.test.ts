@@ -73,7 +73,7 @@ describe('JE-21 late payment surcharge', () => {
       amountPkr: 200,
       monthIndex: 1,
       bookType: 'PACCI',
-      billingParty: { id: 'p1', partyType: 'TRADER', name: 'Test Trader' },
+      billingParty: { id: 'p1', controlAccountCode: '1120', name: 'Test Trader' },
     });
     expect(draft.entryType).toBe('ACCRUAL');
     expect(draft.sourceTable).toBe('invoice_surcharge');

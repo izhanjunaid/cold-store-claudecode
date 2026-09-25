@@ -1,5 +1,6 @@
+import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import { defaultControlAccountForPartyType, SYSTEM_ACCOUNTS, defaultRevenueAccountForCommodity } from '@coldchain/shared';
+import { SYSTEM_ACCOUNTS, defaultRevenueAccountForCommodity } from '@coldchain/shared';
 
 type InvoiceLineInput = {
   lineType: string;
@@ -17,7 +18,7 @@ type Input = {
   gstAmountPkr: number;
   discountAmountPkr?: number;
   bookType: 'PACCI' | 'KATCHI';
-  billingParty: { id: string; partyType: string; name: string };
+  billingParty: ReceivableParty;
   lot: { id: string; lotNumber: string; commodityName: string };
   lines: InvoiceLineInput[];
 };
@@ -46,7 +47,7 @@ type Input = {
  * That keeps the entry balanced and the GL transparent.
  */
 export function buildJE01InvoiceFinalized(input: Input): JournalEntryDraft {
-  const arAccount = defaultControlAccountForPartyType(input.billingParty.partyType);
+  const arAccount = input.billingParty.controlAccountCode;
   const lines: JournalEntryLineDraft[] = [];
 
   // Sum revenue by account

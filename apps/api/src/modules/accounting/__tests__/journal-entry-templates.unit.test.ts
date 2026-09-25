@@ -16,8 +16,8 @@ function totals(lines: { debitAmount: number; creditAmount: number }[]) {
   };
 }
 
-const farmerParty = { id: 'p1', name: 'Test Farmer', partyType: 'FARMER' };
-const traderParty = { id: 'p2', name: 'Test Trader', partyType: 'TRADER' };
+const farmerParty = { id: 'p1', name: 'Test Farmer', controlAccountCode: '1110' };
+const traderParty = { id: 'p2', name: 'Test Trader', controlAccountCode: '1120' };
 const lot = { id: 'l1', lotNumber: 'LOT-260101-0001', commodityName: 'POTATO' };
 
 describe('JE template balance enforcement', () => {

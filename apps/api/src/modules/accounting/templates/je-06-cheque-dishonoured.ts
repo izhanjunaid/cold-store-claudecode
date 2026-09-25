@@ -1,12 +1,13 @@
+import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import { SYSTEM_ACCOUNTS, defaultControlAccountForPartyType, assetAccountForPaymentMethod } from '@coldchain/shared';
+import { SYSTEM_ACCOUNTS, assetAccountForPaymentMethod } from '@coldchain/shared';
 
 type Input = {
   paymentId: string;
   dishonourDate: Date;
   amountPkr: number;
   bookType: 'PACCI' | 'KATCHI';
-  party: { id: string; partyType: string; name: string };
+  party: ReceivableParty;
   originalAssetAccountCode?: string | null;
   /**
    * Portion of the bounced payment still sitting in 2010 Advance Receipts — i.e. received
@@ -45,7 +46,7 @@ type Input = {
  * Posts as a REVERSAL entry referencing the original (the JE service handles reversed_by).
  */
 export function buildJE06ChequeDishonoured(input: Input): JournalEntryDraft {
-  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
+  const arAccount = input.party.controlAccountCode;
   const bankAccount = input.originalAssetAccountCode ?? assetAccountForPaymentMethod('CHEQUE');
   const amount = round2(input.amountPkr);
 

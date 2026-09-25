@@ -1,5 +1,6 @@
+import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft } from './types';
-import { defaultControlAccountForPartyType, SYSTEM_ACCOUNTS } from '@coldchain/shared';
+import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 type Input = {
   invoiceId: string;
@@ -8,7 +9,7 @@ type Input = {
   amountPkr: number;
   reason: string;
   bookType: 'PACCI' | 'KATCHI';
-  party: { id: string; partyType: string; name: string };
+  party: ReceivableParty;
 };
 
 /**
@@ -20,7 +21,7 @@ type Input = {
  * OWNER-only. Invoice status moves to WRITTEN_OFF; AR is removed; expense recognized.
  */
 export function buildJE08BadDebtWriteOff(input: Input): JournalEntryDraft {
-  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
+  const arAccount = input.party.controlAccountCode;
   const amount = round2(input.amountPkr);
   const invRef = input.invoiceNumber ?? input.invoiceId.slice(0, 8);
 

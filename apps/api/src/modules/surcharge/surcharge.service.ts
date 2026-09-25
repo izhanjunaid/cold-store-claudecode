@@ -11,6 +11,7 @@ import { resolveFacilitySettings } from '../facility/facility.service';
 import { computeSurcharge } from './surcharge-calc';
 import { buildJE21LatePaymentSurcharge } from '../accounting/templates/je-21-late-payment-surcharge';
 import type { JournalEntryService } from '../accounting/journal-entry.service';
+import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 
 const SURCHARGE_SOURCE = 'invoice_surcharge';
 
@@ -120,7 +121,7 @@ export class SurchargeService {
       );
       const inv = await tx.invoice.findFirst({
         where: { id: invoiceId, facilityId },
-        include: { billingParty: { select: { id: true, name: true, partyType: true } } },
+        include: { billingParty: { select: RECEIVABLE_PARTY_SELECT } },
       });
       if (!inv) throw Errors.INVOICE_NOT_FOUND();
       if (inv.status !== 'FINALIZED') throw Errors.SURCHARGE_NOT_ELIGIBLE();
@@ -151,7 +152,7 @@ export class SurchargeService {
           amountPkr: perMonth,
           monthIndex: alreadyCharged + m,
           bookType: inv.bookType as 'PACCI' | 'KATCHI',
-          billingParty: { id: inv.billingParty.id, partyType: inv.billingParty.partyType, name: inv.billingParty.name },
+          billingParty: receivableParty(inv.billingParty),
         });
         const je = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, { postingStatus: 'POSTED' });
         posted.push({

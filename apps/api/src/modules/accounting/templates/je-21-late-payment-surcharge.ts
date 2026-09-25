@@ -1,5 +1,5 @@
+import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft } from './types';
-import { defaultControlAccountForPartyType } from '@coldchain/shared';
 
 export const ACCOUNT_LATE_PAYMENT_SURCHARGE = '4210';
 
@@ -10,7 +10,7 @@ type Input = {
   amountPkr: number;
   monthIndex: number;
   bookType: 'PACCI' | 'KATCHI';
-  billingParty: { id: string; partyType: string; name: string };
+  billingParty: ReceivableParty;
 };
 
 /**
@@ -25,7 +25,7 @@ type Input = {
  * manual REVERSAL — posted entries are never edited.
  */
 export function buildJE21LatePaymentSurcharge(input: Input): JournalEntryDraft {
-  const arAccount = defaultControlAccountForPartyType(input.billingParty.partyType);
+  const arAccount = input.billingParty.controlAccountCode;
   const amount = Math.round(input.amountPkr * 100) / 100;
 
   return {

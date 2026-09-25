@@ -3,11 +3,12 @@ import { Errors } from '../../common/errors';
 import { JournalEntryService } from './journal-entry.service';
 import { generateCreditNoteNumber } from './journal-entry-number';
 import { buildJE05CreditNote } from './templates/je-05-credit-note';
+import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 import type { CreateCreditNoteRequestType, CreditNoteListQueryType } from '@coldchain/shared';
 
 const include = {
   originalInvoice: { select: { id: true, invoiceNumber: true, totalPkr: true, amountPaidPkr: true, billingPartyId: true, status: true } },
-  billingParty: { select: { id: true, name: true, partyType: true } },
+  billingParty: { select: RECEIVABLE_PARTY_SELECT },
   journalEntry: { select: { entryNumber: true } },
   createdByUser: { select: { name: true } },
   lineItems: { orderBy: { sortOrder: 'asc' as const } },
@@ -54,7 +55,7 @@ export class CreditNoteService {
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.invoice.findFirst({
         where: { id: body.original_invoice_id, facilityId },
-        include: { billingParty: { select: { id: true, name: true, partyType: true } } },
+        include: { billingParty: { select: RECEIVABLE_PARTY_SELECT } },
       });
       if (!invoice) throw Errors.INVOICE_NOT_FOUND();
       if (invoice.status !== 'FINALIZED') throw Errors.INVOICE_NOT_FINALIZED();
@@ -113,7 +114,7 @@ export class CreditNoteService {
         creditNoteNumber: cnNumber,
         creditDate,
         bookType: created.bookType as 'PACCI' | 'KATCHI',
-        party: invoice.billingParty,
+        party: receivableParty(invoice.billingParty),
         invoice: { id: invoice.id, invoiceNumber: invoice.invoiceNumber },
         lineItems: body.line_items.map((l) => ({
           revenueAccountCode: l.revenue_account_code,

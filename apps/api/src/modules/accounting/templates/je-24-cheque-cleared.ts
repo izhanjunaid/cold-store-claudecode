@@ -6,7 +6,7 @@ type Input = {
   clearedDate: Date;
   amountPkr: number;
   bookType: 'PACCI' | 'KATCHI';
-  party: { id: string; partyType: string; name: string };
+  party: { id: string; name: string };
   referenceNumber: string | null;
 };
 

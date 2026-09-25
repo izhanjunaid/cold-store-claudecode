@@ -8,7 +8,7 @@ type Input = {
   paymentMethod: string;
   referenceNumber: string | null;
   bookType: 'PACCI' | 'KATCHI';
-  party: { id: string; partyType: string; name: string };
+  party: { id: string; name: string };
   assetAccountCode?: string | null;
 };
 

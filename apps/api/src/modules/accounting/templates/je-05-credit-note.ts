@@ -1,12 +1,12 @@
+import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import { defaultControlAccountForPartyType } from '@coldchain/shared';
 
 type Input = {
   creditNoteId: string;
   creditNoteNumber: string;
   creditDate: Date;
   bookType: 'PACCI' | 'KATCHI';
-  party: { id: string; partyType: string; name: string };
+  party: ReceivableParty;
   invoice: { id: string; invoiceNumber: string | null };
   lineItems: { revenueAccountCode: string; amountPkr: number; description: string }[];
 };
@@ -20,7 +20,7 @@ type Input = {
  * Reverses revenue; reduces receivable. Multi-line credit notes can debit multiple revenue accounts.
  */
 export function buildJE05CreditNote(input: Input): JournalEntryDraft {
-  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
+  const arAccount = input.party.controlAccountCode;
   const lines: JournalEntryLineDraft[] = [];
   let total = 0;
 

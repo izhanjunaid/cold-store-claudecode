@@ -10,6 +10,7 @@ import { buildJE24ChequeCleared } from '../accounting/templates/je-24-cheque-cle
 import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recovered';
 import { generateReceiptNumber } from './receipt-number';
 import { receiptAssetAccountForPaymentMethod } from '@coldchain/shared';
+import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 
 // Internal allocation shape used by service. Controller normalises legacy
 // `{invoice_id, allocated_amount_pkr}` payloads into INVOICE-targeted lines.
@@ -79,6 +80,7 @@ export class PaymentService {
         where: { id: params.partyId, facilityId: params.facilityId },
       });
       if (!party) throw Errors.PARTY_NOT_FOUND();
+      const customer = receivableParty(party);
 
       const isAdvance = params.isAdvance ?? false;
       const allocations = isAdvance ? [] : (params.allocations ?? []);
@@ -203,7 +205,7 @@ export class PaymentService {
               paymentMethod: payment.paymentMethod,
               referenceNumber: payment.referenceNumber,
               bookType,
-              party: { id: party.id, partyType: party.partyType, name: party.name },
+              party: customer,
               assetAccountCode,
             })
           : buildJE02PaymentReceived({
@@ -214,7 +216,7 @@ export class PaymentService {
               paymentMethod: payment.paymentMethod,
               referenceNumber: payment.referenceNumber,
               bookType,
-              party: { id: party.id, partyType: party.partyType, name: party.name },
+              party: customer,
               assetAccountCode,
             });
 
@@ -361,7 +363,7 @@ export class PaymentService {
       if (previousStatus === 'ADVANCE') {
         const partyRow = await tx.party.findFirstOrThrow({
           where: { id: paymentRow.party_id },
-          select: { id: true, name: true, partyType: true },
+          select: RECEIVABLE_PARTY_SELECT,
         });
         for (const alloc of allocations) {
           if (alloc.target !== 'INVOICE') continue;
@@ -376,7 +378,7 @@ export class PaymentService {
             appliedDate: paymentDate,
             amountPkr: alloc.allocated_amount_pkr,
             bookType,
-            party: partyRow,
+            party: receivableParty(partyRow),
           });
           await this.journalEntry.postInTransaction(
             tx,
@@ -411,7 +413,7 @@ export class PaymentService {
       const fullPayment = await tx.payment.findFirst({
         where: { id, facilityId },
         include: {
-          party: { select: { id: true, name: true, partyType: true } },
+          party: { select: RECEIVABLE_PARTY_SELECT },
         },
       });
       if (!fullPayment) throw Errors.PAYMENT_NOT_FOUND();
@@ -529,7 +531,7 @@ export class PaymentService {
           amountPkr: je06Amount,
           taxWithheldPkr: Number(fullPayment.taxWithheldPkr),
           bookType: fullPayment.bookType as 'PACCI' | 'KATCHI',
-          party: fullPayment.party,
+          party: receivableParty(fullPayment.party),
           originalAssetAccountCode: fullPayment.assetAccountCode,
           advanceRemainderPkr,
         });
@@ -610,7 +612,7 @@ export class PaymentService {
       const fullPayment = await tx.payment.findFirst({
         where: { id, facilityId },
         include: {
-          party: { select: { id: true, name: true, partyType: true } },
+          party: { select: RECEIVABLE_PARTY_SELECT },
         },
       });
       if (!fullPayment) throw Errors.PAYMENT_NOT_FOUND();

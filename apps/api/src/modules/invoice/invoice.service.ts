@@ -14,6 +14,7 @@ import type {
 } from '@coldchain/shared';
 import type { JournalEntryService } from '../accounting/journal-entry.service';
 import { buildJE01InvoiceFinalized } from '../accounting/templates/je-01-invoice-finalized';
+import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 
 function formatInvoice(inv: InvoiceWithRelations) {
   return {
@@ -200,7 +201,7 @@ export class InvoiceService {
         const context = await tx.invoice.findFirstOrThrow({
           where: { id: invoiceId },
           include: {
-            billingParty: { select: { id: true, name: true, partyType: true } },
+            billingParty: { select: RECEIVABLE_PARTY_SELECT },
             lot: {
               select: {
                 id: true,
@@ -226,11 +227,7 @@ export class InvoiceService {
           gstAmountPkr: Number(context.gstAmountPkr),
           discountAmountPkr: Number(context.discountAmountPkr),
           bookType: context.bookType as 'PACCI' | 'KATCHI',
-          billingParty: {
-            id: context.billingParty.id,
-            partyType: context.billingParty.partyType,
-            name: context.billingParty.name,
-          },
+          billingParty: receivableParty(context.billingParty),
           lot: {
             id: context.lot.id,
             lotNumber: context.lot.lotNumber,

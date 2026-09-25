@@ -1,5 +1,6 @@
+import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft } from './types';
-import { defaultControlAccountForPartyType, SYSTEM_ACCOUNTS } from '@coldchain/shared';
+import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 type Input = {
   paymentId: string;
@@ -8,7 +9,7 @@ type Input = {
   appliedDate: Date;
   amountPkr: number;
   bookType: 'PACCI' | 'KATCHI';
-  party: { id: string; partyType: string; name: string };
+  party: ReceivableParty;
 };
 
 /**
@@ -20,7 +21,7 @@ type Input = {
  * Triggers when a previously-recorded ADVANCE payment is allocated against a finalized invoice.
  */
 export function buildJE04AdvanceApplied(input: Input): JournalEntryDraft {
-  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
+  const arAccount = input.party.controlAccountCode;
   const amount = round2(input.amountPkr);
   const invRef = input.invoiceNumber ?? input.invoiceId.slice(0, 8);
 

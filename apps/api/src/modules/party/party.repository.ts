@@ -66,6 +66,12 @@ export class PartyRepository {
     return Number(rows[0]?.outstanding ?? 0);
   }
 
+  /** True once any journal line names this party — its control account is then frozen. */
+  async hasPostings(facilityId: string, partyId: string): Promise<boolean> {
+    const line = await this.prisma.journalEntryLine.findFirst({ where: { facilityId, partyId }, select: { id: true } });
+    return line !== null;
+  }
+
   async create(data: Prisma.PartyUncheckedCreateInput) {
     return this.prisma.party.create({
       data,
