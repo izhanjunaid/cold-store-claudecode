@@ -538,7 +538,7 @@ export class PaymentService {
           facilityId,
           userId ?? fullPayment.createdBy,
           draft,
-          { postingStatus: 'POSTED', reversedById: fullPayment.journalEntryId ?? null },
+          { postingStatus: 'POSTED' },
         );
         if (fullPayment.journalEntryId) {
           await this.journalEntry.markReversed(tx, fullPayment.journalEntryId, posted.id);
@@ -580,10 +580,7 @@ export class PaymentService {
           facilityId,
           userId ?? fullPayment.createdBy,
           reverseDraft,
-          {
-            postingStatus: 'POSTED',
-            reversedById: lr.repaymentJournalEntryIds[0] ?? null,
-          },
+          { postingStatus: 'POSTED' },
         );
         for (const originalJeId of lr.repaymentJournalEntryIds) {
           await this.journalEntry.markReversed(tx, originalJeId, reversedPost.id);

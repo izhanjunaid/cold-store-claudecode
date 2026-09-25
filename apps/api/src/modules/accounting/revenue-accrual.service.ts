@@ -8,7 +8,7 @@ import {
   buildJE25Reversal,
   type AccrualLotShare,
 } from './templates/je-25-revenue-accrual';
-import type { JournalEntryService } from './journal-entry.service';
+import { postedEntryNumber, type JournalEntryService } from './journal-entry.service';
 import { defaultRevenueAccountForCommodity } from '@coldchain/shared';
 
 const SOURCE_TABLE = 'revenue_accrual';
@@ -290,7 +290,7 @@ export class RevenueAccrualService {
               facilityId,
               bookType: 'PACCI',
               reversalDate: periodStartDate(year, month),
-              accruedEntryNumber: prior.entryNumber,
+              accruedEntryNumber: postedEntryNumber(prior),
               lines: prior.lines.map((l) => ({
                 accountCode: l.accountCode,
                 debitAmount: Number(l.debitAmount),

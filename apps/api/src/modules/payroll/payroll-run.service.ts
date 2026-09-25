@@ -544,33 +544,13 @@ export class PayrollRunService {
       for (const originalId of entryIds) {
         const original = await tx.journalEntry.findFirstOrThrow({
           where: { id: originalId, facilityId },
-          include: { lines: { orderBy: { lineNumber: 'asc' } } },
+          select: { reversedById: true },
         });
         if (original.reversedById) continue;
-
-        const reversal = await this.journalEntry.postInTransaction(
-          tx,
-          facilityId,
-          userId,
-          {
-            entryType: 'REVERSAL',
-            bookType: original.bookType as 'PACCI' | 'KATCHI',
-            sourceTable: 'payroll_runs',
-            sourceId: runId,
-            entryDate: reversalDate,
-            description: `Reversal of ${original.entryNumber} (payroll ${run.runNumber}) — ${body.reason}`,
-            lines: original.lines.map((l) => ({
-              accountCode: l.accountCode,
-              debitAmount: Number(l.creditAmount),
-              creditAmount: Number(l.debitAmount),
-              partyId: l.partyId,
-              lotId: l.lotId,
-              description: l.description ?? undefined,
-            })),
-          },
-          { postingStatus: 'POSTED' },
-        );
-        await this.journalEntry.markReversed(tx, original.id, reversal.id);
+        await this.journalEntry.reverseInTransaction(tx, facilityId, userId, originalId, {
+          reason: `payroll ${run.runNumber} reversed — ${body.reason}`,
+          date: reversalDate,
+        });
       }
 
       const tag = `[REVERSED ${reversalDate.toISOString().slice(0, 10)}]: ${body.reason}`;

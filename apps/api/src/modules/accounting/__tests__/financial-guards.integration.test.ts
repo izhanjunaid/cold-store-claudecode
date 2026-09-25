@@ -2,7 +2,7 @@
  * DB-level financial integrity guards (audit findings F-1, F-3, F-4.3 in
  * docs/16_accounting_module_audit.md):
  *  - audit triggers on financial tables (who/when/before-after)
- *  - posted journal entries immutable except POSTED→REVERSED
+ *  - posted journal entries immutable except recording reversed_by once
  *  - deferred SUM(debit)=SUM(credit) constraint per entry
  *  - per-line CHECK constraints
  *  - chart_of_accounts structure locked once the account has postings
@@ -177,29 +177,33 @@ describe('posted journal entries are immutable at the DB level', () => {
     ).rejects.toThrow(/immutable/i);
   });
 
-  it('allows the POSTED → REVERSED transition (reversal linkage only)', async () => {
+  it('allows recording, once, which entry reversed a posted entry — and nothing else', async () => {
     const originalId = await postManualJe('POSTED');
     const reversingId = await postManualJe('POSTED');
     const count = await prisma.$executeRawUnsafe(
-      `UPDATE journal_entries SET posting_status = 'REVERSED', reversed_by = $2::uuid WHERE id = $1::uuid`,
+      `UPDATE journal_entries SET reversed_by = $2::uuid WHERE id = $1::uuid`,
       originalId,
       reversingId,
     );
     expect(count).toBe(1);
-  });
-
-  it('rejects any further change to a REVERSED entry', async () => {
-    const originalId = await postManualJe('POSTED');
-    const reversingId = await postManualJe('POSTED');
-    await prisma.$executeRawUnsafe(
-      `UPDATE journal_entries SET posting_status = 'REVERSED', reversed_by = $2::uuid WHERE id = $1::uuid`,
-      originalId,
-      reversingId,
-    );
     await expect(
       prisma.$executeRawUnsafe(
         `UPDATE journal_entries SET description = 'tampered after reversal' WHERE id = $1::uuid`,
         originalId,
+      ),
+    ).rejects.toThrow(/immutable/i);
+  });
+
+  // 0030 retired the legacy POSTED -> REVERSED branch: a reversed entry stays
+  // POSTED in its own period and carries reversed_by (docs/25 L-11).
+  it('refuses to flip a posted entry to REVERSED', async () => {
+    const originalId = await postManualJe('POSTED');
+    const reversingId = await postManualJe('POSTED');
+    await expect(
+      prisma.$executeRawUnsafe(
+        `UPDATE journal_entries SET posting_status = 'REVERSED', reversed_by = $2::uuid WHERE id = $1::uuid`,
+        originalId,
+        reversingId,
       ),
     ).rejects.toThrow(/immutable/i);
   });

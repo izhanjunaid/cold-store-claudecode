@@ -1,69 +1,19 @@
 import type { Prisma } from '@coldchain/db';
-import { advisoryXactLock } from '../../common/advisory-lock';
+import { documentNumberPrefix, formatDocumentNumber, nextDocumentNumber } from '../../common/document-number';
 
-// UTC getters throughout so a document's number always agrees with the
-// accounting period derived in period.ts (which also uses UTC). Local-time
-// getters put a late-evening-UTC entry in the wrong month on non-UTC servers.
-export function formatJournalEntryNumber(date: Date, next: number): string {
-  const yyyy = String(date.getUTCFullYear());
-  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const seq = String(next).padStart(4, '0');
-  return `JE-${yyyy}${mm}-${seq}`;
-}
+// UTC throughout so a document's number always agrees with the accounting period
+// derived from its date (see common/document-number.ts).
 
-export function journalEntryNumberPrefix(date: Date): string {
-  const yyyy = String(date.getUTCFullYear());
-  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-  return `JE-${yyyy}${mm}-`;
-}
+export const journalEntryNumberPrefix = (date: Date): string => documentNumberPrefix('JE', date, 'monthly');
 
-export async function generateJournalEntryNumber(
-  tx: Prisma.TransactionClient,
-  facilityId: string,
-  date: Date,
-): Promise<string> {
-  const prefix = journalEntryNumberPrefix(date);
-  const lockKey = `${facilityId}:${prefix}`;
+export const formatJournalEntryNumber = (date: Date, next: number): string =>
+  formatDocumentNumber(journalEntryNumberPrefix(date), next, 4);
 
-  await advisoryXactLock(tx, lockKey);
+export const generateJournalEntryNumber = (tx: Prisma.TransactionClient, facilityId: string, date: Date) =>
+  nextDocumentNumber(tx, facilityId, 'journal_entries', journalEntryNumberPrefix(date), 4);
 
-  const rows = await tx.$queryRawUnsafe<{ next: number | bigint }[]>(
-    `SELECT COALESCE(MAX(CAST(split_part(entry_number, '-', 3) AS INT)), 0) + 1 AS next
-     FROM journal_entries
-     WHERE facility_id = $1::uuid AND entry_number LIKE $2`,
-    facilityId,
-    `${prefix}%`,
-  );
-  const next = Number(rows[0]?.next ?? 1);
-  return formatJournalEntryNumber(date, next);
-}
+export const formatCreditNoteNumber = (date: Date, next: number): string =>
+  formatDocumentNumber(documentNumberPrefix('CN', date, 'monthly'), next, 4);
 
-export function formatCreditNoteNumber(date: Date, next: number): string {
-  const yyyy = String(date.getUTCFullYear());
-  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const seq = String(next).padStart(4, '0');
-  return `CN-${yyyy}${mm}-${seq}`;
-}
-
-export async function generateCreditNoteNumber(
-  tx: Prisma.TransactionClient,
-  facilityId: string,
-  date: Date,
-): Promise<string> {
-  const yyyy = String(date.getUTCFullYear());
-  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const prefix = `CN-${yyyy}${mm}-`;
-  const lockKey = `${facilityId}:${prefix}`;
-
-  await advisoryXactLock(tx, lockKey);
-
-  const rows = await tx.$queryRawUnsafe<{ next: number | bigint }[]>(
-    `SELECT COALESCE(MAX(CAST(split_part(credit_note_number, '-', 3) AS INT)), 0) + 1 AS next
-     FROM credit_notes
-     WHERE facility_id = $1::uuid AND credit_note_number LIKE $2`,
-    facilityId,
-    `${prefix}%`,
-  );
-  const next = Number(rows[0]?.next ?? 1);
-  return formatCreditNoteNumber(date, next);
-}
+export const generateCreditNoteNumber = (tx: Prisma.TransactionClient, facilityId: string, date: Date) =>
+  nextDocumentNumber(tx, facilityId, 'credit_notes', documentNumberPrefix('CN', date, 'monthly'), 4);

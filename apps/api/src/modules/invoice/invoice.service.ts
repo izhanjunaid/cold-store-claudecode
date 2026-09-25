@@ -303,35 +303,11 @@ export class InvoiceService {
         throw Errors.INVOICE_NOT_VOIDABLE('Invoice has late-payment surcharges; reverse those first');
       }
 
-      const original = await tx.journalEntry.findFirstOrThrow({
-        where: { id: inv.journalEntryId, facilityId },
-        include: { lines: { orderBy: { lineNumber: 'asc' } } },
-      });
-
       const voidDate = body.void_date ? new Date(body.void_date) : new Date();
-      const reversal = await this.journalEntry!.postInTransaction(
-        tx,
-        facilityId,
-        userId,
-        {
-          entryType: 'REVERSAL',
-          bookType: original.bookType,
-          sourceTable: 'invoices',
-          sourceId: invoiceId,
-          entryDate: voidDate,
-          description: `Void of invoice ${inv.invoiceNumber ?? invoiceId} — ${body.reason}`,
-          lines: original.lines.map((l) => ({
-            accountCode: l.accountCode,
-            debitAmount: Number(l.creditAmount),
-            creditAmount: Number(l.debitAmount),
-            partyId: l.partyId,
-            lotId: l.lotId,
-            description: l.description,
-          })),
-        },
-        { postingStatus: 'POSTED' },
-      );
-      await this.journalEntry!.markReversed(tx, original.id, reversal.id);
+      await this.journalEntry!.reverseInTransaction(tx, facilityId, userId, inv.journalEntryId, {
+        reason: `void of invoice ${inv.invoiceNumber ?? invoiceId} — ${body.reason}`,
+        date: voidDate,
+      });
 
       const voidTag = `[VOID ${voidDate.toISOString().slice(0, 10)}]: ${body.reason}`;
       await tx.invoice.update({

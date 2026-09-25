@@ -445,11 +445,13 @@ describe('Phase 8B — Fixed Assets', () => {
       headers: authHeaders(ownerToken),
       payload: { disposal_date: '2026-12-15', disposal_proceeds_pkr: 100000 },
     });
+    // A reversal may not be dated before the entry it reverses, so it takes the
+    // (future) disposal date rather than today.
     const first = await app.inject({
       method: 'POST',
       url: `/v1/fixed-assets/${id}/reverse-disposal`,
       headers: authHeaders(ownerToken),
-      payload: { reason: 'undo' },
+      payload: { reason: 'undo', reversal_date: '2026-12-15' },
     });
     expect(first.statusCode).toBe(200);
 

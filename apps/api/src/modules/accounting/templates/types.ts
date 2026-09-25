@@ -12,6 +12,8 @@ export type JournalEntryLineDraft = {
 };
 
 export type JournalEntryDraft = {
+  /** Pre-assigned id — a manual entry has no document behind it, so it is its own source. */
+  id?: string;
   entryType: EntryType;
   bookType: BookType;
   sourceTable: string;

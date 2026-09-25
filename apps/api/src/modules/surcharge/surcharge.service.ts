@@ -1,3 +1,4 @@
+import { postedEntryNumber } from '../accounting/journal-entry.service';
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import type {
   SurchargeSuggestionsResponseType,
@@ -155,7 +156,7 @@ export class SurchargeService {
         const je = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, { postingStatus: 'POSTED' });
         posted.push({
           journal_entry_id: je.id,
-          entry_number: je.entryNumber,
+          entry_number: postedEntryNumber(je),
           entry_date: asOf.toISOString().slice(0, 10),
           amount_pkr: perMonth,
           description: draft.description,
@@ -181,7 +182,7 @@ export class SurchargeService {
     });
     const surcharges: AppliedSurchargeType[] = entries.map((e) => ({
       journal_entry_id: e.id,
-      entry_number: e.entryNumber,
+      entry_number: postedEntryNumber(e),
       entry_date: e.entryDate.toISOString().slice(0, 10),
       amount_pkr: e.lines.reduce((s, l) => s + Number(l.creditAmount), 0),
       description: e.description,

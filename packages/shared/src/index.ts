@@ -31,3 +31,4 @@ export * from './account-code';
 export * from './money';
 export * from './fiscal';
 export * from './chart';
+export * from './journal-sources';
