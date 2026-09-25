@@ -30,6 +30,12 @@ export const ChartOfAccountsResponse = z.object({
   cash_flow_section: CashFlowSection.nullable(),
   is_system_account: z.boolean(),
   is_active: z.boolean(),
+  // What every "paid from" picker offers and the cash-flow statement counts.
+  is_cash_equivalent: z.boolean(),
+  // False on accounts only their own documents or automated flow may move.
+  allow_manual_posting: z.boolean(),
+  // Every line must name a party (receivable and payable control accounts).
+  requires_party: z.boolean(),
   created_at: z.string(),
 });
 export type ChartOfAccountsResponseType = z.infer<typeof ChartOfAccountsResponse>;

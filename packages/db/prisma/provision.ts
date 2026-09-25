@@ -126,6 +126,9 @@ async function main() {
           storage_alert_thresholds: {},
           gst_registered: Boolean(f.gstRegistered || f.gstNumber),
           number_format: f.numberFormat || 'en-PK',
+          // Stored, not left to the code default: it freezes once anything is
+          // posted, and a frozen value has to be a stored one (docs/25 L-05).
+          fiscal_year_start_month: 7,
         },
       },
     });

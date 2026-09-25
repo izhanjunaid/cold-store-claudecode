@@ -138,6 +138,12 @@ export interface AccountRef {
   parent_account_code: string | null;
   normal_balance: 'DEBIT' | 'CREDIT';
   is_active: boolean;
+  /** Cash or a bank/wallet account — what a "paid from / paid into" picker offers. */
+  is_cash_equivalent: boolean;
+  /** False on accounts only their own documents or automated flow may move. */
+  allow_manual_posting: boolean;
+  /** Every line must name a party (receivable and payable control accounts). */
+  requires_party: boolean;
 }
 
 /**

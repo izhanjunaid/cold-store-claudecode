@@ -604,6 +604,18 @@ removed with guards re-enabled).
 
 ---
 
+### Release blocker found while building the kernel
+
+`syncChartOfAccounts` now fails the deploy when an owner account sits on a code this release
+claims with a different class or type (rather than silently posting into it). But a failed
+`db:deploy` makes `update.ps1` keep the previous image running, and `/v1/system/version` then
+compares that OLD image's migrations with the database's — the expand-only migrations already
+applied cover everything the old image knows, so it reports nothing pending. The box would stop
+updating with the settings screen saying all is well: the same trap as the old `0011` duplicates.
+Before v0.6.0 ships, `deploy.ts` must record its last outcome (success, or the error text) where
+the version endpoint reads it, and the settings screen must show it. Pre-update check C20 is the
+first line of defence; this is the second.
+
 ## 9. Fix program
 
 See the approved plan: Kernel PR (all schema, registry, engine, ledger read path, shared

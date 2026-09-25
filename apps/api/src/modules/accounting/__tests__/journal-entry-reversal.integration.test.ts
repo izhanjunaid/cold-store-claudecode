@@ -124,6 +124,25 @@ describe('Gap 2 · journal entry reversal endpoint', () => {
     expect(originalAfter.is_user_reversible).toBe(false);
   });
 
+  it('filters the journal by reversed, not by a status the ledger no longer writes', async () => {
+    const original = await createManualJe();
+    const reversal = JSON.parse((await reverse(original.id, managerToken)).body).data;
+
+    // The mirror inherits the original's source, so one source_id holds the pair.
+    const list = async (reversed: string) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/accounting/journal-entries?source_table=manual&source_id=${original.source_id}&reversed=${reversed}`,
+        headers: authHeaders(managerToken),
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return (JSON.parse(res.body).data as { id: string }[]).map((e) => e.id);
+    };
+
+    expect(await list('true')).toEqual([original.id]);
+    expect(await list('false')).toEqual([reversal.id]);
+  });
+
   it('requires a reason', async () => {
     const original = await createManualJe();
     const res = await reverse(original.id, managerToken, {});
