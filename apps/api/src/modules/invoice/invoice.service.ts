@@ -1,9 +1,9 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { InvoiceRepository, type InvoiceWithRelations } from './invoice.repository';
-import { buildInvoiceFromOutbound } from './invoice.builder';
 import { generateInvoiceNumber } from './invoice-number';
 import { renderInvoice } from '../pdf/pdf.service';
+import { lockRow } from '../../common/row-lock';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import type {
   InvoiceListQueryType,
@@ -43,6 +43,8 @@ function formatInvoice(inv: InvoiceWithRelations) {
     finalized_by: inv.finalizedBy ?? null,
     book_type: inv.bookType,
     notes: inv.notes,
+    voided_at: inv.voidedAt?.toISOString() ?? null,
+    void_reason: inv.voidReason,
     created_at: inv.createdAt.toISOString(),
     line_items: inv.lineItems.map((l) => ({
       id: l.id,
@@ -75,12 +77,8 @@ export class InvoiceService {
   constructor(
     private prisma: PrismaClient,
     private repo: InvoiceRepository,
-    private journalEntry?: JournalEntryService,
+    private journalEntry: JournalEntryService,
   ) {}
-
-  async buildFromOutbound(tx: Prisma.TransactionClient, outboundEventId: string) {
-    return buildInvoiceFromOutbound(tx, outboundEventId);
-  }
 
   async list(facilityId: string, query: InvoiceListQueryType) {
     const { data, total } = await this.repo.list(
@@ -197,7 +195,7 @@ export class InvoiceService {
       const updated = await this.repo.finalize(tx, invoiceId, invoiceNumber, userId);
 
       // Phase 8: post JE-01 atomically with finalize so the GL is always reconciled.
-      if (this.journalEntry) {
+      {
         const context = await tx.invoice.findFirstOrThrow({
           where: { id: invoiceId },
           include: {
@@ -268,11 +266,7 @@ export class InvoiceService {
   async void(facilityId: string, invoiceId: string, userId: string, body: VoidInvoiceRequestType) {
     await this.prisma.$transaction(async (tx) => {
       // Row-lock the invoice so a concurrent payment can't slip in.
-      await tx.$queryRawUnsafe(
-        `SELECT id FROM invoices WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-        invoiceId,
-        facilityId,
-      );
+      if (!(await lockRow(tx, 'invoices', invoiceId, facilityId))) throw Errors.INVOICE_NOT_FOUND();
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId, facilityId } });
       if (!inv) throw Errors.INVOICE_NOT_FOUND();
       if (inv.status !== 'FINALIZED') {
@@ -301,18 +295,14 @@ export class InvoiceService {
       }
 
       const voidDate = body.void_date ? new Date(body.void_date) : new Date();
-      await this.journalEntry!.reverseInTransaction(tx, facilityId, userId, inv.journalEntryId, {
+      await this.journalEntry.reverseInTransaction(tx, facilityId, userId, inv.journalEntryId, {
         reason: `void of invoice ${inv.invoiceNumber ?? invoiceId} — ${body.reason}`,
         date: voidDate,
       });
 
-      const voidTag = `[VOID ${voidDate.toISOString().slice(0, 10)}]: ${body.reason}`;
       await tx.invoice.update({
         where: { id: invoiceId },
-        data: {
-          status: 'VOID',
-          notes: inv.notes ? `${inv.notes}\n${voidTag}` : voidTag,
-        },
+        data: { status: 'VOID', voidedAt: new Date(), voidedBy: userId, voidReason: body.reason },
       });
     });
 

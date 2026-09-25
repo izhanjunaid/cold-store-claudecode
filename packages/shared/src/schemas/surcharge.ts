@@ -26,7 +26,6 @@ export type SurchargeSuggestionsResponseType = z.infer<typeof SurchargeSuggestio
 
 export const ApplySurchargeRequest = z.object({
   as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  notes: z.string().max(400).optional(),
 });
 export type ApplySurchargeRequestType = z.infer<typeof ApplySurchargeRequest>;
 

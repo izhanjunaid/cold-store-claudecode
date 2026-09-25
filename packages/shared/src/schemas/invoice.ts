@@ -1,17 +1,5 @@
 import { z } from 'zod';
 
-// CreateInvoiceRequest - for manually creating invoices (optional, auto-creation is via outbound finalize)
-export const CreateInvoiceRequest = z.object({
-  lot_id: z.string().uuid(),
-  outbound_event_id: z.string().uuid().optional(),
-  period_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  period_end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  invoice_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  gst_rate: z.number().min(0).max(100).optional(),
-  notes: z.string().optional(),
-});
-export type CreateInvoiceRequestType = z.infer<typeof CreateInvoiceRequest>;
-
 // AddInvoiceLineRequest - add SERVICE or ADJUSTMENT line to a DRAFT invoice
 export const AddInvoiceLineRequest = z.object({
   line_type: z.enum(['SERVICE', 'ADJUSTMENT']),
@@ -103,6 +91,8 @@ export const InvoiceResponse = z.object({
   finalized_by: z.string().uuid().nullable(),
   book_type: z.enum(['PACCI', 'KATCHI']),
   notes: z.string().nullable(),
+  voided_at: z.string().nullable(),
+  void_reason: z.string().nullable(),
   created_at: z.string(),
   line_items: z.array(InvoiceLineResponse),
 });

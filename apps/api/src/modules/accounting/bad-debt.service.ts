@@ -51,9 +51,6 @@ export class BadDebtService {
         data: {
           status: 'WRITTEN_OFF',
           amountPaidPkr: { increment: outstanding },
-          notes: invoice.notes
-            ? `${invoice.notes}\n[BAD-DEBT WRITE-OFF ${body.write_off_date}]: ${body.reason}`
-            : `[BAD-DEBT WRITE-OFF ${body.write_off_date}]: ${body.reason}`,
         },
       });
 

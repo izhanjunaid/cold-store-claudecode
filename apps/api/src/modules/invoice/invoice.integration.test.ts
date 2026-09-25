@@ -1034,7 +1034,16 @@ describe('Party GET — over_credit_limit (credit exposure)', () => {
         payload: { reason: 'issued against the wrong party' },
       });
       expect(res.statusCode).toBe(200);
-      expect(JSON.parse(res.body).data.status).toBe('VOID');
+      const voided = JSON.parse(res.body).data;
+      expect(voided.status).toBe('VOID');
+
+      // R-24: the cancellation is recorded in its own columns, never appended to notes.
+      expect(voided.void_reason).toBe('issued against the wrong party');
+      expect(voided.voided_at).toBeTruthy();
+      const row = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+      expect(row.voidReason).toBe('issued against the wrong party');
+      expect(row.voidedBy).toBeTruthy();
+      expect(row.notes).toBeNull();
 
       // Original JE-01 stays POSTED and is cross-linked to its mirror. It
       // really happened; the mirror is what reverses it. Flipping the original
