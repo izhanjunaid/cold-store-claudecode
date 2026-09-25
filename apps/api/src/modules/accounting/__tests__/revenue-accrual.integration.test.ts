@@ -83,8 +83,17 @@ const runAccrual = (year: number, month: number, token = managerToken) =>
   });
 
 async function cleanup() {
+  // Every plan billing to this suite's account, not only this run's: an
+  // interrupted earlier run leaves plans behind, and since migration 0030 the
+  // account cannot be deleted while any rate plan still names it.
+  const planIds = (
+    await prisma.ratePlan.findMany({
+      where: { facilityId: TEST_FACILITY_ID, revenueAccountCode: REVENUE_ACCOUNT },
+      select: { id: true },
+    })
+  ).map((p) => p.id);
   const lots = await prisma.lot.findMany({
-    where: { facilityId: TEST_FACILITY_ID, ratePlanId: { in: [dailyPlanId, seasonalNoEndPlanId].filter(Boolean) } },
+    where: { facilityId: TEST_FACILITY_ID, ratePlanId: { in: planIds } },
     select: { id: true },
   });
   const lotIds = lots.map((l) => l.id);
@@ -113,7 +122,7 @@ async function cleanup() {
     await prisma.lotRackPlacement.deleteMany({ where: { lotId: { in: lotIds } } });
     await prisma.ownershipHistory.deleteMany({ where: { lotId: { in: lotIds } } });
     await prisma.lot.deleteMany({ where: { id: { in: lotIds } } });
-    await prisma.ratePlan.deleteMany({ where: { id: { in: [dailyPlanId, seasonalNoEndPlanId].filter(Boolean) } } });
+    await prisma.ratePlan.deleteMany({ where: { id: { in: planIds } } });
     await prisma.chartOfAccounts.deleteMany({
       where: { facilityId: TEST_FACILITY_ID, accountCode: REVENUE_ACCOUNT },
     });

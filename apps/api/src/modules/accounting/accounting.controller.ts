@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
@@ -15,17 +16,8 @@ import {
   ChangesInEquityQuery,
   LockPeriodRequest,
   UnlockPeriodRequest,
-  CreateCreditNoteRequest,
-  CreditNoteListQuery,
-  BadDebtWriteOffRequest,
   EnterOpeningBalancesRequest,
-  RevenueAccrualPeriodQuery,
-  RunRevenueAccrualRequest,
-  GstSettlementQuery,
-  PostGstSettlementRequest,
-  CreateCashTransferRequest,
   CreateOwnerEquityRequest,
-  RemitWithholdingRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { assertKatchiWriteAllowed, resolveBookTypeForRead } from './book-gate';
@@ -35,20 +27,14 @@ import { GlService } from './gl.service';
 import { FinancialStatementsService } from './financial-statements.service';
 import { CashFlowService } from './cash-flow.service';
 import { PeriodLockService } from './period-lock.service';
-import { CreditNoteService } from './credit-note.service';
-import { BadDebtService } from './bad-debt.service';
 import { OpeningBalanceService } from './opening-balance.service';
-import { RevenueAccrualService } from './revenue-accrual.service';
-import { GstSettlementService } from './gst-settlement.service';
-import { WithholdingRemittanceService } from './withholding-remittance.service';
-import { buildJE27CashTransfer, CASH_TRANSFER_ACCOUNTS } from './templates/je-27-cash-transfer';
+import { CASH_TRANSFER_ACCOUNTS } from './templates/je-27-cash-transfer';
 import { buildJE30OwnerEquity } from './templates/je-30-owner-equity';
 import { DERIVED_EQUITY_ACCOUNTS } from './equity-accounts';
 import { Errors } from '../../common/errors';
 
 const CodeParam = z.object({ code: z.string().regex(/^[0-9]+$/) });
 const IdParam = z.object({ id: z.string().uuid() });
-const InvoiceIdParam = z.object({ invoiceId: z.string().uuid() });
 
 export async function accountingRoutes(app: FastifyInstance) {
   const periodLock = new PeriodLockService(app.prisma);
@@ -57,12 +43,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   const gl = new GlService(app.prisma);
   const financials = new FinancialStatementsService(app.prisma);
   const cashFlow = new CashFlowService(app.prisma);
-  const creditNote = new CreditNoteService(app.prisma, journalEntry);
-  const badDebt = new BadDebtService(app.prisma, journalEntry);
   const openingBalance = new OpeningBalanceService(app.prisma, journalEntry);
-  const revenueAccrual = new RevenueAccrualService(app.prisma, journalEntry);
-  const gstSettlement = new GstSettlementService(app.prisma, journalEntry);
-  const withholdingRemittance = new WithholdingRemittanceService(app.prisma, journalEntry);
 
   // ==========================================================
   // CHART OF ACCOUNTS — S-35
@@ -148,6 +129,7 @@ export async function accountingRoutes(app: FastifyInstance) {
         dateFrom: q.date_from,
         dateTo: q.date_to,
         postingStatus: q.posting_status,
+        reversed: q.reversed,
         page: q.page,
         pageSize: q.page_size,
       });
@@ -178,11 +160,14 @@ export async function accountingRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateManualJournalEntryRequest>;
       assertKatchiWriteAllowed(request.user!.role, body.book_type);
+      // A manual entry has no document behind it: it is its own source.
+      const id = randomUUID();
       const draft = {
+        id,
         entryType: 'ADJUSTMENT' as const,
         bookType: body.book_type,
         sourceTable: 'manual',
-        sourceId: request.user!.userId,
+        sourceId: id,
         entryDate: new Date(body.entry_date),
         description: body.description,
         lines: body.lines.map((l) => ({
@@ -334,110 +319,6 @@ export async function accountingRoutes(app: FastifyInstance) {
   });
 
   // ==========================================================
-  // REVENUE ACCRUAL (JE-25)
-  // ==========================================================
-
-  app.route({
-    method: 'GET',
-    url: '/v1/accounting/revenue-accrual',
-    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
-    schema: { querystring: RevenueAccrualPeriodQuery },
-    handler: async (request, reply) => {
-      const q = request.query as z.infer<typeof RevenueAccrualPeriodQuery>;
-      const data = await revenueAccrual.preview(request.user!.facilityId, q.period_year, q.period_month);
-      return sendSuccess(reply, data);
-    },
-  });
-
-  app.route({
-    method: 'POST',
-    url: '/v1/accounting/revenue-accrual',
-    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
-    schema: { body: RunRevenueAccrualRequest },
-    handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof RunRevenueAccrualRequest>;
-      const data = await revenueAccrual.run(
-        request.user!.facilityId,
-        request.user!.userId,
-        body.period_year,
-        body.period_month,
-      );
-      return sendSuccess(reply.status(201), data);
-    },
-  });
-
-  // ==========================================================
-  // WITHHOLDING TAX REMITTANCE (JE-29)
-  // ==========================================================
-
-  app.route({
-    method: 'POST',
-    url: '/v1/accounting/withholding-remittance',
-    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
-    schema: { body: RemitWithholdingRequest },
-    handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof RemitWithholdingRequest>;
-      const data = await withholdingRemittance.remit(
-        request.user!.facilityId,
-        request.user!.userId,
-        body,
-      );
-      return sendSuccess(reply.status(201), data);
-    },
-  });
-
-  // ==========================================================
-  // CASH / BANK TRANSFER (JE-27)
-  // ==========================================================
-
-  app.route({
-    method: 'POST',
-    url: '/v1/accounting/cash-transfers',
-    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
-    schema: { body: CreateCashTransferRequest },
-    handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof CreateCashTransferRequest>;
-      assertKatchiWriteAllowed(request.user!.role, body.book_type);
-
-      const allowed = CASH_TRANSFER_ACCOUNTS as readonly string[];
-      for (const [field, code] of [
-        ['from_account_code', body.from_account_code],
-        ['to_account_code', body.to_account_code],
-      ] as const) {
-        if (!allowed.includes(code)) {
-          throw Errors.VALIDATION_ERROR(
-            `A transfer may only move money between cash and bank accounts (${allowed.join(', ')}).`,
-            field,
-          );
-        }
-      }
-      if (body.from_account_code === body.to_account_code) {
-        throw Errors.VALIDATION_ERROR(
-          'The source and destination must be different accounts.',
-          'to_account_code',
-        );
-      }
-
-      const posted = await journalEntry.post(
-        request.user!.facilityId,
-        request.user!.userId,
-        buildJE27CashTransfer({
-          transferDate: new Date(body.transfer_date),
-          amountPkr: body.amount_pkr,
-          fromAccountCode: body.from_account_code,
-          toAccountCode: body.to_account_code,
-          bookType: body.book_type,
-          userId: request.user!.userId,
-          note: body.note,
-        }),
-        { postingStatus: 'POSTED' },
-      );
-      const full = await journalEntry.getById(request.user!.facilityId, posted.id);
-      return sendSuccess(reply.status(201), full);
-    },
-  });
-
-  // ==========================================================
   // OWNER CAPITAL AND DRAWINGS (JE-30)
   // ==========================================================
 
@@ -503,34 +384,6 @@ export async function accountingRoutes(app: FastifyInstance) {
       );
       const full = await journalEntry.getById(request.user!.facilityId, posted.id);
       return sendSuccess(reply.status(201), full);
-    },
-  });
-
-  // ==========================================================
-  // GST / SALES TAX SETTLEMENT (JE-26)
-  // ==========================================================
-
-  app.route({
-    method: 'GET',
-    url: '/v1/accounting/gst-settlement',
-    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
-    schema: { querystring: GstSettlementQuery },
-    handler: async (request, reply) => {
-      const q = request.query as z.infer<typeof GstSettlementQuery>;
-      const data = await gstSettlement.preview(request.user!.facilityId, q.period_year, q.period_month);
-      return sendSuccess(reply, data);
-    },
-  });
-
-  app.route({
-    method: 'POST',
-    url: '/v1/accounting/gst-settlement',
-    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
-    schema: { body: PostGstSettlementRequest },
-    handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof PostGstSettlementRequest>;
-      const data = await gstSettlement.settle(request.user!.facilityId, request.user!.userId, body);
-      return sendSuccess(reply.status(201), data);
     },
   });
 
@@ -622,79 +475,4 @@ export async function accountingRoutes(app: FastifyInstance) {
     },
   });
 
-  // ==========================================================
-  // CREDIT NOTES (JE-05)
-  // ==========================================================
-
-  app.route({
-    method: 'POST',
-    url: '/v1/credit-notes',
-    preHandler: [app.authenticate, app.requirePermission('invoices.manage')],
-    schema: { body: CreateCreditNoteRequest },
-    handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof CreateCreditNoteRequest>;
-      assertKatchiWriteAllowed(request.user!.role, body.book_type);
-      const data = await creditNote.create(request.user!.facilityId, request.user!.userId, body);
-      return sendSuccess(reply.status(201), data);
-    },
-  });
-
-  app.route({
-    method: 'GET',
-    url: '/v1/credit-notes',
-    preHandler: [app.authenticate, app.requirePermission('billing.view')],
-    schema: { querystring: CreditNoteListQuery },
-    handler: async (request, reply) => {
-      const q = request.query as z.infer<typeof CreditNoteListQuery>;
-      const data = await creditNote.list(request.user!.facilityId, q);
-      return sendSuccess(reply, data.data, data.meta);
-    },
-  });
-
-  app.route({
-    method: 'GET',
-    url: '/v1/credit-notes/:id',
-    preHandler: [app.authenticate, app.requirePermission('billing.view')],
-    schema: { params: IdParam },
-    handler: async (request, reply) => {
-      const { id } = request.params as z.infer<typeof IdParam>;
-      const data = await creditNote.getById(request.user!.facilityId, id);
-      return sendSuccess(reply, data);
-    },
-  });
-
-  app.route({
-    method: 'GET',
-    url: '/v1/invoices/:invoiceId/credit-notes',
-    preHandler: [app.authenticate, app.requirePermission('billing.view')],
-    schema: { params: InvoiceIdParam },
-    handler: async (request, reply) => {
-      const { invoiceId } = request.params as z.infer<typeof InvoiceIdParam>;
-      const data = await creditNote.listByInvoice(request.user!.facilityId, invoiceId);
-      return sendSuccess(reply, data);
-    },
-  });
-
-  // ==========================================================
-  // BAD DEBT WRITE-OFF (JE-08) — OWNER only
-  // ==========================================================
-
-  app.route({
-    method: 'POST',
-    url: '/v1/invoices/:invoiceId/write-off',
-    preHandler: [app.authenticate, app.requirePermission('invoices.write_off')],
-    schema: {
-      params: InvoiceIdParam,
-      body: BadDebtWriteOffRequest.omit({ invoice_id: true }),
-    },
-    handler: async (request, reply) => {
-      const { invoiceId } = request.params as z.infer<typeof InvoiceIdParam>;
-      const body = request.body as Omit<z.infer<typeof BadDebtWriteOffRequest>, 'invoice_id'>;
-      const data = await badDebt.writeOff(request.user!.facilityId, request.user!.userId, {
-        ...body,
-        invoice_id: invoiceId,
-      });
-      return sendSuccess(reply.status(201), data);
-    },
-  });
 }

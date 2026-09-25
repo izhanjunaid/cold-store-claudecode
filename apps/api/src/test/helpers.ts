@@ -23,6 +23,8 @@ import { invoiceRoutes } from '../modules/invoice/invoice.controller';
 import { surchargeRoutes } from '../modules/surcharge/surcharge.controller';
 import { paymentRoutes } from '../modules/payment/payment.controller';
 import { accountingRoutes } from '../modules/accounting/accounting.controller';
+import { receivablesAccountingRoutes } from '../modules/accounting/receivables.routes';
+import { treasuryRoutes } from '../modules/accounting/treasury.routes';
 import { fixedAssetRoutes } from '../modules/fixed-assets/fixed-asset.controller';
 import { payrollRoutes } from '../modules/payroll/payroll.controller';
 import { expenseRoutes } from '../modules/expenses/expense.controller';
@@ -86,6 +88,8 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(surchargeRoutes);
   await testApp.register(paymentRoutes);
   await testApp.register(accountingRoutes);
+  await testApp.register(receivablesAccountingRoutes);
+  await testApp.register(treasuryRoutes);
   await testApp.register(fixedAssetRoutes);
   await testApp.register(payrollRoutes);
   await testApp.register(expenseRoutes);

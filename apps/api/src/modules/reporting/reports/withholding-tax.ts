@@ -1,3 +1,4 @@
+import { postedEntryNumber } from '../../accounting/journal-entry.service';
 import type { PrismaClient } from '@coldchain/db';
 import { round2 } from '../helpers/money';
 import {
@@ -175,7 +176,7 @@ export async function getWithholdingTax(
           .filter((l) => Number(l.creditAmount) > 0)
           .map((l) => ({
             entry_date: l.journalEntry.entryDate.toISOString().slice(0, 10),
-            entry_number: l.journalEntry.entryNumber,
+            entry_number: postedEntryNumber(l.journalEntry),
             counterparty:
               vendorById.get(l.journalEntry.sourceId) ??
               (l.journalEntry.sourceTable === 'payroll_runs' ? 'Employees (payroll)' : '—'),

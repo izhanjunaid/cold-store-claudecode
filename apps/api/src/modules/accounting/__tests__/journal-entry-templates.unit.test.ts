@@ -7,8 +7,7 @@ import { buildJE05CreditNote } from '../templates/je-05-credit-note';
 import { buildJE06ChequeDishonoured } from '../templates/je-06-cheque-dishonoured';
 import { buildJE08BadDebtWriteOff } from '../templates/je-08-bad-debt-writeoff';
 import { buildJE24ChequeCleared } from '../templates/je-24-cheque-cleared';
-import { arAccountForParty, assetAccountForPaymentMethod, revenueAccountForCommodity } from '../templates/types';
-import { receiptAssetAccountForPaymentMethod } from '@coldchain/shared';
+import { receiptAssetAccountForPaymentMethod, defaultControlAccountForPartyType, assetAccountForPaymentMethod, defaultRevenueAccountForCommodity } from '@coldchain/shared';
 
 function totals(lines: { debitAmount: number; creditAmount: number }[]) {
   return {
@@ -321,14 +320,14 @@ describe('JE template balance enforcement', () => {
 
 describe('Account-mapping helpers', () => {
   it('maps party types to AR accounts and fails loudly on unknown types (F-10)', () => {
-    expect(arAccountForParty('FARMER')).toBe('1110');
-    expect(arAccountForParty('TRADER')).toBe('1120');
-    expect(arAccountForParty('ARHTI')).toBe('1130');
-    expect(arAccountForParty('BUYER')).toBe('1150');
-    expect(arAccountForParty('OTHER')).toBe('1150');
+    expect(defaultControlAccountForPartyType('FARMER')).toBe('1110');
+    expect(defaultControlAccountForPartyType('TRADER')).toBe('1120');
+    expect(defaultControlAccountForPartyType('ARHTI')).toBe('1130');
+    expect(defaultControlAccountForPartyType('BUYER')).toBe('1150');
+    expect(defaultControlAccountForPartyType('OTHER')).toBe('1150');
     // Party types are a closed enum — an unmapped value is a programming
     // error and must not silently misclassify AR into Buyers'.
-    expect(() => arAccountForParty('UNKNOWN')).toThrow(/no ar account mapping/i);
+    expect(() => defaultControlAccountForPartyType('UNKNOWN')).toThrow(/no control account mapping/i);
   });
 
   it('maps payment methods to asset accounts and fails loudly on unknown methods (F-10)', () => {
@@ -357,11 +356,11 @@ describe('Account-mapping helpers', () => {
   });
 
   it('maps commodities to revenue accounts and falls back to 4050', () => {
-    expect(revenueAccountForCommodity('POTATO')).toBe('4010');
-    expect(revenueAccountForCommodity('APPLE')).toBe('4020');
-    expect(revenueAccountForCommodity('ONION')).toBe('4030');
-    expect(revenueAccountForCommodity('KINNOW')).toBe('4040');
-    expect(revenueAccountForCommodity(null)).toBe('4050');
-    expect(revenueAccountForCommodity('GUAVA')).toBe('4050');
+    expect(defaultRevenueAccountForCommodity('POTATO')).toBe('4010');
+    expect(defaultRevenueAccountForCommodity('APPLE')).toBe('4020');
+    expect(defaultRevenueAccountForCommodity('ONION')).toBe('4030');
+    expect(defaultRevenueAccountForCommodity('KINNOW')).toBe('4040');
+    expect(defaultRevenueAccountForCommodity(null)).toBe('4050');
+    expect(defaultRevenueAccountForCommodity('GUAVA')).toBe('4050');
   });
 });

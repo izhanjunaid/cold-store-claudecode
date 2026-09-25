@@ -84,6 +84,11 @@ jobs:
           fi
           echo "OK: advisory locks go through the helper"
 
+      - name: Guardrail — account codes live in the registry (docs/25)
+        # An account code is spelled out only in SYSTEM_ACCOUNTS and the seed; the
+        # allowlist of files still holding literals may only shrink.
+        run: node scripts/check-account-literals.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 

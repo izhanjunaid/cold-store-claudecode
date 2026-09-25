@@ -4,12 +4,12 @@ import { JournalEntryService } from '../accounting/journal-entry.service';
 import { FixedAssetRepository } from './fixed-asset.repository';
 import { generateFixedAssetNumber } from './fixed-asset-number';
 import { ASSET_CATEGORY_ACCOUNT_DEFAULTS } from './templates/types';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting/templates/types';
 import { buildJE12AssetPurchase } from './templates/je-12-asset-purchase';
 import { buildJE13Depreciation } from './templates/je-13-depreciation';
 import { buildJE14AssetDisposal } from './templates/je-14-asset-disposal';
 import { buildJE28AssetImpairment } from './templates/je-28-asset-impairment';
 import { computeMonthlyDepreciation } from './depreciation-calc';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 
 type CreateInput = {
   asset_name: string;
@@ -330,7 +330,7 @@ Impaired ${body.impairment_date}: ${body.reason}`
 
       const original = await tx.journalEntry.findFirstOrThrow({
         where: { id: asset.disposalJournalEntryId, facilityId },
-        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+        select: { reversedById: true },
       });
       if (original.reversedById) {
         throw Errors.ASSET_NOT_REVERSIBLE('Disposal entry has already been reversed');
@@ -338,29 +338,10 @@ Impaired ${body.impairment_date}: ${body.reason}`
 
       const reversalDate = body?.reversal_date ? new Date(body.reversal_date) : new Date();
 
-      const reversal = await this.journalEntry.postInTransaction(
-        tx,
-        facilityId,
-        userId,
-        {
-          entryType: 'REVERSAL',
-          bookType: original.bookType as 'PACCI' | 'KATCHI',
-          sourceTable: 'fixed_assets',
-          sourceId: id,
-          entryDate: reversalDate,
-          description: `Reversal of disposal ${original.entryNumber} (${asset.assetNumber}) — ${body.reason}`,
-          lines: original.lines.map((l) => ({
-            accountCode: l.accountCode,
-            debitAmount: Number(l.creditAmount),
-            creditAmount: Number(l.debitAmount),
-            partyId: l.partyId,
-            lotId: l.lotId,
-            description: l.description ?? undefined,
-          })),
-        },
-        { postingStatus: 'POSTED' },
-      );
-      await this.journalEntry.markReversed(tx, original.id, reversal.id);
+      await this.journalEntry.reverseInTransaction(tx, facilityId, userId, asset.disposalJournalEntryId, {
+        reason: `disposal of ${asset.assetNumber} reversed — ${body.reason}`,
+        date: reversalDate,
+      });
 
       const tag = `[DISPOSAL REVERSED ${reversalDate.toISOString().slice(0, 10)}]: ${body.reason}`;
       await tx.fixedAsset.update({

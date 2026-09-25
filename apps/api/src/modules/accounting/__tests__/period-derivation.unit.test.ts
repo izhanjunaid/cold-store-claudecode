@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { derivePeriod } from '../period';
+import { periodOf as derivePeriod } from '@coldchain/shared';
 
 /**
  * Audit finding F-13: period_month/year were derived with server-local-time

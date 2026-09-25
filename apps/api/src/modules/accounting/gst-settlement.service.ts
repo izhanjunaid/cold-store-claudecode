@@ -1,9 +1,9 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
-import { ACCOUNT_GST_PAYABLE } from './templates/types';
 import { buildJE26GstSettlement, ACCOUNT_SALES_TAX_INPUT } from './templates/je-26-gst-settlement';
 import type { JournalEntryService } from './journal-entry.service';
+import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 const SETTLEMENT_ACCOUNTS = ['1010', '1020', '1030'];
 
@@ -93,11 +93,11 @@ export class GstSettlementService {
 
     const [outputInPeriod, inputInPeriod, outputToDate, inputToDate, outputEver, inputEver] =
       await Promise.all([
-        this.sumSide(db, facilityId, ACCOUNT_GST_PAYABLE, inPeriod),
+        this.sumSide(db, facilityId, SYSTEM_ACCOUNTS.GST_OUTPUT, inPeriod),
         this.sumSide(db, facilityId, ACCOUNT_SALES_TAX_INPUT, inPeriod),
-        this.sumSide(db, facilityId, ACCOUNT_GST_PAYABLE, toPeriodEnd),
+        this.sumSide(db, facilityId, SYSTEM_ACCOUNTS.GST_OUTPUT, toPeriodEnd),
         this.sumSide(db, facilityId, ACCOUNT_SALES_TAX_INPUT, toPeriodEnd),
-        this.sumSide(db, facilityId, ACCOUNT_GST_PAYABLE),
+        this.sumSide(db, facilityId, SYSTEM_ACCOUNTS.GST_OUTPUT),
         this.sumSide(db, facilityId, ACCOUNT_SALES_TAX_INPUT),
       ]);
 

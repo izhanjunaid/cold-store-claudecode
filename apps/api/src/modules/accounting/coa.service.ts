@@ -115,6 +115,9 @@ function format(a: Prisma.ChartOfAccountsGetPayload<{}>) {
     cash_flow_section: a.cashFlowSection,
     is_system_account: a.isSystemAccount,
     is_active: a.isActive,
+    is_cash_equivalent: a.isCashEquivalent,
+    allow_manual_posting: a.allowManualPosting,
+    requires_party: a.requiresParty,
     created_at: a.createdAt.toISOString(),
   };
 }

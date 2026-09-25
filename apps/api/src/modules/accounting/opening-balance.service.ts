@@ -2,9 +2,11 @@ import type { PrismaClient } from '@coldchain/db';
 import type { EnterOpeningBalancesRequestType } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
-import { arAccountForParty, type JournalEntryLineDraft } from './templates/types';
+import { type JournalEntryLineDraft } from './templates/types';
 import type { JournalEntryService } from './journal-entry.service';
+import { standingEntriesWhere } from './ledger';
 import { EQUITY_PLUG_ACCOUNT, unattributedPlug } from './equity-accounts';
+import { defaultControlAccountForPartyType } from '@coldchain/shared';
 
 /**
  * Guided opening balances (audit Gap 1): one balanced PACCI entry holding
@@ -42,7 +44,7 @@ export class OpeningBalanceService {
   async getStatus(facilityId: string) {
     const [existing, firstPosting, plugSums] = await Promise.all([
       this.prisma.journalEntry.findFirst({
-        where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED', reversedById: null },
+        where: { ...standingEntriesWhere(facilityId), sourceTable: 'opening_balances' },
         orderBy: { createdAt: 'desc' },
         select: { id: true, entryNumber: true, entryDate: true },
       }),
@@ -50,7 +52,9 @@ export class OpeningBalanceService {
       // already gets: the entry is immutable once posted, so telling someone
       // their date is impossible AFTER they have keyed every balance is too late.
       this.prisma.journalEntry.findFirst({
-        where: { facilityId, postingStatus: 'POSTED', bookType: 'PACCI' },
+        // Trading activity, not an earlier opening balance or its reversal — those are
+        // exactly the position being replaced when opening balances are re-entered.
+        where: { facilityId, postingStatus: 'POSTED', bookType: 'PACCI', sourceTable: { not: 'opening_balances' } },
         orderBy: { entryDate: 'asc' },
         select: { entryNumber: true, entryDate: true },
       }),
@@ -102,7 +106,7 @@ export class OpeningBalanceService {
       await advisoryXactLock(tx, `${facilityId}:opening-balances`);
 
       const existing = await tx.journalEntry.findFirst({
-        where: { facilityId, sourceTable: 'opening_balances', postingStatus: 'POSTED', reversedById: null },
+        where: { ...standingEntriesWhere(facilityId), sourceTable: 'opening_balances' },
       });
       if (existing) throw Errors.OPENING_BALANCES_ALREADY_ENTERED();
 
@@ -116,7 +120,9 @@ export class OpeningBalanceService {
       // PACCI only: that is the book this entry posts to and the one every
       // statement defaults to. A rough KATCHI note must not block a real cutover.
       const firstPosting = await tx.journalEntry.findFirst({
-        where: { facilityId, postingStatus: 'POSTED', bookType: 'PACCI' },
+        // Trading activity, not an earlier opening balance or its reversal — those are
+        // exactly the position being replaced when opening balances are re-entered.
+        where: { facilityId, postingStatus: 'POSTED', bookType: 'PACCI', sourceTable: { not: 'opening_balances' } },
         orderBy: { entryDate: 'asc' },
         select: { entryNumber: true, entryDate: true },
       });
@@ -167,7 +173,7 @@ export class OpeningBalanceService {
         const party = await tx.party.findFirst({ where: { id: pr.party_id, facilityId } });
         if (!party) throw Errors.VALIDATION_ERROR(`Party ${pr.party_id} not found`, 'party_receivables');
         lines.push({
-          accountCode: arAccountForParty(party.partyType),
+          accountCode: defaultControlAccountForPartyType(party.partyType),
           debitAmount: pr.amount_pkr,
           creditAmount: 0,
           partyId: party.id,

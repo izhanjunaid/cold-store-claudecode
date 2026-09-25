@@ -16,26 +16,27 @@ import { useAuthStore } from '@/stores/auth.store';
 import { hasMinRole } from '@/lib/rbac';
 
 import { formatDate } from '@/lib/format';
+import { JournalEntryType } from '@coldchain/shared';
 interface JournalEntry {
   id: string;
-  entry_number: string;
+  /** Null only on a draft — a number is assigned when the entry is posted. */
+  entry_number: string | null;
   entry_date: string;
   entry_type: string;
   book_type: 'PACCI' | 'KATCHI';
   description: string;
-  posting_status: 'AUTO_DRAFT' | 'POSTED' | 'REVERSED';
-  reversed_by_entry_number: string | null;
+  posting_status: 'AUTO_DRAFT' | 'POSTED';
+  is_reversed: boolean;
   total_debit_pkr: number;
 }
 
-const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger'> = {
+const STATUS_TONE: Record<string, 'success' | 'warning'> = {
   POSTED: 'success',
   AUTO_DRAFT: 'warning',
-  REVERSED: 'danger',
 };
 
 const columns: DataTableColumn<JournalEntry>[] = [
-  { id: 'entry_number', header: 'Number', enableHiding: false, cell: (e) => <span className="font-mono text-primary-700">{e.entry_number}</span>, csv: (e) => e.entry_number },
+  { id: 'entry_number', header: 'Number', enableHiding: false, cell: (e) => <span className="font-mono text-primary-700">{e.entry_number ?? '—'}</span>, csv: (e) => e.entry_number ?? '' },
   { id: 'date', header: 'Date', cell: (e) => formatDate(e.entry_date), csv: (e) => e.entry_date },
   { id: 'type', header: 'Type', cell: (e) => <StatusBadge status={e.entry_type} tone="info" />, csv: (e) => e.entry_type },
   { id: 'book', header: 'Book', cell: (e) => e.book_type, csv: (e) => e.book_type },
@@ -45,19 +46,18 @@ const columns: DataTableColumn<JournalEntry>[] = [
     id: 'status',
     header: 'Status',
     // A reversed entry stays POSTED — it really happened, and its mirror
-    // cancels it — so the badge reads off reversed_by, not the status.
-    // Entries reversed before that change still carry the REVERSED status.
+    // cancels it — so the badge reads is_reversed, never the status.
     cell: (e) =>
-      e.reversed_by_entry_number ? (
+      e.is_reversed ? (
         <StatusBadge status="REVERSED" tone="danger" />
       ) : (
         <StatusBadge status={e.posting_status} tone={STATUS_TONE[e.posting_status]} />
       ),
-    csv: (e) => (e.reversed_by_entry_number ? 'REVERSED' : e.posting_status),
+    csv: (e) => (e.is_reversed ? 'REVERSED' : e.posting_status),
   },
 ];
 
-const FILTER_KEYS = ['entry_type', 'book_type', 'posting_status', 'date_from', 'date_to'] as const;
+const FILTER_KEYS = ['entry_type', 'book_type', 'posting_status', 'reversed', 'date_from', 'date_to'] as const;
 
 export default function JournalEntryListPage() {
   const router = useRouter();
@@ -115,10 +115,11 @@ export default function JournalEntryListPage() {
             {
               key: 'entry_type',
               label: 'Type',
-              options: ['INVOICE', 'PAYMENT', 'ADVANCE', 'ADVANCE_APPLIED', 'CREDIT_NOTE', 'REVERSAL', 'BAD_DEBT', 'ADJUSTMENT'].map((v) => ({ label: v.replace(/_/g, ' '), value: v })),
+              options: JournalEntryType.options.map((v) => ({ label: v.replace(/_/g, ' '), value: v })),
             },
             { key: 'book_type', label: 'Book', options: canSeeKatchi ? [{ label: 'PACCI', value: 'PACCI' }, { label: 'KATCHI', value: 'KATCHI' }] : [{ label: 'PACCI', value: 'PACCI' }] },
-            { key: 'posting_status', label: 'Status', options: [{ label: 'Posted', value: 'POSTED' }, { label: 'Draft', value: 'AUTO_DRAFT' }, { label: 'Reversed', value: 'REVERSED' }] },
+            { key: 'posting_status', label: 'Status', options: [{ label: 'Posted', value: 'POSTED' }, { label: 'Draft', value: 'AUTO_DRAFT' }] },
+            { key: 'reversed', label: 'Reversed', options: [{ label: 'Reversed', value: 'true' }, { label: 'Not reversed', value: 'false' }] },
           ],
           extra: (
             <div className="flex items-center gap-2">

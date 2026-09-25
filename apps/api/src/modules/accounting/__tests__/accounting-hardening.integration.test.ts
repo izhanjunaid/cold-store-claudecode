@@ -1549,18 +1549,44 @@ describe('a custom header with a section lands in the right statement section, n
 // a new 6900 (OTHER_EXPENSE) header, symmetric with 4230/4200.
 // ============================================================
 describe('other_expense_lines (phase/25) — non-operating losses stay below operating profit', () => {
-  it('a loss booked to 6110 reduces net_profit but leaves operating_profit untouched', async () => {
+  // 6110 is posted only by asset disposal now (docs/25 §2 matrix), so the stage
+  // is exercised through a non-operating account an owner opens under 6900 —
+  // the same header 6110 sits under, which is what places both.
+  const NON_OPERATING_LOSS = '6995';
+
+  it('6110 sits under 6900, the non-operating header', async () => {
+    const lossAccount = await prisma.chartOfAccounts.findUniqueOrThrow({
+      where: { facilityId_accountCode: { facilityId: TEST_FACILITY_ID, accountCode: '6110' } },
+    });
+    expect(lossAccount.parentAccountCode).toBe('6900');
+  });
+
+  it('a loss booked under 6900 reduces net_profit but leaves operating_profit untouched', async () => {
+    await prisma.chartOfAccounts.upsert({
+      where: { facilityId_accountCode: { facilityId: TEST_FACILITY_ID, accountCode: NON_OPERATING_LOSS } },
+      update: {},
+      create: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: NON_OPERATING_LOSS,
+        accountName: 'Test non-operating loss',
+        accountClass: 'EXPENSE',
+        accountType: 'DETAIL',
+        parentAccountCode: '6900',
+        normalBalance: 'DEBIT',
+      },
+    });
+
     const je = await app.inject({
       method: 'POST',
       url: '/v1/accounting/journal-entries',
       headers: authHeaders(managerToken),
       payload: {
         entry_date: '2026-02-13',
-        description: 'other-expense stage test — asset disposal loss',
+        description: 'other-expense stage test — non-operating loss',
         posting_status: 'POSTED',
         // Funded from equity so it doesn't touch any other P&L account.
         lines: [
-          { account_code: '6110', debit_amount: 400, credit_amount: 0 },
+          { account_code: NON_OPERATING_LOSS, debit_amount: 400, credit_amount: 0 },
           { account_code: '3010', debit_amount: 0, credit_amount: 400 },
         ],
       },
@@ -1576,20 +1602,19 @@ describe('other_expense_lines (phase/25) — non-operating losses stay below ope
     const pl = JSON.parse(res.body).data;
 
     const line = (pl.other_expense_lines as { account_code: string; amount_pkr: number }[]).find(
-      (l) => l.account_code === '6110',
+      (l) => l.account_code === NON_OPERATING_LOSS,
     );
     expect(line).toBeTruthy();
     expect(line!.amount_pkr).toBe(400);
     expect(pl.total_other_expense_pkr).toBeGreaterThanOrEqual(400);
 
-    // Must NOT double-count in operating_expense_lines — 6110 sits under 6900
-    // now, not 6000.
+    // Must NOT double-count in operating_expense_lines — 6900 is not 6000.
     expect(
-      (pl.operating_expense_lines as { account_code: string }[]).some((l) => l.account_code === '6110'),
+      (pl.operating_expense_lines as { account_code: string }[]).some((l) => l.account_code === NON_OPERATING_LOSS),
     ).toBe(false);
     // Nor in unclassified — 6900 carries a real section.
     expect(
-      (pl.unclassified_lines as { account_code: string }[]).some((l) => l.account_code === '6110'),
+      (pl.unclassified_lines as { account_code: string }[]).some((l) => l.account_code === NON_OPERATING_LOSS),
     ).toBe(false);
 
     // The identity must hold exactly, symmetric with other_income's + above.
@@ -1818,7 +1843,10 @@ describe('every JE sourceId resolves to a live row in its sourceTable (invariant
   // acting user's id; 'opening_balances' (opening-balance.service.ts) stamps
   // the facility's own id. Both predate this test.
   const resolvableTables: Record<string, (id: string) => Promise<boolean>> = {
-    manual: async (id) => (await prisma.user.count({ where: { id } })) > 0,
+    // A manual entry is its own source document (docs/25 L-10); entries posted
+    // before that carry the acting user's id instead.
+    manual: async (id) =>
+      (await prisma.journalEntry.count({ where: { id } })) > 0 || (await prisma.user.count({ where: { id } })) > 0,
     opening_balances: async (id) => (await prisma.facility.count({ where: { id } })) > 0,
     expense_vouchers: async (id) => (await prisma.expenseVoucher.count({ where: { id } })) > 0,
     party_loans: async (id) => (await prisma.partyLoan.count({ where: { id } })) > 0,

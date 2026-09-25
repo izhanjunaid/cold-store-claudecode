@@ -7,9 +7,9 @@ import { buildJE03AdvanceReceived } from '../accounting/templates/je-03-advance-
 import { buildJE04AdvanceApplied } from '../accounting/templates/je-04-advance-applied';
 import { buildJE06ChequeDishonoured } from '../accounting/templates/je-06-cheque-dishonoured';
 import { buildJE24ChequeCleared } from '../accounting/templates/je-24-cheque-cleared';
-import { receiptAssetAccountForPaymentMethod } from '../accounting/templates/types';
 import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recovered';
 import { generateReceiptNumber } from './receipt-number';
+import { receiptAssetAccountForPaymentMethod } from '@coldchain/shared';
 
 // Internal allocation shape used by service. Controller normalises legacy
 // `{invoice_id, allocated_amount_pkr}` payloads into INVOICE-targeted lines.
@@ -538,7 +538,7 @@ export class PaymentService {
           facilityId,
           userId ?? fullPayment.createdBy,
           draft,
-          { postingStatus: 'POSTED', reversedById: fullPayment.journalEntryId ?? null },
+          { postingStatus: 'POSTED' },
         );
         if (fullPayment.journalEntryId) {
           await this.journalEntry.markReversed(tx, fullPayment.journalEntryId, posted.id);
@@ -580,10 +580,7 @@ export class PaymentService {
           facilityId,
           userId ?? fullPayment.createdBy,
           reverseDraft,
-          {
-            postingStatus: 'POSTED',
-            reversedById: lr.repaymentJournalEntryIds[0] ?? null,
-          },
+          { postingStatus: 'POSTED' },
         );
         for (const originalJeId of lr.repaymentJournalEntryIds) {
           await this.journalEntry.markReversed(tx, originalJeId, reversedPost.id);

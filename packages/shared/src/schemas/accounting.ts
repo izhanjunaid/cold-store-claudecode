@@ -30,6 +30,12 @@ export const ChartOfAccountsResponse = z.object({
   cash_flow_section: CashFlowSection.nullable(),
   is_system_account: z.boolean(),
   is_active: z.boolean(),
+  // What every "paid from" picker offers and the cash-flow statement counts.
+  is_cash_equivalent: z.boolean(),
+  // False on accounts only their own documents or automated flow may move.
+  allow_manual_posting: z.boolean(),
+  // Every line must name a party (receivable and payable control accounts).
+  requires_party: z.boolean(),
   created_at: z.string(),
 });
 export type ChartOfAccountsResponseType = z.infer<typeof ChartOfAccountsResponse>;
@@ -146,7 +152,8 @@ export type JournalEntryLineResponseType = z.infer<typeof JournalEntryLineRespon
 export const JournalEntryResponse = z.object({
   id: z.string().uuid(),
   facility_id: z.string().uuid(),
-  entry_number: z.string(),
+  // Null only on a draft: a number is assigned when the entry is posted.
+  entry_number: z.string().nullable(),
   entry_date: z.string(),
   entry_type: JournalEntryType,
   book_type: BookType,
@@ -158,6 +165,10 @@ export const JournalEntryResponse = z.object({
   period_year: z.number().int(),
   reversed_by_id: z.string().uuid().nullable(),
   reversed_by_entry_number: z.string().nullable(),
+  // "Has this been reversed?" — derived from reversed_by, never from the status.
+  is_reversed: z.boolean(),
+  // Whether a person may reverse it from the journal (JOURNAL_SOURCES).
+  is_user_reversible: z.boolean(),
   total_debit_pkr: z.number(),
   total_credit_pkr: z.number(),
   created_at: z.string(),
@@ -174,6 +185,7 @@ export const JournalEntryListQuery = z.object({
   date_from: dateOnly.optional(),
   date_to: dateOnly.optional(),
   posting_status: PostingStatus.optional(),
+  reversed: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
   page: z.coerce.number().int().min(1).default(1),
   page_size: z.coerce.number().int().min(1).max(100).default(20),
 });

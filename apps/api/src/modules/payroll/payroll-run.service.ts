@@ -2,13 +2,13 @@ import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
 import { JournalEntryService } from '../accounting/journal-entry.service';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting/templates/types';
 import { generatePayrollRunNumber } from './payroll-number';
 import { buildJE15MonthlyPayroll } from './templates/je-15-monthly-payroll';
 import { buildJE15BDailyWages } from './templates/je-15b-daily-wages';
 import { buildJE16SalaryPayment } from './templates/je-16-salary-payment';
 import { buildJE16BGovtRemittance } from './templates/je-16b-govt-remittance';
 import { formatEmployee } from './employee.service';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 
 // EOBI rates per spec §11.2 (Pakistan, 2026 rates)
 const EOBI_EMPLOYEE_PER_MONTH = 375; // 1% of minimum wage
@@ -544,33 +544,13 @@ export class PayrollRunService {
       for (const originalId of entryIds) {
         const original = await tx.journalEntry.findFirstOrThrow({
           where: { id: originalId, facilityId },
-          include: { lines: { orderBy: { lineNumber: 'asc' } } },
+          select: { reversedById: true },
         });
         if (original.reversedById) continue;
-
-        const reversal = await this.journalEntry.postInTransaction(
-          tx,
-          facilityId,
-          userId,
-          {
-            entryType: 'REVERSAL',
-            bookType: original.bookType as 'PACCI' | 'KATCHI',
-            sourceTable: 'payroll_runs',
-            sourceId: runId,
-            entryDate: reversalDate,
-            description: `Reversal of ${original.entryNumber} (payroll ${run.runNumber}) — ${body.reason}`,
-            lines: original.lines.map((l) => ({
-              accountCode: l.accountCode,
-              debitAmount: Number(l.creditAmount),
-              creditAmount: Number(l.debitAmount),
-              partyId: l.partyId,
-              lotId: l.lotId,
-              description: l.description ?? undefined,
-            })),
-          },
-          { postingStatus: 'POSTED' },
-        );
-        await this.journalEntry.markReversed(tx, original.id, reversal.id);
+        await this.journalEntry.reverseInTransaction(tx, facilityId, userId, originalId, {
+          reason: `payroll ${run.runNumber} reversed — ${body.reason}`,
+          date: reversalDate,
+        });
       }
 
       const tag = `[REVERSED ${reversalDate.toISOString().slice(0, 10)}]: ${body.reason}`;

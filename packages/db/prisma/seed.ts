@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { CHART_OF_ACCOUNTS } from '../src/chart-of-accounts';
+import { seedChartOfAccounts } from '../src/chart-of-accounts';
 
 // bcryptjs hash of 'admin123' with 10 rounds
 // Pre-computed to avoid needing bcryptjs as a seed dependency
@@ -45,6 +45,11 @@ async function main() {
     },
   });
   console.log(`  Facility: ${facility.name} (${facility.id})`);
+
+  // The chart first: parties, rate plans and service charges all name accounts in it,
+  // and the chart-referencing columns carry foreign keys (migration 0030).
+  const coaCount = await seedChartOfAccounts(prisma, facility.id);
+  console.log(`  Chart of Accounts: ${coaCount} accounts seeded`);
 
   // Create OWNER user
   const owner = await prisma.user.upsert({
@@ -372,60 +377,8 @@ async function main() {
     console.log(`  Service Charge: ${sc.name} (${sc.unitType}, Rs. ${sc.unitPricePkr})`);
   }
 
-  // ============================================================
-  // PHASE 8: ACCOUNTING — CHART OF ACCOUNTS (§2 of 09_accounting_spec.md)
-  // ============================================================
-
-  console.log('\n  --- Phase 8 Seed Data (Chart of Accounts) ---');
-
-  // Standard chart shared with provision.ts — keeps system-account flags in sync.
-  const coa = CHART_OF_ACCOUNTS;
-
-  for (const a of coa) {
-    await prisma.chartOfAccounts.upsert({
-      where: { facilityId_accountCode: { facilityId: facility.id, accountCode: a.code } },
-      update: {
-        accountName: a.name,
-        accountClass: a.cls,
-        accountType: a.type,
-        parentAccountCode: a.parent,
-        normalBalance: a.normal,
-        isSystemAccount: a.system ?? false,
-        statementSection: a.section ?? null,
-      },
-      create: {
-        facilityId: facility.id,
-        accountCode: a.code,
-        accountName: a.name,
-        accountClass: a.cls,
-        accountType: a.type,
-        parentAccountCode: a.parent,
-        normalBalance: a.normal,
-        isSystemAccount: a.system ?? false,
-        statementSection: a.section ?? null,
-      },
-    });
-  }
-  console.log(`  Chart of Accounts: ${coa.length} accounts seeded`);
-
-  // Wire revenue account codes to existing rate plans and service charges so JE-01 can route by commodity/service.
-  // Commodity → revenue account (per JE-01 spec):
-  const commodityRevenueMap: Record<string, string> = {
-    POTATO: '4010',
-    APPLE: '4020',
-    ONION: '4030',
-    KINNOW: '4040',
-  };
-
-  for (const rp of ratePlans) {
-    const cmd = commodities.find((c) => c.id === rp.commodityId);
-    const code = cmd ? (commodityRevenueMap[cmd.name] ?? '4050') : '4050';
-    await prisma.ratePlan.update({
-      where: { id: rp.id },
-      data: { revenueAccountCode: code },
-    });
-  }
-  console.log(`  Rate Plans: revenue_account_code wired by commodity`);
+  // Storage revenue routes through the commodity's own revenue_account_code (stamped
+  // when the commodity is created); a rate plan names an account only to override it.
 
   // Service → revenue account (per JE-01 spec):
   const serviceRevenueMap: Record<string, string> = {

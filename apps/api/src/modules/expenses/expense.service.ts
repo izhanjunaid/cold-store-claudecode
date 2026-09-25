@@ -1,13 +1,13 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting/templates/types';
 import { generateExpenseVoucherNumber } from './expense-number';
 import { buildJE17AExpensePaid } from './templates/je-17a-expense-paid';
 import { buildJE17BExpenseAccrued } from './templates/je-17b-expense-accrued';
 import { buildJE17BPayAccruedExpense } from './templates/je-17b-pay-accrued-payment';
 import { buildJE17CPettyCashReplenish } from './templates/je-17c-petty-cash-replenish';
 import { WITHHOLDING_ACCOUNTS, type WithholdingSection } from './templates/withholding';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 

@@ -99,6 +99,23 @@ export class FacilityService {
       // Never allow internal keys through the generic settings PATCH.
       for (const key of INTERNAL_SETTINGS_KEYS) delete settingsPatch[key];
 
+      // The fiscal-year start decides which past profits are "retained" and which
+      // are "this year" on every balance sheet ever drawn. Once anything is posted,
+      // changing it would restate them all silently (docs/25 L-05). Compared on the
+      // resolved value, because a facility that never saved the key is still on the
+      // default and has, in effect, already chosen it.
+      const newFyStart = patch.settings.fiscal_year_start_month;
+      if (
+        newFyStart !== undefined &&
+        newFyStart !== resolveFacilitySettings(existing.settings).fiscal_year_start_month &&
+        (await this.prisma.journalEntry.count({ where: { facilityId, postingStatus: 'POSTED' }, take: 1 })) > 0
+      ) {
+        throw Errors.VALIDATION_ERROR(
+          'The fiscal year start cannot change once entries are posted: it would restate every past balance sheet',
+          'settings.fiscal_year_start_month',
+        );
+      }
+
       if (settingsPatch['email'] !== undefined) {
         const { smtp_password, ...emailPublic } = settingsPatch['email'] as Record<string, unknown> & {
           smtp_password?: string;

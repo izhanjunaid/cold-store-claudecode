@@ -10,7 +10,7 @@ export const UserRole = z.enum([
 ]);
 export type UserRole = z.infer<typeof UserRole>;
 
-export const PartyType = z.enum(['FARMER', 'TRADER', 'ARHTI', 'BUYER', 'OTHER']);
+export const PartyType = z.enum(['FARMER', 'TRADER', 'ARHTI', 'BUYER', 'OTHER', 'SUPPLIER']);
 export type PartyType = z.infer<typeof PartyType>;
 
 export const BookType = z.enum(['PACCI', 'KATCHI']);
@@ -48,7 +48,7 @@ export const InvoiceStatus = z.enum([
 ]);
 export type InvoiceStatus = z.infer<typeof InvoiceStatus>;
 
-export const InvoiceLineType = z.enum(['STORAGE', 'SERVICE', 'ADJUSTMENT', 'ADVANCE_APPLIED']);
+export const InvoiceLineType = z.enum(['STORAGE', 'SERVICE', 'ADJUSTMENT', 'ADVANCE_APPLIED', 'SURCHARGE']);
 export type InvoiceLineType = z.infer<typeof InvoiceLineType>;
 
 export const PaymentMethod = z.enum(['CASH', 'CHEQUE', 'BANK_TRANSFER', 'MOBILE_WALLET']);
@@ -148,13 +148,26 @@ export const JournalEntryType = z.enum([
   'PESHGI_ISSUE',
   'PESHGI_RECOVERY',
   'PESHGI_WRITE_OFF',
+  'EMPLOYEE_ADVANCE_ISSUE',
+  'EMPLOYEE_ADVANCE_WRITE_OFF',
+  'CHEQUE_CLEARED',
+  'OPENING_BALANCE',
+  'OWNER_EQUITY',
+  'CASH_TRANSFER',
+  'IMPAIRMENT',
+  'BILL',
+  'SUPPLIER_PAYMENT',
+  'TAX_REMITTANCE',
+  'LATE_PAYMENT_SURCHARGE',
 ]);
 export type JournalEntryType = z.infer<typeof JournalEntryType>;
 
 export const CreditNoteStatus = z.enum(['ISSUED', 'APPLIED', 'CANCELLED']);
 export type CreditNoteStatus = z.infer<typeof CreditNoteStatus>;
 
-export const PostingStatus = z.enum(['AUTO_DRAFT', 'POSTED', 'REVERSED']);
+// REVERSED is retired (migration 0025/0030): a reversed entry stays POSTED and
+// carries reversed_by. "Is it reversed?" is is_reversed, never the status.
+export const PostingStatus = z.enum(['AUTO_DRAFT', 'POSTED']);
 export type PostingStatus = z.infer<typeof PostingStatus>;
 
 export const AuditAction = z.enum(['INSERT', 'UPDATE']);

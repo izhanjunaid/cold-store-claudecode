@@ -1,7 +1,7 @@
 /**
  * Gap 2 (docs/16_accounting_module_audit.md) — generic reversal endpoint:
  * POST /v1/accounting/journal-entries/:id/reverse builds the mirror-image
- * entry, links both ways, and flips the original to REVERSED. Manual
+ * entry and records reversed_by on the original, which stays POSTED. Manual
  * entries only — system entries are corrected through their own flows
  * (credit note, dishonour, write-off).
  */
@@ -83,7 +83,7 @@ function reverse(id: string, token: string, body: Record<string, unknown> = { re
 }
 
 describe('Gap 2 · journal entry reversal endpoint', () => {
-  it('MANAGER reverses a posted manual entry: mirror lines, both-way links, original flipped to REVERSED', async () => {
+  it('MANAGER reverses a posted manual entry: mirror lines, linked, original stays POSTED', async () => {
     const original = await createManualJe();
 
     const res = await reverse(original.id, managerToken);
@@ -93,8 +93,14 @@ describe('Gap 2 · journal entry reversal endpoint', () => {
     expect(reversal.entry_type).toBe('REVERSAL');
     expect(reversal.book_type).toBe('PACCI');
     expect(reversal.posting_status).toBe('POSTED');
-    expect(reversal.source_table).toBe('journal_entries');
-    expect(reversal.source_id).toBe(original.id);
+    // A reversal inherits its original's source, so "the entries for this document"
+    // includes the reversal (docs/25 §2 invariant 3). A manual entry is its own
+    // source document.
+    expect(reversal.source_table).toBe('manual');
+    expect(reversal.source_id).toBe(original.source_id);
+    expect(original.source_id).toBe(original.id);
+    // The mirror is never itself reversible, and the original is now reversed.
+    expect(reversal.is_user_reversible).toBe(false);
     expect(reversal.description).toContain(original.entry_number);
     expect(reversal.description).toContain('entered against wrong account');
 
@@ -114,6 +120,27 @@ describe('Gap 2 · journal entry reversal endpoint', () => {
     // Stays POSTED — the mirror is what reverses it (migration 0025).
     expect(originalAfter.posting_status).toBe('POSTED');
     expect(originalAfter.reversed_by_id).toBe(reversal.id);
+    expect(originalAfter.is_reversed).toBe(true);
+    expect(originalAfter.is_user_reversible).toBe(false);
+  });
+
+  it('filters the journal by reversed, not by a status the ledger no longer writes', async () => {
+    const original = await createManualJe();
+    const reversal = JSON.parse((await reverse(original.id, managerToken)).body).data;
+
+    // The mirror inherits the original's source, so one source_id holds the pair.
+    const list = async (reversed: string) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/accounting/journal-entries?source_table=manual&source_id=${original.source_id}&reversed=${reversed}`,
+        headers: authHeaders(managerToken),
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return (JSON.parse(res.body).data as { id: string }[]).map((e) => e.id);
+    };
+
+    expect(await list('true')).toEqual([original.id]);
+    expect(await list('false')).toEqual([reversal.id]);
   });
 
   it('requires a reason', async () => {

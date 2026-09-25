@@ -1,6 +1,6 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
-import { derivePeriod } from './period';
+import { periodOf } from '@coldchain/shared';
 
 type Tx = Prisma.TransactionClient;
 type Db = PrismaClient | Tx;
@@ -15,7 +15,7 @@ export class PeriodLockService {
    * unlock row (reopen exception, OWNER-created via unlock()).
    */
   async assertOpen(db: Db, facilityId: string, entryDate: Date): Promise<void> {
-    const { month, year } = derivePeriod(entryDate);
+    const { month, year } = periodOf(entryDate);
     const explicit = await db.periodLock.findUnique({
       where: { facilityId_periodYear_periodMonth: { facilityId, periodYear: year, periodMonth: month } },
     });
