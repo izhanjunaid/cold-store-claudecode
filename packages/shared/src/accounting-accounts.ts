@@ -150,7 +150,7 @@ export const PAYMENT_METHOD_ASSET_ACCOUNT: Record<string, string> = {
 };
 
 /** The default "paid from / paid into" account offered when a caller does not choose one. */
-export const DEFAULT_BANK_ACCOUNT_CODE = A.BANK_MAIN;
+export const DEFAULT_BANK_ACCOUNT_CODE: string = A.BANK_MAIN;
 
 /**
  * Payment methods are a closed enum: an unmapped value is a programming error, and a

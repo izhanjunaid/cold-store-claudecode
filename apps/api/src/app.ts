@@ -29,6 +29,8 @@ import { invoiceRoutes } from './modules/invoice/invoice.controller';
 import { surchargeRoutes } from './modules/surcharge/surcharge.controller';
 import { paymentRoutes } from './modules/payment/payment.controller';
 import { accountingRoutes } from './modules/accounting/accounting.controller';
+import { receivablesAccountingRoutes } from './modules/accounting/receivables.routes';
+import { treasuryRoutes } from './modules/accounting/treasury.routes';
 import { fixedAssetRoutes } from './modules/fixed-assets/fixed-asset.controller';
 import { payrollRoutes } from './modules/payroll/payroll.controller';
 import { expenseRoutes } from './modules/expenses/expense.controller';
@@ -119,6 +121,8 @@ export async function buildApp() {
   await app.register(surchargeRoutes);
   await app.register(paymentRoutes);
   await app.register(accountingRoutes);
+  await app.register(receivablesAccountingRoutes);
+  await app.register(treasuryRoutes);
   await app.register(fixedAssetRoutes);
   await app.register(payrollRoutes);
   await app.register(expenseRoutes);

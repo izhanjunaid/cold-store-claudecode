@@ -63,15 +63,43 @@ Recorded, deliberately **not** built (owner/accountant decisions, not engineerin
 | Trade Payables | allowed | yes |
 | 1140 peshgi, 2010 customer advances | no — module documents only | yes |
 | 1025, 1250, 1230, 2030 | no — owned by cheque clearing / accrual / advances / payroll | — |
+| 5030, 5035, 6010, 6015 (payroll cost); 5040, 6120, 6130, 6140, 6170, 6180 (depreciation); 4230, 6110 (disposal); 6080 (bad debts); 6160 (impairment) | no — owned by their automated flow, each of which now has its own reversal | — |
 | 3030 | never, from any source | — |
 | 3020 | opening balances only | — |
-| everything else, incl. 2020, 2060–2072, cash equivalents | allowed | no |
+| everything else, incl. 2020, 2060–2072, 6150, cash equivalents | allowed | no |
+
+The automated-cost rows replace the web-only `AUTOMATED_COST_ACCOUNTS` list (C-05), which also
+blocked 6150 — an account nothing posts to, so nobody could book spoilage at all.
 
 Every AR/AP line carries a party, so aging = AR GL and payables aging = AP GL hold by construction:
 the read models show invoices/bills as open items, plus any non-document party lines (opening,
 manual, legacy surcharge) as "other".
 
 ---
+
+### Decisions taken while building the kernel
+
+- **Future-dated manual entries stay allowed** (L-12 not adopted). Post-dated journals are
+  legitimate in every mainstream ledger; the period lock is the control that matters. Rejecting
+  them also broke every suite that isolates itself in a future month.
+- **A reversal inherits its original's source** (`source_table`/`source_id`). "The entries for
+  this document" therefore includes their reversals, and every sub-ledger that reads a
+  document's lines — opening-balance AR in aging and party statements (L-03) — nets to zero by
+  construction. The one-opening-balance index excludes `entry_type = 'REVERSAL'` (0031).
+- **A manual entry is its own source document** (`source_id` = its own id), not the acting
+  user's id (L-10). Entries posted before carry the user id; the invariant-17 resolver accepts
+  both.
+- **Revenue routing:** a rate plan may override; otherwise the lot's commodity decides, through
+  `commodities.revenue_account_code` stamped at creation — never the commodity's name (L-28).
+  Commodities are global (no facility), so that column has no foreign key.
+- **No foreign key on `parties.control_account_code` / `employees.cost_account_code`.** The dev
+  seed and provisioning create parties before (or without) the chart, and both codes are always
+  system accounts the engine validates at posting time anyway. Owner-chosen configuration columns
+  (rate plans, service charges, payment/asset/loan/advance accounts) do get foreign keys (0030).
+- **Payroll constants are not effective-dated.** A finalised payroll line stores the amounts it
+  was finalised with, so revising the EOBI figure cannot restate it.
+- **Lots, gate passes and dispatch notes keep their own number generators** — operations, out of
+  this program's scope. Accounting documents move onto `common/document-number.ts`.
 
 ## 3. Root causes
 

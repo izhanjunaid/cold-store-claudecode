@@ -52,9 +52,25 @@ export type NotificationSettingsType = z.infer<typeof NotificationSettings>;
  */
 export const RevenueAccrualRule = z.object({
   enabled: z.boolean(),
-  start_date: z.string().regex(/^d{4}-d{2}-d{2}$/).nullable(),
+  // The pattern had lost its backslashes (`^d{4}-d{2}-d{2}$`), so no real date ever
+  // validated and a start date could never be saved (docs/25).
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD').nullable(),
 });
 export type RevenueAccrualRuleType = z.infer<typeof RevenueAccrualRule>;
+
+/**
+ * Statutory payroll figures that change by notification, not by code (docs/25 C-19).
+ * They were literals in four places (server, two forms and the run screen), so a
+ * revision of the EOBI contribution meant a release. A revision cannot restate a
+ * finalised run: each payroll line stores the amounts it was finalised with.
+ */
+export const PayrollSettings = z.object({
+  eobi_employee_monthly_pkr: z.number().min(0),
+  eobi_employer_monthly_pkr: z.number().min(0),
+  /** Days a daily-wage draft is pre-filled with; gross is always days worked x wage. */
+  standard_working_days: z.number().int().min(1).max(31),
+});
+export type PayrollSettingsType = z.infer<typeof PayrollSettings>;
 
 export const FacilitySettings = z.object({
   weight_dispute_threshold_kg: z.number().nonnegative(),
@@ -66,10 +82,13 @@ export const FacilitySettings = z.object({
   gst_default_rate: z.number().min(0).max(100),
   // Month (1–12) the fiscal year starts. Drives the balance-sheet virtual
   // closing (current-year P&L is bounded to this FY; earlier years roll into
-  // retained earnings) and the web report period presets.
+  // retained earnings) and the web report period presets. Frozen once anything
+  // is posted: changing it would silently re-split every past balance sheet
+  // between retained earnings and the current-year result (docs/25 L-05).
   fiscal_year_start_month: z.number().int().min(1).max(12),
   late_payment_surcharge: LatePaymentSurchargeRule,
   revenue_accrual: RevenueAccrualRule,
+  payroll: PayrollSettings,
   email: EmailSettings,
   notifications: NotificationSettings,
 });
@@ -87,9 +106,10 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
   // data keeps working — see apps/api/src/test/setup.ts, prisma/seed.ts.
   backdating_max_days: 7,
   gst_default_rate: 18,
-  fiscal_year_start_month: 7, // July — Pakistan's standard fiscal year (matches web DEFAULT_FY_START_MONTH)
+  fiscal_year_start_month: 7, // July — Pakistan's fiscal year (DEFAULT_FY_START_MONTH in fiscal.ts)
   late_payment_surcharge: { enabled: false, pct_per_month: 2, grace_days: 30 },
   revenue_accrual: { enabled: false, start_date: null },
+  payroll: { eobi_employee_monthly_pkr: 375, eobi_employer_monthly_pkr: 1875, standard_working_days: 26 },
   email: {
     enabled: false,
     smtp_host: 'smtp.gmail.com',
