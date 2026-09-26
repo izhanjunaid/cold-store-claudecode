@@ -499,26 +499,21 @@ describe('Payment — Financial Ledger', () => {
     });
     expect(dishonourRes.statusCode).toBe(200);
 
-    const reversal = await prisma.journalEntry.findFirst({
+    // The receipt (JE-03) and its application (JE-04) are each reversed by their own
+    // mirror (docs/25 R-05), so across the payment's chain every account nets to zero:
+    // 2010 holds nothing, AR is back where the invoice left it, 1025 is empty.
+    const mirrors = await prisma.journalEntry.findMany({
       where: { facilityId: TEST_FACILITY_ID, sourceId: paymentId, entryType: 'REVERSAL' },
-      include: { lines: true },
     });
-    expect(reversal).toBeTruthy();
-
-    // Unapplied remainder goes to 2010; the applied part goes back to AR.
-    const advanceLine = reversal!.lines.find((l) => l.accountCode === '2010');
-    expect(Number(advanceLine!.debitAmount)).toBe(2000 - totalPkr);
-
-    const arLine = reversal!.lines.find(
-      (l) => ['1110', '1120', '1130', '1150'].includes(l.accountCode) && Number(l.debitAmount) > 0,
-    );
-    expect(Number(arLine!.debitAmount)).toBe(totalPkr);
-
-    // And the entry balances against the full bank credit.
-    const totalDebit = reversal!.lines.reduce((s, l) => s + Number(l.debitAmount), 0);
-    const totalCredit = reversal!.lines.reduce((s, l) => s + Number(l.creditAmount), 0);
-    expect(totalDebit).toBe(2000);
-    expect(totalCredit).toBe(2000);
+    expect(mirrors).toHaveLength(2);
+    const chain = await prisma.journalEntryLine.findMany({
+      where: { journalEntry: { facilityId: TEST_FACILITY_ID, sourceTable: 'payments', sourceId: paymentId } },
+    });
+    const net = (code: string) =>
+      Math.round(chain.filter((l) => l.accountCode === code).reduce((s, l) => s + Number(l.debitAmount) - Number(l.creditAmount), 0) * 100) / 100;
+    expect(net('2010')).toBe(0);
+    expect(net('1110')).toBe(0);
+    expect(net('1025')).toBe(0);
   });
 
   it('10. Dishonour non-cheque payment → 409 PAYMENT_NOT_CHEQUE', async () => {
@@ -1002,7 +997,7 @@ describe('Phase 9 — Combined settlement (invoice + loan)', () => {
     expect(loanAfter.balance_outstanding_pkr).toBe(loanPrincipal);
     expect(loanAfter.repayments ?? []).toHaveLength(0);
 
-    // JE-06 (cheque dishonour) should be posted for the INVOICE portion only — not the full 150k.
+    // The receipt's own mirror covers the INVOICE portion only — not the full 150k.
     const je06 = await prisma.journalEntry.findFirst({
       where: { facilityId: TEST_FACILITY_ID, sourceId: paymentId, entryType: 'REVERSAL' },
       include: { lines: true },
@@ -1023,18 +1018,14 @@ describe('Phase 9 — Combined settlement (invoice + loan)', () => {
     expect(originalJe02Refreshed?.postingStatus).toBe('POSTED');
     expect(originalJe02Refreshed?.reversedById).toBeTruthy();
 
-    // Per-loan REVERSAL JE: sourceTable='party_loans', sourceId=loan.id, DR 1140 / CR 1025
-    // (the loan side used the payment's own assetAccountCode, same as the
-    // invoice side — a CHEQUE payment routes to 1025 throughout, phase/25).
-    const loanReversal = await prisma.journalEntry.findFirst({
-      where: {
-        facilityId: TEST_FACILITY_ID,
-        sourceTable: 'party_loans',
-        sourceId: loan.id,
-        entryType: 'REVERSAL',
-      },
+    // The JE-19 is reversed by its own mirror (docs/25 R-05), DR 1140 / CR 1025 — the loan
+    // side used the payment's own asset account, a CHEQUE routes to 1025 throughout.
+    const je19 = await prisma.journalEntry.findUniqueOrThrow({ where: { id: originalJe19Id } });
+    const loanReversal = await prisma.journalEntry.findUnique({
+      where: { id: je19.reversedById! },
       include: { lines: true },
     });
+    expect(loanReversal?.sourceTable).toBe('party_loan_repayments');
     expect(loanReversal).toBeTruthy();
     const loanReversalCashCredit = loanReversal!.lines.find((l) => l.accountCode === '1025');
     const loanReversalPeshgiDebit = loanReversal!.lines.find((l) => l.accountCode === '1140');

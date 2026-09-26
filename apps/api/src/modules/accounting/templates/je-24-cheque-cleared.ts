@@ -1,5 +1,5 @@
 import type { JournalEntryDraft } from './types';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 
 type Input = {
   paymentId: string;
@@ -37,14 +37,14 @@ export function buildJE24ChequeCleared(input: Input): JournalEntryDraft {
     description: `Cheque cleared — ${input.party.name}${ref}`,
     lines: [
       {
-        accountCode: DEFAULT_BANK_ACCOUNT_CODE,
+        accountCode: SYSTEM_ACCOUNTS.BANK_MAIN,
         debitAmount: amount,
         creditAmount: 0,
         partyId: input.party.id,
         description: `Cheque cleared from ${input.party.name}`,
       },
       {
-        accountCode: '1025',
+        accountCode: SYSTEM_ACCOUNTS.CHEQUES_IN_HAND,
         debitAmount: 0,
         creditAmount: amount,
         partyId: input.party.id,
@@ -54,6 +54,3 @@ export function buildJE24ChequeCleared(input: Input): JournalEntryDraft {
   };
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}

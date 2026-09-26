@@ -5,7 +5,6 @@ import type { JournalEntryService } from '../accounting/journal-entry.service';
 import { buildJE02PaymentReceived } from '../accounting/templates/je-02-payment-received';
 import { buildJE03AdvanceReceived } from '../accounting/templates/je-03-advance-received';
 import { buildJE04AdvanceApplied } from '../accounting/templates/je-04-advance-applied';
-import { buildJE06ChequeDishonoured } from '../accounting/templates/je-06-cheque-dishonoured';
 import { buildJE24ChequeCleared } from '../accounting/templates/je-24-cheque-cleared';
 import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recovered';
 import { generateReceiptNumber } from './receipt-number';
@@ -463,201 +462,79 @@ export class PaymentService {
     return this.repo.update(tx, id, { status });
   }
 
-  async dishonour(
-    facilityId: string,
-    id: string,
-    notes?: string,
-    userId?: string,
-    dishonourDateInput?: string,
-  ) {
-    // The bank often notifies a bounce days after it happened. Defaulting to
-    // "now" would post it — and the period-lock check below it — against the
-    // wrong date. postInTransaction enforces the period lock on whatever date
-    // is passed here, so no separate check is needed for that. Dishonour has
-    // never had a backdating-window rule (unlike lots/outbound), so none is
-    // added here either — a caller-supplied date is simply used as given.
-    const dishonourDate = dishonourDateInput ? new Date(dishonourDateInput) : new Date();
+  /**
+   * A cheque bounced: every entry it caused is reversed through
+   * reverseInTransaction — the receipt (JE-02/03), each advance application
+   * (JE-04), the clearing (JE-24) if it had cleared, and the peshgi recoveries
+   * (JE-19) it funded — so each account returns exactly to where it was. A
+   * cleared cheque therefore nets 1025 to zero and takes the money back out of
+   * the bank (docs/25 R-05). The sub-ledger follows: allocations and repayments
+   * are voided, the invoices and loans re-derived.
+   *
+   * The bank often reports a bounce days later, so the date is the caller's —
+   * but never before the last entry in the chain.
+   */
+  async dishonour(facilityId: string, id: string, userId: string, notes?: string, dishonourDateInput?: string) {
     return this.prisma.$transaction(async (tx) => {
-      const fullPayment = await tx.payment.findFirst({
-        where: { id, facilityId },
-        include: {
-          party: { select: RECEIVABLE_PARTY_SELECT },
+      if (!(await lockRow(tx, 'payments', id, facilityId))) throw Errors.PAYMENT_NOT_FOUND();
+      const payment = await tx.payment.findFirstOrThrow({ where: { id, facilityId } });
+      if (payment.clearanceStatus === 'BOUNCED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
+      if (payment.paymentMethod !== 'CHEQUE') throw Errors.PAYMENT_NOT_CHEQUE();
+
+      const repayments = await tx.partyLoanRepayment.findMany({ where: { paymentId: id, voidedAt: null } });
+      const chain = await tx.journalEntry.findMany({
+        where: {
+          facilityId,
+          postingStatus: 'POSTED',
+          reversedById: null,
+          entryType: { not: 'REVERSAL' },
+          OR: [
+            { sourceTable: 'payments', sourceId: id },
+            { id: { in: repayments.map((r) => r.journalEntryId).filter((v): v is string => Boolean(v)) } },
+          ],
         },
-      });
-      if (!fullPayment) throw Errors.PAYMENT_NOT_FOUND();
-      if (fullPayment.status === 'DISHONOURED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
-      if (fullPayment.paymentMethod !== 'CHEQUE') throw Errors.PAYMENT_NOT_CHEQUE();
-
-      await tx.$queryRawUnsafe(
-        `SELECT id FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-        id,
-        facilityId,
-      );
-
-      const allocations = await tx.paymentAllocation.findMany({
-        where: { paymentId: id, voidedAt: null },
+        select: { id: true, entryDate: true, entryType: true },
       });
 
-      // Track per-loan reversal state so we can post REVERSAL JEs for JE-19 entries
-      // after the data side is cleaned up.
-      type LoanReversal = {
-        loanId: string;
-        loanNumber: string;
-        partyId: string;
-        bookType: 'PACCI' | 'KATCHI';
-        amountPkr: number;
-        repaymentJournalEntryIds: string[];
-      };
-      const loanReversals: LoanReversal[] = [];
-      let loanReversalTotal = 0;
+      const dishonourDate = new Date(`${dishonourDateInput ?? toIsoDate(new Date())}T00:00:00.000Z`);
+      const latest = chain.reduce((d, e) => (e.entryDate > d ? e.entryDate : d), payment.paymentDate);
+      if (dishonourDate < latest) {
+        throw Errors.VALIDATION_ERROR(
+          `This cheque's entries run to ${toIsoDate(latest)}; it cannot be dishonoured before then`,
+          'dishonour_date',
+        );
+      }
 
+      // The clearing first: it is what moved the money on from 1025.
+      chain.sort((a, b) => Number(b.entryType === 'CHEQUE_CLEARED') - Number(a.entryType === 'CHEQUE_CLEARED'));
+      const reason = `cheque ${payment.referenceNumber ?? payment.receiptNumber ?? id} dishonoured`;
+      for (const entry of chain) {
+        await this.journalEntry.reverseInTransaction(tx, facilityId, userId, entry.id, { reason, date: dishonourDate });
+      }
+
+      const now = new Date();
+      const allocations = await tx.paymentAllocation.findMany({ where: { paymentId: id, voidedAt: null } });
+      await tx.paymentAllocation.updateMany({ where: { paymentId: id, voidedAt: null }, data: { voidedAt: now, voidedBy: userId } });
+      // Void, don't delete (F-11): the sub-ledger keeps the story of what this cheque funded.
+      await tx.partyLoanRepayment.updateMany({ where: { paymentId: id, voidedAt: null }, data: { voidedAt: now, voidedBy: userId } });
       for (const alloc of allocations) {
         if (alloc.invoiceId) {
-          // Settled again from the allocations once they are voided below.
+          await refreshInvoiceSettlement(tx, alloc.invoiceId);
         } else if (alloc.loanId) {
-          await tx.$queryRawUnsafe(
-            `SELECT id FROM party_loans WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-            alloc.loanId,
-            facilityId,
-          );
-          const loan = await tx.partyLoan.findFirstOrThrow({
-            where: { id: alloc.loanId, facilityId },
-          });
-          const newBalance = round2(
-            Number(loan.balanceOutstandingPkr) + Number(alloc.allocatedAmountPkr),
-          );
+          await lockRow(tx, 'party_loans', alloc.loanId, facilityId);
+          const loan = await tx.partyLoan.findUniqueOrThrow({ where: { id: alloc.loanId } });
           await tx.partyLoan.update({
             where: { id: alloc.loanId },
             data: {
-              balanceOutstandingPkr: newBalance,
+              balanceOutstandingPkr: round2(Number(loan.balanceOutstandingPkr) + Number(alloc.allocatedAmountPkr)),
               status: 'ACTIVE',
             },
           });
-          // Capture the JE-19 ids before voiding the repayment rows so we can
-          // mark them as reversed once the reversal JEs are posted.
-          const repayments = await tx.partyLoanRepayment.findMany({
-            where: { loanId: alloc.loanId, paymentId: id, voidedAt: null },
-            select: { journalEntryId: true },
-          });
-          loanReversals.push({
-            loanId: alloc.loanId,
-            loanNumber: loan.loanNumber,
-            partyId: loan.partyId,
-            bookType: loan.bookType as 'PACCI' | 'KATCHI',
-            amountPkr: Number(alloc.allocatedAmountPkr),
-            repaymentJournalEntryIds: repayments
-              .map((r) => r.journalEntryId)
-              .filter((v): v is string => Boolean(v)),
-          });
-          loanReversalTotal += Number(alloc.allocatedAmountPkr);
-          // Void, don't delete (F-11): the subledger keeps the story of what
-          // this cheque had funded; readers filter on voided_at IS NULL.
-          await tx.partyLoanRepayment.updateMany({
-            where: { loanId: alloc.loanId, paymentId: id, voidedAt: null },
-            data: { voidedAt: new Date(), voidedBy: userId ?? fullPayment.createdBy },
-          });
         }
       }
 
-      await tx.paymentAllocation.updateMany({
-        where: { paymentId: id, voidedAt: null },
-        data: { voidedAt: new Date(), voidedBy: userId ?? fullPayment.createdBy },
-      });
-      for (const invoiceId of new Set(allocations.map((a) => a.invoiceId).filter((v): v is string => Boolean(v)))) {
-        await refreshInvoiceSettlement(tx, invoiceId);
-      }
-
-      const updated = await this.repo.update(tx, id, {
-        status: 'DISHONOURED',
-        clearanceStatus: 'BOUNCED',
-        ...(notes ? { notes } : {}),
-      });
-
-      // JE-06 reverses only the invoice/unallocated portion of the original JE-02 —
-      // matching the scaled-down amount we originally posted (see record() for the rule).
-      const je06Amount = round2(Number(fullPayment.amountPkr) - loanReversalTotal);
-      if (je06Amount > 0.005) {
-        // An advance receipt credited 2010 (JE-03), not AR. Only allocating it to an
-        // invoice moves it to AR via JE-04, so whatever is still unallocated must be
-        // reversed against 2010 — reversing it against AR would leave the advance
-        // liability standing AND invent a receivable. record() forces `allocations = []`
-        // when isAdvance, and allocate() rejects LOAN targets, so every allocation an
-        // advance can carry is an invoice allocation that went through JE-04. Read from
-        // the in-memory `allocations` captured before they were voided above.
-        const invoiceAllocTotal = fullPayment.isAdvance
-          ? allocations
-              .filter((a) => a.invoiceId)
-              .reduce((s, a) => s + Number(a.allocatedAmountPkr), 0)
-          : 0;
-        const advanceRemainderPkr = fullPayment.isAdvance
-          ? Math.max(0, round2(je06Amount - invoiceAllocTotal))
-          : 0;
-
-        const draft = buildJE06ChequeDishonoured({
-          paymentId: id,
-          dishonourDate: dishonourDate ?? new Date(),
-          amountPkr: je06Amount,
-          taxWithheldPkr: Number(fullPayment.taxWithheldPkr),
-          bookType: fullPayment.bookType as 'PACCI' | 'KATCHI',
-          party: receivableParty(fullPayment.party),
-          originalAssetAccountCode: fullPayment.assetAccountCode,
-          advanceRemainderPkr,
-        });
-        const posted = await this.journalEntry.postInTransaction(
-          tx,
-          facilityId,
-          userId ?? fullPayment.createdBy,
-          draft,
-          { postingStatus: 'POSTED' },
-        );
-        if (fullPayment.journalEntryId) {
-          await this.journalEntry.markReversed(tx, fullPayment.journalEntryId, posted.id);
-        }
-      }
-
-      // For each loan portion, post a JE-19 reversal: DR 1140 / CR cash account.
-      // This unwinds the per-loan cash receipt JE-19 booked during combined settlement.
-      // Same rule as allocate(): fall back to the method's account, not a cash guess.
-      const cashAccount =
-        fullPayment.assetAccountCode ?? receiptAssetAccountForPaymentMethod(fullPayment.paymentMethod);
-      for (const lr of loanReversals) {
-        const reverseDraft = {
-          entryType: 'REVERSAL' as const,
-          bookType: lr.bookType,
-          sourceTable: 'party_loans',
-          sourceId: lr.loanId,
-          entryDate: dishonourDate ?? new Date(),
-          description: `Cheque dishonour reversal — peshgi ${lr.loanNumber} (${fullPayment.party.name})`,
-          lines: [
-            {
-              accountCode: '1140',
-              debitAmount: lr.amountPkr,
-              creditAmount: 0,
-              partyId: lr.partyId,
-              description: `Restore peshgi balance — cheque dishonour ${lr.loanNumber}`,
-            },
-            {
-              accountCode: cashAccount,
-              debitAmount: 0,
-              creditAmount: lr.amountPkr,
-              partyId: lr.partyId,
-              description: `Reverse loan cash receipt — cheque dishonour ${lr.loanNumber}`,
-            },
-          ],
-        };
-        const reversedPost = await this.journalEntry.postInTransaction(
-          tx,
-          facilityId,
-          userId ?? fullPayment.createdBy,
-          reverseDraft,
-          { postingStatus: 'POSTED' },
-        );
-        for (const originalJeId of lr.repaymentJournalEntryIds) {
-          await this.journalEntry.markReversed(tx, originalJeId, reversedPost.id);
-        }
-      }
-
-      return formatPayment(updated);
+      await tx.payment.update({ where: { id }, data: { clearanceStatus: 'BOUNCED', ...(notes ? { notes } : {}) } });
+      return formatPayment(await this.refreshStatus(tx, id));
     });
   }
 
@@ -669,14 +546,10 @@ export class PaymentService {
    * assetAccountCode — the invoice/advance portion (JE-02/JE-03) and any loan
    * portion (JE-19, via applyLoanAllocation) both used it (phase/25).
    */
-  async clear(
-    facilityId: string,
-    id: string,
-    userId?: string,
-    clearDateInput?: string,
-  ) {
-    const clearDate = clearDateInput ? new Date(clearDateInput) : new Date();
+  async clear(facilityId: string, id: string, userId: string, clearDateInput?: string) {
+    const clearDate = new Date(`${clearDateInput ?? toIsoDate(new Date())}T00:00:00.000Z`);
     return this.prisma.$transaction(async (tx) => {
+      if (!(await lockRow(tx, 'payments', id, facilityId))) throw Errors.PAYMENT_NOT_FOUND();
       const fullPayment = await tx.payment.findFirst({
         where: { id, facilityId },
         include: {
@@ -686,12 +559,6 @@ export class PaymentService {
       if (!fullPayment) throw Errors.PAYMENT_NOT_FOUND();
       if (fullPayment.paymentMethod !== 'CHEQUE') throw Errors.PAYMENT_NOT_CHEQUE();
       if (fullPayment.clearanceStatus !== 'PENDING') throw Errors.PAYMENT_NOT_PENDING_CLEARANCE();
-
-      await tx.$queryRawUnsafe(
-        `SELECT id FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-        id,
-        facilityId,
-      );
 
       const draft = buildJE24ChequeCleared({
         paymentId: id,
@@ -706,7 +573,7 @@ export class PaymentService {
       await this.journalEntry.postInTransaction(
         tx,
         facilityId,
-        userId ?? fullPayment.createdBy,
+        userId,
         draft,
         { postingStatus: 'POSTED' },
       );

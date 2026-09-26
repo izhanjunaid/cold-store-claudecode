@@ -144,8 +144,8 @@ export async function paymentRoutes(app: FastifyInstance) {
       const result = await service.dishonour(
         request.user!.facilityId,
         id,
-        body.notes,
         request.user!.userId,
+        body.notes,
         body.dishonour_date,
       );
       return sendSuccess(reply, result);

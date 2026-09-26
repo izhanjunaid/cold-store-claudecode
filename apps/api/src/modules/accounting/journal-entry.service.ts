@@ -138,15 +138,6 @@ export class JournalEntryService {
   }
 
   /**
-   * Transitional: records `reversedById` for the one caller that still builds its
-   * own reversing entry (cheque dishonour, JE-06). Stream R replaces that with a
-   * chain of reverseInTransaction calls and deletes this (docs/25 R-05).
-   */
-  async markReversed(tx: Tx, originalId: string, reversingEntryId: string): Promise<void> {
-    await tx.journalEntry.update({ where: { id: originalId }, data: { reversedById: reversingEntryId } });
-  }
-
-  /**
    * Reverse an entry a person may reverse from the journal (JOURNAL_SOURCES):
    * manual entries, opening balances and the legacy document-less transfers. Every
    * other entry is corrected through the document that posted it.
