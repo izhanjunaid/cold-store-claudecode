@@ -143,6 +143,9 @@ export class InvoiceService {
 
     return this.prisma.$transaction(async (tx) => {
       const data: Prisma.InvoiceUpdateInput = {};
+      if (body.gst_rate !== undefined && body.gst_rate > 0 && inv.bookType === 'KATCHI') {
+        throw Errors.VALIDATION_ERROR('An invoice on the KATCHI book carries no sales tax', 'gst_rate');
+      }
       if (body.gst_rate !== undefined) data.gstRate = body.gst_rate;
       if (body.discount !== undefined) {
         if (body.discount === null) {

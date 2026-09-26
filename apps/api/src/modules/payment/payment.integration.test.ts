@@ -185,7 +185,7 @@ describe('Payment — Financial Ledger', () => {
     expect(inv.balance_due_pkr).toBe(0);
   });
 
-  it('2. Partial allocation → invoice partly paid, status=ALLOCATED', async () => {
+  it('2. Partial allocation → invoice partly paid, receipt keeps the rest on account (R-22)', async () => {
     const lot = await createLot({ ownerPartyId, quantity: 20, inboundDate: '2026-03-01' });
     const invoiceId = await finalizeOutbound({ lotId: lot.id, quantity: 20, outboundDate: '2026-04-02' });
     const totalPkr = await finalizeInvoice(invoiceId); // 20 × 50 = 1000
@@ -204,7 +204,9 @@ describe('Payment — Financial Ledger', () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    expect(JSON.parse(res.body).data.status).toBe('ALLOCATED');
+    // Half the receipt is still on account, so it is not ALLOCATED (docs/25 R-22).
+    expect(JSON.parse(res.body).data.status).toBe('RECORDED');
+    expect(JSON.parse(res.body).data.unallocated_pkr).toBe(totalPkr - partial);
 
     const invRes = await app.inject({
       method: 'GET',

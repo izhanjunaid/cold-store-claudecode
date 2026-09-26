@@ -177,8 +177,7 @@ describe('JE template balance enforcement', () => {
   it('JE-04 advance applied: debits Advance Receipts, credits AR', () => {
     const draft = buildJE04AdvanceApplied({
       paymentId: 'pay2',
-      invoiceId: 'inv4',
-      invoiceNumber: 'INV-4',
+      appliedTo: 'invoice INV-4',
       appliedDate: new Date(),
       amountPkr: 4000,
       bookType: 'PACCI',

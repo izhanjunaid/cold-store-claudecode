@@ -31,7 +31,11 @@ export const CreatePaymentRequest = z.object({
   tax_withheld_pkr: z.number().nonnegative().optional(),
   is_advance: z.boolean().optional().default(false),
   cheque_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  book_type: z.enum(['PACCI', 'KATCHI']).optional().default('PACCI'),
+  /**
+   * Only for a receipt that settles nothing yet (on account, or an advance). When it
+   * settles invoices or loans their book decides, and a conflicting value is refused.
+   */
+  book_type: z.enum(['PACCI', 'KATCHI']).optional(),
   notes: z.string().optional(),
   allocations: z.array(AllocationLine).optional().default([]),
 });
@@ -40,8 +44,16 @@ export type CreatePaymentRequestType = z.infer<typeof CreatePaymentRequest>;
 // AllocatePaymentRequest â€” add allocations to an existing payment
 export const AllocatePaymentRequest = z.object({
   allocations: z.array(AllocationLine).min(1),
+  /** When an advance is applied (its JE-04 date). Defaults to today. */
+  applied_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 export type AllocatePaymentRequestType = z.infer<typeof AllocatePaymentRequest>;
+
+export const PostMissingAdvanceApplicationRequest = z.object({
+  /** Defaults to today. */
+  entry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+export type PostMissingAdvanceApplicationRequestType = z.infer<typeof PostMissingAdvanceApplicationRequest>;
 
 // DishonourPaymentRequest
 export const DishonourPaymentRequest = z.object({
@@ -104,6 +116,10 @@ export const PaymentResponse = z.object({
   notes: z.string().nullable(),
   created_at: z.string(),
   created_by_name: z.string(),
+  unallocated_pkr: z.number(),
+  can_allocate: z.boolean(),
+  can_clear: z.boolean(),
+  can_dishonour: z.boolean(),
   allocations: z.array(PaymentAllocationResponse),
 });
 export type PaymentResponseType = z.infer<typeof PaymentResponse>;

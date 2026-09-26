@@ -6,6 +6,7 @@ import {
   DishonourPaymentRequest,
   ClearPaymentRequest,
   PaymentListQuery,
+  PostMissingAdvanceApplicationRequest,
 } from '@coldchain/shared';
 import { PaymentService } from './payment.service';
 import { PaymentRepository } from './payment.repository';
@@ -30,8 +31,9 @@ export async function paymentRoutes(app: FastifyInstance) {
     schema: { body: CreatePaymentRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreatePaymentRequest>;
-      assertKatchiWriteAllowed(request.user!.role, body.book_type);
+      // The book comes from the documents the receipt settles; the service gates it.
       const result = await service.record({
+        role: request.user!.role,
         facilityId: request.user!.facilityId,
         createdBy: request.user!.userId,
         partyId: body.party_id,
@@ -100,8 +102,31 @@ export async function paymentRoutes(app: FastifyInstance) {
         id,
         body.allocations,
         request.user!.userId,
+        body.applied_date,
       );
       return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/payments/:id/post-missing-advance-application — correction for advances an
+  // older version applied without JE-04 (docs/25 R-02, pre-update check C05)
+  app.route({
+    method: 'POST',
+    url: '/v1/payments/:id/post-missing-advance-application',
+    preHandler: [app.authenticate, app.requirePermission('payments.record')],
+    schema: { params: IdParam, body: PostMissingAdvanceApplicationRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof PostMissingAdvanceApplicationRequest>;
+      const existing = await service.getById(request.user!.facilityId, id);
+      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
+      const result = await service.postMissingAdvanceApplication(
+        request.user!.facilityId,
+        id,
+        request.user!.userId,
+        body.entry_date,
+      );
+      return sendSuccess(reply.status(201), result);
     },
   });
 

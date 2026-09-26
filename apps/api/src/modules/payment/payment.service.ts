@@ -1,4 +1,4 @@
-import type { PrismaClient, Prisma } from '@coldchain/db';
+import type { PrismaClient, Prisma, BookType, PaymentStatus } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { PaymentRepository, type PaymentWithRelations } from './payment.repository';
 import type { JournalEntryService } from '../accounting/journal-entry.service';
@@ -10,7 +10,9 @@ import { buildJE24ChequeCleared } from '../accounting/templates/je-24-cheque-cle
 import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recovered';
 import { generateReceiptNumber } from './receipt-number';
 import { refreshInvoiceSettlement } from '../invoice/invoice-settlement';
-import { receiptAssetAccountForPaymentMethod } from '@coldchain/shared';
+import { receiptAssetAccountForPaymentMethod, toIsoDate, round2 } from '@coldchain/shared';
+import { assertKatchiWriteAllowed } from '../accounting/book-gate';
+import { lockRow } from '../../common/row-lock';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 
 // Internal allocation shape used by service. Controller normalises legacy
@@ -19,7 +21,28 @@ type AllocationInput =
   | { target: 'INVOICE'; invoice_id: string; allocated_amount_pkr: number }
   | { target: 'LOAN'; loan_id: string; allocated_amount_pkr: number };
 
+/**
+ * A receipt's status follows from what it is and what it settles, recomputed on
+ * every change rather than set by whichever path ran last (docs/25 R-22): a
+ * bounced cheque is DISHONOURED; a fully applied receipt is ALLOCATED; otherwise
+ * an advance still holding money in 2010 is ADVANCE and a receipt with money
+ * still on account is RECORDED.
+ */
+export function derivePaymentStatus(p: {
+  isAdvance: boolean;
+  clearanceStatus: string;
+  amountPkr: number;
+  allocatedPkr: number;
+}): PaymentStatus {
+  if (p.clearanceStatus === 'BOUNCED') return 'DISHONOURED';
+  if (round2(p.amountPkr - p.allocatedPkr) <= 0.005) return 'ALLOCATED';
+  return p.isAdvance ? 'ADVANCE' : 'RECORDED';
+}
+
 function formatPayment(p: PaymentWithRelations) {
+  const allocated = round2(p.allocations.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0));
+  const unallocated = round2(Number(p.amountPkr) - allocated);
+  const bounced = p.clearanceStatus === 'BOUNCED';
   return {
     id: p.id,
     facility_id: p.facilityId,
@@ -41,6 +64,11 @@ function formatPayment(p: PaymentWithRelations) {
     notes: p.notes ?? null,
     created_at: p.createdAt.toISOString(),
     created_by_name: p.createdByUser.name,
+    /** Still on account (a normal receipt) or still in 2010 (an advance). */
+    unallocated_pkr: unallocated,
+    can_allocate: !bounced && unallocated > 0.005,
+    can_clear: p.clearanceStatus === 'PENDING',
+    can_dishonour: p.paymentMethod === 'CHEQUE' && !bounced,
     allocations: p.allocations.map((a) => ({
       id: a.id,
       payment_id: a.paymentId,
@@ -72,9 +100,11 @@ export class PaymentService {
     taxWithheldPkr?: number;
     isAdvance?: boolean;
     chequeDate?: string;
-    bookType?: string;
+    /** Only for a receipt that settles nothing yet; otherwise the documents decide. */
+    bookType?: BookType;
     notes?: string;
     allocations?: AllocationInput[];
+    role: string;
   }) {
     return this.prisma.$transaction(async (tx) => {
       const party = await tx.party.findFirst({
@@ -91,18 +121,24 @@ export class PaymentService {
         throw Errors.PAYMENT_OVER_ALLOCATED();
       }
 
-      // Pre-validate each allocation (row-locking targets).
+      // Pre-validate each allocation (row-locking targets). A receipt belongs to the
+      // book of the documents it settles, never to what the request says (docs/25 R-04).
+      const books = new Set<BookType>();
       for (const alloc of allocations) {
-        if (alloc.target === 'INVOICE') {
-          await validateInvoiceAllocation(tx, params.facilityId, params.partyId, alloc);
-        } else {
-          await validateLoanAllocation(tx, params.facilityId, params.partyId, alloc);
-        }
+        books.add(
+          alloc.target === 'INVOICE'
+            ? await validateInvoiceAllocation(tx, params.facilityId, params.partyId, alloc)
+            : await validateLoanAllocation(tx, params.facilityId, params.partyId, alloc),
+        );
       }
-
-      let status: 'RECORDED' | 'ALLOCATED' | 'ADVANCE' = 'RECORDED';
-      if (isAdvance) status = 'ADVANCE';
-      else if (allocations.length > 0) status = 'ALLOCATED';
+      if (books.size > 1) {
+        throw Errors.VALIDATION_ERROR('One receipt settles documents of one book only; record a receipt per book', 'allocations');
+      }
+      const bookType: BookType = [...books][0] ?? params.bookType ?? 'PACCI';
+      if (params.bookType && params.bookType !== bookType) {
+        throw Errors.VALIDATION_ERROR(`The documents this receipt settles are on the ${bookType} book`, 'book_type');
+      }
+      assertKatchiWriteAllowed(params.role, bookType);
 
       // A cheque is not bank funds the moment it's handed over — it can still
       // bounce. It starts PENDING and posts to 1025 (clearing), not 1020;
@@ -140,7 +176,6 @@ export class PaymentService {
 
       const clearanceStatus = params.paymentMethod === 'CHEQUE' ? 'PENDING' : 'NA';
       const assetAccountCode = receiptAssetAccountForPaymentMethod(params.paymentMethod);
-      const bookType = ((params.bookType as 'PACCI' | 'KATCHI' | undefined) ?? 'PACCI');
 
       const paymentDateValue = new Date(params.paymentDate);
       const payment = await this.repo.create(tx, {
@@ -153,7 +188,7 @@ export class PaymentService {
         paymentMethod: params.paymentMethod as any,
         referenceNumber: params.referenceNumber ?? null,
         isAdvance,
-        status,
+        status: derivePaymentStatus({ isAdvance, clearanceStatus, amountPkr: params.amountPkr, allocatedPkr: allocTotal }),
         clearanceStatus: clearanceStatus as any,
         chequeDate: params.chequeDate ? new Date(params.chequeDate) : null,
         bookType,
@@ -231,7 +266,7 @@ export class PaymentService {
         });
       }
 
-      return formatPayment(payment);
+      return formatPayment(await this.refreshStatus(tx, payment.id));
     });
   }
 
@@ -274,120 +309,158 @@ export class PaymentService {
     return formatPayment(payment);
   }
 
+  /**
+   * Apply a receipt's remaining money to invoices — the one allocate action for both
+   * kinds of unapplied cash (docs/25 R-13). A normal receipt already credited AR when
+   * it was recorded, so applying it moves nothing in the ledger; an advance sits in
+   * 2010 until applied, so EVERY application posts JE-04 (R-02 — only the first one
+   * used to). Loans are settled at receipt time or through the loan itself.
+   */
   async allocate(
     facilityId: string,
     id: string,
     allocations: AllocationInput[],
-    userId?: string,
+    userId: string,
+    appliedDateInput?: string,
   ) {
-    // LOAN allocations require coordinating the cash-side JE with creation-time JE-02.
-    // Post-creation /allocate would need an AR-transfer JE we don't have, so route
-    // peshgi recovery through POST /v1/payments or POST /v1/loans/:id/repayments.
     if (allocations.some((a) => a.target === 'LOAN')) {
       throw Errors.VALIDATION_ERROR(
-        'LOAN allocations must be supplied at payment creation, not via /allocate. ' +
-          'Use POST /v1/payments with combined allocations, or POST /v1/loans/:id/repayments.',
+        'A peshgi is settled when the receipt is recorded, or from the loan itself — not by allocating a receipt later.',
         'allocations',
       );
     }
     return this.prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRawUnsafe<
-        { id: string; status: string; amount_pkr: string; party_id: string; asset_account_code: string | null; payment_method: string; payment_date: Date; book_type: string }[]
-      >(
-        `SELECT id, status, amount_pkr, party_id, asset_account_code, payment_method, payment_date, book_type FROM payments WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-        id,
-        facilityId,
-      );
-      const paymentRow = rows[0];
-      if (!paymentRow) throw Errors.PAYMENT_NOT_FOUND();
-      if (paymentRow.status === 'DISHONOURED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
-
-      const existing = await tx.paymentAllocation.findMany({
-        where: { paymentId: id, voidedAt: null },
-        select: { allocatedAmountPkr: true },
+      if (!(await lockRow(tx, 'payments', id, facilityId))) throw Errors.PAYMENT_NOT_FOUND();
+      const payment = await tx.payment.findFirstOrThrow({
+        where: { id, facilityId },
+        include: {
+          party: { select: RECEIVABLE_PARTY_SELECT },
+          allocations: { where: { voidedAt: null }, select: { allocatedAmountPkr: true } },
+        },
       });
-      const existingTotal = existing.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0);
+      if (payment.clearanceStatus === 'BOUNCED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
+
+      const existingTotal = payment.allocations.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0);
       const newTotal = allocations.reduce((s, a) => s + a.allocated_amount_pkr, 0);
+      if (existingTotal + newTotal > Number(payment.amountPkr) + 0.001) throw Errors.PAYMENT_OVER_ALLOCATED();
 
-      if (existingTotal + newTotal > Number(paymentRow.amount_pkr) + 0.001) {
-        throw Errors.PAYMENT_OVER_ALLOCATED();
+      // An advance is applied on the day it is applied — that is when 2010 becomes AR.
+      const appliedDate = new Date(`${appliedDateInput ?? toIsoDate(new Date())}T00:00:00.000Z`);
+      if (payment.isAdvance && appliedDate < payment.paymentDate) {
+        throw Errors.VALIDATION_ERROR('An advance cannot be applied before it was received', 'applied_date');
       }
 
       for (const alloc of allocations) {
-        if (alloc.target === 'INVOICE') {
-          await validateInvoiceAllocation(tx, facilityId, paymentRow.party_id, alloc);
-        } else {
-          await validateLoanAllocation(tx, facilityId, paymentRow.party_id, alloc);
-        }
-      }
-
-      const previousStatus = paymentRow.status;
-      const paymentDate = new Date(paymentRow.payment_date);
-      const bookType = (paymentRow.book_type ?? 'PACCI') as 'PACCI' | 'KATCHI';
-      // Derive the fallback from the payment's own method rather than assuming cash:
-      // a legacy row with a null asset_account_code paid by cheque belongs to 1025 (the
-      // receipt-side clearing account, phase/25), and hardcoding '1010' here diverged
-      // from PAYMENT_METHOD_ASSET_ACCOUNT.
-      const assetAccountCode =
-        paymentRow.asset_account_code ?? receiptAssetAccountForPaymentMethod(paymentRow.payment_method);
-
-      for (const alloc of allocations) {
-        if (alloc.target === 'INVOICE') {
-          await tx.paymentAllocation.create({
-            data: {
-              paymentId: id,
-              invoiceId: alloc.invoice_id,
-              allocatedAmountPkr: alloc.allocated_amount_pkr,
-            },
-          });
-          await refreshInvoiceSettlement(tx, alloc.invoice_id);
-        } else {
-          await this.applyLoanAllocation(
-            tx,
-            facilityId,
-            userId ?? paymentRow.party_id,
-            id,
-            assetAccountCode,
-            paymentDate,
-            alloc,
+        if (alloc.target !== 'INVOICE') continue;
+        const book = await validateInvoiceAllocation(tx, facilityId, payment.partyId, alloc);
+        if (book !== payment.bookType) {
+          throw Errors.VALIDATION_ERROR(
+            `This receipt is on the ${payment.bookType} book and cannot settle a ${book} invoice`,
+            'allocations',
           );
         }
-      }
-
-      // ADVANCE → applying to invoices triggers JE-04 per invoice line.
-      if (previousStatus === 'ADVANCE') {
-        const partyRow = await tx.party.findFirstOrThrow({
-          where: { id: paymentRow.party_id },
-          select: RECEIVABLE_PARTY_SELECT,
+        await tx.paymentAllocation.create({
+          data: { paymentId: id, invoiceId: alloc.invoice_id, allocatedAmountPkr: alloc.allocated_amount_pkr },
         });
-        for (const alloc of allocations) {
-          if (alloc.target !== 'INVOICE') continue;
-          const invRow = await tx.invoice.findFirstOrThrow({
+        await refreshInvoiceSettlement(tx, alloc.invoice_id);
+
+        if (payment.isAdvance) {
+          const inv = await tx.invoice.findFirstOrThrow({
             where: { id: alloc.invoice_id },
-            select: { id: true, invoiceNumber: true },
+            select: { invoiceNumber: true, invoiceDate: true },
           });
-          const draft = buildJE04AdvanceApplied({
-            paymentId: id,
-            invoiceId: invRow.id,
-            invoiceNumber: invRow.invoiceNumber,
-            appliedDate: paymentDate,
-            amountPkr: alloc.allocated_amount_pkr,
-            bookType,
-            party: receivableParty(partyRow),
-          });
+          if (appliedDate < inv.invoiceDate) {
+            throw Errors.VALIDATION_ERROR('An advance cannot be applied to an invoice before the invoice date', 'applied_date');
+          }
           await this.journalEntry.postInTransaction(
             tx,
             facilityId,
-            userId ?? partyRow.id,
-            draft,
-            { postingStatus: 'POSTED' },
+            userId,
+            buildJE04AdvanceApplied({
+              paymentId: id,
+              appliedTo: `invoice ${inv.invoiceNumber}`,
+              appliedDate,
+              amountPkr: alloc.allocated_amount_pkr,
+              bookType: payment.bookType,
+              party: receivableParty(payment.party),
+            }),
           );
         }
       }
 
-      const updated = await this.repo.update(tx, id, { status: 'ALLOCATED' });
-      return formatPayment(updated);
+      return formatPayment(await this.refreshStatus(tx, id));
     });
+  }
+
+  /**
+   * The correction for advances an older version applied without JE-04 (docs/25
+   * R-02, pre-update check C05): whatever is allocated beyond what the standing
+   * JE-04s already moved out of 2010 is moved now, sourced to the payment so a
+   * later dishonour finds it with the rest of the chain.
+   */
+  async postMissingAdvanceApplication(facilityId: string, id: string, userId: string, dateInput?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await lockRow(tx, 'payments', id, facilityId))) throw Errors.PAYMENT_NOT_FOUND();
+      const payment = await tx.payment.findFirstOrThrow({
+        where: { id, facilityId },
+        include: {
+          party: { select: RECEIVABLE_PARTY_SELECT },
+          allocations: { where: { voidedAt: null, invoiceId: { not: null } }, select: { allocatedAmountPkr: true } },
+        },
+      });
+      if (!payment.isAdvance) throw Errors.VALIDATION_ERROR('Only an advance is applied through 2010', 'id');
+      if (payment.clearanceStatus === 'BOUNCED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
+
+      const allocated = payment.allocations.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0);
+      const applied = await tx.journalEntryLine.aggregate({
+        where: {
+          debitAmount: { gt: 0 },
+          journalEntry: {
+            facilityId,
+            sourceTable: 'payments',
+            sourceId: id,
+            entryType: 'ADVANCE_APPLIED',
+            postingStatus: 'POSTED',
+            reversedById: null,
+          },
+        },
+        _sum: { debitAmount: true },
+      });
+      const missing = round2(allocated - Number(applied._sum.debitAmount ?? 0));
+      if (missing <= 0.005) {
+        throw Errors.VALIDATION_ERROR('Every allocation of this advance already has its journal entry', 'id');
+      }
+
+      await this.journalEntry.postInTransaction(
+        tx,
+        facilityId,
+        userId,
+        buildJE04AdvanceApplied({
+          paymentId: id,
+          appliedTo: 'allocations recorded without their entry',
+          appliedDate: new Date(`${dateInput ?? toIsoDate(new Date())}T00:00:00.000Z`),
+          amountPkr: missing,
+          bookType: payment.bookType,
+          party: receivableParty(payment.party),
+        }),
+      );
+      return formatPayment(await this.refreshStatus(tx, id));
+    });
+  }
+
+  /** Re-derive and store a payment's status from its allocations and clearance. */
+  private async refreshStatus(tx: Prisma.TransactionClient, id: string): Promise<PaymentWithRelations> {
+    const p = await tx.payment.findUniqueOrThrow({
+      where: { id },
+      include: { allocations: { where: { voidedAt: null }, select: { allocatedAmountPkr: true } } },
+    });
+    const status = derivePaymentStatus({
+      isAdvance: p.isAdvance,
+      clearanceStatus: p.clearanceStatus,
+      amountPkr: Number(p.amountPkr),
+      allocatedPkr: p.allocations.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0),
+    });
+    return this.repo.update(tx, id, { status });
   }
 
   async dishonour(
@@ -928,54 +1001,45 @@ export class PaymentService {
   }
 }
 
+/** Lock and check an invoice a receipt is about to settle; returns the invoice's book. */
 async function validateInvoiceAllocation(
   tx: Prisma.TransactionClient,
   facilityId: string,
   partyId: string,
   alloc: { invoice_id: string; allocated_amount_pkr: number },
-) {
-  const rows = await tx.$queryRawUnsafe<
-    { id: string; status: string; billing_party_id: string; total_pkr: string; amount_paid_pkr: string }[]
-  >(
-    `SELECT id, status, billing_party_id, total_pkr, amount_paid_pkr FROM invoices WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-    alloc.invoice_id,
-    facilityId,
-  );
-  const inv = rows[0];
-  if (!inv) throw Errors.INVOICE_NOT_FOUND();
+): Promise<BookType> {
+  if (!(await lockRow(tx, 'invoices', alloc.invoice_id, facilityId))) throw Errors.INVOICE_NOT_FOUND();
+  const inv = await tx.invoice.findUniqueOrThrow({
+    where: { id: alloc.invoice_id },
+    select: { status: true, billingPartyId: true, totalPkr: true, amountPaidPkr: true, bookType: true },
+  });
   if (inv.status !== 'FINALIZED') {
     throw Errors.VALIDATION_ERROR('Only FINALIZED invoices can be allocated', 'invoice_id');
   }
-  if (inv.billing_party_id !== partyId) throw Errors.PAYMENT_PARTY_MISMATCH();
-  const balanceDue = Number(inv.total_pkr) - Number(inv.amount_paid_pkr);
+  if (inv.billingPartyId !== partyId) throw Errors.PAYMENT_PARTY_MISMATCH();
+  const balanceDue = Number(inv.totalPkr) - Number(inv.amountPaidPkr);
   if (alloc.allocated_amount_pkr > balanceDue + 0.001) {
     throw Errors.PAYMENT_EXCEEDS_INVOICE_BALANCE();
   }
+  return inv.bookType;
 }
 
+/** Lock and check a loan a receipt is about to recover; returns the loan's book. */
 async function validateLoanAllocation(
   tx: Prisma.TransactionClient,
   facilityId: string,
   partyId: string,
   alloc: { loan_id: string; allocated_amount_pkr: number },
-) {
-  const rows = await tx.$queryRawUnsafe<
-    { id: string; status: string; party_id: string; balance_outstanding_pkr: string }[]
-  >(
-    `SELECT id, status, party_id, balance_outstanding_pkr FROM party_loans WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-    alloc.loan_id,
-    facilityId,
-  );
-  const loan = rows[0];
-  if (!loan) throw Errors.PESHGI_NOT_FOUND();
+): Promise<BookType> {
+  if (!(await lockRow(tx, 'party_loans', alloc.loan_id, facilityId))) throw Errors.PESHGI_NOT_FOUND();
+  const loan = await tx.partyLoan.findUniqueOrThrow({
+    where: { id: alloc.loan_id },
+    select: { status: true, partyId: true, balanceOutstandingPkr: true, bookType: true },
+  });
   if (loan.status !== 'ACTIVE') throw Errors.PESHGI_INACTIVE();
-  if (loan.party_id !== partyId) throw Errors.PAYMENT_PARTY_MISMATCH();
-  const balance = Number(loan.balance_outstanding_pkr);
-  if (alloc.allocated_amount_pkr > balance + 0.005) {
+  if (loan.partyId !== partyId) throw Errors.PAYMENT_PARTY_MISMATCH();
+  if (alloc.allocated_amount_pkr > Number(loan.balanceOutstandingPkr) + 0.005) {
     throw Errors.PESHGI_OVER_REPAYMENT();
   }
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+  return loan.bookType;
 }

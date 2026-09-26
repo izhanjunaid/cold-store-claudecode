@@ -13,6 +13,8 @@ export const POTATO_ID = '00000000-0000-0000-0000-000000000100';
 export const CHAMBER_A = '00000000-0000-0000-0000-000000000200';
 export const RATE_PLAN_SEASONAL = '00000000-0000-0000-0000-000000000501';
 
+type InvoiceOpts = { bags?: number; inbound?: string; outbound?: string; book?: 'PACCI' | 'KATCHI' };
+
 export async function billingFixture(app: FastifyInstance) {
   const tokens = {
     owner: (await loginAsRole(app, 'OWNER')).accessToken,
@@ -38,28 +40,32 @@ export async function billingFixture(app: FastifyInstance) {
   }
 
   /** Inbound `bags` for the party, dispatch them all, and return the DRAFT invoice id. */
-  async function draftInvoice(partyId: string, opts: { bags?: number; inbound?: string; outbound?: string } = {}) {
+  async function draftInvoice(partyId: string, opts: InvoiceOpts = {}) {
     const bags = opts.bags ?? 10;
-    const lot = await call('POST', '/v1/lots', tokens.operator, {
+    // Only the OWNER may touch the KATCHI book.
+    const op = opts.book === 'KATCHI' ? tokens.owner : tokens.operator;
+    const mgr = opts.book === 'KATCHI' ? tokens.owner : tokens.manager;
+    const lot = await call('POST', '/v1/lots', op, {
       owner_party_id: partyId, commodity_id: POTATO_ID, rate_plan_id: RATE_PLAN_SEASONAL, chamber_id: CHAMBER_A,
       quantity_bags: bags, accepted_weight_kg: bags * 20, inbound_date: opts.inbound ?? '2026-03-01',
+      ...(opts.book ? { book_type: opts.book } : {}),
     });
     expect(lot.status).toBe(201);
-    const ob = await call('POST', '/v1/outbound-events', tokens.operator, {
+    const ob = await call('POST', '/v1/outbound-events', op, {
       lot_id: lot.body.data.id, withdrawal_type: 'FULL', quantity_withdrawn_bags: bags,
       outbound_date: opts.outbound ?? '2026-04-01',
     });
     expect(ob.status).toBe(201);
-    await call('PATCH', `/v1/outbound-events/${ob.body.data.id}/weight`, tokens.operator, { outbound_weight_kg: bags * 19.5 });
-    const fin = await call('POST', `/v1/outbound-events/${ob.body.data.id}/finalize`, tokens.manager, {});
+    await call('PATCH', `/v1/outbound-events/${ob.body.data.id}/weight`, op, { outbound_weight_kg: bags * 19.5 });
+    const fin = await call('POST', `/v1/outbound-events/${ob.body.data.id}/finalize`, mgr, {});
     expect(fin.status).toBe(200);
     return fin.body.data.invoice_id as string;
   }
 
   /** A finalized invoice for the party: its id and total. */
-  async function invoice(partyId: string, opts: { bags?: number; inbound?: string; outbound?: string } = {}) {
+  async function invoice(partyId: string, opts: InvoiceOpts = {}) {
     const id = await draftInvoice(partyId, opts);
-    const r = await call('POST', `/v1/invoices/${id}/finalize`, tokens.manager, {});
+    const r = await call('POST', `/v1/invoices/${id}/finalize`, opts.book === 'KATCHI' ? tokens.owner : tokens.manager, {});
     expect(r.status).toBe(200);
     return { id, total: Number(r.body.data.total_pkr) as number, invoice: r.body.data };
   }

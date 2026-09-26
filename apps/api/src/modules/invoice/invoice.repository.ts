@@ -113,7 +113,8 @@ export class InvoiceRepository {
     const lines = await tx.invoiceLineItem.findMany({ where: { invoiceId } });
     const subTotal = lines.reduce((sum, l) => sum + Number(l.amountPkr), 0);
     const invoice = await tx.invoice.findUnique({ where: { id: invoiceId } });
-    const gstRate = Number(invoice?.gstRate ?? 0);
+    // KATCHI never carries sales tax (docs/25 R-06), whatever rate an older row holds.
+    const gstRate = invoice?.bookType === 'KATCHI' ? 0 : Number(invoice?.gstRate ?? 0);
     const discount = computeDiscountAmount(
       subTotal,
       (invoice?.discountType as 'PERCENT' | 'FIXED' | null) ?? null,
