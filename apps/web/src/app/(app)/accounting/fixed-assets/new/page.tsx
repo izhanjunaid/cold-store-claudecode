@@ -2,12 +2,14 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
+import { DEFAULT_BANK_ACCOUNT_CODE, PERMISSION_REGISTRY, localIsoDate } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
-import { useAccounts, isCashOrBank } from '@/hooks/use-reference-data';
+import type { AccountRef } from '@/hooks/use-reference-data';
+import { CATEGORY_LABELS } from '../category-labels';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -24,7 +26,7 @@ export default function NewFixedAssetPage() {
 
   const [name, setName] = useState('');
   const [category, setCategory] = useState('COLD_PLANT');
-  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [purchaseDate, setPurchaseDate] = useState(localIsoDate());
   const [cost, setCost] = useState('');
   const [residual, setResidual] = useState('0');
   const [method, setMethod] = useState<'SLM' | 'WDV'>('WDV');
@@ -36,19 +38,29 @@ export default function NewFixedAssetPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // An asset is funded either out of cash/bank or by taking on a long-term
-  // liability (2100's children — equipment finance, director's loan). Both were
-  // hardcoded here before; keep both, read from the live chart.
-  const { data: accounts = [] } = useAccounts();
-  const fundingAccounts = accounts.filter(
-    (a) => isCashOrBank(a) || a.parent_account_code === '2100',
+  // An asset is paid for out of cash or a bank account, or financed by a long-term
+  // liability (equipment finance, a director's loan). Both are read off the chart's
+  // own properties — the cash-equivalent flag and the header's statement section —
+  // so an account the owner adds appears here too.
+  const { data: chart = [] } = useQuery({
+    queryKey: ['accounts', 'with-headers'],
+    queryFn: () => apiClient<Array<AccountRef & { statement_section: string | null }>>('/v1/accounting/accounts?is_active=true'),
+  });
+  const longTermHeaders = new Set(
+    chart.filter((a) => a.account_type === 'HEADER' && a.statement_section === 'NON_CURRENT_LIABILITY').map((a) => a.account_code),
+  );
+  const fundingAccounts = chart.filter(
+    (a) =>
+      a.account_type === 'DETAIL' &&
+      (a.is_cash_equivalent || (a.parent_account_code !== null && longTermHeaders.has(a.parent_account_code))),
   );
 
   if (!canCreate) {
+    const need = PERMISSION_REGISTRY.find((p) => p.key === 'fixed_assets.manage')!.label;
     return (
       <div>
         <PageHeader title="New Fixed Asset" />
-        <p className="text-muted-foreground">Only the OWNER can register fixed assets.</p>
+        <p className="text-muted-foreground">You need the “{need}” permission to register fixed assets.</p>
       </div>
     );
   }
@@ -71,7 +83,7 @@ export default function NewFixedAssetPage() {
       if (method === 'SLM') payload['useful_life_years'] = Number(usefulLife);
       else payload['wdv_rate_percent'] = Number(wdvRate);
       const created = await apiClient<{ id: string }>('/v1/fixed-assets', { method: 'POST', body: payload });
-      toast.success('Asset created · JE-12 posted');
+      toast.success('Asset registered');
       router.push(`/accounting/fixed-assets/${created.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create asset');
@@ -94,11 +106,9 @@ export default function NewFixedAssetPage() {
               <div className="space-y-1.5">
                 <Label>Category <span className="text-destructive">*</span></Label>
                 <select value={category} onChange={(e) => setCategory(e.target.value)} className={SELECT_CLASS}>
-                  <option value="COLD_PLANT">Cold Plant (5040 direct cost)</option>
-                  <option value="BUILDING">Building (6120 indirect)</option>
-                  <option value="VEHICLE">Vehicle (6130)</option>
-                  <option value="COMPUTER">Computer (6140)</option>
-                  <option value="OTHER">Other</option>
+                  {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
                 </select>
               </div>
               <div className="space-y-1.5">
@@ -133,7 +143,7 @@ export default function NewFixedAssetPage() {
               )}
             </div>
             <div className="space-y-1.5">
-              <Label>Paid From Account</Label>
+              <Label>Paid From / Financed By</Label>
               <select value={paidFrom} onChange={(e) => setPaidFrom(e.target.value)} className={SELECT_CLASS}>
                 {fundingAccounts.map((a) => (
                   <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.account_name}</option>
@@ -146,7 +156,7 @@ export default function NewFixedAssetPage() {
             </div>
             {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
             <div className="flex gap-3">
-              <Button type="submit" disabled={submitting}>{submitting ? 'Creating…' : 'Create & Post JE-12'}</Button>
+              <Button type="submit" disabled={submitting}>{submitting ? 'Registering…' : 'Register Asset'}</Button>
               <Button type="button" variant="outline" onClick={() => router.back()}>Cancel</Button>
             </div>
           </form>

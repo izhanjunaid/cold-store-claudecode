@@ -23,7 +23,6 @@ apps/api/src/modules/peshgi/templates/je-20-peshgi-write-off.ts
 apps/api/src/modules/reporting/reports/cash-exceptions.ts
 apps/api/src/modules/reporting/reports/receivables-aging.ts
 apps/web/src/app/(app)/accounting/cash-transfers/page.tsx
-apps/web/src/app/(app)/accounting/fixed-assets/new/page.tsx
 apps/web/src/app/(app)/accounting/gst-settlement/page.tsx
 apps/web/src/app/(app)/accounting/opening-balances/page.tsx
 apps/web/src/app/(app)/accounting/owner-equity/page.tsx

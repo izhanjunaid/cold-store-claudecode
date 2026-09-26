@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { toast } from 'sonner';
+import { localIsoDate, type FixedAssetActionType } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -19,6 +20,8 @@ import { JournalEntryPeek } from '@/components/accounting/journal-entry-peek';
 
 import { formatDate, formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
+import { CATEGORY_LABELS } from '../category-labels';
+
 interface ScheduleRow {
   period_year: number;
   period_month: number;
@@ -47,9 +50,47 @@ interface FixedAsset {
   depr_expense_account_code: string;
   purchase_journal_entry_id: string | null;
   disposal_journal_entry_id: string | null;
+  is_opening_balance: boolean;
+  voided_at: string | null;
+  void_reason: string | null;
+  /** What the asset's state allows next — decided by the server. */
+  allowed_actions: FixedAssetActionType[];
   notes: string | null;
   schedules: ScheduleRow[];
 }
+
+/** Corrections that take only a reason: one dialog, one request. */
+type Correction = 'reverse_disposal' | 'reverse_depreciation' | 'reverse_impairment' | 'void';
+const CORRECTIONS: Record<Correction, { path: string; title: string; button: string; done: string; text: string }> = {
+  reverse_disposal: {
+    path: 'reverse-disposal',
+    title: 'Reverse Disposal',
+    button: 'Reverse disposal',
+    done: 'Disposal reversed',
+    text: 'Undoes a disposal posted in error and puts the asset back on the register. Depreciation up to the disposal date stands.',
+  },
+  reverse_depreciation: {
+    path: 'reverse-depreciation',
+    title: 'Reverse Latest Depreciation',
+    button: 'Reverse month',
+    done: 'Depreciation month reversed',
+    text: 'Reverses the most recent month of depreciation on this asset, in that month. The next depreciation run posts it again.',
+  },
+  reverse_impairment: {
+    path: 'reverse-impairment',
+    title: 'Reverse Latest Impairment',
+    button: 'Reverse impairment',
+    done: 'Impairment reversed',
+    text: 'Reverses the most recent write-down on this asset, in its own month. Not possible once depreciation has been posted on the written-down amount.',
+  },
+  void: {
+    path: 'void',
+    title: 'Void Asset',
+    button: 'Void asset',
+    done: 'Asset voided',
+    text: 'For an asset entered in error: reverses its purchase and takes it off the register. Only possible before any depreciation or impairment is posted on it.',
+  },
+};
 
 function Kpi({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
@@ -65,25 +106,26 @@ export default function FixedAssetDetailPage() {
   const params = useParams();
   const id = params['id'] as string;
   const { user } = useAuthStore();
-  const isOwner = can(user, 'fixed_assets.manage');
-  const canReverseDisposal = can(user, 'fixed_assets.reverse');
+  const canManage = can(user, 'fixed_assets.manage');
+  const canCorrect = can(user, 'fixed_assets.reverse');
   const canPeekJe = can(user, 'accounting.view');
   const [peekEntryId, setPeekEntryId] = useState<string | null>(null);
 
   const [asset, setAsset] = useState<FixedAsset | null>(null);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [showCommission, setShowCommission] = useState(false);
   const [showDispose, setShowDispose] = useState(false);
   const [showImpair, setShowImpair] = useState(false);
-  const [impairDate, setImpairDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [showConvert, setShowConvert] = useState(false);
+  const [correction, setCorrection] = useState<Correction | null>(null);
+  const [impairDate, setImpairDate] = useState(() => localIsoDate());
   const [impairAmount, setImpairAmount] = useState('');
-  const [impairReason, setImpairReason] = useState('');
-  const [showReverse, setShowReverse] = useState(false);
-  const [commissionDate, setCommissionDate] = useState(new Date().toISOString().slice(0, 10));
-  const [disposalDate, setDisposalDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState('');
+  const [commissionDate, setCommissionDate] = useState(localIsoDate());
+  const [disposalDate, setDisposalDate] = useState(localIsoDate());
   const [disposalProceeds, setDisposalProceeds] = useState('');
-  const [reverseReason, setReverseReason] = useState('');
-  const [reversing, setReversing] = useState(false);
+  const [openingAccumulated, setOpeningAccumulated] = useState('');
 
   const fetchAsset = useCallback(async () => {
     setLoading(true);
@@ -98,90 +140,61 @@ export default function FixedAssetDetailPage() {
     fetchAsset();
   }, [fetchAsset]);
 
-  async function commission() {
+  /** Every state change goes through here: one request in flight, then a refetch. */
+  async function act(path: string, body: Record<string, unknown>, done: string, close: () => void) {
+    setBusy(true);
     try {
-      await apiClient(`/v1/fixed-assets/${id}/commission`, { method: 'POST', body: { depreciation_start_date: commissionDate } });
-      setShowCommission(false);
-      toast.success('Asset commissioned');
-      fetchAsset();
+      await apiClient(`/v1/fixed-assets/${id}/${path}`, { method: 'POST', body });
+      close();
+      toast.success(done);
+      await fetchAsset();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed');
-    }
-  }
-
-  async function dispose() {
-    try {
-      await apiClient(`/v1/fixed-assets/${id}/dispose`, { method: 'POST', body: { disposal_date: disposalDate, disposal_proceeds_pkr: Number(disposalProceeds) } });
-      setShowDispose(false);
-      toast.success('Asset disposed', { description: 'Journal entry JE-14 posted.' });
-      fetchAsset();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed');
-    }
-  }
-
-  async function impair() {
-    if (!impairReason.trim() || !(Number(impairAmount) > 0)) return;
-    try {
-      await apiClient(`/v1/fixed-assets/${id}/impair`, {
-        method: 'POST',
-        body: {
-          impairment_date: impairDate,
-          amount_pkr: Number(impairAmount),
-          reason: impairReason.trim(),
-        },
-      });
-      setShowImpair(false);
-      setImpairAmount('');
-      setImpairReason('');
-      toast.success('Impairment recorded', { description: 'Journal entry JE-28 posted.' });
-      fetchAsset();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed');
-    }
-  }
-
-  async function reverseDisposal() {
-    if (!reverseReason.trim()) return;
-    setReversing(true);
-    try {
-      await apiClient(`/v1/fixed-assets/${id}/reverse-disposal`, {
-        method: 'POST',
-        body: { reason: reverseReason.trim() },
-      });
-      setShowReverse(false);
-      toast.success('Disposal reversed');
-      fetchAsset();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Reversal failed');
     } finally {
-      setReversing(false);
+      setBusy(false);
     }
   }
 
   if (loading) return <PageSkeleton />;
   if (!asset) return <p className="text-destructive">Asset not found</p>;
 
+  const allows = (a: FixedAssetActionType) => asset.allowed_actions.includes(a);
+  const openWithReason = (open: () => void) => { setReason(''); open(); };
+  const jeButton = (entryId: string) => (
+    <Button variant="link" className="h-auto p-0 font-mono" onClick={() => (canPeekJe ? setPeekEntryId(entryId) : router.push(`/accounting/journal-entries/${entryId}`))}>
+      {entryId.slice(0, 8)}…
+    </Button>
+  );
+  const current = correction ? CORRECTIONS[correction] : null;
+
   return (
     <div>
       <PageHeader
         title={asset.asset_name}
         crumb={asset.asset_number}
-        description={`${asset.asset_category} · Purchased ${formatDate(asset.purchase_date)}${asset.depreciation_start_date ? ` · In service since ${formatDate(asset.depreciation_start_date)}` : ''}`}
+        description={`${CATEGORY_LABELS[asset.asset_category] ?? asset.asset_category} · Purchased ${formatDate(asset.purchase_date)}${asset.depreciation_start_date ? ` · In service since ${formatDate(asset.depreciation_start_date)}` : ''}`}
         actions={
           <>
-            {isOwner && asset.status === 'PURCHASED' && <Button onClick={() => setShowCommission(true)}>Commission</Button>}
-            {isOwner && (asset.status === 'PURCHASED' || asset.status === 'IN_SERVICE') && (
-              <Button variant="outline" onClick={() => setShowImpair(true)}>Impair…</Button>
+            {canManage && allows('commission') && <Button onClick={() => setShowCommission(true)} disabled={busy}>Commission</Button>}
+            {canManage && allows('impair') && (
+              <Button variant="outline" onClick={() => openWithReason(() => setShowImpair(true))} disabled={busy}>Impair…</Button>
             )}
-            {isOwner && (asset.status === 'PURCHASED' || asset.status === 'IN_SERVICE') && (
-              <Button variant="outline" className="text-destructive" onClick={() => setShowDispose(true)}>Dispose</Button>
+            {canManage && allows('dispose') && (
+              <Button variant="outline" className="text-destructive" onClick={() => setShowDispose(true)} disabled={busy}>Dispose</Button>
             )}
-            {canReverseDisposal && asset.status === 'DISPOSED' && (
-              <Button variant="outline" className="text-destructive" onClick={() => { setReverseReason(''); setShowReverse(true); }}>
-                Reverse disposal…
+            {canCorrect && allows('convert_to_opening') && (
+              <Button variant="outline" onClick={() => openWithReason(() => setShowConvert(true))} disabled={busy}>
+                Already in opening balances…
               </Button>
             )}
+            {canCorrect &&
+              (Object.keys(CORRECTIONS) as Correction[])
+                .filter((c) => allows(c))
+                .map((c) => (
+                  <Button key={c} variant="outline" className="text-destructive" onClick={() => openWithReason(() => setCorrection(c))} disabled={busy}>
+                    {CORRECTIONS[c].button}…
+                  </Button>
+                ))}
           </>
         }
       />
@@ -190,8 +203,14 @@ export default function FixedAssetDetailPage() {
         <CardContent className="p-4">
           <div className="mb-4 flex items-center gap-2">
             <span className="font-mono text-sm text-muted-foreground">{asset.asset_number}</span>
-            <StatusBadge status={asset.status} />
+            <StatusBadge status={asset.voided_at ? 'VOIDED' : asset.status} />
+            {asset.is_opening_balance && <span className="text-xs text-muted-foreground">Owned at go-live — carried by the opening balances</span>}
           </div>
+          {asset.voided_at && (
+            <div className="mb-4 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+              Voided on {asset.voided_at.slice(0, 10)}: {asset.void_reason}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <Kpi label="Purchase Cost" value={`${formatMoney(asset.purchase_cost_pkr)}`} />
             <Kpi label="Accum. Depreciation" value={`${formatMoney(asset.accumulated_depreciation_pkr)}`} tone="text-amber-700" />
@@ -205,12 +224,8 @@ export default function FixedAssetDetailPage() {
             <div>
               Asset acct <span className="font-mono">{asset.asset_account_code}</span> · Accum. depr. <span className="font-mono">{asset.accum_depr_account_code}</span> · Expense <span className="font-mono">{asset.depr_expense_account_code}</span>
             </div>
-            {asset.purchase_journal_entry_id && (
-              <div>Purchase JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => (canPeekJe ? setPeekEntryId(asset.purchase_journal_entry_id) : router.push(`/accounting/journal-entries/${asset.purchase_journal_entry_id}`))}>{asset.purchase_journal_entry_id.slice(0, 8)}…</Button></div>
-            )}
-            {asset.disposal_journal_entry_id && (
-              <div>Disposal JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => (canPeekJe ? setPeekEntryId(asset.disposal_journal_entry_id) : router.push(`/accounting/journal-entries/${asset.disposal_journal_entry_id}`))}>{asset.disposal_journal_entry_id.slice(0, 8)}…</Button></div>
-            )}
+            {asset.purchase_journal_entry_id && <div>Purchase entry: {jeButton(asset.purchase_journal_entry_id)}</div>}
+            {asset.disposal_journal_entry_id && <div>Disposal entry: {jeButton(asset.disposal_journal_entry_id)}</div>}
             {asset.notes && <div>Notes: {asset.notes}</div>}
           </div>
         </CardContent>
@@ -219,7 +234,7 @@ export default function FixedAssetDetailPage() {
       <Card>
         <div className="border-b px-4 py-3">
           <h2 className="text-sm font-semibold">Depreciation Schedule</h2>
-          <p className="text-xs text-muted-foreground">Posted entries from monthly depreciation runs.</p>
+          <p className="text-xs text-muted-foreground">Months posted by depreciation runs.</p>
         </div>
         <Table>
           <TableHeader>
@@ -233,7 +248,7 @@ export default function FixedAssetDetailPage() {
           </TableHeader>
           <TableBody>
             {asset.schedules.length === 0 ? (
-              <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">No depreciation runs yet</TableCell></TableRow>
+              <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">No depreciation posted yet</TableCell></TableRow>
             ) : (
               asset.schedules.map((s) => (
                 <TableRow key={`${s.period_year}-${s.period_month}`} className="h-7">
@@ -261,14 +276,16 @@ export default function FixedAssetDetailPage() {
       <Dialog open={showCommission} onOpenChange={setShowCommission}>
         <DialogContent>
           <DialogHeader><DialogTitle>Commission Asset</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Sets status to IN_SERVICE and starts depreciation accrual.</p>
+          <p className="text-sm text-muted-foreground">Puts the asset into service; depreciation starts from this date (not before it was bought).</p>
           <div className="space-y-1.5">
             <Label>Depreciation Start Date</Label>
             <Input type="date" value={commissionDate} onChange={(e) => setCommissionDate(e.target.value)} className="tabular-nums" />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCommission(false)}>Cancel</Button>
-            <Button onClick={commission}>Commission</Button>
+            <Button disabled={busy} onClick={() => act('commission', { depreciation_start_date: commissionDate }, 'Asset commissioned', () => setShowCommission(false))}>
+              Commission
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -277,7 +294,9 @@ export default function FixedAssetDetailPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Dispose Asset</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Current NBV: {formatMoney(asset.net_book_value_pkr)}. Posts JE-14 with gain (4230) or loss (6110) vs proceeds.
+            The asset is first depreciated for every month it was used up to the disposal date; the difference between
+            its carrying amount then and the proceeds is recorded as a gain or loss on disposal. Current carrying amount:{' '}
+            {formatMoney(asset.net_book_value_pkr)}.
           </p>
           <div className="space-y-1.5">
             <Label>Disposal Date</Label>
@@ -289,7 +308,15 @@ export default function FixedAssetDetailPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDispose(false)}>Cancel</Button>
-            <Button className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={dispose}>Dispose</Button>
+            <Button
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={busy}
+              onClick={() =>
+                act('dispose', { disposal_date: disposalDate, disposal_proceeds_pkr: Number(disposalProceeds) || 0 }, 'Asset disposed', () => setShowDispose(false))
+              }
+            >
+              Dispose
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -298,13 +325,12 @@ export default function FixedAssetDetailPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Record Impairment</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Write the asset down to what it is actually worth — a failed compressor, flood damage,
-            an accident. Posts JE-28: DR 6160 Impairment Loss / CR 1370 Accum. Impairment, keeping
-            the write-down separate from depreciation so cost, depreciation and impairment stay
-            readable side by side. Later depreciation spreads what is left over the remaining life.
+            Write the asset down to what it is actually worth — a failed compressor, flood damage, an accident. The
+            write-down is kept separate from depreciation so cost, depreciation and impairment stay readable side by side,
+            and later depreciation spreads what is left over the remaining life. The asset is depreciated up to the
+            impairment date first.
             <br />
-            Carrying amount now: {formatMoney(asset.net_book_value_pkr)} — the most that can be
-            written down.
+            Carrying amount now: {formatMoney(asset.net_book_value_pkr)} — the most that can be written down.
           </p>
           <div className="space-y-1.5">
             <Label>Impairment Date</Label>
@@ -312,57 +338,84 @@ export default function FixedAssetDetailPage() {
           </div>
           <div className="space-y-1.5">
             <Label>Amount (PKR)</Label>
-            <Input
-              type="number"
-              min={0}
-              step={0.01}
-              value={impairAmount}
-              onChange={(e) => setImpairAmount(e.target.value)}
-              placeholder="0.00"
-              className="tabular-nums"
-            />
+            <Input type="number" min={0} step={0.01} value={impairAmount} onChange={(e) => setImpairAmount(e.target.value)} placeholder="0.00" className="tabular-nums" />
           </div>
           <div className="space-y-1.5">
             <Label>Reason</Label>
-            <Input
-              value={impairReason}
-              onChange={(e) => setImpairReason(e.target.value)}
-              placeholder="e.g. compressor failed beyond economic repair"
-              maxLength={300}
-            />
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. compressor failed beyond economic repair" maxLength={300} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowImpair(false)}>Cancel</Button>
-            <Button onClick={impair} disabled={!impairReason.trim() || !(Number(impairAmount) > 0)}>
+            <Button
+              disabled={busy || !reason.trim() || !(Number(impairAmount) > 0)}
+              onClick={() =>
+                act(
+                  'impair',
+                  { impairment_date: impairDate, amount_pkr: Number(impairAmount), reason: reason.trim() },
+                  'Impairment recorded',
+                  () => { setShowImpair(false); setImpairAmount(''); },
+                )
+              }
+            >
               Record impairment
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showReverse} onOpenChange={setShowReverse}>
+      <Dialog open={showConvert} onOpenChange={setShowConvert}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Reverse Disposal</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Already in the Opening Balances</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Reverses JE-14 and returns the asset to service. Both the original and reversal stay on
-            the ledger permanently — nothing is deleted.
+            This asset was bought before go-live and its cost is also in the opening-balance entry, so it is counted twice.
+            This reverses its purchase and keeps it on the register as an asset owned at go-live. Enter the depreciation the
+            opening balances already carry for it.
+          </p>
+          <div className="space-y-1.5">
+            <Label>Depreciation to go-live (PKR)</Label>
+            <Input type="number" min={0} step={0.01} value={openingAccumulated} onChange={(e) => setOpeningAccumulated(e.target.value)} placeholder="0.00" className="tabular-nums" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Reason (required)</Label>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Entered here and in the opening balances" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowConvert(false)}>Cancel</Button>
+            <Button
+              disabled={busy || !reason.trim()}
+              onClick={() =>
+                act(
+                  'convert-to-opening',
+                  { reason: reason.trim(), opening_accumulated_depreciation_pkr: Number(openingAccumulated) || 0 },
+                  'Moved onto the opening register',
+                  () => setShowConvert(false),
+                )
+              }
+            >
+              Reverse purchase, keep asset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={correction !== null} onOpenChange={(o) => !o && setCorrection(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{current?.title}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {current?.text} Both the original and its reversal stay on the ledger — nothing is deleted.
           </p>
           <div className="space-y-1.5">
             <Label>Reason (required)</Label>
-            <Input
-              value={reverseReason}
-              onChange={(e) => setReverseReason(e.target.value)}
-              placeholder="e.g. Disposed in error"
-            />
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Posted in error" />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowReverse(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setCorrection(null)}>Cancel</Button>
             <Button
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={reverseDisposal}
-              disabled={reversing || !reverseReason.trim()}
+              disabled={busy || !reason.trim() || !current}
+              onClick={() => current && act(current.path, { reason: reason.trim() }, current.done, () => setCorrection(null))}
             >
-              {reversing ? 'Reversing…' : 'Reverse disposal'}
+              {busy ? 'Working…' : current?.button}
             </Button>
           </DialogFooter>
         </DialogContent>
