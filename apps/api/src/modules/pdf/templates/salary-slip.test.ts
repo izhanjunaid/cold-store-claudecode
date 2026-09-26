@@ -3,6 +3,7 @@ import { renderSalarySlipHtml } from '../pdf.service';
 import type { SalarySlipData } from '../pdf.service';
 
 const SAMPLE: SalarySlipData = {
+  status: 'PAID',
   facilityName: 'Test Cold Store',
   runNumber: 'PAY-202604-001',
   payrollPeriod: 'April 2026',
@@ -14,9 +15,8 @@ const SAMPLE: SalarySlipData = {
   grossPay: 45000,
   eobiEmployee: 375,
   incomeTax: 0,
-  otherDeductions: 1000,
   advanceRecovery: 0,
-  netPay: 43625,
+  netPay: 44625,
 };
 
 describe('salary-slip template', () => {
@@ -38,7 +38,7 @@ describe('salary-slip template', () => {
   it('groups and 2-decimals the money fields', () => {
     const html = renderSalarySlipHtml(SAMPLE);
     expect(html).toContain('45,000.00');
-    expect(html).toContain('43,625.00');
+    expect(html).toContain('44,625.00');
     expect(html).not.toContain('>45000<');
   });
 
@@ -73,6 +73,14 @@ describe('salary-slip template', () => {
     const html = renderSalarySlipHtml({ ...SAMPLE, advanceRecovery: 5000 });
     expect(html).toContain('Advance Recovery');
     expect(html).toContain('5,000.00');
+  });
+
+  // docs/25 C-24: a slip printed from a draft or reversed run is not a record of pay.
+  it('watermarks a draft or reversed run, and only those', () => {
+    expect(renderSalarySlipHtml({ ...SAMPLE, status: 'DRAFT' })).toContain('DRAFT — NOT A PAYSLIP');
+    expect(renderSalarySlipHtml({ ...SAMPLE, status: 'REVERSED' })).toContain('REVERSED — NOT A PAYSLIP');
+    expect(renderSalarySlipHtml({ ...SAMPLE, status: 'PAID' })).not.toContain('NOT A PAYSLIP');
+    expect(renderSalarySlipHtml({ ...SAMPLE, status: 'FINALIZED' })).not.toContain('NOT A PAYSLIP');
   });
 
   it('includes Urdu header', () => {

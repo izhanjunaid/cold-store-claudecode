@@ -20,10 +20,6 @@ apps/api/src/modules/expenses/templates/withholding.ts
 apps/api/src/modules/fixed-assets/templates/je-28-asset-impairment.ts
 apps/api/src/modules/fixed-assets/templates/types.ts
 apps/api/src/modules/payment/payment.service.ts
-apps/api/src/modules/payroll/payroll-run.service.ts
-apps/api/src/modules/payroll/templates/je-15-monthly-payroll.ts
-apps/api/src/modules/payroll/templates/je-15b-daily-wages.ts
-apps/api/src/modules/payroll/templates/je-16-salary-payment.ts
 apps/api/src/modules/payroll/templates/je-16b-govt-remittance.ts
 apps/api/src/modules/peshgi/templates/je-18-peshgi-issued.ts
 apps/api/src/modules/peshgi/templates/je-19-peshgi-recovered.ts

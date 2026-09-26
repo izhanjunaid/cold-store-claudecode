@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildJE15MonthlyPayroll } from '../templates/je-15-monthly-payroll';
-import { buildJE15BDailyWages } from '../templates/je-15b-daily-wages';
+import { buildJE15Payroll } from '../templates/je-15-payroll';
 import { buildJE16SalaryPayment } from '../templates/je-16-salary-payment';
 import { buildJE16BGovtRemittance } from '../templates/je-16b-govt-remittance';
 
@@ -11,128 +10,92 @@ function totals(lines: { debitAmount: number; creditAmount: number }[]) {
   };
 }
 
+type LineOpts = { gross: number; ee?: number; er?: number; tax?: number; adv?: number; cost?: string | null };
+const line = ({ gross, ee = 375, er = 1875, tax = 0, adv = 0, cost = '6010' }: LineOpts) => ({
+  employeeName: 'Asif',
+  costAccountCode: cost,
+  gross_pay_pkr: gross,
+  eobi_employee_pkr: ee,
+  eobi_employer_pkr: er,
+  income_tax_pkr: tax,
+  advance_recovery_pkr: adv,
+});
+
+const build = (lines: ReturnType<typeof line>[], payrollType: 'MONTHLY_SALARY' | 'DAILY_WAGES' = 'MONTHLY_SALARY') =>
+  buildJE15Payroll({
+    payrollRunId: 'r1',
+    runNumber: 'PAY-202604-001',
+    payrollType,
+    entryDate: new Date('2026-04-30'),
+    bookType: 'PACCI',
+    lines,
+  });
+
+const amount = (draft: ReturnType<typeof build>, code: string, side: 'debitAmount' | 'creditAmount') =>
+  draft.lines.filter((l) => l.accountCode === code).reduce((s, l) => s + Number(l[side]), 0);
+
 describe('Payroll JE templates', () => {
   it('JE-15 balances with EOBI and zero income tax (omits 2070 line)', () => {
     // Spec §11.3 example: 3 salaried staff, gross 105000, employee EOBI 1125, employer EOBI 5625
-    const draft = buildJE15MonthlyPayroll({
-      payrollRunId: 'r1',
-      runNumber: 'PAY-202604-001',
-      entryDate: new Date('2026-04-30'),
-      totalGrossPkr: 105000,
-      totalEmployerEobiPkr: 5625,
-      totalEmployeeEobiPkr: 1125,
-      totalIncomeTaxPkr: 0,
-      totalAdvanceRecoveryPkr: 0,
-      totalNetPayablePkr: 103875,
-      bookType: 'PACCI',
-    });
+    const draft = build([line({ gross: 40000 }), line({ gross: 35000 }), line({ gross: 30000 })]);
     const t = totals(draft.lines);
     expect(t.d).toBe(110625);
     expect(t.c).toBe(110625);
-    expect(draft.lines.find((l) => l.accountCode === '6010')?.debitAmount).toBe(105000);
-    expect(draft.lines.find((l) => l.accountCode === '6015')?.debitAmount).toBe(5625);
-    expect(draft.lines.find((l) => l.accountCode === '2030')?.creditAmount).toBe(103875);
-    expect(draft.lines.find((l) => l.accountCode === '2060')?.creditAmount).toBe(1125);
-    expect(draft.lines.find((l) => l.accountCode === '2061')?.creditAmount).toBe(5625);
+    expect(amount(draft, '6010', 'debitAmount')).toBe(105000);
+    expect(amount(draft, '6015', 'debitAmount')).toBe(5625);
+    expect(amount(draft, '2030', 'creditAmount')).toBe(103875);
+    expect(amount(draft, '2060', 'creditAmount')).toBe(1125);
+    expect(amount(draft, '2061', 'creditAmount')).toBe(5625);
     // Spec §11.3: zero-tax line MUST be omitted
     expect(draft.lines.find((l) => l.accountCode === '2070')).toBeUndefined();
   });
 
-  // Phase 21: the arithmetic that makes advance recovery postable. Net pay already
-  // has the recovery subtracted (payroll-run.service.ts), so without a matching
-  // credit line the entry would be short by exactly that amount — the same failure
-  // mode phase/20 hit with other_deductions_pkr.
+  // Phase 21: net pay has the recovery subtracted, so without a matching credit line
+  // the entry would be short by exactly that amount.
   it('JE-15 balances with a non-zero advance recovery, crediting 1230', () => {
-    const draft = buildJE15MonthlyPayroll({
-      payrollRunId: 'r1adv',
-      runNumber: 'PAY-202605-001',
-      entryDate: new Date('2026-05-31'),
-      totalGrossPkr: 50000,
-      totalEmployerEobiPkr: 1875,
-      totalEmployeeEobiPkr: 375,
-      totalIncomeTaxPkr: 2000,
-      totalAdvanceRecoveryPkr: 5000,
-      totalNetPayablePkr: 42625, // 50000 - 375 - 2000 - 5000
-      bookType: 'PACCI',
-    });
+    const draft = build([line({ gross: 50000, tax: 2000, adv: 5000 })]);
     const t = totals(draft.lines);
     expect(t.d).toBeCloseTo(t.c);
-    expect(draft.lines.find((l) => l.accountCode === '1230')?.creditAmount).toBe(5000);
+    expect(amount(draft, '1230', 'creditAmount')).toBe(5000);
+    expect(amount(draft, '2030', 'creditAmount')).toBe(42625);
   });
 
   it('JE-15 omits the 1230 line when advance recovery is zero', () => {
-    const draft = buildJE15MonthlyPayroll({
-      payrollRunId: 'r1noadv',
-      runNumber: 'PAY-202605-002',
-      entryDate: new Date('2026-05-31'),
-      totalGrossPkr: 50000,
-      totalEmployerEobiPkr: 1875,
-      totalEmployeeEobiPkr: 375,
-      totalIncomeTaxPkr: 0,
-      totalAdvanceRecoveryPkr: 0,
-      totalNetPayablePkr: 49625,
-      bookType: 'PACCI',
-    });
+    const draft = build([line({ gross: 50000 })]);
     expect(draft.lines.find((l) => l.accountCode === '1230')).toBeUndefined();
   });
 
   it('JE-15 includes 2070 line when income tax > 0', () => {
-    const draft = buildJE15MonthlyPayroll({
-      payrollRunId: 'r2',
-      runNumber: 'PAY-202604-002',
-      entryDate: new Date('2026-04-30'),
-      totalGrossPkr: 700000,
-      totalEmployerEobiPkr: 1875,
-      totalEmployeeEobiPkr: 375,
-      totalIncomeTaxPkr: 5000,
-      totalAdvanceRecoveryPkr: 0,
-      totalNetPayablePkr: 694625, // 700k - 375 - 5000
-      bookType: 'PACCI',
-    });
+    const draft = build([line({ gross: 700000, tax: 5000 })]);
     const t = totals(draft.lines);
     expect(t.d).toBeCloseTo(t.c);
-    expect(draft.lines.find((l) => l.accountCode === '2070')?.creditAmount).toBe(5000);
+    expect(amount(draft, '2070', 'creditAmount')).toBe(5000);
   });
 
-  it('JE-15B routes daily wages to 5030 / 5035 (cost of service, not 6010)', () => {
-    const draft = buildJE15BDailyWages({
-      payrollRunId: 'r3',
-      runNumber: 'PAY-202604-DW01',
-      entryDate: new Date('2026-04-30'),
-      totalGrossPkr: 30000,
-      totalEmployerEobiPkr: 1875,
-      totalEmployeeEobiPkr: 375,
-      totalIncomeTaxPkr: 0,
-      totalAdvanceRecoveryPkr: 0,
-      totalNetPayablePkr: 29625,
-      bookType: 'PACCI',
-    });
+  it('routes direct labour to 5030 / 5035 by the employee cost account, whatever the pay type', () => {
+    const draft = build([line({ gross: 30000, cost: '5030' })], 'DAILY_WAGES');
     const t = totals(draft.lines);
     expect(t.d).toBeCloseTo(t.c);
-    expect(draft.lines.find((l) => l.accountCode === '5030')?.debitAmount).toBe(30000);
-    expect(draft.lines.find((l) => l.accountCode === '5035')?.debitAmount).toBe(1875);
-    // Should NOT post to 6010 (that's salaried staff only)
+    expect(amount(draft, '5030', 'debitAmount')).toBe(30000);
+    expect(amount(draft, '5035', 'debitAmount')).toBe(1875);
     expect(draft.lines.find((l) => l.accountCode === '6010')).toBeUndefined();
-    // Zero tax omits the 2070 line entirely (spec §11.3), same rule as JE-15.
     expect(draft.lines.find((l) => l.accountCode === '2070')).toBeUndefined();
   });
 
-  it('JE-15B credits 2070 when daily wages carry income tax', () => {
-    const draft = buildJE15BDailyWages({
-      payrollRunId: 'r3b',
-      runNumber: 'PAY-202604-DW02',
-      entryDate: new Date('2026-04-30'),
-      totalGrossPkr: 30000,
-      totalEmployerEobiPkr: 1875,
-      totalEmployeeEobiPkr: 375,
-      totalIncomeTaxPkr: 900,
-      totalAdvanceRecoveryPkr: 0,
-      totalNetPayablePkr: 28725, // gross - employee EOBI - tax
-      bookType: 'PACCI',
-    });
+  it('splits one run across cost accounts, each with its own employer EOBI', () => {
+    const draft = build([line({ gross: 60000, cost: '5030' }), line({ gross: 40000, cost: '6010', tax: 900 })]);
     const t = totals(draft.lines);
     expect(t.d).toBeCloseTo(t.c);
-    expect(draft.lines.find((l) => l.accountCode === '2070')?.creditAmount).toBe(900);
+    expect(amount(draft, '5030', 'debitAmount')).toBe(60000);
+    expect(amount(draft, '5035', 'debitAmount')).toBe(1875);
+    expect(amount(draft, '6010', 'debitAmount')).toBe(40000);
+    expect(amount(draft, '6015', 'debitAmount')).toBe(1875);
+    expect(amount(draft, '2070', 'creditAmount')).toBe(900);
+  });
+
+  it('refuses a line with no payroll cost account instead of guessing one', () => {
+    expect(() => build([line({ gross: 1000, cost: null })])).toThrow(/cost account/);
+    expect(() => build([line({ gross: 1000, cost: '4010' })])).toThrow(/cost account/);
   });
 
   it('JE-16 balances: DR Salaries Payable, CR Bank', () => {

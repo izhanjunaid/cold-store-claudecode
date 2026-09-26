@@ -4,8 +4,9 @@ import type {
   WriteOffEmployeeAdvanceRequestType,
   EmployeeAdvanceListQueryType,
 } from '@coldchain/shared';
-import { assetAccountForPaymentMethod } from '@coldchain/shared';
+import { assetAccountForPaymentMethod, round2 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
+import { resolveFacilitySettings } from '../facility/facility.service';
 import { advisoryXactLock } from '../../common/advisory-lock';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { generateEmployeeAdvanceNumber } from './employee-advance-number';
@@ -38,13 +39,15 @@ export class EmployeeAdvanceService {
       });
       if (activeExisting) throw Errors.EMPLOYEE_ADVANCE_ALREADY_ACTIVE();
 
-      // Capped at one month's pay: basic salary for SALARIED, 26 working days' wage for
-      // DAILY_WAGE — the same 26-day constant createDraft uses when snapshotting wage
-      // lines, so the cap matches what the employee will actually earn that month.
+      // Capped at one month's pay: basic salary for SALARIED, the facility's standard
+      // working days' wage for DAILY_WAGE — the same figure a payroll draft pre-fills,
+      // so the cap matches what the employee will actually earn that month (C-19).
+      const facility = await tx.facility.findUniqueOrThrow({ where: { id: facilityId }, select: { settings: true } });
+      const { standard_working_days } = resolveFacilitySettings(facility.settings).payroll;
       const monthlyPay =
         employee.employeeType === 'SALARIED'
           ? Number(employee.basicSalaryPkr ?? 0)
-          : Number(employee.dailyWagePkr ?? 0) * 26;
+          : round2(Number(employee.dailyWagePkr ?? 0) * standard_working_days);
       if (body.principal_pkr > monthlyPay + 0.005) {
         throw Errors.EMPLOYEE_ADVANCE_EXCEEDS_CAP(
           `Principal (${body.principal_pkr}) exceeds this employee's one-month pay cap (${monthlyPay})`,

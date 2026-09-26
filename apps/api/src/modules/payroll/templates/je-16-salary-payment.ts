@@ -1,3 +1,4 @@
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 import type { JournalEntryDraft } from '../../accounting/templates/types';
 
 type Input = {
@@ -5,15 +6,15 @@ type Input = {
   runNumber: string;
   entryDate: Date;
   amountPkr: number;
-  fromAssetAccountCode: string; // 1010 cash or 1020 bank
+  fromAssetAccountCode: string;
   bookType: 'PACCI' | 'KATCHI';
 };
 
 /**
  * JE-16: Salary Payment.
  *
- *   DR  2030  Salaries Payable     amount_paid
- *     CR  1020  Bank Account / 1010 Cash    amount_paid
+ *   DR  2030  Salaries Payable        amount_paid
+ *     CR  cash / bank account          amount_paid
  */
 export function buildJE16SalaryPayment(input: Input): JournalEntryDraft {
   const amount = round2(input.amountPkr);
@@ -26,7 +27,7 @@ export function buildJE16SalaryPayment(input: Input): JournalEntryDraft {
     description: `Salary payment — ${input.runNumber}`,
     lines: [
       {
-        accountCode: '2030',
+        accountCode: SYSTEM_ACCOUNTS.SALARIES_PAYABLE,
         debitAmount: amount,
         creditAmount: 0,
         description: `Settle salaries payable — ${input.runNumber}`,
@@ -39,8 +40,4 @@ export function buildJE16SalaryPayment(input: Input): JournalEntryDraft {
       },
     ],
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

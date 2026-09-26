@@ -394,6 +394,8 @@ async function htmlToA5Pdf(html: string): Promise<Buffer> {
 }
 
 export interface SalarySlipData {
+  /** A DRAFT or REVERSED run's slip is watermarked: it is not a record of pay. */
+  status: 'DRAFT' | 'FINALIZED' | 'PAID' | 'REVERSED';
   facilityName: string;
   runNumber: string;
   payrollPeriod: string;
@@ -405,7 +407,6 @@ export interface SalarySlipData {
   grossPay: number;
   eobiEmployee: number;
   incomeTax: number;
-  otherDeductions: number;
   advanceRecovery: number;
   netPay: number;
 }

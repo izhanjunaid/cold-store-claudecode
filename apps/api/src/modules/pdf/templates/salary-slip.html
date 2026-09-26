@@ -124,6 +124,18 @@
       color: #666;
       text-align: center;
     }
+    .watermark {
+      position: fixed;
+      top: 40%;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 64px;
+      font-weight: 700;
+      color: rgba(192, 57, 43, 0.18);
+      transform: rotate(-30deg);
+      pointer-events: none;
+    }
     .sig-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -140,6 +152,7 @@
   </style>
 </head>
 <body>
+  {{#unless (eq status 'FINALIZED')}}{{#unless (eq status 'PAID')}}<div class="watermark">{{status}} — NOT A PAYSLIP</div>{{/unless}}{{/unless}}
 
   <div class="header">
     <h1>{{facilityName}}</h1>
@@ -173,7 +186,6 @@
       <tr><td>Gross Pay / مجموعی تنخواہ</td><td class="num">{{money grossPay}}</td></tr>
       <tr><td>EOBI Employee Contribution / EOBI</td><td class="num">- {{money eobiEmployee}}</td></tr>
       {{#if incomeTax}}<tr><td>Income Tax / انکم ٹیکس</td><td class="num">- {{money incomeTax}}</td></tr>{{/if}}
-      {{#if otherDeductions}}<tr><td>Other Deductions / دیگر کٹوتیاں</td><td class="num">- {{money otherDeductions}}</td></tr>{{/if}}
       {{#if advanceRecovery}}<tr><td>Advance Recovery / پیشگی کی وصولی</td><td class="num">- {{money advanceRecovery}}</td></tr>{{/if}}
       <tr class="net"><td>Net Pay / خالص تنخواہ</td><td class="num">{{money netPay}}</td></tr>
     </tbody>

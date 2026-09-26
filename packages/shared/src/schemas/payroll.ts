@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting-accounts';
+import { DEFAULT_BANK_ACCOUNT_CODE, SYSTEM_ACCOUNTS } from '../accounting-accounts';
+import { round2, sumMoney } from '../money';
 import { BookType } from './enums';
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
@@ -7,6 +8,66 @@ const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 export const EmployeeType = z.enum(['SALARIED', 'DAILY_WAGE']);
 export const PayrollType = z.enum(['MONTHLY_SALARY', 'DAILY_WAGES']);
 export const PayrollRunStatus = z.enum(['DRAFT', 'FINALIZED', 'PAID', 'REVERSED']);
+
+/**
+ * Where an employee's pay is expensed — by what they do, not how they are paid
+ * (docs/25 C-16): a salaried plant operator is direct labour, a daily-wage clerk
+ * is overhead. A closed set, each with the account its employer EOBI pairs with.
+ */
+export const PAYROLL_COST_ACCOUNTS = {
+  [SYSTEM_ACCOUNTS.SALARIES_OFFICE]: {
+    employerEobi: SYSTEM_ACCOUNTS.SALARIES_OFFICE_EOBI,
+    label: 'Management & office (overhead)',
+  },
+  [SYSTEM_ACCOUNTS.DIRECT_LABOUR]: {
+    employerEobi: SYSTEM_ACCOUNTS.DIRECT_LABOUR_EOBI,
+    label: 'Direct labour (cost of service)',
+  },
+} as const;
+export const PayrollCostAccount = z.enum([SYSTEM_ACCOUNTS.SALARIES_OFFICE, SYSTEM_ACCOUNTS.DIRECT_LABOUR]);
+export type PayrollCostAccountType = z.infer<typeof PayrollCostAccount>;
+
+export const DEFAULT_PAYROLL_COST_ACCOUNT: Record<z.infer<typeof EmployeeType>, PayrollCostAccountType> = {
+  SALARIED: SYSTEM_ACCOUNTS.SALARIES_OFFICE,
+  DAILY_WAGE: SYSTEM_ACCOUNTS.DIRECT_LABOUR,
+};
+
+/** The amounts on one payroll line that decide its net pay. */
+export type PayrollLineAmounts = {
+  gross_pay_pkr: number;
+  eobi_employee_pkr: number;
+  eobi_employer_pkr: number;
+  income_tax_pkr: number;
+  advance_recovery_pkr: number;
+};
+
+/** Net pay of one line: gross less the employee's EOBI, income tax and advance recovery. */
+export function payrollLineNet(l: PayrollLineAmounts): number {
+  return round2(l.gross_pay_pkr - l.eobi_employee_pkr - l.income_tax_pkr - l.advance_recovery_pkr);
+}
+
+/**
+ * A run's totals, from its lines. The one implementation: the draft, a line edit,
+ * finalize, payment and the run screen all used to sum the lines themselves, and
+ * the payment paid a stored total the accrual had recomputed (docs/25 C-23).
+ */
+export function payrollRunTotals(lines: PayrollLineAmounts[]) {
+  const gross = sumMoney(lines.map((l) => l.gross_pay_pkr));
+  const employeeEobi = sumMoney(lines.map((l) => l.eobi_employee_pkr));
+  const employerEobi = sumMoney(lines.map((l) => l.eobi_employer_pkr));
+  const incomeTax = sumMoney(lines.map((l) => l.income_tax_pkr));
+  const advanceRecovery = sumMoney(lines.map((l) => l.advance_recovery_pkr));
+  const net = sumMoney(lines.map(payrollLineNet));
+  return {
+    gross,
+    employeeEobi,
+    employerEobi,
+    incomeTax,
+    advanceRecovery,
+    net,
+    deductions: round2(employeeEobi + incomeTax + advanceRecovery),
+  };
+}
 
 export const CreateEmployeeRequest = z
   .object({
@@ -19,6 +80,8 @@ export const CreateEmployeeRequest = z
     basic_salary_pkr: z.number().nonnegative().optional(),
     daily_wage_pkr: z.number().nonnegative().optional(),
     eobi_registered: z.boolean().optional(),
+    /** Defaults from the employee type when omitted. */
+    cost_account_code: PayrollCostAccount.optional(),
     bank_account_number: z.string().max(30).nullable().optional(),
     bank_name: z.string().max(100).nullable().optional(),
     notes: z.string().optional(),
@@ -41,6 +104,7 @@ export const UpdateEmployeeRequest = z.object({
   basic_salary_pkr: z.number().nonnegative().optional(),
   daily_wage_pkr: z.number().nonnegative().optional(),
   eobi_registered: z.boolean().optional(),
+  cost_account_code: PayrollCostAccount.optional(),
   bank_account_number: z.string().max(30).nullable().optional(),
   bank_name: z.string().max(100).nullable().optional(),
   is_active: z.boolean().optional(),
@@ -72,6 +136,7 @@ export const EmployeeResponse = z.object({
   basic_salary_pkr: z.number().nullable(),
   daily_wage_pkr: z.number().nullable(),
   eobi_registered: z.boolean(),
+  cost_account_code: z.string(),
   bank_account_number: z.string().nullable(),
   bank_name: z.string().nullable(),
   is_active: z.boolean(),
@@ -92,13 +157,16 @@ export const CreatePayrollRunRequest = z.object({
 });
 export type CreatePayrollRunRequestType = z.infer<typeof CreatePayrollRunRequest>;
 
+/**
+ * A daily-wage line's gross is days worked x daily wage, computed by the server;
+ * a salaried line has no days worked. Net pay is always derived.
+ */
 export const UpdatePayrollLineRequest = z.object({
   days_worked: z.number().nonnegative().optional(),
   gross_pay_pkr: z.number().nonnegative().optional(),
   eobi_employee_pkr: z.number().nonnegative().optional(),
   eobi_employer_pkr: z.number().nonnegative().optional(),
   income_tax_pkr: z.number().nonnegative().optional(),
-  other_deductions_pkr: z.number().nonnegative().optional(),
   advance_recovery_pkr: z.number().nonnegative().optional(),
 });
 export type UpdatePayrollLineRequestType = z.infer<typeof UpdatePayrollLineRequest>;
@@ -133,6 +201,10 @@ export const RemitGovtRequest = z.object({
 });
 export type RemitGovtRequestType = z.infer<typeof RemitGovtRequest>;
 
+/** What the server will let a run do next, by its state alone (the web adds permissions). */
+export const PayrollRunAction = z.enum(['edit_lines', 'finalize', 'pay', 'void_payment', 'reverse', 'remit']);
+export type PayrollRunActionType = z.infer<typeof PayrollRunAction>;
+
 export const PayrollLineItemResponse = z.object({
   id: z.string().uuid(),
   employee_id: z.string().uuid(),
@@ -143,7 +215,6 @@ export const PayrollLineItemResponse = z.object({
   eobi_employee_pkr: z.number(),
   eobi_employer_pkr: z.number(),
   income_tax_pkr: z.number(),
-  other_deductions_pkr: z.number(),
   advance_recovery_pkr: z.number(),
   net_pay_pkr: z.number(),
 });
@@ -169,6 +240,9 @@ export const PayrollRunResponse = z.object({
   finalized_at: z.string().nullable(),
   paid_at: z.string().nullable(),
   notes: z.string().nullable(),
+  voided_at: z.string().nullable(),
+  void_reason: z.string().nullable(),
+  allowed_actions: z.array(PayrollRunAction),
   line_items: z.array(PayrollLineItemResponse).optional(),
   created_at: z.string(),
 });

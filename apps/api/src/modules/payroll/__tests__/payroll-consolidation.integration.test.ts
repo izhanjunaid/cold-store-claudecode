@@ -180,6 +180,264 @@ describe('C-14 — an advance cannot be recovered past its balance across two dr
   });
 });
 
+const patchLine = (runId: string, lineId: string, payload: Record<string, unknown>) =>
+  app.inject({
+    method: 'PATCH',
+    url: `/v1/payroll-runs/${runId}/lines/${lineId}`,
+    headers: authHeaders(accountantToken),
+    payload,
+  });
+
+/** Run `fn` with the facility's payroll settings overridden, restoring them afterwards. */
+async function withPayrollSettings(payroll: Record<string, number>, fn: () => Promise<void>) {
+  const facility = await prisma.facility.findUniqueOrThrow({ where: { id: TEST_FACILITY_ID } });
+  const original = facility.settings;
+  await prisma.facility.update({
+    where: { id: TEST_FACILITY_ID },
+    data: { settings: { ...(original as object), payroll } },
+  });
+  try {
+    await fn();
+  } finally {
+    await prisma.facility.update({ where: { id: TEST_FACILITY_ID }, data: { settings: original as object } });
+  }
+}
+
+describe('C-18 / C-19 — daily-wage gross is days x wage; statutory figures come from settings', () => {
+  it('draft pre-fills standard working days and the EOBI amounts from facility settings', async () => {
+    await withPayrollSettings(
+      { eobi_employee_monthly_pkr: 400, eobi_employer_monthly_pkr: 2000, standard_working_days: 22 },
+      async () => {
+        const emp = await dailyWage(1000);
+        const run = await draft(2029, 1, 'DAILY_WAGES');
+        const line = run.line_items.find((l: any) => l.employee_id === emp.id);
+        expect(line.days_worked).toBe(22);
+        expect(line.gross_pay_pkr).toBe(22000);
+        expect(line.eobi_employee_pkr).toBe(400);
+        expect(line.eobi_employer_pkr).toBe(2000);
+        expect(line.net_pay_pkr).toBe(21600);
+      },
+    );
+  });
+
+  it('editing days worked recomputes gross on the server', async () => {
+    const emp = await dailyWage(1000);
+    const run = await draft(2029, 2, 'DAILY_WAGES');
+    const line = run.line_items.find((l: any) => l.employee_id === emp.id);
+
+    const res = await patchLine(run.id, line.id, { days_worked: 20 });
+    expect(res.statusCode, res.body).toBe(200);
+    const updated = JSON.parse(res.body).data.line_items.find((l: any) => l.id === line.id);
+    expect(updated.days_worked).toBe(20);
+    expect(updated.gross_pay_pkr).toBe(20000);
+    expect(updated.net_pay_pkr).toBe(20000 - updated.eobi_employee_pkr);
+    expect(JSON.parse(res.body).data.total_gross_pkr).toBe(20000);
+  });
+
+  it('a daily-wage gross cannot be typed over', async () => {
+    const emp = await dailyWage(1000);
+    const run = await draft(2029, 3, 'DAILY_WAGES');
+    const line = run.line_items.find((l: any) => l.employee_id === emp.id);
+    const res = await patchLine(run.id, line.id, { gross_pay_pkr: 99999 });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it("an advance is capped at one month's pay using the facility's standard working days", async () => {
+    await withPayrollSettings(
+      { eobi_employee_monthly_pkr: 375, eobi_employer_monthly_pkr: 1875, standard_working_days: 22 },
+      async () => {
+        const emp = await dailyWage(1000);
+        const res = await app.inject({
+          method: 'POST',
+          url: '/v1/employee-advances/issue',
+          headers: authHeaders(ownerToken),
+          payload: {
+            employee_id: emp.id,
+            issue_date: '2027-12-10',
+            principal_pkr: 25000, // within 26 days' wage, above 22 days'
+            monthly_installment_pkr: 5000,
+            payment_method: 'CASH',
+          },
+        });
+        expect(res.statusCode).toBe(409);
+        expect(JSON.parse(res.body).error.code).toBe('EMPLOYEE_ADVANCE_EXCEEDS_CAP');
+      },
+    );
+  });
+});
+
+describe('C-16 — pay is expensed by what the employee does, not how they are paid', () => {
+  it('stamps the default cost account by type and refuses one that is not a payroll cost account', async () => {
+    const office = await salaried(40000);
+    expect(office.cost_account_code).toBe('6010');
+    const loader = await dailyWage(900);
+    expect(loader.cost_account_code).toBe('5030');
+
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/v1/employees',
+      headers: authHeaders(ownerToken),
+      payload: {
+        name: `CA-Bad-${uniq()}`,
+        employee_type: 'SALARIED',
+        join_date: '2026-01-01',
+        basic_salary_pkr: 30000,
+        cost_account_code: '4010',
+      },
+    });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it('JE-15 debits each employee group to its own cost account and pairs employer EOBI with it', async () => {
+    // A salaried plant operator is direct labour; the office clerk is overhead.
+    await salaried(60000, { cost_account_code: '5030' });
+    await salaried(40000);
+    const run = await draft(2029, 4);
+    const fin = await finalize(run.id);
+    expect(fin.statusCode, fin.body).toBe(200);
+
+    const je = await prisma.journalEntry.findUniqueOrThrow({
+      where: { id: JSON.parse(fin.body).data.payroll_journal_entry_id },
+      include: { lines: true },
+    });
+    const debit = (code: string) =>
+      je.lines.filter((l) => l.accountCode === code).reduce((s, l) => s + Number(l.debitAmount), 0);
+    expect(debit('5030')).toBe(60000);
+    expect(debit('5035')).toBe(1875);
+    expect(debit('6010')).toBe(40000);
+    expect(debit('6015')).toBe(1875);
+  });
+});
+
+describe('C-17 / C-24 — other deductions are gone; a negative net is refused where it is typed', () => {
+  it('no longer reports or accepts other deductions', async () => {
+    const emp = await salaried(40000);
+    const run = await draft(2029, 5);
+    const line = run.line_items.find((l: any) => l.employee_id === emp.id);
+    expect(line).not.toHaveProperty('other_deductions_pkr');
+
+    const res = await patchLine(run.id, line.id, { other_deductions_pkr: 2500 });
+    expect(res.statusCode).toBe(200);
+    const row = await prisma.payrollLineItem.findUniqueOrThrow({ where: { id: line.id } });
+    expect(Number(row.otherDeductionsPkr)).toBe(0);
+    expect(Number(row.netPayPkr)).toBe(40000 - 375);
+  });
+
+  it('refuses a line whose deductions exceed its gross', async () => {
+    const emp = await salaried(40000);
+    const run = await draft(2029, 6);
+    const line = run.line_items.find((l: any) => l.employee_id === emp.id);
+    const res = await patchLine(run.id, line.id, { income_tax_pkr: 45000 });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('the slip says which runs it is not final for', async () => {
+    const emp = await salaried(40000);
+    const run = await draft(2029, 7);
+    const line = run.line_items.find((l: any) => l.employee_id === emp.id);
+    const slip = await app.inject({
+      method: 'GET',
+      url: `/v1/payroll-runs/${run.id}/lines/${line.id}/slip`,
+      headers: authHeaders(accountantToken),
+    });
+    expect(slip.statusCode).toBe(200);
+    expect(JSON.parse(slip.body).data.status).toBe('DRAFT');
+  });
+});
+
+describe('C-21 — an owner is not an employee', () => {
+  const MARK = 'CATEST';
+  afterAll(async () => {
+    const partners = await prisma.partner.findMany({
+      where: { facilityId: TEST_FACILITY_ID, name: { startsWith: MARK } },
+    });
+    await prisma.partnerProfitShare.deleteMany({ where: { partnerId: { in: partners.map((p) => p.id) } } });
+    await prisma.partner.deleteMany({ where: { id: { in: partners.map((p) => p.id) } } });
+    await prisma.chartOfAccounts.deleteMany({
+      where: { facilityId: TEST_FACILITY_ID, accountName: { startsWith: MARK } },
+    });
+  });
+
+  it("refuses an employee whose CNIC is an active partner's", async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/partners',
+      headers: authHeaders(ownerToken),
+      payload: { name: `${MARK} Owner`, admitted_on: '2026-01-01' },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    await prisma.partner.update({
+      where: { id: JSON.parse(res.body).data.id },
+      data: { cnic: '35202-1234567-1' },
+    });
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/employees',
+      headers: authHeaders(ownerToken),
+      payload: {
+        name: `CA-Owner-${uniq()}`,
+        employee_type: 'SALARIED',
+        join_date: '2026-01-01',
+        basic_salary_pkr: 100000,
+        cnic: '3520212345671', // same person, typed without dashes
+      },
+    });
+    expect(create.statusCode).toBe(400);
+    expect(JSON.parse(create.body).error.code).toBe('VALIDATION_ERROR');
+
+    const emp = await salaried(30000);
+    const update = await app.inject({
+      method: 'PATCH',
+      url: `/v1/employees/${emp.id}`,
+      headers: authHeaders(ownerToken),
+      payload: { cnic: '35202-1234567-1' },
+    });
+    expect(update.statusCode).toBe(400);
+  });
+});
+
+describe('C-22 — the ledger ties to the payroll register', () => {
+  it('2030 Salaries Payable equals the net pay of finalised, unpaid runs', async () => {
+    await salaried(30000);
+    const unpaid = await draft(2029, 8);
+    expect((await finalize(unpaid.id)).statusCode).toBe(200);
+    await salaried(20000);
+    const paid = await draft(2029, 9);
+    expect((await finalize(paid.id)).statusCode).toBe(200);
+    expect((await pay(paid.id, '2029-10-01')).statusCode).toBe(200);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/payroll-runs/${unpaid.id}`,
+      headers: authHeaders(accountantToken),
+    });
+    const tie = JSON.parse(res.body).data.salaries_payable;
+    expect(tie.is_reconciled).toBe(true);
+
+    // Independently of the API: the ledger balance against the register.
+    const lines = await prisma.journalEntryLine.aggregate({
+      where: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: '2030',
+        journalEntry: { postingStatus: 'POSTED', bookType: 'PACCI' },
+      },
+      _sum: { creditAmount: true, debitAmount: true },
+    });
+    const gl = Number(lines._sum.creditAmount ?? 0) - Number(lines._sum.debitAmount ?? 0);
+    const runs = await prisma.payrollRun.findMany({
+      where: { facilityId: TEST_FACILITY_ID, status: 'FINALIZED', bookType: 'PACCI' },
+      include: { lineItems: true },
+    });
+    const register = runs.flatMap((r) => r.lineItems).reduce((s, l) => s + Number(l.netPayPkr), 0);
+    expect(gl).toBeCloseTo(register, 2);
+    expect(tie.gl_salaries_payable_pkr).toBeCloseTo(gl, 2);
+    expect(tie.unpaid_net_pay_pkr).toBeCloseTo(register, 2);
+  });
+});
+
 const reverse = (runId: string, payload: Record<string, unknown> = { reason: 'posted in error', reversal_date: '2028-12-31' }) =>
   app.inject({ method: 'POST', url: `/v1/payroll-runs/${runId}/reverse`, headers: authHeaders(ownerToken), payload });
 const voidPayment = (runId: string, payload: Record<string, unknown> = { reason: 'paid from the wrong account' }) =>
