@@ -227,8 +227,8 @@ export default function EmployeeAdvanceDetailPage() {
             </p>
           )}
           <p className="mt-3 text-xs text-muted-foreground">
-            Recovery posts no journal entry of its own — it rides inside the payroll entry (JE-15/JE-15B) as a credit to
-            1230 Advances to Employees.
+            Recovery posts no journal entry of its own — it rides inside the payroll run&apos;s entry, reducing what the
+            employee owes.
           </p>
         </CardContent>
       </Card>
@@ -237,9 +237,8 @@ export default function EmployeeAdvanceDetailPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Write Off Advance</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Posts JE-23 (DR 6080 Bad Debt / CR 1230 Advances to Employees) for the outstanding balance of{' '}
-            {formatMoney(Number(advance.balance_outstanding_pkr))} and marks the advance WRITTEN_OFF. This cannot be
-            undone.
+            Forgives the outstanding balance of {formatMoney(Number(advance.balance_outstanding_pkr))}: it is
+            expensed as a staff benefit and the advance is marked WRITTEN_OFF. This cannot be undone.
           </p>
           <div className="space-y-1.5">
             <Label>Reason <span className="text-destructive">*</span></Label>

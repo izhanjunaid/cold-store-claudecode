@@ -3,7 +3,16 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import {
+  DEFAULT_PAYROLL_COST_ACCOUNT,
+  PAYROLL_COST_ACCOUNTS,
+  PERMISSION_REGISTRY,
+  localIsoDate,
+  type PayrollCostAccountType,
+} from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
+import { formatMoney } from '@/lib/format';
+import { usePayrollSettings } from '../../use-payroll-settings';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
@@ -25,20 +34,24 @@ export default function NewEmployeePage() {
   const [cnic, setCnic] = useState('');
   const [type, setType] = useState<'SALARIED' | 'DAILY_WAGE'>('SALARIED');
   const [designation, setDesignation] = useState('');
-  const [joinDate, setJoinDate] = useState(new Date().toISOString().slice(0, 10));
+  const [joinDate, setJoinDate] = useState(localIsoDate());
   const [salary, setSalary] = useState('');
   const [wage, setWage] = useState('');
   const [eobiRegistered, setEobiRegistered] = useState(true);
+  // Where their pay is expensed — by what they do; defaults from how they are paid.
+  const [costAccount, setCostAccount] = useState<PayrollCostAccountType>(DEFAULT_PAYROLL_COST_ACCOUNT.SALARIED);
   const [bankAcct, setBankAcct] = useState('');
   const [bankName, setBankName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const payroll = usePayrollSettings();
 
   if (!canCreate) {
+    const need = PERMISSION_REGISTRY.find((p) => p.key === 'employees.manage')!.label;
     return (
       <div>
         <PageHeader title="New Employee" />
-        <p className="text-muted-foreground">Requires MANAGER role or higher.</p>
+        <p className="text-muted-foreground">You need the “{need}” permission to add employees.</p>
       </div>
     );
   }
@@ -56,6 +69,7 @@ export default function NewEmployeePage() {
         designation: designation || null,
         join_date: joinDate,
         eobi_registered: eobiRegistered,
+        cost_account_code: costAccount,
         bank_account_number: bankAcct || null,
         bank_name: bankName || null,
       };
@@ -75,10 +89,10 @@ export default function NewEmployeePage() {
     <div className="max-w-3xl">
       <PageHeader title="New Employee" crumb="New" />
 
-      {/* An owner is not an employee. Payroll posts every line to 6010, an
-          expense account, so paying an owner here would understate profit and
-          taxable income alike — the tax ordinance disallows a member's pay as a
-          deduction. Say so where the mistake is made, and point at the way out. */}
+      {/* An owner is not an employee: paying an owner through payroll would
+          understate profit and taxable income alike — the tax ordinance disallows
+          a member's pay as a deduction. The server refuses a CNIC that belongs to a
+          partner; this says why before the mistake is made. */}
       <p className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed">
         <span className="font-medium">Owners and partners are not employees.</span> What an owner
         takes out is a share of profit, not a wage, so it must not go through payroll — recording
@@ -107,9 +121,25 @@ export default function NewEmployeePage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Type <span className="text-destructive">*</span></Label>
-                <select value={type} onChange={(e) => setType(e.target.value as 'SALARIED' | 'DAILY_WAGE')} className={SELECT_CLASS}>
+                <select
+                  value={type}
+                  onChange={(e) => {
+                    const next = e.target.value as 'SALARIED' | 'DAILY_WAGE';
+                    setType(next);
+                    setCostAccount(DEFAULT_PAYROLL_COST_ACCOUNT[next]);
+                  }}
+                  className={SELECT_CLASS}
+                >
                   <option value="SALARIED">Salaried (monthly)</option>
                   <option value="DAILY_WAGE">Daily Wage</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Pay is a cost of</Label>
+                <select value={costAccount} onChange={(e) => setCostAccount(e.target.value as PayrollCostAccountType)} className={SELECT_CLASS}>
+                  {(Object.keys(PAYROLL_COST_ACCOUNTS) as PayrollCostAccountType[]).map((code) => (
+                    <option key={code} value={code}>{PAYROLL_COST_ACCOUNTS[code].label}</option>
+                  ))}
                 </select>
               </div>
               <div className="space-y-1.5">
@@ -136,7 +166,9 @@ export default function NewEmployeePage() {
 
             <label className="flex items-center gap-2.5 text-sm">
               <Checkbox checked={eobiRegistered} onCheckedChange={(c) => setEobiRegistered(!!c)} />
-              EOBI registered (Rs 375 employee + Rs 1,875 employer per month)
+              EOBI registered
+              {payroll &&
+                ` (${formatMoney(payroll.eobi_employee_monthly_pkr)} employee + ${formatMoney(payroll.eobi_employer_monthly_pkr)} employer per month)`}
             </label>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
