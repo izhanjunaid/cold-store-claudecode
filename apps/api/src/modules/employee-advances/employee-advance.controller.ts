@@ -6,7 +6,6 @@ import {
   EmployeeAdvanceListQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 import { EmployeeAdvanceService } from './employee-advance.service';
@@ -39,8 +38,7 @@ export async function employeeAdvanceRoutes(app: FastifyInstance) {
     schema: { body: IssueEmployeeAdvanceRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof IssueEmployeeAdvanceRequest>;
-      assertKatchiWriteAllowed(request.user!.role, body.book_type);
-      const data = await service.issue(request.user!.facilityId, request.user!.userId, body);
+      const data = await service.issue(request.user!.facilityId, request.user!.userId, request.user!.role, body);
       return sendSuccess(reply.status(201), data);
     },
   });
@@ -67,9 +65,8 @@ export async function employeeAdvanceRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof WriteOffEmployeeAdvanceRequest>;
-      const existing = await service.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.writeOff(request.user!.facilityId, request.user!.userId, id, body);
+      const u = request.user!;
+      const data = await service.writeOff(u.facilityId, u.userId, u.role, id, body);
       return sendSuccess(reply, data);
     },
   });

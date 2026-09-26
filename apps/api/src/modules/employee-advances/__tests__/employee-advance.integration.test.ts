@@ -156,7 +156,8 @@ describe('Phase 21 — Employee Advances', () => {
     expect(active).toHaveLength(1);
   });
 
-  it('writes off an advance: DR 6080 / CR 1230; rejects writing off twice', async () => {
+  // docs/25 C-27: a forgiven staff advance is a staff benefit (6190), not a bad debt (6080).
+  it('writes off an advance: DR 6190 / CR 1230; rejects writing off twice', async () => {
     await cleanup();
     const empId = await createSalaried(`Advance-WriteOff-${Date.now()}`, 50000);
     const issued = JSON.parse((await issueAdvance(empId, 8000)).body).data;
@@ -177,7 +178,7 @@ describe('Phase 21 — Employee Advances', () => {
       include: { lines: true },
     });
     expect(je?.entryType).toBe('EMPLOYEE_ADVANCE_WRITE_OFF');
-    expect(je?.lines.find((l) => l.accountCode === '6080')?.debitAmount.toString()).toBe('8000');
+    expect(je?.lines.find((l) => l.accountCode === '6190')?.debitAmount.toString()).toBe('8000');
     expect(je?.lines.find((l) => l.accountCode === '1230')?.creditAmount.toString()).toBe('8000');
 
     const again = await app.inject({

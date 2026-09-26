@@ -438,6 +438,59 @@ describe('C-22 — the ledger ties to the payroll register', () => {
   });
 });
 
+describe('C-27 — an employee advance written off is a staff cost, not a customer bad debt', () => {
+  it('debits Staff Welfare & Benefits', async () => {
+    const emp = await salaried(40000);
+    const advance = await issueAdvance(emp.id, 8000, 2000);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/employee-advances/${advance.id}/write-off`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'left without notice', write_off_date: '2027-12-20' },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const je = await prisma.journalEntry.findUniqueOrThrow({
+      where: { id: JSON.parse(res.body).data.write_off_journal_entry_id },
+      include: { lines: true },
+    });
+    expect(Number(je.lines.find((l) => l.accountCode === '6190')?.debitAmount)).toBe(8000);
+    expect(je.lines.find((l) => l.accountCode === '6080')).toBeUndefined();
+  });
+});
+
+describe('invariant — 1230 Advances to Employees equals the advance register', () => {
+  it('holds after issues, payroll recoveries and write-offs', async () => {
+    const a = await salaried(50000);
+    const b = await salaried(50000);
+    await issueAdvance(a.id, 6000, 2500, '2029-10-01');
+    const bAdvance = await issueAdvance(b.id, 4000, 1000, '2029-10-01');
+    const run = await draft(2029, 10);
+    expect((await finalize(run.id)).statusCode).toBe(200);
+    await app.inject({
+      method: 'POST',
+      url: `/v1/employee-advances/${bAdvance.id}/write-off`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'forgiven', write_off_date: '2029-11-05' },
+    });
+
+    const lines = await prisma.journalEntryLine.aggregate({
+      where: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: '1230',
+        journalEntry: { postingStatus: 'POSTED', bookType: 'PACCI' },
+      },
+      _sum: { debitAmount: true, creditAmount: true },
+    });
+    const gl = Number(lines._sum.debitAmount ?? 0) - Number(lines._sum.creditAmount ?? 0);
+    const register = await prisma.employeeAdvance.aggregate({
+      where: { facilityId: TEST_FACILITY_ID, bookType: 'PACCI' },
+      _sum: { balanceOutstandingPkr: true },
+    });
+    expect(gl).toBeCloseTo(Number(register._sum.balanceOutstandingPkr ?? 0), 2);
+    expect(gl).toBeGreaterThan(0);
+  });
+});
+
 const reverse = (runId: string, payload: Record<string, unknown> = { reason: 'posted in error', reversal_date: '2028-12-31' }) =>
   app.inject({ method: 'POST', url: `/v1/payroll-runs/${runId}/reverse`, headers: authHeaders(ownerToken), payload });
 const voidPayment = (runId: string, payload: Record<string, unknown> = { reason: 'paid from the wrong account' }) =>
