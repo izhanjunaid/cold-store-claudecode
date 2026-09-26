@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { InvoiceStatus, InvoiceLineType } from './enums';
 
 // AddInvoiceLineRequest - add SERVICE or ADJUSTMENT line to a DRAFT invoice
 export const AddInvoiceLineRequest = z.object({
@@ -40,7 +41,7 @@ export type VoidInvoiceRequestType = z.infer<typeof VoidInvoiceRequest>;
 export const InvoiceListQuery = z.object({
   party_id: z.string().uuid().optional(),
   lot_id: z.string().uuid().optional(),
-  status: z.enum(['DRAFT', 'FINALIZED', 'VOID']).optional(),
+  status: InvoiceStatus.optional(),
   date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -52,7 +53,7 @@ export type InvoiceListQueryType = z.infer<typeof InvoiceListQuery>;
 export const InvoiceLineResponse = z.object({
   id: z.string().uuid(),
   invoice_id: z.string().uuid(),
-  line_type: z.enum(['STORAGE', 'SERVICE', 'ADJUSTMENT', 'ADVANCE_APPLIED']),
+  line_type: InvoiceLineType,
   description: z.string(),
   quantity: z.number(),
   unit_price_pkr: z.number(),
@@ -84,9 +85,15 @@ export const InvoiceResponse = z.object({
   gst_rate: z.number(),
   gst_amount_pkr: z.number(),
   total_pkr: z.number(),
+  /** Receipts allocated to the invoice. */
   amount_paid_pkr: z.number(),
-  balance_due_pkr: z.number(), // computed: total_pkr - amount_paid_pkr
-  status: z.enum(['DRAFT', 'FINALIZED', 'VOID']),
+  /** Standing credit notes against it. */
+  amount_credited_pkr: z.number(),
+  /** The bad-debt write-off, if any. */
+  amount_written_off_pkr: z.number(),
+  /** total − paid − credited − written off. */
+  balance_due_pkr: z.number(),
+  status: InvoiceStatus,
   finalized_at: z.string().nullable(),
   finalized_by: z.string().uuid().nullable(),
   book_type: z.enum(['PACCI', 'KATCHI']),

@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from './journal-entry.service';
+import { refreshInvoiceSettlement } from '../invoice/invoice-settlement';
 import { buildJE08BadDebtWriteOff } from './templates/je-08-bad-debt-writeoff';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 import type { BadDebtWriteOffRequestType } from '@coldchain/shared';
@@ -46,13 +47,8 @@ export class BadDebtService {
         postingStatus: 'POSTED',
       });
 
-      const updated = await tx.invoice.update({
-        where: { id: invoice.id },
-        data: {
-          status: 'WRITTEN_OFF',
-          amountPaidPkr: { increment: outstanding },
-        },
-      });
+      const updated = await tx.invoice.update({ where: { id: invoice.id }, data: { status: 'WRITTEN_OFF' } });
+      await refreshInvoiceSettlement(tx, invoice.id);
 
       return {
         invoice_id: updated.id,

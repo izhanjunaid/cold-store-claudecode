@@ -2,6 +2,7 @@ import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { JournalEntryService } from './journal-entry.service';
 import { generateCreditNoteNumber } from './journal-entry-number';
+import { refreshInvoiceSettlement } from '../invoice/invoice-settlement';
 import { buildJE05CreditNote } from './templates/je-05-credit-note';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 import type { CreateCreditNoteRequestType, CreditNoteListQueryType } from '@coldchain/shared';
@@ -138,10 +139,7 @@ export class CreditNoteService {
       // Decrement amount_paid is wrong; credit notes reduce gross AR not cash receipts.
       // Convention: increment amount_paid by the credit-note total so balance_due drops to reflect
       // settled portion. This makes the invoice's `balance_due_pkr` accurate post-credit.
-      await tx.invoice.update({
-        where: { id: invoice.id },
-        data: { amountPaidPkr: { increment: total } },
-      });
+      await refreshInvoiceSettlement(tx, invoice.id);
 
       return format(updated);
     });

@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma, InvoiceStatus } from '@coldchain/db';
 import { Errors } from '../../common/errors';
+import { SETTLEMENT_INCLUDE } from './invoice-settlement';
 
 export function computeDiscountAmount(
   subTotal: number,
@@ -19,6 +20,7 @@ const invoiceInclude = {
   lot: { select: { lotNumber: true } },
   billingParty: { select: { name: true } },
   lineItems: { orderBy: { sortOrder: 'asc' as const } },
+  ...SETTLEMENT_INCLUDE,
 } satisfies Prisma.InvoiceInclude;
 
 export type InvoiceWithRelations = Prisma.InvoiceGetPayload<{ include: typeof invoiceInclude }>;

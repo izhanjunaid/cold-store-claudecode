@@ -4,6 +4,8 @@ import { InvoiceRepository, type InvoiceWithRelations } from './invoice.reposito
 import { generateInvoiceNumber } from './invoice-number';
 import { renderInvoice } from '../pdf/pdf.service';
 import { lockRow } from '../../common/row-lock';
+import { round2 } from '@coldchain/shared';
+import { settlementOf, SETTLEMENT_INCLUDE } from './invoice-settlement';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import type {
   InvoiceListQueryType,
@@ -17,6 +19,7 @@ import { buildJE01InvoiceFinalized } from '../accounting/templates/je-01-invoice
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 
 function formatInvoice(inv: InvoiceWithRelations) {
+  const settlement = settlementOf(inv);
   return {
     id: inv.id,
     facility_id: inv.facilityId,
@@ -36,8 +39,10 @@ function formatInvoice(inv: InvoiceWithRelations) {
     gst_rate: Number(inv.gstRate),
     gst_amount_pkr: Number(inv.gstAmountPkr),
     total_pkr: Number(inv.totalPkr),
-    amount_paid_pkr: Number(inv.amountPaidPkr),
-    balance_due_pkr: Number(inv.totalPkr) - Number(inv.amountPaidPkr),
+    amount_paid_pkr: settlement.paidPkr,
+    amount_credited_pkr: settlement.creditedPkr,
+    amount_written_off_pkr: settlement.writtenOffPkr,
+    balance_due_pkr: round2(Number(inv.totalPkr) - settlement.settledPkr),
     status: inv.status,
     finalized_at: inv.finalizedAt?.toISOString() ?? null,
     finalized_by: inv.finalizedBy ?? null,
@@ -69,6 +74,7 @@ async function refreshInvoice(tx: Prisma.TransactionClient, id: string) {
       lot: { select: { lotNumber: true } },
       billingParty: { select: { name: true } },
       lineItems: { orderBy: { sortOrder: 'asc' } },
+      ...SETTLEMENT_INCLUDE,
     },
   });
 }

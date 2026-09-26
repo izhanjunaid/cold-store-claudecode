@@ -9,6 +9,7 @@ import { buildJE06ChequeDishonoured } from '../accounting/templates/je-06-cheque
 import { buildJE24ChequeCleared } from '../accounting/templates/je-24-cheque-cleared';
 import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recovered';
 import { generateReceiptNumber } from './receipt-number';
+import { refreshInvoiceSettlement } from '../invoice/invoice-settlement';
 import { receiptAssetAccountForPaymentMethod } from '@coldchain/shared';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 
@@ -171,10 +172,7 @@ export class PaymentService {
       // Apply each allocation: invoice increments amount_paid; loan decrements balance + posts JE-19.
       for (const alloc of allocations) {
         if (alloc.target === 'INVOICE') {
-          await tx.invoice.update({
-            where: { id: alloc.invoice_id },
-            data: { amountPaidPkr: { increment: alloc.allocated_amount_pkr } },
-          });
+          await refreshInvoiceSettlement(tx, alloc.invoice_id);
         } else {
           await this.applyLoanAllocation(
             tx,
@@ -342,10 +340,7 @@ export class PaymentService {
               allocatedAmountPkr: alloc.allocated_amount_pkr,
             },
           });
-          await tx.invoice.update({
-            where: { id: alloc.invoice_id },
-            data: { amountPaidPkr: { increment: alloc.allocated_amount_pkr } },
-          });
+          await refreshInvoiceSettlement(tx, alloc.invoice_id);
         } else {
           await this.applyLoanAllocation(
             tx,
@@ -445,10 +440,7 @@ export class PaymentService {
 
       for (const alloc of allocations) {
         if (alloc.invoiceId) {
-          await tx.invoice.update({
-            where: { id: alloc.invoiceId },
-            data: { amountPaidPkr: { decrement: Number(alloc.allocatedAmountPkr) } },
-          });
+          // Settled again from the allocations once they are voided below.
         } else if (alloc.loanId) {
           await tx.$queryRawUnsafe(
             `SELECT id FROM party_loans WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
@@ -498,6 +490,9 @@ export class PaymentService {
         where: { paymentId: id, voidedAt: null },
         data: { voidedAt: new Date(), voidedBy: userId ?? fullPayment.createdBy },
       });
+      for (const invoiceId of new Set(allocations.map((a) => a.invoiceId).filter((v): v is string => Boolean(v)))) {
+        await refreshInvoiceSettlement(tx, invoiceId);
+      }
 
       const updated = await this.repo.update(tx, id, {
         status: 'DISHONOURED',
