@@ -4,7 +4,6 @@ apps/api/src/modules/accounting/equity-accounts.ts
 apps/api/src/modules/accounting/financial-statements.service.ts
 apps/api/src/modules/accounting/gst-settlement.service.ts
 apps/api/src/modules/accounting/opening-balance.service.ts
-apps/api/src/modules/accounting/templates/je-01-invoice-finalized.ts
 apps/api/src/modules/accounting/templates/je-21-late-payment-surcharge.ts
 apps/api/src/modules/accounting/templates/je-25-revenue-accrual.ts
 apps/api/src/modules/accounting/templates/je-26-gst-settlement.ts

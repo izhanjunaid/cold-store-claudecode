@@ -6,7 +6,8 @@ export const AddInvoiceLineRequest = z.object({
   line_type: z.enum(['SERVICE', 'ADJUSTMENT']),
   description: z.string().min(1).max(300),
   quantity: z.number().positive(),
-  unit_price_pkr: z.number(), // can be negative for ADJUSTMENT
+  /** A charge; a reduction is the invoice discount (docs/25 R-07). */
+  unit_price_pkr: z.number().positive(),
   service_charge_id: z.string().uuid().optional(),
 });
 export type AddInvoiceLineRequestType = z.infer<typeof AddInvoiceLineRequest>;
@@ -104,3 +105,37 @@ export const InvoiceResponse = z.object({
   line_items: z.array(InvoiceLineResponse),
 });
 export type InvoiceResponseType = z.infer<typeof InvoiceResponse>;
+
+// ============================================================
+// Credit notes — built from the invoice's own lines (docs/25 R-03). They live
+// here, beside the invoice they adjust; the older CreateCreditNoteRequest in
+// accounting.ts (free revenue account, request book) is no longer read.
+// ============================================================
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export const IssueCreditNoteRequest = z.object({
+  original_invoice_id: z.string().uuid(),
+  credit_date: isoDate,
+  reason: z.string().min(1),
+  notes: z.string().optional(),
+  line_items: z
+    .array(
+      z.object({
+        /** The invoice line being credited; its revenue account is the one reversed. */
+        invoice_line_item_id: z.string().uuid(),
+        /** Revenue credited on that line, before its share of the discount and GST. */
+        amount_pkr: z.number().positive(),
+        description: z.string().min(1).max(300).optional(),
+      }),
+    )
+    .min(1),
+});
+export type IssueCreditNoteRequestType = z.infer<typeof IssueCreditNoteRequest>;
+
+export const CancelCreditNoteRequest = z.object({
+  reason: z.string().min(1).max(400),
+  /** Defaults to today; never before the credit note. */
+  cancel_date: isoDate.optional(),
+});
+export type CancelCreditNoteRequestType = z.infer<typeof CancelCreditNoteRequest>;

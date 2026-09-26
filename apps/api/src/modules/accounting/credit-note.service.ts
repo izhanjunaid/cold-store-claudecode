@@ -1,15 +1,23 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
+import { round2, toIsoDate } from '@coldchain/shared';
+import type {
+  IssueCreditNoteRequestType,
+  CancelCreditNoteRequestType,
+  CreditNoteListQueryType,
+} from '@coldchain/shared';
 import { Errors } from '../../common/errors';
-import { JournalEntryService } from './journal-entry.service';
+import { lockRow } from '../../common/row-lock';
+import { JournalEntryService, postedEntryNumber } from './journal-entry.service';
 import { generateCreditNoteNumber } from './journal-entry-number';
-import { refreshInvoiceSettlement } from '../invoice/invoice-settlement';
 import { buildJE05CreditNote } from './templates/je-05-credit-note';
+import { assertKatchiWriteAllowed } from './book-gate';
+import { refreshInvoiceSettlement } from '../invoice/invoice-settlement';
+import { revenueAccountForLine, REVENUE_LINE_INCLUDE } from '../invoice/revenue-account';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
-import type { CreateCreditNoteRequestType, CreditNoteListQueryType } from '@coldchain/shared';
 
 const include = {
-  originalInvoice: { select: { id: true, invoiceNumber: true, totalPkr: true, amountPaidPkr: true, billingPartyId: true, status: true } },
-  billingParty: { select: RECEIVABLE_PARTY_SELECT },
+  originalInvoice: { select: { id: true, invoiceNumber: true } },
+  billingParty: { select: { id: true, name: true } },
   journalEntry: { select: { entryNumber: true } },
   createdByUser: { select: { name: true } },
   lineItems: { orderBy: { sortOrder: 'asc' as const } },
@@ -26,18 +34,24 @@ function format(cn: CreditNoteWithRelations) {
     original_invoice_number: cn.originalInvoice.invoiceNumber ?? null,
     billing_party_id: cn.billingPartyId,
     billing_party_name: cn.billingParty.name,
-    credit_date: cn.creditDate.toISOString().slice(0, 10),
+    credit_date: toIsoDate(cn.creditDate),
     reason: cn.reason,
     total_pkr: Number(cn.totalPkr),
+    gst_amount_pkr: Number(cn.gstAmountPkr),
     status: cn.status,
     book_type: cn.bookType,
     journal_entry_id: cn.journalEntryId,
     journal_entry_number: cn.journalEntry?.entryNumber ?? null,
     notes: cn.notes,
+    voided_at: cn.voidedAt?.toISOString() ?? null,
+    void_reason: cn.voidReason,
+    /** The server's own rule for whether it can still be cancelled. */
+    can_cancel: cn.voidedAt === null,
     created_at: cn.createdAt.toISOString(),
     created_by_name: cn.createdByUser.name,
     line_items: cn.lineItems.map((l) => ({
       id: l.id,
+      invoice_line_item_id: l.invoiceLineItemId,
       revenue_account_code: l.revenueAccountCode,
       description: l.description,
       amount_pkr: Number(l.amountPkr),
@@ -52,38 +66,66 @@ export class CreditNoteService {
     private journalEntry: JournalEntryService,
   ) {}
 
-  async create(facilityId: string, userId: string, body: CreateCreditNoteRequestType) {
+  /**
+   * Issue a credit note against a finalized invoice, built from the invoice's own
+   * lines (docs/25 R-03): each credited line reverses its own revenue account,
+   * and the credit carries its pro-rata share of the invoice's discount and output
+   * tax. The book is the invoice's (R-04), and the invoice is row-locked so a
+   * payment racing it cannot over-settle (R-23).
+   */
+  async create(facilityId: string, userId: string, role: string, body: IssueCreditNoteRequestType) {
     return this.prisma.$transaction(async (tx) => {
-      const invoice = await tx.invoice.findFirst({
-        where: { id: body.original_invoice_id, facilityId },
-        include: { billingParty: { select: RECEIVABLE_PARTY_SELECT } },
+      if (!(await lockRow(tx, 'invoices', body.original_invoice_id, facilityId))) throw Errors.INVOICE_NOT_FOUND();
+      const invoice = await tx.invoice.findUniqueOrThrow({
+        where: { id: body.original_invoice_id },
+        include: {
+          billingParty: { select: RECEIVABLE_PARTY_SELECT },
+          lot: { select: { commodity: { select: { revenueAccountCode: true } } } },
+          lineItems: { include: REVENUE_LINE_INCLUDE },
+        },
       });
-      if (!invoice) throw Errors.INVOICE_NOT_FOUND();
       if (invoice.status !== 'FINALIZED') throw Errors.INVOICE_NOT_FINALIZED();
+      assertKatchiWriteAllowed(role, invoice.bookType);
 
-      const total = body.line_items.reduce((s, l) => s + l.amount_pkr, 0);
-      const balanceDue = Number(invoice.totalPkr) - Number(invoice.amountPaidPkr);
-      // A credit note reduces what is still owed — it must never exceed the
-      // balance due, or amount_paid overtakes the total and AR goes negative.
-      // Refunding an already-settled invoice is a different workflow.
-      if (total > balanceDue + 0.001) {
-        throw Errors.CREDIT_NOTE_EXCEEDS_INVOICE();
-      }
-
-      // Validate revenue account codes exist
-      const codes = Array.from(new Set(body.line_items.map((l) => l.revenue_account_code)));
-      const accounts = await tx.chartOfAccounts.findMany({
-        where: { facilityId, accountCode: { in: codes } },
+      const credited = await tx.creditNoteLineItem.groupBy({
+        by: ['invoiceLineItemId'],
+        where: { creditNote: { originalInvoiceId: invoice.id, voidedAt: null }, invoiceLineItemId: { not: null } },
+        _sum: { amountPkr: true },
       });
-      const found = new Set(accounts.map((a) => a.accountCode));
-      for (const code of codes) {
-        if (!found.has(code)) throw Errors.ACCOUNT_NOT_FOUND();
-      }
+      const creditedByLine = new Map(credited.map((c) => [c.invoiceLineItemId, Number(c._sum.amountPkr ?? 0)]));
 
-      const creditDate = new Date(body.credit_date);
+      const items = body.line_items.map((req, idx) => {
+        const line = invoice.lineItems.find((l) => l.id === req.invoice_line_item_id);
+        if (!line) throw Errors.VALIDATION_ERROR('That line is not on this invoice', `line_items.${idx}.invoice_line_item_id`);
+        const left = round2(Number(line.amountPkr) - (creditedByLine.get(line.id) ?? 0));
+        if (req.amount_pkr > left + 0.005) {
+          throw Errors.VALIDATION_ERROR(`Only Rs ${left} of "${line.description}" is left to credit`, `line_items.${idx}.amount_pkr`);
+        }
+        creditedByLine.set(line.id, (creditedByLine.get(line.id) ?? 0) + req.amount_pkr);
+        return {
+          invoiceLineItemId: line.id,
+          revenueAccountCode: revenueAccountForLine(line, invoice.lot.commodity),
+          description: req.description ?? line.description,
+          amountPkr: round2(req.amount_pkr),
+        };
+      });
+
+      // The discount was taken off the subtotal and the tax charged on what was left,
+      // so the credited revenue carries the same proportions.
+      const revenue = round2(items.reduce((s, i) => s + i.amountPkr, 0));
+      const subTotal = Number(invoice.subTotalPkr);
+      const discount = Number(invoice.discountAmountPkr);
+      const taxable = subTotal - discount;
+      const discountPkr = subTotal > 0 ? round2((revenue * discount) / subTotal) : 0;
+      const gstPkr = taxable > 0 ? round2(((revenue - discountPkr) * Number(invoice.gstAmountPkr)) / taxable) : 0;
+      const total = round2(revenue - discountPkr + gstPkr);
+
+      // A credit note reduces what is still owed; refunding a settled invoice is a different workflow.
+      const balanceDue = round2(Number(invoice.totalPkr) - Number(invoice.amountPaidPkr));
+      if (total > balanceDue + 0.005) throw Errors.CREDIT_NOTE_EXCEEDS_INVOICE();
+
+      const creditDate = new Date(`${body.credit_date}T00:00:00.000Z`);
       const cnNumber = await generateCreditNoteNumber(tx, facilityId, creditDate);
-
-      // Create credit note + line items
       const created = await tx.creditNote.create({
         data: {
           facilityId,
@@ -93,55 +135,66 @@ export class CreditNoteService {
           creditDate,
           reason: body.reason,
           totalPkr: total,
-          status: 'ISSUED',
-          bookType: body.book_type ?? 'PACCI',
+          gstAmountPkr: gstPkr,
+          status: 'APPLIED',
+          bookType: invoice.bookType,
           notes: body.notes ?? null,
           createdBy: userId,
-          lineItems: {
-            create: body.line_items.map((l, idx) => ({
-              revenueAccountCode: l.revenue_account_code,
-              description: l.description,
-              amountPkr: l.amount_pkr,
-              sortOrder: idx,
-            })),
-          },
+          lineItems: { create: items.map((i, idx) => ({ ...i, sortOrder: idx })) },
         },
-        include,
       });
 
-      // Post JE-05
-      const draft = buildJE05CreditNote({
-        creditNoteId: created.id,
-        creditNoteNumber: cnNumber,
-        creditDate,
-        bookType: created.bookType as 'PACCI' | 'KATCHI',
-        party: receivableParty(invoice.billingParty),
-        invoice: { id: invoice.id, invoiceNumber: invoice.invoiceNumber },
-        lineItems: body.line_items.map((l) => ({
-          revenueAccountCode: l.revenue_account_code,
-          description: l.description,
-          amountPkr: l.amount_pkr,
-        })),
-      });
-      const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
-        postingStatus: 'POSTED',
-      });
-
-      // Reduce invoice's effective AR by reducing total_pkr is wrong (the original is immutable);
-      // the credit note's JE-05 already debits revenue and credits AR — net effect is the AR
-      // ledger drops by `total`. We update the credit note with journalEntryId and APPLIED status.
-      const updated = await tx.creditNote.update({
-        where: { id: created.id },
-        data: { journalEntryId: posted.id, status: 'APPLIED' },
-        include,
-      });
-
-      // Decrement amount_paid is wrong; credit notes reduce gross AR not cash receipts.
-      // Convention: increment amount_paid by the credit-note total so balance_due drops to reflect
-      // settled portion. This makes the invoice's `balance_due_pkr` accurate post-credit.
+      const posted = await this.journalEntry.postInTransaction(
+        tx,
+        facilityId,
+        userId,
+        buildJE05CreditNote({
+          creditNoteId: created.id,
+          creditNoteNumber: cnNumber,
+          creditDate,
+          bookType: invoice.bookType,
+          party: receivableParty(invoice.billingParty),
+          invoiceNumber: invoice.invoiceNumber ?? invoice.id,
+          lineItems: items,
+          discountPkr,
+          gstPkr,
+        }),
+      );
+      await tx.creditNote.update({ where: { id: created.id }, data: { journalEntryId: posted.id } });
       await refreshInvoiceSettlement(tx, invoice.id);
+      return format(await tx.creditNote.findUniqueOrThrow({ where: { id: created.id }, include }));
+    });
+  }
 
-      return format(updated);
+  /**
+   * Cancel a credit note: its JE-05 is reversed and the invoice owes again
+   * (docs/25 R-23). The cancellation is recorded in its own columns.
+   */
+  async cancel(facilityId: string, userId: string, role: string, id: string, body: CancelCreditNoteRequestType) {
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await lockRow(tx, 'credit_notes', id, facilityId))) throw Errors.CREDIT_NOTE_NOT_FOUND();
+      const cn = await tx.creditNote.findUniqueOrThrow({ where: { id } });
+      assertKatchiWriteAllowed(role, cn.bookType);
+      if (cn.voidedAt) throw Errors.VALIDATION_ERROR('This credit note is already cancelled', 'id');
+      await lockRow(tx, 'invoices', cn.originalInvoiceId, facilityId);
+      const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: cn.originalInvoiceId }, select: { status: true } });
+      if (invoice.status !== 'FINALIZED') {
+        throw Errors.VALIDATION_ERROR(`The invoice is ${invoice.status}; its credit notes can no longer change`, 'id');
+      }
+      if (!cn.journalEntryId) throw Errors.VALIDATION_ERROR('This credit note has no journal entry to reverse', 'id');
+
+      const date = body.cancel_date ? new Date(`${body.cancel_date}T00:00:00.000Z`) : undefined;
+      const je = await tx.journalEntry.findUniqueOrThrow({ where: { id: cn.journalEntryId } });
+      await this.journalEntry.reverseInTransaction(tx, facilityId, userId, cn.journalEntryId, {
+        reason: `credit note ${postedEntryNumber(je)} cancelled — ${body.reason}`,
+        date,
+      });
+      await tx.creditNote.update({
+        where: { id },
+        data: { status: 'CANCELLED', voidedAt: new Date(), voidedBy: userId, voidReason: body.reason },
+      });
+      await refreshInvoiceSettlement(tx, cn.originalInvoiceId);
+      return format(await tx.creditNote.findUniqueOrThrow({ where: { id }, include }));
     });
   }
 
@@ -151,9 +204,10 @@ export class CreditNoteService {
     if (query.billing_party_id) where.billingPartyId = query.billing_party_id;
     if (query.status) where.status = query.status;
     if (query.date_from || query.date_to) {
-      where.creditDate = {};
-      if (query.date_from) (where.creditDate as any).gte = new Date(query.date_from);
-      if (query.date_to) (where.creditDate as any).lte = new Date(query.date_to);
+      where.creditDate = {
+        ...(query.date_from ? { gte: new Date(query.date_from) } : {}),
+        ...(query.date_to ? { lte: new Date(query.date_to) } : {}),
+      };
     }
 
     const [data, total] = await Promise.all([

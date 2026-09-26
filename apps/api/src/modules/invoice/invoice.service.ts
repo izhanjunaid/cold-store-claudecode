@@ -17,6 +17,7 @@ import type {
 import type { JournalEntryService } from '../accounting/journal-entry.service';
 import { buildJE01InvoiceFinalized } from '../accounting/templates/je-01-invoice-finalized';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
+import { revenueAccountForLine, REVENUE_LINE_INCLUDE } from './revenue-account';
 
 function formatInvoice(inv: InvoiceWithRelations) {
   const settlement = settlementOf(inv);
@@ -115,6 +116,12 @@ export class InvoiceService {
     if (!inv) throw Errors.INVOICE_NOT_FOUND();
     if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
 
+    // A line adds a charge. A reduction is the invoice's discount, which already posts
+    // to 4910 and which GST and credit notes pro-rate (docs/25 R-07).
+    if (!(body.unit_price_pkr > 0)) {
+      throw Errors.VALIDATION_ERROR('A line must be a charge; give a reduction as the invoice discount', 'unit_price_pkr');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const maxSort = inv.lineItems.length > 0 ? Math.max(...inv.lineItems.map((l) => l.sortOrder)) : 0;
       await this.repo.addLine(tx, invoiceId, {
@@ -170,7 +177,7 @@ export class InvoiceService {
 
     const line = inv.lineItems.find((l) => l.id === lineId);
     if (!line) throw Errors.INVOICE_LINE_NOT_FOUND();
-    if (line.lineType === 'STORAGE' || line.lineType === 'ADVANCE_APPLIED') {
+    if (line.lineType === 'STORAGE') {
       throw Errors.INVOICE_LINE_IMMUTABLE();
     }
 
@@ -188,79 +195,52 @@ export class InvoiceService {
     userId: string,
     body: FinalizeInvoiceRequestType,
   ) {
-    const inv = await this.repo.findById(facilityId, invoiceId);
-    if (!inv) throw Errors.INVOICE_NOT_FOUND();
-    if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
-
     return this.prisma.$transaction(async (tx) => {
+      if (!(await lockRow(tx, 'invoices', invoiceId, facilityId))) throw Errors.INVOICE_NOT_FOUND();
+      const inv = await tx.invoice.findUniqueOrThrow({
+        where: { id: invoiceId },
+        include: {
+          billingParty: { select: RECEIVABLE_PARTY_SELECT },
+          lot: { select: { id: true, lotNumber: true, commodity: { select: { revenueAccountCode: true } } } },
+          lineItems: { orderBy: { sortOrder: 'asc' }, include: REVENUE_LINE_INCLUDE },
+        },
+      });
+      if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
+      // A draft saved by an older version may still carry a negative adjustment line;
+      // a reduction is a discount now (docs/25 R-07).
+      if (inv.lineItems.some((l) => Number(l.amountPkr) <= 0)) {
+        throw Errors.VALIDATION_ERROR('Remove the negative adjustment and give the reduction as a discount', 'line_items');
+      }
       if (body.notes) {
         await tx.invoice.update({ where: { id: invoiceId }, data: { notes: body.notes } });
       }
       // Number from the invoice's own date, not the wall clock at finalize: a backdated
       // invoice belongs to its own month's sequence, matching the period it posts to.
-      // The advisory lock inside the generator is keyed on the same date, so the lock
-      // and the number always agree on which month is being extended.
       const invoiceNumber = await generateInvoiceNumber(tx, facilityId, inv.invoiceDate);
       const updated = await this.repo.finalize(tx, invoiceId, invoiceNumber, userId);
 
-      // Phase 8: post JE-01 atomically with finalize so the GL is always reconciled.
-      {
-        const context = await tx.invoice.findFirstOrThrow({
-          where: { id: invoiceId },
-          include: {
-            billingParty: { select: RECEIVABLE_PARTY_SELECT },
-            lot: {
-              select: {
-                id: true,
-                lotNumber: true,
-                commodity: { select: { name: true } },
-              },
-            },
-            lineItems: {
-              orderBy: { sortOrder: 'asc' },
-              include: {
-                serviceCharge: { select: { revenueAccountCode: true } },
-                ratePlan: { select: { revenueAccountCode: true } },
-              },
-            },
-          },
-        });
-
-        const draft = buildJE01InvoiceFinalized({
-          invoiceId: context.id,
-          invoiceNumber: context.invoiceNumber ?? invoiceNumber,
-          invoiceDate: context.invoiceDate,
-          totalPkr: Number(context.totalPkr),
-          gstAmountPkr: Number(context.gstAmountPkr),
-          discountAmountPkr: Number(context.discountAmountPkr),
-          bookType: context.bookType as 'PACCI' | 'KATCHI',
-          billingParty: receivableParty(context.billingParty),
-          lot: {
-            id: context.lot.id,
-            lotNumber: context.lot.lotNumber,
-            commodityName: context.lot.commodity.name,
-          },
-          lines: context.lineItems.map((l) => ({
-            lineType: l.lineType,
-            description: l.description,
+      // JE-01 posts atomically with finalize, so the GL always agrees with the invoice.
+      const posted = await this.journalEntry.postInTransaction(
+        tx,
+        facilityId,
+        userId,
+        buildJE01InvoiceFinalized({
+          invoiceId: inv.id,
+          invoiceNumber,
+          invoiceDate: inv.invoiceDate,
+          totalPkr: Number(inv.totalPkr),
+          gstAmountPkr: Number(inv.gstAmountPkr),
+          discountAmountPkr: Number(inv.discountAmountPkr),
+          bookType: inv.bookType,
+          billingParty: receivableParty(inv.billingParty),
+          lot: { id: inv.lot.id, lotNumber: inv.lot.lotNumber },
+          lines: inv.lineItems.map((l) => ({
+            revenueAccountCode: revenueAccountForLine(l, inv.lot.commodity),
             amountPkr: Number(l.amountPkr),
-            serviceChargeRevenueCode: l.serviceCharge?.revenueAccountCode ?? null,
-            ratePlanRevenueCode: l.ratePlan?.revenueAccountCode ?? null,
           })),
-        });
-
-        const posted = await this.journalEntry.postInTransaction(
-          tx,
-          facilityId,
-          userId,
-          draft,
-          { postingStatus: 'POSTED' },
-        );
-        await tx.invoice.update({
-          where: { id: invoiceId },
-          data: { journalEntryId: posted.id },
-        });
-      }
+        }),
+      );
+      await tx.invoice.update({ where: { id: invoiceId }, data: { journalEntryId: posted.id } });
 
       return formatInvoice(updated);
     });
@@ -288,7 +268,7 @@ export class InvoiceService {
         throw Errors.INVOICE_NOT_VOIDABLE('Invoice has no journal entry to reverse');
       }
 
-      const creditNotes = await tx.creditNote.count({ where: { facilityId, originalInvoiceId: invoiceId } });
+      const creditNotes = await tx.creditNote.count({ where: { facilityId, originalInvoiceId: invoiceId, voidedAt: null } });
       if (creditNotes > 0) {
         throw Errors.INVOICE_NOT_VOIDABLE('Invoice has credit notes; use a credit note flow instead');
       }

@@ -349,7 +349,9 @@ describe('Invoice — Billing Engine', () => {
     expect(inv.total_pkr).toBe(1200);
   });
 
-  it('6. POST ADJUSTMENT (negative) line recomputes totals', async () => {
+  // docs/25 R-07: a negative line could never finalize (JE-01 skipped it but still lowered
+  // the AR debit). A reduction is the discount; an adjustment line is a charge.
+  it('6. a negative ADJUSTMENT line is refused — the reduction is the discount', async () => {
     const lot = await createLot({
       ratePlanId: RATE_PLAN_SEASONAL,
       quantity: 10,
@@ -372,11 +374,24 @@ describe('Invoice — Billing Engine', () => {
         unit_price_pkr: -100,
       },
     });
-    expect(addRes.statusCode).toBe(201);
-    const inv = JSON.parse(addRes.body).data;
-    // Seasonal 10 × 50 = 500, minus 100 adjustment = 400
-    expect(inv.sub_total_pkr).toBe(400);
-    expect(inv.total_pkr).toBe(400);
+    expect(addRes.statusCode).toBe(400);
+
+    const discount = await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+      payload: { discount: { type: 'FIXED', value: 100 } },
+    });
+    expect(discount.statusCode).toBe(200);
+    const fin = await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${invoiceId}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(fin.statusCode).toBe(200);
+    // Seasonal 10 × 50 = 500, less the 100 discount = 400
+    expect(JSON.parse(fin.body).data.total_pkr).toBe(400);
   });
 
   it('7. DELETE SERVICE line succeeds; DELETE STORAGE line → 422 INVOICE_LINE_IMMUTABLE', async () => {
