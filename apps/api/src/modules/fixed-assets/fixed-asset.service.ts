@@ -8,8 +8,10 @@ import {
   round2,
   sumMoney,
   toIsoDate,
+  type ConvertToOpeningAssetRequestType,
   type CreateFixedAssetRequestType,
   type FixedAssetActionType,
+  type OpeningAssetType,
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { lockRow } from '../../common/row-lock';
@@ -117,6 +119,106 @@ export class FixedAssetService {
 
   async getById(facilityId: string, id: string) {
     return this.detail(this.prisma, facilityId, id);
+  }
+
+  /**
+   * Bring the assets the business owned at go-live onto the register (docs/25 C-30).
+   * Their cost and depreciation to date are already in the opening-balance entry, so
+   * no journal entry is posted — posting a purchase too used to count every one of
+   * them twice. The register may not claim more than that entry carries.
+   */
+  async importOpening(facilityId: string, userId: string, role: string, assets: OpeningAssetType[]) {
+    // Opening balances are official-book only.
+    assertKatchiWriteAllowed(role, 'PACCI');
+    return this.prisma.$transaction(async (tx) => {
+      const opening = await standingOpeningEntry(tx, facilityId);
+      const ids: string[] = [];
+      for (const a of assets) {
+        const purchaseDate = new Date(a.purchase_date);
+        if (purchaseDate > opening.entryDate) {
+          throw Errors.VALIDATION_ERROR(
+            `${a.asset_name} was bought after the opening date (${toIsoDate(opening.entryDate)}); record it as a purchase instead`,
+            'purchase_date',
+          );
+        }
+        if (a.depreciation_start_date && new Date(a.depreciation_start_date) < purchaseDate) {
+          throw Errors.VALIDATION_ERROR(`${a.asset_name} cannot go into service before it was bought`, 'depreciation_start_date');
+        }
+        const defaults = ASSET_CATEGORY_ACCOUNTS[a.asset_category]!;
+        const created = await tx.fixedAsset.create({
+          data: {
+            facilityId,
+            assetNumber: await nextDocumentNumber(tx, facilityId, 'fixed_assets', documentNumberPrefix('FA', purchaseDate, 'yearly'), 4),
+            assetName: a.asset_name,
+            assetCategory: a.asset_category,
+            assetAccountCode: a.asset_account_code ?? defaults.asset,
+            accumDeprAccountCode: a.accum_depr_account_code ?? defaults.accumulatedDepreciation,
+            deprExpenseAccountCode: a.depr_expense_account_code ?? defaults.depreciationExpense,
+            purchaseDate,
+            purchaseCostPkr: a.purchase_cost_pkr,
+            residualValuePkr: a.residual_value_pkr ?? 0,
+            usefulLifeYears: a.useful_life_years ?? null,
+            depreciationMethod: a.depreciation_method,
+            wdvRatePercent: a.wdv_rate_percent ?? null,
+            depreciationStartDate: a.depreciation_start_date ? new Date(a.depreciation_start_date) : null,
+            status: a.depreciation_start_date ? 'IN_SERVICE' : 'PURCHASED',
+            accumulatedDepreciationPkr: a.accumulated_depreciation_pkr,
+            isOpeningBalance: true,
+            bookType: 'PACCI',
+            notes: a.notes ?? null,
+            createdBy: userId,
+          },
+        });
+        ids.push(created.id);
+      }
+      await assertRegisterWithinOpening(tx, facilityId);
+      return Promise.all(ids.map((id) => this.detail(tx, facilityId, id)));
+    });
+  }
+
+  /**
+   * For a box that already double-booked (pre-update check C08): an asset entered
+   * through the register whose cost the opening-balance entry also carries. Reverse
+   * its purchase entry and keep the row as an opening asset, adding the depreciation
+   * the opening entry carries for it.
+   */
+  async convertToOpening(facilityId: string, userId: string, role: string, id: string, body: ConvertToOpeningAssetRequestType) {
+    return this.prisma.$transaction(async (tx) => {
+      const asset = await this.lockAsset(tx, facilityId, id, role);
+      if (asset.isOpeningBalance) throw Errors.FIXED_ASSET_INVALID_STATUS('This asset is already on the opening register');
+      if (asset.status === 'DISPOSED') throw Errors.FIXED_ASSET_INVALID_STATUS('Reverse the disposal first');
+      const opening = await standingOpeningEntry(tx, facilityId);
+      if (!(await carriedByOpening(tx, facilityId, asset))) {
+        throw Errors.FIXED_ASSET_INVALID_STATUS(
+          'The opening-balance entry does not carry this asset (bought on or before its date, on the same account); it was not booked twice',
+        );
+      }
+      const early = await tx.depreciationSchedule.findMany({ where: { fixedAssetId: id, status: 'POSTED' } });
+      if (early.some((s) => periodIndex({ year: s.periodYear, month: s.periodMonth }) <= lastFullMonthBy(opening.entryDate))) {
+        throw Errors.FIXED_ASSET_INVALID_STATUS(
+          'Depreciation was posted for months the opening entry already covers; reverse those months first',
+        );
+      }
+
+      await this.journalEntry.reverseInTransaction(tx, facilityId, userId, asset.purchaseJournalEntryId!, {
+        reason: `${asset.assetNumber} is carried by the opening balances — ${body.reason}`,
+        date: body.reversal_date ? new Date(body.reversal_date) : undefined,
+      });
+      await tx.fixedAsset.update({
+        where: { id },
+        data: {
+          isOpeningBalance: true,
+          accumulatedDepreciationPkr: { increment: body.opening_accumulated_depreciation_pkr },
+        },
+      });
+      await assertRegisterWithinOpening(tx, facilityId);
+      return this.detail(tx, facilityId, id);
+    });
+  }
+
+  /** The opening register against the opening-balance entry, account by account. */
+  async openingTieOut(facilityId: string) {
+    return openingTieOut(this.prisma, facilityId);
   }
 
   async list(facilityId: string, query: { status?: string; category?: string; page: number; pageSize: number }) {
@@ -581,7 +683,124 @@ export class FixedAssetService {
   private async detail(db: PrismaClient | Tx, facilityId: string, id: string) {
     const asset = await this.repo.findById(facilityId, id, db);
     if (!asset) throw Errors.FIXED_ASSET_NOT_FOUND();
-    return formatAsset(asset);
+    const convertible = !asset.isOpeningBalance && !asset.voidedAt && (await carriedByOpening(db, facilityId, asset));
+    return formatAsset(asset, convertible);
+  }
+}
+
+type Db = PrismaClient | Tx;
+
+async function standingOpeningEntry(db: Db, facilityId: string) {
+  const opening = await db.journalEntry.findFirst({
+    where: { ...standingEntriesWhere(facilityId), sourceTable: 'opening_balances' },
+    include: { lines: true },
+  });
+  if (!opening) {
+    throw Errors.VALIDATION_ERROR(
+      'Enter the opening balances first: an asset owned at go-live is carried by the opening-balance entry',
+    );
+  }
+  return opening;
+}
+
+/**
+ * Is `asset`'s cost also in the opening-balance entry? The C08 test: bought on or
+ * before the opening date, its purchase entry still standing, and the opening entry
+ * debiting its asset account.
+ */
+async function carriedByOpening(db: Db, facilityId: string, asset: Asset): Promise<boolean> {
+  if (!asset.purchaseJournalEntryId) return false;
+  const purchase = await db.journalEntry.findFirst({
+    where: { id: asset.purchaseJournalEntryId, reversedById: null },
+    select: { id: true },
+  });
+  if (!purchase) return false;
+  const opening = await db.journalEntry.findFirst({
+    where: {
+      ...standingEntriesWhere(facilityId),
+      sourceTable: 'opening_balances',
+      entryDate: { gte: asset.purchaseDate },
+      lines: { some: { accountCode: asset.assetAccountCode, debitAmount: { gt: 0 } } },
+    },
+    select: { id: true },
+  });
+  return opening !== null;
+}
+
+/**
+ * Per fixed-asset account: what the opening-balance entry carries against what the
+ * opening register says — cost on asset accounts, depreciation to go-live on
+ * accumulated-depreciation accounts (the register's own later months excluded).
+ */
+async function openingTieOut(db: Db, facilityId: string) {
+  const opening = await db.journalEntry.findFirst({
+    where: { ...standingEntriesWhere(facilityId), sourceTable: 'opening_balances' },
+    include: { lines: true },
+  });
+  const assets = await db.fixedAsset.findMany({
+    where: { facilityId, isOpeningBalance: true, voidedAt: null },
+    include: { schedules: { where: { status: 'POSTED' }, select: { depreciationAmountPkr: true } } },
+  });
+
+  const costAccounts = new Set<string>(Object.values(ASSET_CATEGORY_ACCOUNTS).map((c) => c.asset));
+  const accumAccounts = new Set<string>(Object.values(ASSET_CATEGORY_ACCOUNTS).map((c) => c.accumulatedDepreciation));
+  const register = new Map<string, number>();
+  const add = (code: string, amount: number) => register.set(code, round2((register.get(code) ?? 0) + amount));
+  for (const a of assets) {
+    costAccounts.add(a.assetAccountCode);
+    accumAccounts.add(a.accumDeprAccountCode);
+    add(a.assetAccountCode, Number(a.purchaseCostPkr));
+    add(
+      a.accumDeprAccountCode,
+      Number(a.accumulatedDepreciationPkr) - sumMoney(a.schedules.map((s) => Number(s.depreciationAmountPkr))),
+    );
+  }
+
+  const ledger = (code: string, kind: 'COST' | 'ACCUMULATED_DEPRECIATION') => {
+    const lines = (opening?.lines ?? []).filter((l) => l.accountCode === code);
+    const net = sumMoney(lines.map((l) => Number(l.debitAmount) - Number(l.creditAmount)));
+    return kind === 'COST' ? net : round2(-net);
+  };
+  const codes = [...costAccounts, ...accumAccounts];
+  const names = new Map(
+    (await db.chartOfAccounts.findMany({ where: { facilityId, accountCode: { in: codes } }, select: { accountCode: true, accountName: true } }))
+      .map((c) => [c.accountCode, c.accountName]),
+  );
+
+  const accounts = [
+    ...[...costAccounts].map((code) => ({ code, kind: 'COST' as const })),
+    ...[...accumAccounts].map((code) => ({ code, kind: 'ACCUMULATED_DEPRECIATION' as const })),
+  ]
+    .map(({ code, kind }) => {
+      const ledgerPkr = ledger(code, kind);
+      const registerPkr = register.get(code) ?? 0;
+      return {
+        account_code: code,
+        account_name: names.get(code) ?? code,
+        kind,
+        ledger_pkr: ledgerPkr,
+        register_pkr: registerPkr,
+        difference_pkr: round2(ledgerPkr - registerPkr),
+      };
+    })
+    .filter((r) => Math.abs(r.ledger_pkr) >= MONEY_EPSILON || Math.abs(r.register_pkr) >= MONEY_EPSILON)
+    .sort((a, b) => a.account_code.localeCompare(b.account_code));
+
+  return {
+    opening_date: opening ? toIsoDate(opening.entryDate) : null,
+    accounts,
+    is_reconciled: accounts.every((r) => Math.abs(r.difference_pkr) < MONEY_EPSILON),
+  };
+}
+
+/** The opening register may not claim more on any account than the opening entry carries — that is the double count. */
+async function assertRegisterWithinOpening(tx: Tx, facilityId: string) {
+  const over = (await openingTieOut(tx, facilityId)).accounts.find((r) => r.register_pkr > r.ledger_pkr + MONEY_EPSILON);
+  if (over) {
+    throw Errors.VALIDATION_ERROR(
+      `The opening register would carry Rs. ${over.register_pkr.toLocaleString()} on ${over.account_code} ${over.account_name}, ` +
+        `but the opening-balance entry carries Rs. ${over.ledger_pkr.toLocaleString()}. Correct the asset or the opening balances.`,
+    );
   }
 }
 
@@ -621,8 +840,13 @@ function statusWhenStanding(a: Asset): 'PURCHASED' | 'IN_SERVICE' | 'WRITTEN_OFF
   return a.depreciationStartDate ? 'IN_SERVICE' : 'PURCHASED';
 }
 
-function allowedActions(a: any): FixedAssetActionType[] {
+function allowedActions(a: any, convertible: boolean): FixedAssetActionType[] {
   if (a.voidedAt) return [];
+  if (convertible && a.status !== 'DISPOSED') return [...standingActions(a), 'convert_to_opening'];
+  return standingActions(a);
+}
+
+function standingActions(a: any): FixedAssetActionType[] {
   const impaired = Number(a.accumulatedImpairmentPkr) > MONEY_EPSILON;
   const depreciated = (a.schedules ?? []).some((s: any) => s.status === 'POSTED');
   const untouched = !impaired && !depreciated;
@@ -667,7 +891,7 @@ function formatAssetSummary(a: any) {
   };
 }
 
-function formatAsset(a: any) {
+function formatAsset(a: any, convertible = false) {
   return {
     ...formatAssetSummary(a),
     asset_account_code: a.assetAccountCode,
@@ -683,7 +907,7 @@ function formatAsset(a: any) {
     purchase_journal_entry_id: a.purchaseJournalEntryId,
     disposal_journal_entry_id: a.disposalJournalEntryId,
     void_reason: a.voidReason ?? null,
-    allowed_actions: allowedActions(a),
+    allowed_actions: allowedActions(a, convertible),
     notes: a.notes,
     schedules: (a.schedules ?? []).map((s: any) => ({
       period_year: s.periodYear,

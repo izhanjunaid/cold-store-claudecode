@@ -220,6 +220,111 @@ describe('C-33 — every asset posting has a correction', () => {
   });
 });
 
+describe('C-30 / L-35 — assets owned at go-live join the register without a second entry', () => {
+  // The opening-balance entry the register ties to: two plant assets at cost
+  // 240,000 + 500,000, with 120,000 + 50,000 depreciated before go-live.
+  const OB_ID = '00000000-0000-0000-0000-00000000c030';
+  const openingAsset = {
+    asset_name: 'Old compressor',
+    asset_category: 'COLD_PLANT',
+    purchase_date: '2027-07-01',
+    purchase_cost_pkr: 240000,
+    accumulated_depreciation_pkr: 120000,
+    useful_life_years: 2,
+    depreciation_method: 'SLM',
+    depreciation_start_date: '2027-07-01',
+  };
+  const importAssets = (assets: Record<string, unknown>[]) => post('/v1/fixed-assets/opening', { assets });
+
+  afterAll(async () => {
+    await withGuardsDisabled(prisma, async () => {
+      const scope = { facilityId: TEST_FACILITY_ID, sourceTable: 'opening_balances', sourceId: OB_ID };
+      await prisma.journalEntryLine.deleteMany({ where: { facilityId: TEST_FACILITY_ID, journalEntry: scope } });
+      await prisma.journalEntry.deleteMany({ where: scope });
+    });
+  });
+
+  it('refuses an opening asset while no opening-balance entry stands', async () => {
+    const res = await importAssets([openingAsset]);
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('brings an asset on at go-live with its accumulated depreciation and no journal entry', async () => {
+    const { JournalEntryService } = await import('../../accounting/journal-entry.service');
+    const { PeriodLockService } = await import('../../accounting/period-lock.service');
+    await new JournalEntryService(prisma, new PeriodLockService(prisma)).post(
+      TEST_FACILITY_ID,
+      '00000000-0000-0000-0000-000000000010',
+      {
+        id: OB_ID,
+        entryType: 'OPENING_BALANCE',
+        bookType: 'PACCI',
+        sourceTable: 'opening_balances',
+        sourceId: OB_ID,
+        entryDate: new Date('2028-06-30'),
+        description: 'test opening balances',
+        lines: [
+          { accountCode: '1310', debitAmount: 740000, creditAmount: 0 },
+          { accountCode: '1311', debitAmount: 0, creditAmount: 170000 },
+          { accountCode: '3010', debitAmount: 0, creditAmount: 570000 },
+        ],
+      },
+    );
+
+    const res = await importAssets([openingAsset]);
+    expect(res.statusCode, res.body).toBe(201);
+    const [asset] = JSON.parse(res.body).data;
+    expect(asset.is_opening_balance).toBe(true);
+    expect(asset.status).toBe('IN_SERVICE');
+    expect(asset.accumulated_depreciation_pkr).toBe(120000);
+    expect(asset.purchase_journal_entry_id).toBeNull();
+    expect(await prisma.journalEntry.count({ where: { sourceTable: 'fixed_assets', sourceId: asset.id } })).toBe(0);
+
+    // Depreciation resumes with the first month after go-live, not from 2027.
+    expect((await runDepreciation(2028, 7)).statusCode).toBe(201);
+    expect(await months(asset.id)).toEqual(['2028-7']);
+    expect(Number((await assetRow(asset.id)).accumulatedDepreciationPkr)).toBe(130000);
+  });
+
+  it('moves an asset already booked twice onto the opening register: purchase reversed, row kept', async () => {
+    const asset = await createAsset({ purchase: '2028-01-10', cost: 500000 });
+    const res = await post(`/v1/fixed-assets/${asset.id}/convert-to-opening`, {
+      reason: 'already in the opening balances',
+      opening_accumulated_depreciation_pkr: 50000,
+      reversal_date: '2028-07-01',
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const converted = JSON.parse(res.body).data;
+    expect(converted.is_opening_balance).toBe(true);
+    expect(converted.accumulated_depreciation_pkr).toBe(50000);
+    const purchase = await prisma.journalEntry.findUniqueOrThrow({ where: { id: asset.purchase_journal_entry_id } });
+    expect(purchase.reversedById).toBeTruthy();
+  });
+
+  it('ties the register to the opening entry per account', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/fixed-assets/opening-tie-out',
+      headers: authHeaders(ownerToken),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const tie = JSON.parse(res.body).data;
+    expect(tie.opening_date).toBe('2028-06-30');
+    const row = (code: string) => tie.accounts.find((a: any) => a.account_code === code);
+    expect(row('1310')).toMatchObject({ kind: 'COST', ledger_pkr: 740000, register_pkr: 740000, difference_pkr: 0 });
+    // The register's July depreciation is not opening depreciation.
+    expect(row('1311')).toMatchObject({ kind: 'ACCUMULATED_DEPRECIATION', ledger_pkr: 170000, register_pkr: 170000 });
+    expect(tie.is_reconciled).toBe(true);
+  });
+
+  it('refuses an opening asset the opening entry does not carry', async () => {
+    const res = await importAssets([{ ...openingAsset, asset_name: 'Phantom', purchase_cost_pkr: 10000, accumulated_depreciation_pkr: 0 }]);
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
+  });
+});
+
 describe('C-34 / L-21 — category accounts come from the registry', () => {
   it('computer hardware depreciates to 6170; other equipment has its own three accounts', async () => {
     const computer = await createAsset({ category: 'COMPUTER', purchase: '2029-01-15' });
