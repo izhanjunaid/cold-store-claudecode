@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildJE12AssetPurchase } from '../templates/je-12-asset-purchase';
 import { buildJE13Depreciation } from '../templates/je-13-depreciation';
 import { buildJE14AssetDisposal } from '../templates/je-14-asset-disposal';
-import { ASSET_CATEGORY_ACCOUNT_DEFAULTS } from '../templates/types';
+import { ASSET_CATEGORY_ACCOUNTS } from '@coldchain/shared';
 
 function totals(lines: { debitAmount: number; creditAmount: number }[]) {
   return {
@@ -36,8 +36,8 @@ describe('Fixed Asset JE templates', () => {
       assetId: 'a1',
       assetNumber: 'FA-2026-0001',
       assetName: 'Bitzer Compressor',
-      deprExpenseAccountCode: ASSET_CATEGORY_ACCOUNT_DEFAULTS.COLD_PLANT.deprExpense,
-      accumDeprAccountCode: ASSET_CATEGORY_ACCOUNT_DEFAULTS.COLD_PLANT.accumDepr,
+      deprExpenseAccountCode: ASSET_CATEGORY_ACCOUNTS['COLD_PLANT']!.depreciationExpense,
+      accumDeprAccountCode: ASSET_CATEGORY_ACCOUNTS['COLD_PLANT']!.accumulatedDepreciation,
       periodYear: 2026,
       periodMonth: 4,
       amountPkr: 75000,
@@ -56,8 +56,8 @@ describe('Fixed Asset JE templates', () => {
       assetId: 'a2',
       assetNumber: 'FA-2026-0002',
       assetName: 'Cold Store Building',
-      deprExpenseAccountCode: ASSET_CATEGORY_ACCOUNT_DEFAULTS.BUILDING.deprExpense,
-      accumDeprAccountCode: ASSET_CATEGORY_ACCOUNT_DEFAULTS.BUILDING.accumDepr,
+      deprExpenseAccountCode: ASSET_CATEGORY_ACCOUNTS['BUILDING']!.depreciationExpense,
+      accumDeprAccountCode: ASSET_CATEGORY_ACCOUNTS['BUILDING']!.accumulatedDepreciation,
       periodYear: 2026,
       periodMonth: 4,
       amountPkr: 20833,

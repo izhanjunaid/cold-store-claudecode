@@ -34,11 +34,4 @@ export class FixedAssetRepository {
       this.prisma.fixedAsset.count({ where }),
     ]);
   }
-
-  async listInService(facilityId: string, db: Tx = this.prisma): Promise<any[]> {
-    return db.fixedAsset.findMany({
-      where: { facilityId, status: 'IN_SERVICE' },
-      orderBy: { assetNumber: 'asc' },
-    });
-  }
 }

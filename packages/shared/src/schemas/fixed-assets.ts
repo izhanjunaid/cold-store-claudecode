@@ -68,11 +68,46 @@ export const ReverseDisposalRequest = z.object({
 });
 export type ReverseDisposalRequestType = z.infer<typeof ReverseDisposalRequest>;
 
+/**
+ * Correct the latest depreciation month or the latest impairment (docs/25 C-33). The
+ * reversal defaults to the original entry's own date, so the correction lands in the
+ * month it corrects.
+ */
+export const ReverseAssetEntryRequest = z.object({
+  reason: z.string().min(1).max(400),
+  reversal_date: dateOnly.optional(),
+});
+export type ReverseAssetEntryRequestType = z.infer<typeof ReverseAssetEntryRequest>;
+
+/** Void an asset entered in error: reverses its purchase entry; only before anything else posted to it. */
+export const VoidAssetRequest = z.object({
+  reason: z.string().min(1).max(400),
+  void_date: dateOnly.optional(),
+});
+export type VoidAssetRequestType = z.infer<typeof VoidAssetRequest>;
+
+/**
+ * Post every unposted month of depreciation up to this period, asset by asset
+ * (docs/25 C-29). One book per run: a KATCHI run is the owner's.
+ */
 export const RunDepreciationRequest = z.object({
   period_year: z.number().int().min(2020).max(2100),
   period_month: z.number().int().min(1).max(12),
+  book_type: BookType.optional(),
 });
 export type RunDepreciationRequestType = z.infer<typeof RunDepreciationRequest>;
+
+/** What the server will let an asset do next, by its state alone (the web adds permissions). */
+export const FixedAssetAction = z.enum([
+  'commission',
+  'impair',
+  'dispose',
+  'reverse_disposal',
+  'reverse_depreciation',
+  'reverse_impairment',
+  'void',
+]);
+export type FixedAssetActionType = z.infer<typeof FixedAssetAction>;
 
 export const FixedAssetListQuery = z.object({
   status: FixedAssetStatus.optional(),
@@ -104,6 +139,10 @@ export const FixedAssetResponse = z.object({
   disposal_proceeds_pkr: z.number().nullable(),
   purchase_journal_entry_id: z.string().uuid().nullable(),
   disposal_journal_entry_id: z.string().uuid().nullable(),
+  is_opening_balance: z.boolean(),
+  voided_at: z.string().nullable(),
+  void_reason: z.string().nullable(),
+  allowed_actions: z.array(FixedAssetAction),
   book_type: BookType,
   notes: z.string().nullable(),
   created_at: z.string(),
@@ -120,6 +159,8 @@ export const DepreciationRunResponse = z.object({
     z.object({
       asset_id: z.string().uuid(),
       asset_number: z.string(),
+      period_year: z.number().int(),
+      period_month: z.number().int(),
       depreciation_amount_pkr: z.number(),
       journal_entry_id: z.string().uuid(),
     }),
