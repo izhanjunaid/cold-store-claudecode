@@ -124,10 +124,27 @@ export const PaymentResponse = z.object({
 });
 export type PaymentResponseType = z.infer<typeof PaymentResponse>;
 
-// PartyLedgerEntry
+export const PartyLedgerQuery = z.object({
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  book_type: z.enum(['PACCI', 'KATCHI']).optional(),
+});
+export type PartyLedgerQueryType = z.infer<typeof PartyLedgerQuery>;
+
+// PartyLedgerEntry — one journal entry's effect on the party's receivable (the AR read model)
 export const PartyLedgerEntry = z.object({
   date: z.string(),
-  type: z.enum(['OPENING_BALANCE', 'INVOICE', 'PAYMENT', 'CREDIT_NOTE']),
+  type: z.enum([
+    'OPENING_BALANCE',
+    'INVOICE',
+    'SURCHARGE',
+    'PAYMENT',
+    'ADVANCE_APPLIED',
+    'CREDIT_NOTE',
+    'WRITE_OFF',
+    'REVERSAL',
+    'ADJUSTMENT',
+  ]),
   reference: z.string().nullable(),
   description: z.string(),
   debit_pkr: z.number(),

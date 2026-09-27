@@ -2,6 +2,8 @@ import type { PrismaClient } from '@coldchain/db';
 import { daysInStorage } from '../helpers/days-in-storage';
 import { round2, startOfToday } from '../helpers/money';
 import { getReceivablesAging } from './receivables-aging';
+import { sumMoney } from '@coldchain/shared';
+import { arBalances } from '../../invoice/receivables';
 
 const FINANCIAL_MIN_ROLE_RANK = 4; // ACCOUNTANT
 const ROLE_RANK: Record<string, number> = {
@@ -121,23 +123,20 @@ export async function getDashboard(
   } | null = null;
 
   if (includeFinancial) {
-    const [arRows, collectedAgg, aging, draftInvoices] = await Promise.all([
-      prisma.$queryRaw<{ ar_total: string | null }[]>`
-        SELECT COALESCE(SUM(total_pkr - amount_paid_pkr), 0)::text AS ar_total
-        FROM invoices
-        WHERE facility_id = ${facilityId}::uuid
-          AND status = 'FINALIZED'
-          AND total_pkr > amount_paid_pkr
-      `,
-      prisma.payment.aggregate({
-        where: {
-          facilityId,
-          paymentDate: today,
-          status: { not: 'DISHONOURED' },
+    // Receivables and collections on the official book, from the AR read model
+    // (docs/25 R-39): what the ledger says is owed, and the cash that actually came
+    // in today against receivables — net of tax withheld, without loan recoveries.
+    const [balances, collectedToday, aging, draftInvoices] = await Promise.all([
+      arBalances(prisma, { facilityId, book: 'PACCI', asOf: today }),
+      prisma.payment.findMany({
+        where: { facilityId, bookType: 'PACCI', paymentDate: today, clearanceStatus: { not: 'BOUNCED' } },
+        select: {
+          amountPkr: true,
+          taxWithheldPkr: true,
+          allocations: { where: { voidedAt: null, loanId: { not: null } }, select: { allocatedAmountPkr: true } },
         },
-        _sum: { amountPkr: true },
       }),
-      getReceivablesAging(prisma, facilityId, {}),
+      getReceivablesAging(prisma, facilityId, { per_page: 1 }),
       // DRAFT invoices already represent money owed with no AR/JE-01 posted
       // yet. outboundEventId set = goods already dispatched, waiting on the
       // accountant to finalize; null = a FULL ownership transfer's accrued
@@ -158,10 +157,16 @@ export async function getDashboard(
       }),
     ]);
 
-    const arTotal = Number(arRows[0]?.ar_total ?? 0);
     financial = {
-      ar_total_pkr: round2(arTotal),
-      collected_today_pkr: round2(Number(collectedAgg._sum.amountPkr ?? 0)),
+      ar_total_pkr: sumMoney(balances.values()),
+      collected_today_pkr: sumMoney(
+        collectedToday.map(
+          (p) =>
+            Number(p.amountPkr) -
+            Number(p.taxWithheldPkr) -
+            p.allocations.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0),
+        ),
+      ),
       overdue_90_plus_pkr: round2(aging.buckets.b_90_plus),
     };
 

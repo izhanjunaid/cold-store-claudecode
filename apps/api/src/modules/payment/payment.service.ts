@@ -9,6 +9,7 @@ import { buildJE24ChequeCleared } from '../accounting/templates/je-24-cheque-cle
 import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recovered';
 import { generateReceiptNumber } from './receipt-number';
 import { refreshInvoiceSettlement } from '../invoice/invoice-settlement';
+import { partyStatement } from '../invoice/receivables';
 import { receiptAssetAccountForPaymentMethod, toIsoDate, round2 } from '@coldchain/shared';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { lockRow } from '../../common/row-lock';
@@ -583,223 +584,30 @@ export class PaymentService {
     });
   }
 
+  /** The party's statement on one book (the AR read model, docs/25 R-11). */
   async getPartyLedger(
     facilityId: string,
     partyId: string,
     opts: { fromDate?: string; toDate?: string; bookType?: 'PACCI' | 'KATCHI' } = {},
   ) {
-    const party = await this.prisma.party.findFirst({
-      where: { id: partyId, facilityId },
-    });
+    const party = await this.prisma.party.findFirst({ where: { id: partyId, facilityId } });
     if (!party) throw Errors.PARTY_NOT_FOUND();
-
-    const { fromDate, toDate, bookType } = opts;
-    const bookFilter = bookType ? { bookType } : {};
-
-    const invoices = await this.prisma.invoice.findMany({
-      where: {
-        facilityId,
-        billingPartyId: partyId,
-        status: 'FINALIZED',
-        ...bookFilter,
-      },
-      select: {
-        id: true,
-        invoiceNumber: true,
-        invoiceDate: true,
-        totalPkr: true,
-        createdAt: true,
-      },
-      orderBy: [{ invoiceDate: 'asc' }, { createdAt: 'asc' }],
+    const book = opts.bookType ?? 'PACCI';
+    const statement = await partyStatement(this.prisma, {
+      facilityId,
+      partyId,
+      book,
+      from: opts.fromDate ? new Date(`${opts.fromDate}T00:00:00.000Z`) : undefined,
+      to: opts.toDate ? new Date(`${opts.toDate}T00:00:00.000Z`) : undefined,
     });
-
-    const payments = await this.prisma.payment.findMany({
-      where: {
-        facilityId,
-        partyId,
-        status: { not: 'DISHONOURED' },
-        ...bookFilter,
-      },
-      select: {
-        id: true,
-        paymentDate: true,
-        amountPkr: true,
-        paymentMethod: true,
-        referenceNumber: true,
-        createdAt: true,
-      },
-      orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
-    });
-
-    const creditNotes = await this.prisma.creditNote.findMany({
-      where: {
-        facilityId,
-        billingPartyId: partyId,
-        status: { in: ['ISSUED', 'APPLIED'] },
-        ...bookFilter,
-      },
-      select: {
-        id: true,
-        creditNoteNumber: true,
-        creditDate: true,
-        totalPkr: true,
-        createdAt: true,
-      },
-      orderBy: [{ creditDate: 'asc' }, { createdAt: 'asc' }],
-    });
-
-    // Opening balances (audit Gap 1) live as journal-entry lines with party
-    // attribution, not as documents — surface them so the statement matches
-    // the GL from day one.
-    const openingLines = await this.prisma.journalEntryLine.findMany({
-      where: {
-        facilityId,
-        partyId,
-        journalEntry: {
-          facilityId,
-          sourceTable: 'opening_balances',
-          postingStatus: 'POSTED',
-          ...bookFilter,
-        },
-      },
-      select: {
-        debitAmount: true,
-        creditAmount: true,
-        journalEntry: { select: { id: true, entryNumber: true, entryDate: true, createdAt: true } },
-      },
-    });
-
-    // Late-payment surcharges (JE-21) debit the party's AR — surface them on the
-    // statement too (only the AR debit line; the 4210 credit line also carries
-    // the partyId but is not the receivable). phase/19 audit.
-    const surchargeLines = await this.prisma.journalEntryLine.findMany({
-      where: {
-        facilityId,
-        partyId,
-        debitAmount: { gt: 0 },
-        journalEntry: {
-          facilityId,
-          sourceTable: 'invoice_surcharge',
-          postingStatus: 'POSTED',
-          ...bookFilter,
-        },
-      },
-      select: {
-        debitAmount: true,
-        creditAmount: true,
-        description: true,
-        journalEntry: { select: { id: true, entryNumber: true, entryDate: true, createdAt: true } },
-      },
-    });
-
-    type RawEntry = {
-      date: string;
-      type: 'OPENING_BALANCE' | 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE' | 'SURCHARGE';
-      reference: string | null;
-      description: string;
-      debit_pkr: number;
-      credit_pkr: number;
-      id: string;
-      sortKey: string;
-    };
-
-    const allEntries: RawEntry[] = [
-      ...openingLines.map((line) => ({
-        date: line.journalEntry.entryDate.toISOString().slice(0, 10),
-        type: 'OPENING_BALANCE' as const,
-        reference: line.journalEntry.entryNumber,
-        description: 'Opening balance brought forward',
-        debit_pkr: Number(line.debitAmount),
-        credit_pkr: Number(line.creditAmount),
-        id: line.journalEntry.id,
-        sortKey: `${line.journalEntry.entryDate.toISOString().slice(0, 10)}_0_${line.journalEntry.createdAt.toISOString()}`,
-      })),
-      ...surchargeLines.map((line) => ({
-        date: line.journalEntry.entryDate.toISOString().slice(0, 10),
-        type: 'SURCHARGE' as const,
-        reference: line.journalEntry.entryNumber,
-        description: line.description ?? 'Late payment surcharge',
-        debit_pkr: Number(line.debitAmount),
-        credit_pkr: Number(line.creditAmount),
-        id: line.journalEntry.id,
-        sortKey: `${line.journalEntry.entryDate.toISOString().slice(0, 10)}_1_${line.journalEntry.createdAt.toISOString()}`,
-      })),
-      ...invoices.map((inv) => ({
-        date: inv.invoiceDate.toISOString().slice(0, 10),
-        type: 'INVOICE' as const,
-        reference: inv.invoiceNumber ?? null,
-        description: `Invoice ${inv.invoiceNumber ?? inv.id.slice(0, 8)}`,
-        debit_pkr: Number(inv.totalPkr),
-        credit_pkr: 0,
-        id: inv.id,
-        sortKey: `${inv.invoiceDate.toISOString().slice(0, 10)}_A_${inv.createdAt.toISOString()}`,
-      })),
-      ...payments.map((pay) => ({
-        date: pay.paymentDate.toISOString().slice(0, 10),
-        type: 'PAYMENT' as const,
-        reference: pay.referenceNumber ?? null,
-        description: `Payment via ${pay.paymentMethod}${pay.referenceNumber ? ` (${pay.referenceNumber})` : ''}`,
-        debit_pkr: 0,
-        credit_pkr: Number(pay.amountPkr),
-        id: pay.id,
-        sortKey: `${pay.paymentDate.toISOString().slice(0, 10)}_B_${pay.createdAt.toISOString()}`,
-      })),
-      ...creditNotes.map((cn) => ({
-        date: cn.creditDate.toISOString().slice(0, 10),
-        type: 'CREDIT_NOTE' as const,
-        reference: cn.creditNoteNumber ?? null,
-        description: `Credit Note ${cn.creditNoteNumber ?? cn.id.slice(0, 8)}`,
-        debit_pkr: 0,
-        credit_pkr: Number(cn.totalPkr),
-        id: cn.id,
-        sortKey: `${cn.creditDate.toISOString().slice(0, 10)}_C_${cn.createdAt.toISOString()}`,
-      })),
-    ];
-
-    allEntries.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-
-    const openingBalance = fromDate
-      ? allEntries
-          .filter((e) => e.date < fromDate)
-          .reduce((bal, e) => bal + e.debit_pkr - e.credit_pkr, 0)
-      : 0;
-
-    const windowEntries = allEntries.filter((e) => {
-      if (fromDate && e.date < fromDate) return false;
-      if (toDate && e.date > toDate) return false;
-      return true;
-    });
-
-    let balance = openingBalance;
-    const ledgerEntries = windowEntries.map((e) => {
-      balance = balance + e.debit_pkr - e.credit_pkr;
-      return {
-        date: e.date,
-        type: e.type,
-        reference: e.reference,
-        description: e.description,
-        debit_pkr: e.debit_pkr,
-        credit_pkr: e.credit_pkr,
-        balance_pkr: Math.round(balance * 100) / 100,
-        id: e.id,
-      };
-    });
-
-    const totalDebit = windowEntries.reduce((s, e) => s + e.debit_pkr, 0);
-    const totalCredit = windowEntries.reduce((s, e) => s + e.credit_pkr, 0);
-
     return {
       party_id: partyId,
       party_name: party.name,
       party_type: party.partyType,
-      book_type: bookType ?? null,
-      date_from: fromDate ?? null,
-      date_to: toDate ?? null,
-      opening_balance_pkr: Math.round(openingBalance * 100) / 100,
-      entries: ledgerEntries,
-      total_debit_pkr: Math.round(totalDebit * 100) / 100,
-      total_credit_pkr: Math.round(totalCredit * 100) / 100,
-      closing_balance_pkr: Math.round(balance * 100) / 100,
+      book_type: book,
+      date_from: opts.fromDate ?? null,
+      date_to: opts.toDate ?? null,
+      ...statement,
     };
   }
 

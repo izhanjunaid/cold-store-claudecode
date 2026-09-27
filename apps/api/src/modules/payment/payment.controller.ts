@@ -7,11 +7,12 @@ import {
   ClearPaymentRequest,
   PaymentListQuery,
   PostMissingAdvanceApplicationRequest,
+  PartyLedgerQuery,
 } from '@coldchain/shared';
 import { PaymentService } from './payment.service';
 import { PaymentRepository } from './payment.repository';
 import { sendSuccess } from '../../common/response';
-import { assertKatchiWriteAllowed } from '../accounting/book-gate';
+import { assertKatchiWriteAllowed, resolveBookTypeForRead } from '../accounting/book-gate';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 
@@ -178,10 +179,15 @@ export async function paymentRoutes(app: FastifyInstance) {
     method: 'GET',
     url: '/v1/parties/:partyId/ledger',
     preHandler: [app.authenticate, app.requirePermission('billing.view')],
-    schema: { params: PartyIdParam },
+    schema: { params: PartyIdParam, querystring: PartyLedgerQuery },
     handler: async (request, reply) => {
       const { partyId } = request.params as z.infer<typeof PartyIdParam>;
-      const result = await service.getPartyLedger(request.user!.facilityId, partyId);
+      const query = request.query as z.infer<typeof PartyLedgerQuery>;
+      const result = await service.getPartyLedger(request.user!.facilityId, partyId, {
+        fromDate: query.date_from,
+        toDate: query.date_to,
+        bookType: resolveBookTypeForRead(request.user!.role, query.book_type),
+      });
       return sendSuccess(reply, result);
     },
   });
