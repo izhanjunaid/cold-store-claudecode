@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   RevenueAccrualPeriodQuery,
-  RunRevenueAccrualRequest,
   GstSettlementQuery,
   PostGstSettlementRequest,
   IssueCreditNoteRequest,
@@ -49,22 +48,8 @@ export async function receivablesAccountingRoutes(app: FastifyInstance) {
     },
   });
 
-  app.route({
-    method: 'POST',
-    url: '/v1/accounting/revenue-accrual',
-    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
-    schema: { body: RunRevenueAccrualRequest },
-    handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof RunRevenueAccrualRequest>;
-      const data = await revenueAccrual.run(
-        request.user!.facilityId,
-        request.user!.userId,
-        body.period_year,
-        body.period_month,
-      );
-      return sendSuccess(reply.status(201), data);
-    },
-  });
+  // The accrual itself is posted by the month lock (PeriodLockService.lock): a month
+  // cannot close without it, and it cannot be posted for a month still open.
 
 
   // ==========================================================

@@ -1,6 +1,9 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { periodOf } from '@coldchain/shared';
+import { advisoryXactLock } from '../../common/advisory-lock';
+import { JournalEntryService } from './journal-entry.service';
+import { RevenueAccrualService } from './revenue-accrual.service';
 
 type Tx = Prisma.TransactionClient;
 type Db = PrismaClient | Tx;
@@ -63,14 +66,44 @@ export class PeriodLockService {
     }));
   }
 
+  /**
+   * Close a month. Closing is the month-end: every draft invoice dated in the month
+   * must be finalised first (its revenue belongs to the month), and the storage
+   * revenue earned but not yet billed is accrued — with its reversal — before the
+   * lock goes on (docs/25 Q2, L-04, R-09). Months before the accrual start date
+   * lock without an accrual.
+   */
   async lock(facilityId: string, userId: string, year: number, month: number, reason?: string) {
     return this.prisma.$transaction(async (tx) => {
+      // Two closes of the same month: the second waits, then finds it locked.
+      await advisoryXactLock(tx, `${facilityId}:period-lock:${year}-${month}`);
       const existing = await tx.periodLock.findUnique({
         where: { facilityId_periodYear_periodMonth: { facilityId, periodYear: year, periodMonth: month } },
       });
       if (existing && existing.unlockedAt === null) {
         throw Errors.PERIOD_ALREADY_LOCKED();
       }
+
+      const drafts = await tx.invoice.count({
+        where: {
+          facilityId,
+          status: 'DRAFT',
+          invoiceDate: { gte: new Date(Date.UTC(year, month - 1, 1)), lte: new Date(Date.UTC(year, month, 0)) },
+        },
+      });
+      if (drafts > 0) {
+        throw Errors.VALIDATION_ERROR(
+          `${drafts} draft invoice(s) are dated in this month; finalise them before closing it`,
+          'period',
+        );
+      }
+      await new RevenueAccrualService(this.prisma, new JournalEntryService(this.prisma, this)).accrueForClose(
+        tx,
+        facilityId,
+        userId,
+        year,
+        month,
+      );
       if (existing) {
         // Re-lock previously unlocked period — overwrite
         return tx.periodLock.update({

@@ -4,7 +4,6 @@ apps/api/src/modules/accounting/equity-accounts.ts
 apps/api/src/modules/accounting/financial-statements.service.ts
 apps/api/src/modules/accounting/gst-settlement.service.ts
 apps/api/src/modules/accounting/opening-balance.service.ts
-apps/api/src/modules/accounting/templates/je-25-revenue-accrual.ts
 apps/api/src/modules/accounting/templates/je-26-gst-settlement.ts
 apps/api/src/modules/accounting/templates/je-27-cash-transfer.ts
 apps/api/src/modules/accounting/withholding-remittance.service.ts

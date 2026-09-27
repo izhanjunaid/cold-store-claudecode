@@ -1,15 +1,12 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
-import { Errors } from '../../common/errors';
+import { addDays, fromIsoDate, round2, toIsoDate } from '@coldchain/shared';
 import { advisoryXactLock } from '../../common/advisory-lock';
-import { computeStorageCharge } from '../invoice/storage-charge';
+import { computeStorageCharge, billingPeriodStart } from '../invoice/storage-charge';
 import { resolveFacilitySettings } from '../facility/facility.service';
-import {
-  buildJE25RevenueAccrual,
-  buildJE25Reversal,
-  type AccrualLotShare,
-} from './templates/je-25-revenue-accrual';
-import { postedEntryNumber, type JournalEntryService } from './journal-entry.service';
-import { defaultRevenueAccountForCommodity } from '@coldchain/shared';
+import { buildJE25RevenueAccrual, type AccrualLotShare } from './templates/je-25-revenue-accrual';
+import type { JournalEntryService } from './journal-entry.service';
+
+type Db = PrismaClient | Prisma.TransactionClient;
 
 const SOURCE_TABLE = 'revenue_accrual';
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -18,6 +15,7 @@ const DAY_MS = 1000 * 60 * 60 * 24;
 const periodEndDate = (year: number, month: number) => new Date(Date.UTC(year, month, 0));
 const periodStartDate = (year: number, month: number) => new Date(Date.UTC(year, month - 1, 1));
 const daysBetween = (from: Date, to: Date) => (to.getTime() - from.getTime()) / DAY_MS;
+const later = (a: Date, b: Date) => (a > b ? a : b);
 
 export type UnaccruableLot = { lot_number: string; reason: string };
 
@@ -25,6 +23,8 @@ export type AccrualPreview = {
   period_year: number;
   period_month: number;
   period_end: string;
+  /** Accrual applies from this date; null means the facility has not set it yet. */
+  start_date: string | null;
   lots: Array<{
     lot_id: string;
     lot_number: string;
@@ -40,294 +40,240 @@ export type AccrualPreview = {
   already_run: boolean;
 };
 
-type LotForAccrual = Prisma.LotGetPayload<{
-  include: {
-    ratePlan: true;
-    commodity: { select: { name: true } };
-    ownerParty: { select: { name: true } };
-    ownershipHistory: true;
-  };
-}>;
+export type AccrualResult = {
+  accrued_entry_number: string | null;
+  reversal_entry_number: string | null;
+  legacy_reversals: number;
+  total_pkr: number;
+  lot_count: number;
+  unaccruable: UnaccruableLot[];
+};
 
+const lotInclude = {
+  ratePlan: true,
+  commodity: { select: { name: true, revenueAccountCode: true } },
+  ownerParty: { select: { name: true } },
+  ownershipHistory: { select: { eventType: true, effectiveDate: true } },
+  outboundEvents: { where: { status: 'DISPATCHED' as const }, select: { outboundDate: true, quantityWithdrawnBags: true } },
+  childLots: { select: { inboundDate: true, quantityBags: true } },
+} satisfies Prisma.LotInclude;
+
+type LotForAccrual = Prisma.LotGetPayload<{ include: typeof lotInclude }>;
+
+type Share = {
+  lot: LotForAccrual;
+  bags: number;
+  days: number;
+  revenueAccountCode: string;
+  amountPkr: number;
+};
+
+/**
+ * Storage revenue is recognised as it is earned, month by month — the fixed
+ * policy from the facility's `revenue_accrual.start_date` (docs/25 Q2, IFRS for
+ * SMEs s.23; there is no on/off switch). No start date means no accrual yet.
+ *
+ * Each month-end, when the month is locked, the storage earned but not yet
+ * billed is accrued (JE-25: DR 1250 / CR storage revenue), cumulative from each
+ * lot's billing start (never before the start date), for the bags and the owner
+ * the lot had AT that month-end — and its reversal is posted in the same step,
+ * dated the first of the next month. Every accrual therefore nets to zero in the
+ * following month, whatever happens later: the invoice that eventually bills the
+ * storage books the revenue, and nothing is ever counted twice (L-04, R-16).
+ */
 export class RevenueAccrualService {
   constructor(
     private prisma: PrismaClient,
     private journal: JournalEntryService,
   ) {}
 
-  /**
-   * What one lot has earned from the start of its billing period through
-   * `periodEnd` — cumulative, not the month's own slice.
-   *
-   * The billing period start must match what the invoice will eventually use
-   * (invoice.builder.ts:123-125: latest INITIAL/TRANSFER_IN ownership date,
-   * else the lot's inbound date), or the accrual and the invoice never
-   * converge and the difference sits in 1250 forever.
-   */
-  private earnedToDate(
-    lot: LotForAccrual,
-    periodEnd: Date,
-  ): { amountPkr: number; days: number; periodStart: Date } | { unaccruable: string } {
-    const latestOwnership = [...lot.ownershipHistory]
-      .filter((h) => h.eventType === 'INITIAL' || h.eventType === 'TRANSFER_IN')
-      .sort((a, b) => b.effectiveDate.getTime() - a.effectiveDate.getTime())[0];
-    const periodStart = latestOwnership ? latestOwnership.effectiveDate : lot.inboundDate;
-
-    const plan = lot.ratePlan;
-    const bags = lot.currentBalanceBags;
-
-    if (plan.rateType === 'SEASONAL_PER_BAG') {
-      // computeStorageCharge returns a FLAT amount for a seasonal plan,
-      // independent of elapsed days. Feeding it a cumulative window would
-      // recognise the entire season's fee at the first period end — the same
-      // misstatement as today, only front-loaded instead of back-loaded. So
-      // spread it across the season window the rate plan itself defines.
-      if (!plan.seasonEndDate) {
-        return {
-          unaccruable:
-            'seasonal rate plan has no season end date, so the fee cannot be spread over a known term',
-        };
-      }
-      const spreadStart =
-        plan.seasonStartDate && plan.seasonStartDate > periodStart ? plan.seasonStartDate : periodStart;
-      const totalDays = daysBetween(spreadStart, plan.seasonEndDate);
-      if (totalDays <= 0) {
-        return { unaccruable: 'seasonal rate plan ends on or before the lot entered storage' };
-      }
-      const elapsed = daysBetween(spreadStart, periodEnd);
-      const fraction = Math.min(Math.max(elapsed / totalDays, 0), 1);
-      const full = bags * Number(plan.rateAmountPkr);
-      return {
-        amountPkr: Math.round(full * fraction * 100) / 100,
-        days: Math.max(Math.ceil(elapsed), 0),
-        periodStart,
-      };
-    }
-
-    const charge = computeStorageCharge({
-      rateType: plan.rateType,
-      rateAmountPkr: Number(plan.rateAmountPkr),
-      quantityBags: bags,
-      periodStart,
-      periodEnd,
-      minBillingDays: plan.minBillingDays,
-    });
-    return { amountPkr: charge.amountPkr, days: charge.days, periodStart };
+  private async startDate(db: Db, facilityId: string): Promise<Date | null> {
+    const facility = await db.facility.findUnique({ where: { id: facilityId }, select: { settings: true } });
+    const start = resolveFacilitySettings(facility?.settings ?? null).revenue_accrual.start_date;
+    return start ? fromIsoDate(start) : null;
   }
 
-  private async lotsInStorage(facilityId: string, periodEnd: Date): Promise<LotForAccrual[]> {
-    return this.prisma.lot.findMany({
-      where: {
-        facilityId,
-        status: 'ACTIVE',
-        // The accrual is an official-book concern; KATCHI is the informal
-        // ledger and is not what the statements present.
-        bookType: 'PACCI',
-        currentBalanceBags: { gt: 0 },
-        inboundDate: { lte: periodEnd },
-      },
-      include: {
-        ratePlan: true,
-        commodity: { select: { name: true } },
-        ownerParty: { select: { name: true } },
-        ownershipHistory: true,
-      },
+  /** Storage earned but not yet billed on each lot at `periodEnd`, from `from` at the earliest. */
+  private async shares(db: Db, facilityId: string, periodEnd: Date, from: Date) {
+    const lots = await db.lot.findMany({
+      where: { facilityId, bookType: 'PACCI', inboundDate: { lte: periodEnd } },
+      include: lotInclude,
       orderBy: { lotNumber: 'asc' },
     });
-  }
 
-  async preview(facilityId: string, year: number, month: number): Promise<AccrualPreview> {
-    const periodEnd = periodEndDate(year, month);
-    const lots = await this.lotsInStorage(facilityId, periodEnd);
-
-    const rows: AccrualPreview['lots'] = [];
+    const shares: Share[] = [];
     const unaccruable: UnaccruableLot[] = [];
-
     for (const lot of lots) {
-      const earned = this.earnedToDate(lot, periodEnd);
-      if ('unaccruable' in earned) {
-        unaccruable.push({ lot_number: lot.lotNumber, reason: earned.unaccruable });
+      // The lot as it stood at the month-end, not as it stands today.
+      const bags =
+        lot.quantityBags -
+        lot.outboundEvents.filter((o) => o.outboundDate <= periodEnd).reduce((s, o) => s + o.quantityWithdrawnBags, 0) -
+        lot.childLots.filter((c) => c.inboundDate <= periodEnd).reduce((s, c) => s + c.quantityBags, 0);
+      if (bags <= 0) continue;
+      const billingStart = billingPeriodStart({
+        inboundDate: lot.inboundDate,
+        ownershipHistory: lot.ownershipHistory.filter((h) => h.effectiveDate <= periodEnd),
+      });
+      const windowStart = later(billingStart, from);
+      if (windowStart > periodEnd) continue;
+
+      const revenueAccountCode = lot.ratePlan.revenueAccountCode ?? lot.commodity.revenueAccountCode;
+      if (!revenueAccountCode) throw new Error(`Commodity of lot ${lot.lotNumber} has no revenue account`);
+
+      const plan = lot.ratePlan;
+      if (plan.rateType === 'SEASONAL_PER_BAG') {
+        // A seasonal fee is flat, so it is spread over the season the plan defines.
+        if (!plan.seasonEndDate) {
+          unaccruable.push({
+            lot_number: lot.lotNumber,
+            reason: 'seasonal rate plan has no season end date, so the fee cannot be spread over a known term',
+          });
+          continue;
+        }
+        const spreadStart = plan.seasonStartDate && plan.seasonStartDate > billingStart ? plan.seasonStartDate : billingStart;
+        const totalDays = daysBetween(spreadStart, plan.seasonEndDate);
+        if (totalDays <= 0) {
+          unaccruable.push({ lot_number: lot.lotNumber, reason: 'seasonal rate plan ends on or before the lot entered storage' });
+          continue;
+        }
+        const fraction = (d: Date) => Math.min(Math.max(daysBetween(spreadStart, d) / totalDays, 0), 1);
+        const full = bags * Number(plan.rateAmountPkr);
+        // Only what was earned inside the accrual window.
+        const amountPkr = round2(full * (fraction(periodEnd) - fraction(windowStart)));
+        if (amountPkr > 0) {
+          shares.push({ lot, bags, days: Math.ceil(daysBetween(windowStart, periodEnd)), revenueAccountCode, amountPkr });
+        }
         continue;
       }
-      if (earned.periodStart > periodEnd || earned.amountPkr <= 0) continue;
-      rows.push({
-        lot_id: lot.id,
-        lot_number: lot.lotNumber,
-        party_name: lot.ownerParty.name,
-        commodity_name: lot.commodity.name,
-        bags: lot.currentBalanceBags,
-        days_in_storage: earned.days,
-        revenue_account_code:
-          lot.ratePlan.revenueAccountCode ?? defaultRevenueAccountForCommodity(lot.commodity.name),
-        accrued_to_date_pkr: earned.amountPkr,
-      });
-    }
 
-    return {
-      period_year: year,
-      period_month: month,
-      period_end: periodEnd.toISOString().slice(0, 10),
-      lots: rows,
-      total_pkr: Math.round(rows.reduce((s, r) => s + r.accrued_to_date_pkr, 0) * 100) / 100,
-      unaccruable,
-      already_run: await this.hasAccrualFor(this.prisma, facilityId, year, month),
-    };
+      const charge = computeStorageCharge({
+        rateType: plan.rateType,
+        rateAmountPkr: Number(plan.rateAmountPkr),
+        quantityBags: bags,
+        periodStart: windowStart,
+        periodEnd,
+        minBillingDays: plan.minBillingDays,
+      });
+      if (charge.amountPkr > 0) {
+        shares.push({ lot, bags, days: charge.days, revenueAccountCode, amountPkr: charge.amountPkr });
+      }
+    }
+    return { shares, unaccruable };
   }
 
-  private async hasAccrualFor(
-    db: PrismaClient | Prisma.TransactionClient,
-    facilityId: string,
-    year: number,
-    month: number,
-  ): Promise<boolean> {
+  private async hasAccrualFor(db: Db, facilityId: string, year: number, month: number): Promise<boolean> {
     return (
       (await db.journalEntry.count({
-        where: {
-          facilityId,
-          sourceTable: SOURCE_TABLE,
-          entryType: 'ACCRUAL',
-          periodYear: year,
-          periodMonth: month,
-          postingStatus: 'POSTED',
-        },
+        where: { facilityId, sourceTable: SOURCE_TABLE, entryType: 'ACCRUAL', periodYear: year, periodMonth: month, postingStatus: 'POSTED' },
       })) > 0
     );
   }
 
-  /**
-   * Post the period's accrual, reversing the previous one first.
-   *
-   * Ordering matters and is one-way: postInTransaction calls
-   * periodLock.assertOpen, and the lock is a closed-through watermark, so once
-   * a month is locked no earlier month can ever be accrued or corrected.
-   * Accrue, then lock — never the other way round.
-   */
-  async run(facilityId: string, userId: string, year: number, month: number) {
-    const facility = await this.prisma.facility.findUnique({ where: { id: facilityId } });
-    if (!facility) throw Errors.VALIDATION_ERROR('Facility not found', 'facility_id');
-    const settings = resolveFacilitySettings(facility.settings);
-    const rule = settings.revenue_accrual;
-
-    if (!rule.enabled) {
-      throw Errors.VALIDATION_ERROR(
-        'Revenue accrual is switched off for this facility. Enable it in settings, ideally from a fiscal-year boundary so already-reported periods are not restated.',
-        'revenue_accrual',
-      );
-    }
+  async preview(facilityId: string, year: number, month: number): Promise<AccrualPreview> {
     const periodEnd = periodEndDate(year, month);
-    if (rule.start_date && periodEnd < new Date(`${rule.start_date}T00:00:00.000Z`)) {
-      throw Errors.VALIDATION_ERROR(
-        `Revenue accrual starts from ${rule.start_date}; ${year}-${String(month).padStart(2, '0')} is before that.`,
-        'period',
-      );
-    }
+    const start = await this.startDate(this.prisma, facilityId);
+    const base = {
+      period_year: year,
+      period_month: month,
+      period_end: toIsoDate(periodEnd),
+      start_date: start ? toIsoDate(start) : null,
+      already_run: await this.hasAccrualFor(this.prisma, facilityId, year, month),
+    };
+    if (!start || periodEnd < start) return { ...base, lots: [], total_pkr: 0, unaccruable: [] };
 
-    const lots = await this.lotsInStorage(facilityId, periodEnd);
-    const shares: AccrualLotShare[] = [];
-    const unaccruable: UnaccruableLot[] = [];
-    for (const lot of lots) {
-      const earned = this.earnedToDate(lot, periodEnd);
-      if ('unaccruable' in earned) {
-        unaccruable.push({ lot_number: lot.lotNumber, reason: earned.unaccruable });
-        continue;
-      }
-      if (earned.periodStart > periodEnd || earned.amountPkr <= 0) continue;
-      shares.push({
-        lotId: lot.id,
-        lotNumber: lot.lotNumber,
-        revenueAccountCode:
-          lot.ratePlan.revenueAccountCode ?? defaultRevenueAccountForCommodity(lot.commodity.name),
-        amountPkr: earned.amountPkr,
-      });
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      // Serialise per period. The result is immutable by trigger, so a double
-      // post could not be edited back out — same reasoning as opening balances.
-      await advisoryXactLock(tx, `${facilityId}:accrual:${year}-${month}`);
-
-      if (await this.hasAccrualFor(tx, facilityId, year, month)) {
-        throw Errors.VALIDATION_ERROR(
-          `Storage revenue has already been accrued for ${year}-${String(month).padStart(2, '0')}.`,
-          'period',
-        );
-      }
-
-      // Reverse the previous accrual, if one is still standing. "Standing"
-      // means no reversal has been posted after it — derived from the entries
-      // themselves rather than a flag, since marking the original REVERSED
-      // would drop it out of every statement query (all of which filter
-      // POSTED) and erase the revenue from the period it belonged to.
-      const prior = await tx.journalEntry.findFirst({
-        where: {
-          facilityId,
-          sourceTable: SOURCE_TABLE,
-          entryType: 'ACCRUAL',
-          postingStatus: 'POSTED',
-          entryDate: { lt: periodEnd },
-        },
-        orderBy: { entryDate: 'desc' },
-        include: { lines: true },
-      });
-
-      let reversalNumber: string | null = null;
-      if (prior) {
-        const alreadyReversed = await tx.journalEntry.count({
-          where: {
-            facilityId,
-            sourceTable: SOURCE_TABLE,
-            entryType: 'ADJUSTMENT',
-            postingStatus: 'POSTED',
-            entryDate: { gt: prior.entryDate },
-          },
-        });
-        if (alreadyReversed === 0) {
-          const reversal = await this.journal.postInTransaction(
-            tx,
-            facilityId,
-            userId,
-            buildJE25Reversal({
-              facilityId,
-              bookType: 'PACCI',
-              reversalDate: periodStartDate(year, month),
-              accruedEntryNumber: postedEntryNumber(prior),
-              lines: prior.lines.map((l) => ({
-                accountCode: l.accountCode,
-                debitAmount: Number(l.debitAmount),
-                creditAmount: Number(l.creditAmount),
-                lotId: l.lotId,
-              })),
-            }),
-          );
-          reversalNumber = reversal.entryNumber;
-        }
-      }
-
-      if (shares.length === 0) {
-        return {
-          accrued_entry_number: null,
-          reversal_entry_number: reversalNumber,
-          total_pkr: 0,
-          lot_count: 0,
-          unaccruable,
-        };
-      }
-
-      const accrual = await this.journal.postInTransaction(
-        tx,
-        facilityId,
-        userId,
-        buildJE25RevenueAccrual({ periodEnd, bookType: 'PACCI', facilityId, shares }),
-      );
-
-      return {
-        accrued_entry_number: accrual.entryNumber,
-        reversal_entry_number: reversalNumber,
-        total_pkr: Math.round(shares.reduce((s, r) => s + r.amountPkr, 0) * 100) / 100,
-        lot_count: shares.length,
-        unaccruable,
-      };
-    });
+    const { shares, unaccruable } = await this.shares(this.prisma, facilityId, periodEnd, start);
+    return {
+      ...base,
+      lots: shares.map((s) => ({
+        lot_id: s.lot.id,
+        lot_number: s.lot.lotNumber,
+        party_name: s.lot.ownerParty.name,
+        commodity_name: s.lot.commodity.name,
+        bags: s.bags,
+        days_in_storage: s.days,
+        revenue_account_code: s.revenueAccountCode,
+        accrued_to_date_pkr: s.amountPkr,
+      })),
+      total_pkr: round2(shares.reduce((s, r) => s + r.amountPkr, 0)),
+      unaccruable,
+    };
   }
 
+  /**
+   * The month-end accrual, run by the month lock inside its own transaction
+   * (PeriodLockService.lock) — so a month can never close without it. Returns
+   * null when there is nothing to do: no start date yet, a month before it, or
+   * an accrual already posted for the month.
+   */
+  async accrueForClose(tx: Prisma.TransactionClient, facilityId: string, userId: string, year: number, month: number): Promise<AccrualResult | null> {
+    const start = await this.startDate(tx, facilityId);
+    const periodEnd = periodEndDate(year, month);
+    if (!start || periodEnd < start) return null;
+
+    await advisoryXactLock(tx, `${facilityId}:accrual:${year}-${month}`);
+    if (await this.hasAccrualFor(tx, facilityId, year, month)) return null;
+
+    // An accrual an older version posted and never reversed would sit in 1250 next to
+    // the invoice that billed it — revenue counted twice (pre-update check C11). Reverse
+    // those before the first accrual of the new policy.
+    const legacy = await tx.journalEntry.findMany({
+      where: {
+        facilityId,
+        sourceTable: SOURCE_TABLE,
+        entryType: 'ACCRUAL',
+        postingStatus: 'POSTED',
+        reversedById: null,
+        entryDate: { lte: periodEnd },
+      },
+      select: { id: true, entryDate: true },
+    });
+    let legacyReversals = 0;
+    for (const entry of legacy) {
+      const reversedByAdjustment = await tx.journalEntry.count({
+        where: { facilityId, sourceTable: SOURCE_TABLE, entryType: 'ADJUSTMENT', postingStatus: 'POSTED', entryDate: { gt: entry.entryDate } },
+      });
+      if (reversedByAdjustment > 0) continue;
+      await this.journal.reverseInTransaction(tx, facilityId, userId, entry.id, {
+        reason: 'accrual never reversed by an earlier version',
+        date: later(periodStartDate(year, month), entry.entryDate),
+      });
+      legacyReversals += 1;
+    }
+
+    const { shares, unaccruable } = await this.shares(tx, facilityId, periodEnd, start);
+    if (shares.length === 0) {
+      return { accrued_entry_number: null, reversal_entry_number: null, legacy_reversals: legacyReversals, total_pkr: 0, lot_count: 0, unaccruable };
+    }
+
+    const accrual = await this.journal.postInTransaction(
+      tx,
+      facilityId,
+      userId,
+      buildJE25RevenueAccrual({
+        periodEnd,
+        bookType: 'PACCI',
+        facilityId,
+        shares: shares.map<AccrualLotShare>((s) => ({
+          lotId: s.lot.id,
+          lotNumber: s.lot.lotNumber,
+          revenueAccountCode: s.revenueAccountCode,
+          amountPkr: s.amountPkr,
+        })),
+      }),
+    );
+    // Posted with its reversal, so no later run (or its absence) can leave it standing.
+    const reversal = await this.journal.reverseInTransaction(tx, facilityId, userId, accrual.id, {
+      reason: 'accrued storage revenue reverses the next month',
+      date: fromIsoDate(addDays(toIsoDate(periodEnd), 1)),
+    });
+
+    return {
+      accrued_entry_number: accrual.entryNumber,
+      reversal_entry_number: reversal.entryNumber,
+      legacy_reversals: legacyReversals,
+      total_pkr: round2(shares.reduce((s, r) => s + r.amountPkr, 0)),
+      lot_count: shares.length,
+      unaccruable,
+    };
+  }
 }

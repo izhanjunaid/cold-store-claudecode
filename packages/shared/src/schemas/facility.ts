@@ -41,17 +41,12 @@ export const NotificationSettings = z.object({
 export type NotificationSettingsType = z.infer<typeof NotificationSettings>;
 
 /**
- * Storage is a service rendered over time, but revenue is only recognised when
- * the invoice is finalised — at withdrawal. A lot stored October to March puts
- * six months of revenue into March, and every lot still in storage at a period
- * end has none recognised at all. docs/16 names this F-16.
- *
- * Off by default so an existing facility's reported periods are never restated
- * behind the owner's back. start_date should be set to a fiscal-year boundary
- * when switching it on.
+ * Storage revenue is recognised month by month as it is earned — the fixed policy
+ * (docs/25 Q2, IFRS for SMEs s.23); there is no on/off switch. It applies from
+ * start_date, prospectively: set it to an open fiscal-year boundary so periods
+ * already reported are never restated. No start date = no accrual yet.
  */
 export const RevenueAccrualRule = z.object({
-  enabled: z.boolean(),
   // The pattern had lost its backslashes (`^d{4}-d{2}-d{2}$`), so no real date ever
   // validated and a start date could never be saved (docs/25).
   start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD').nullable(),
@@ -108,7 +103,7 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
   gst_default_rate: 18,
   fiscal_year_start_month: 7, // July — Pakistan's fiscal year (DEFAULT_FY_START_MONTH in fiscal.ts)
   late_payment_surcharge: { enabled: false, pct_per_month: 2, grace_days: 30 },
-  revenue_accrual: { enabled: false, start_date: null },
+  revenue_accrual: { start_date: null },
   payroll: { eobi_employee_monthly_pkr: 375, eobi_employer_monthly_pkr: 1875, standard_working_days: 26 },
   email: {
     enabled: false,
