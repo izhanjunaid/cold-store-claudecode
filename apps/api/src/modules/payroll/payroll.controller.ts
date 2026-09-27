@@ -10,11 +10,11 @@ import {
   PayPayrollRequest,
   RemitGovtRequest,
   ReversePayrollRunRequest,
+  VoidPayrollPaymentRequest,
   PayrollRunListQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
-import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 import { EmployeeService } from './employee.service';
@@ -125,8 +125,7 @@ export async function payrollRoutes(app: FastifyInstance) {
     schema: { body: CreatePayrollRunRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreatePayrollRunRequest>;
-      assertKatchiWriteAllowed(request.user!.role, body.book_type);
-      const data = await runs.createDraft(request.user!.facilityId, request.user!.userId, body);
+      const data = await runs.createDraft(request.user!.facilityId, request.user!.role, body);
       return sendSuccess(reply.status(201), data);
     },
   });
@@ -151,9 +150,7 @@ export async function payrollRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id, lineId } = request.params as z.infer<typeof RunLineParam>;
       const body = request.body as z.infer<typeof UpdatePayrollLineRequest>;
-      const existing = await runs.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await runs.updateLine(request.user!.facilityId, id, lineId, body);
+      const data = await runs.updateLine(request.user!.facilityId, request.user!.role, id, lineId, body);
       return sendSuccess(reply, data);
     },
   });
@@ -165,9 +162,7 @@ export async function payrollRoutes(app: FastifyInstance) {
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
-      const existing = await runs.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await runs.finalize(request.user!.facilityId, request.user!.userId, id);
+      const data = await runs.finalize(request.user!.facilityId, request.user!.userId, request.user!.role, id);
       return sendSuccess(reply, data);
     },
   });
@@ -180,9 +175,7 @@ export async function payrollRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof PayPayrollRequest>;
-      const existing = await runs.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await runs.pay(request.user!.facilityId, request.user!.userId, id, body);
+      const data = await runs.pay(request.user!.facilityId, request.user!.userId, request.user!.role, id, body);
       return sendSuccess(reply, data);
     },
   });
@@ -210,9 +203,20 @@ export async function payrollRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof ReversePayrollRunRequest>;
-      const existing = await runs.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await runs.reverse(request.user!.facilityId, request.user!.userId, id, body);
+      const data = await runs.reverse(request.user!.facilityId, request.user!.userId, request.user!.role, id, body);
+      return sendSuccess(reply, data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/payroll-runs/:id/void-payment',
+    preHandler: [app.authenticate, app.requirePermission('payroll.reverse')],
+    schema: { params: IdParam, body: VoidPayrollPaymentRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof VoidPayrollPaymentRequest>;
+      const data = await runs.voidPayment(request.user!.facilityId, request.user!.userId, request.user!.role, id, body);
       return sendSuccess(reply, data);
     },
   });

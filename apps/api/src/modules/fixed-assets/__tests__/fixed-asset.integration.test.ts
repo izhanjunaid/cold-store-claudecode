@@ -213,21 +213,26 @@ describe('Phase 8B — Fixed Assets', () => {
     expect(Number(updated?.accumulatedDepreciationPkr)).toBe(75000);
   });
 
-  it('re-running same period rejects with DEPRECIATION_ALREADY_POSTED', async () => {
+  it('re-running a posted period posts nothing new', async () => {
+    const before = await prisma.journalEntry.count({ where: { facilityId: TEST_FACILITY_ID, entryType: 'DEPRECIATION' } });
     const repeat = await app.inject({
       method: 'POST',
       url: '/v1/depreciation/runs',
       headers: authHeaders(ownerToken),
       payload: { period_year: 2026, period_month: 2 },
     });
-    expect(repeat.statusCode).toBe(409);
-    expect(JSON.parse(repeat.body).error.code).toBe('DEPRECIATION_ALREADY_POSTED');
+    expect(repeat.statusCode).toBe(422);
+    expect(JSON.parse(repeat.body).error.code).toBe('DEPRECIATION_NOTHING_TO_RUN');
+    const after = await prisma.journalEntry.count({ where: { facilityId: TEST_FACILITY_ID, entryType: 'DEPRECIATION' } });
+    expect(after).toBe(before);
   });
 
-  it('rejects an out-of-order period run: skipping February to run March', async () => {
+  // docs/25 C-29: a skipped month is no longer a dead end — the next run catches the
+  // asset up, one entry per month, in order.
+  it('running March after January catches February up first', async () => {
     await cleanup();
     const { id } = await createCompressor();
-    await commission(id, '2026-01-01');
+    await commission(id, '2026-01-15') // bought 15 Jan; a start before that is refused (C-29);
 
     const jan = await app.inject({
       method: 'POST',
@@ -243,35 +248,20 @@ describe('Phase 8B — Fixed Assets', () => {
       headers: authHeaders(ownerToken),
       payload: { period_year: 2026, period_month: 3 },
     });
-    expect(march.statusCode).toBe(409);
-    expect(JSON.parse(march.body).error.code).toBe('DEPRECIATION_PRIOR_PERIOD_NOT_POSTED');
+    expect(march.statusCode).toBe(201);
+    const entries = JSON.parse(march.body).data.entries as { period_month: number }[];
+    expect(entries.map((e) => e.period_month)).toEqual([2, 3]);
 
-    const feb = await app.inject({
-      method: 'POST',
-      url: '/v1/depreciation/runs',
-      headers: authHeaders(ownerToken),
-      payload: { period_year: 2026, period_month: 2 },
+    const schedules = await prisma.depreciationSchedule.findMany({
+      where: { fixedAssetId: id, status: 'POSTED' },
+      orderBy: { periodMonth: 'asc' },
     });
-    expect(feb.statusCode).toBe(201);
-
-    const marchAgain = await app.inject({
-      method: 'POST',
-      url: '/v1/depreciation/runs',
-      headers: authHeaders(ownerToken),
-      payload: { period_year: 2026, period_month: 3 },
-    });
-    expect(marchAgain.statusCode).toBe(201);
+    expect(schedules.map((s) => s.periodMonth)).toEqual([1, 2, 3]);
   });
 
   it('disposes asset above book value (gain) and posts JE-14 with 4230 line', async () => {
     await cleanup();
-    const { id } = await createCompressor();
-    await commission(id);
-    // simulate prior depreciation
-    await prisma.fixedAsset.update({
-      where: { id },
-      data: { accumulatedDepreciationPkr: 1000000 },
-    });
+    const { id } = await createCompressor(); // never in service: NBV = cost 4.5M
 
     const dispose = await app.inject({
       method: 'POST',
@@ -279,7 +269,7 @@ describe('Phase 8B — Fixed Assets', () => {
       headers: authHeaders(ownerToken),
       payload: {
         disposal_date: '2026-12-15',
-        disposal_proceeds_pkr: 4000000, // NBV = 3.5M, gain = 500k
+        disposal_proceeds_pkr: 5000000, // NBV = 4.5M, gain = 500k
       },
     });
     expect(dispose.statusCode).toBe(201);
@@ -296,12 +286,7 @@ describe('Phase 8B — Fixed Assets', () => {
 
   it('disposes asset below book value (loss) and posts JE-14 with 6110 line', async () => {
     await cleanup();
-    const { id } = await createCompressor();
-    await commission(id);
-    await prisma.fixedAsset.update({
-      where: { id },
-      data: { accumulatedDepreciationPkr: 1000000 },
-    });
+    const { id } = await createCompressor(); // never in service: NBV = cost 4.5M
 
     const dispose = await app.inject({
       method: 'POST',
@@ -309,7 +294,7 @@ describe('Phase 8B — Fixed Assets', () => {
       headers: authHeaders(ownerToken),
       payload: {
         disposal_date: '2026-12-15',
-        disposal_proceeds_pkr: 3000000, // NBV = 3.5M, loss = 500k
+        disposal_proceeds_pkr: 4000000, // NBV = 4.5M, loss = 500k
       },
     });
     expect(dispose.statusCode).toBe(201);
@@ -370,10 +355,6 @@ describe('Phase 8B — Fixed Assets', () => {
     await cleanup();
     const { id } = await createCompressor();
     await commission(id);
-    await prisma.fixedAsset.update({
-      where: { id },
-      data: { accumulatedDepreciationPkr: 1000000 },
-    });
 
     const dispose = await app.inject({
       method: 'POST',
@@ -383,6 +364,9 @@ describe('Phase 8B — Fixed Assets', () => {
     });
     expect(dispose.statusCode).toBe(201);
     const disposalJeId = JSON.parse(dispose.body).data.disposal_journal_entry_id as string;
+    // Disposal first depreciated February–November (C-31); that use really happened.
+    const accumulatedAtDisposal = Number((await prisma.fixedAsset.findUniqueOrThrow({ where: { id } })).accumulatedDepreciationPkr);
+    expect(accumulatedAtDisposal).toBeGreaterThan(0);
 
     const rev = await app.inject({
       method: 'POST',
@@ -422,7 +406,7 @@ describe('Phase 8B — Fixed Assets', () => {
 
     // Accumulated depreciation is intact — the contra was restored by the mirror.
     const after = await prisma.fixedAsset.findUnique({ where: { id } });
-    expect(Number(after!.accumulatedDepreciationPkr)).toBe(1000000);
+    expect(Number(after!.accumulatedDepreciationPkr)).toBe(accumulatedAtDisposal);
   });
 
   it('rejects reversing a disposal that was never made, and reversing twice', async () => {

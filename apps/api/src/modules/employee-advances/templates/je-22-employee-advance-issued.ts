@@ -1,6 +1,5 @@
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 import type { JournalEntryDraft } from '../../accounting/templates/types';
-
-const ACCOUNT_EMPLOYEE_ADVANCES = '1230';
 
 type Input = {
   advanceId: string;
@@ -34,7 +33,7 @@ export function buildJE22EmployeeAdvanceIssued(input: Input): JournalEntryDraft 
     description: `Advance ${input.advanceNumber} — issued to ${input.employeeName}`,
     lines: [
       {
-        accountCode: ACCOUNT_EMPLOYEE_ADVANCES,
+        accountCode: SYSTEM_ACCOUNTS.EMPLOYEE_ADVANCES,
         debitAmount: amount,
         creditAmount: 0,
         description: `Advance to ${input.employeeName} — ${input.advanceNumber}`,
@@ -47,8 +46,4 @@ export function buildJE22EmployeeAdvanceIssued(input: Input): JournalEntryDraft 
       },
     ],
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

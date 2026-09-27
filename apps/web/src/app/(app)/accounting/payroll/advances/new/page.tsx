@@ -15,6 +15,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/layout/page-header';
 import { formatMoney } from '@/lib/format';
+import { localIsoDate, round2 } from '@coldchain/shared';
+import { usePayrollSettings } from '../../use-payroll-settings';
 
 interface EmployeeOption {
   id: string;
@@ -47,7 +49,8 @@ export default function IssueEmployeeAdvancePage() {
   const [principal, setPrincipal] = useState('');
   const [installment, setInstallment] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK_TRANSFER'>('CASH');
-  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [issueDate, setIssueDate] = useState(() => localIsoDate());
+  const payroll = usePayrollSettings();
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,10 +77,13 @@ export default function IssueEmployeeAdvancePage() {
     hint: e.employee_type === 'SALARIED' ? `${formatMoney(e.basic_salary_pkr)}/mo` : `${formatMoney(e.daily_wage_pkr)}/day`,
   }));
   const selectedEmployee = employees.find((e) => e.id === employeeId);
+  // The server's cap: one month's pay — the facility's standard working days for daily wages.
   const monthlyCap = selectedEmployee
     ? selectedEmployee.employee_type === 'SALARIED'
       ? Number(selectedEmployee.basic_salary_pkr ?? 0)
-      : Number(selectedEmployee.daily_wage_pkr ?? 0) * 26
+      : payroll
+        ? round2(Number(selectedEmployee.daily_wage_pkr ?? 0) * payroll.standard_working_days)
+        : null
     : null;
 
   async function submit(e: React.FormEvent) {

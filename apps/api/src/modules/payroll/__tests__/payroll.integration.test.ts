@@ -249,36 +249,11 @@ describe('Phase 8B — Payroll', () => {
     );
     expect(credit2030).toBeCloseTo(sumNetPay);
 
-    // The same invariant, now reported on the run itself so the screen can
-    // show it. Asserting the JE alone proved it held on the day the test ran;
-    // this is what tells the accountant it still holds on a run they are
-    // looking at.
-    expect(run.reconciliation).not.toBeNull();
-    expect(run.reconciliation.gl_salaries_payable_pkr).toBeCloseTo(credit2030, 2);
-    expect(run.reconciliation.register_net_pay_pkr).toBeCloseTo(sumNetPay, 2);
-    expect(run.reconciliation.difference_pkr).toBeCloseTo(0, 2);
-    expect(run.reconciliation.is_reconciled).toBe(true);
-  });
-
-  it('reports no reconciliation on a draft run — there is no entry to tie to yet', async () => {
-    const list = await app.inject({
-      method: 'GET',
-      url: '/v1/payroll-runs?status=DRAFT',
-      headers: authHeaders(accountantToken),
-    });
-    const rows = JSON.parse(list.body).data as { id: string }[];
-    const draft = rows[0];
-    if (!draft) return;
-
-    const res = await app.inject({
-      method: 'GET',
-      url: `/v1/payroll-runs/${draft.id}`,
-      headers: authHeaders(accountantToken),
-    });
-    expect(res.statusCode).toBe(200);
-    // Not zero and not a difference equal to the whole payroll — null, because
-    // an unfinalised run has nothing to disagree with.
-    expect(JSON.parse(res.body).data.reconciliation).toBeNull();
+    // The run reports the facility-wide tie-out (docs/25 C-22): 2030 in the ledger
+    // against the net pay of every finalised, unpaid run. The per-run check it
+    // replaces compared an entry with the lines it was built from.
+    expect(run.salaries_payable.is_reconciled).toBe(true);
+    expect(run.salaries_payable.difference_pkr).toBeCloseTo(0, 2);
   });
 
   it('cannot finalize already-finalized run', async () => {
@@ -528,11 +503,11 @@ describe('Phase 8B — Payroll', () => {
     expect(d).toBeCloseTo(c, 2);
   });
 
-  // C1(ii). other_deductions_pkr is subtracted from net pay but has no JE line, so the
-  // entry came up short by exactly that amount and threw JOURNAL_UNBALANCED — a message
-  // that told the accountant nothing. It has no correct account to credit until employee
-  // advances exist, so refuse it explicitly instead.
-  it('rejects finalize with a clear error when a line carries other deductions', async () => {
+  // C1(ii). other_deductions_pkr was subtracted from net pay but had no JE line, so the
+  // entry came up short and threw JOURNAL_UNBALANCED. The column is retired (docs/25
+  // C-17): nothing writes it, and a draft saved before still carrying a value finalizes
+  // with net pay derived from the deductions that do have a ledger home — balanced.
+  it('a legacy draft line still carrying other deductions finalizes balanced, without them', async () => {
     await cleanup();
     await createSalaried(`Mgr-OD-${Date.now()}`, 50000);
 
@@ -550,11 +525,10 @@ describe('Phase 8B — Payroll', () => {
     });
     const run = JSON.parse(create.body).data;
 
-    await app.inject({
-      method: 'PATCH',
-      url: `/v1/payroll-runs/${run.id}/lines/${run.line_items[0].id}`,
-      headers: authHeaders(accountantToken),
-      payload: { other_deductions_pkr: 2500 },
+    // What an older release left behind: a deduction and a net pay that subtracted it.
+    await prisma.payrollLineItem.update({
+      where: { id: run.line_items[0].id },
+      data: { otherDeductionsPkr: 2500, netPayPkr: 50000 - 375 - 2500 },
     });
 
     const fin = await app.inject({
@@ -563,16 +537,18 @@ describe('Phase 8B — Payroll', () => {
       headers: authHeaders(managerToken),
       payload: {},
     });
-    expect(fin.statusCode).toBe(409);
-    expect(JSON.parse(fin.body).error.code).toBe('PAYROLL_OTHER_DEDUCTIONS_UNSUPPORTED');
+    expect(fin.statusCode).toBe(200);
 
-    // Nothing was posted and the run stayed in DRAFT.
-    const je = await prisma.journalEntry.findFirst({
+    const je = await prisma.journalEntry.findFirstOrThrow({
       where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payroll_runs', sourceId: run.id },
+      include: { lines: true },
     });
-    expect(je).toBeNull();
-    const after = await prisma.payrollRun.findUnique({ where: { id: run.id } });
-    expect(after!.status).toBe('DRAFT');
+    const d = je.lines.reduce((s, l) => s + Number(l.debitAmount), 0);
+    const c = je.lines.reduce((s, l) => s + Number(l.creditAmount), 0);
+    expect(d).toBeCloseTo(c, 2);
+    expect(Number(je.lines.find((l) => l.accountCode === '2030')!.creditAmount)).toBe(50000 - 375);
+    const line = await prisma.payrollLineItem.findUniqueOrThrow({ where: { id: run.line_items[0].id } });
+    expect(Number(line.netPayPkr)).toBe(50000 - 375);
   });
 
   // C2. remit overwrote remittance_journal_entry_id instead of rejecting, so a second

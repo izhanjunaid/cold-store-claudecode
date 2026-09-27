@@ -12,6 +12,7 @@
  * Pro-rata: the month of commissioning counts only if the depreciation_start_date
  * falls on or before the 15th of that month.
  */
+import { round2 } from '@coldchain/shared';
 
 export type DepreciationMethod = 'SLM' | 'WDV';
 
@@ -38,9 +39,9 @@ export type ScheduleRow = {
   closingNbvPkr: number;
 };
 
-/** Whole months from the start date to the given period. Local time, matching isPeriodActive. */
+/** Whole months from the start date to the given period (UTC calendar, as the date is stored). */
 export function monthsElapsed(start: Date, year: number, month: number): number {
-  return (year - start.getFullYear()) * 12 + (month - (start.getMonth() + 1));
+  return (year - start.getUTCFullYear()) * 12 + (month - (start.getUTCMonth() + 1));
 }
 
 /**
@@ -48,14 +49,14 @@ export function monthsElapsed(start: Date, year: number, month: number): number 
  * counting the start month only if start date is on or before the 15th.
  */
 export function isPeriodActive(start: Date, year: number, month: number): boolean {
-  const startYear = start.getFullYear();
-  const startMonth = start.getMonth() + 1;
+  const startYear = start.getUTCFullYear();
+  const startMonth = start.getUTCMonth() + 1;
   if (year < startYear) return false;
   if (year > startYear) return true;
   if (month > startMonth) return true;
   if (month < startMonth) return false;
   // Same month — count only if start day <= 15
-  return start.getDate() <= 15;
+  return start.getUTCDate() <= 15;
 }
 
 /**
@@ -134,8 +135,4 @@ export function computeMonthlyDepreciation(input: ScheduleRowInput): ScheduleRow
     depreciationAmountPkr: monthly,
     closingNbvPkr: closing,
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

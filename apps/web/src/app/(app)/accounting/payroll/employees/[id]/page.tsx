@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { toast } from 'sonner';
+import { PAYROLL_COST_ACCOUNTS, localIsoDate, type PayrollCostAccountType } from '@coldchain/shared';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -28,6 +29,7 @@ interface Employee {
   basic_salary_pkr: number | null;
   daily_wage_pkr: number | null;
   eobi_registered: boolean;
+  cost_account_code: PayrollCostAccountType;
   bank_account_number: string | null;
   bank_name: string | null;
   is_active: boolean;
@@ -50,7 +52,8 @@ export default function EmployeeDetailPage() {
   const params = useParams();
   const id = params['id'] as string;
   const { user } = useAuthStore();
-  const isOwner = can(user, 'employees.terminate');
+  const canTerminate = can(user, 'employees.terminate');
+  const canManage = can(user, 'employees.manage');
   const canViewAdvances = can(user, 'employee_advances.view');
   const canIssueAdvance = can(user, 'employee_advances.issue');
 
@@ -58,7 +61,7 @@ export default function EmployeeDetailPage() {
   const [advances, setAdvances] = useState<AdvanceSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showTerminate, setShowTerminate] = useState(false);
-  const [terminationDate, setTerminationDate] = useState(new Date().toISOString().slice(0, 10));
+  const [terminationDate, setTerminationDate] = useState(localIsoDate());
   const [error, setError] = useState<string | null>(null);
 
   const fetchEmp = useCallback(async () => {
@@ -95,6 +98,15 @@ export default function EmployeeDetailPage() {
     }
   }
 
+  async function setCostAccount(code: PayrollCostAccountType) {
+    try {
+      setEmp(await apiClient<Employee>(`/v1/employees/${id}`, { method: 'PATCH', body: { cost_account_code: code } }));
+      toast.success('Pay will be expensed as ' + PAYROLL_COST_ACCOUNTS[code].label.toLowerCase());
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Update failed');
+    }
+  }
+
   if (loading) return <PageSkeleton />;
   if (!emp) return <p className="text-destructive">Employee not found</p>;
 
@@ -112,7 +124,7 @@ export default function EmployeeDetailPage() {
         crumb={emp.name}
         description={`${emp.designation ?? 'No designation'} · ${emp.employee_type === 'SALARIED' ? 'Salaried' : 'Daily Wage'} · Joined ${formatDate(emp.join_date)}`}
         actions={
-          isOwner && emp.is_active && (
+          canTerminate && emp.is_active && (
             <Button variant="outline" className="text-destructive" onClick={() => setShowTerminate(true)}>Terminate</Button>
           )
         }
@@ -136,6 +148,23 @@ export default function EmployeeDetailPage() {
             <div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground">EOBI</div>
               <div>{emp.eobi_registered ? '✓ Registered' : '—'}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Pay is a cost of</div>
+              {canManage ? (
+                <select
+                  aria-label="Pay is a cost of"
+                  value={emp.cost_account_code}
+                  onChange={(e) => setCostAccount(e.target.value as PayrollCostAccountType)}
+                  className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                >
+                  {(Object.keys(PAYROLL_COST_ACCOUNTS) as PayrollCostAccountType[]).map((code) => (
+                    <option key={code} value={code}>{PAYROLL_COST_ACCOUNTS[code].label}</option>
+                  ))}
+                </select>
+              ) : (
+                <div>{PAYROLL_COST_ACCOUNTS[emp.cost_account_code]?.label}</div>
+              )}
             </div>
             {emp.bank_account_number && (
               <div className="col-span-2">

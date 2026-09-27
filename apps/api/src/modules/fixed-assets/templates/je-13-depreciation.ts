@@ -1,3 +1,4 @@
+import { round2 } from '@coldchain/shared';
 import type { JournalEntryDraft } from './types';
 
 type Input = {
@@ -19,7 +20,7 @@ type Input = {
  *     CR  1311 / 1321 / 1331 / 1341  Accumulated Depreciation
  *
  * The depreciation expense account is sourced from `asset.deprExpenseAccountCode`,
- * which is set per-asset from ASSET_CATEGORY_ACCOUNT_DEFAULTS at creation time.
+ * stamped per asset from ASSET_CATEGORY_ACCOUNTS at creation time.
  */
 export function buildJE13Depreciation(input: Input): JournalEntryDraft {
   const amount = round2(input.amountPkr);
@@ -48,8 +49,4 @@ export function buildJE13Depreciation(input: Input): JournalEntryDraft {
       },
     ],
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

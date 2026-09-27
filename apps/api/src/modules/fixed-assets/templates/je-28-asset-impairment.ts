@@ -1,7 +1,5 @@
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 import type { JournalEntryDraft } from './types';
-
-export const ACCOUNT_IMPAIRMENT_LOSS = '6160';
-export const ACCOUNT_ACCUM_IMPAIRMENT = '1370';
 
 type Input = {
   assetId: string;
@@ -27,14 +25,13 @@ type Input = {
  * reconstruct. Crediting the asset account would be worse: it destroys
  * original cost.
  *
- * No balance-sheet change is needed for this to present correctly — the
- * statement sums every DETAIL account under the NON_CURRENT_ASSET headers, so
- * a credit-normal 1370 under 1300 reduces carrying amount on its own.
+ * A credit-normal 1370 under the 1300 header reduces carrying amount on the
+ * balance sheet with no statement-side change.
  */
 export function buildJE28AssetImpairment(input: Input): JournalEntryDraft {
-  const amount = Math.round(input.amountPkr * 100) / 100;
+  const amount = round2(input.amountPkr);
   return {
-    entryType: 'ADJUSTMENT',
+    entryType: 'IMPAIRMENT',
     bookType: input.bookType,
     sourceTable: 'fixed_assets',
     sourceId: input.assetId,
@@ -42,13 +39,13 @@ export function buildJE28AssetImpairment(input: Input): JournalEntryDraft {
     description: `Impairment of ${input.assetName} (${input.assetNumber}) — ${input.reason}`,
     lines: [
       {
-        accountCode: ACCOUNT_IMPAIRMENT_LOSS,
+        accountCode: SYSTEM_ACCOUNTS.IMPAIRMENT_LOSS,
         debitAmount: amount,
         creditAmount: 0,
         description: `Impairment loss — ${input.assetNumber}`,
       },
       {
-        accountCode: ACCOUNT_ACCUM_IMPAIRMENT,
+        accountCode: SYSTEM_ACCOUNTS.FA_ACC_IMPAIRMENT,
         debitAmount: 0,
         creditAmount: amount,
         description: `Accumulated impairment — ${input.assetNumber}`,

@@ -1,28 +1,64 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
+import {
+  DEFAULT_BANK_ACCOUNT_CODE,
+  MONEY_EPSILON,
+  SYSTEM_ACCOUNTS,
+  payrollLineNet,
+  payrollRunTotals,
+  round2,
+  type CreatePayrollRunRequestType,
+  type PayPayrollRequestType,
+  type PayrollRunActionType,
+  type UpdatePayrollLineRequestType,
+} from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
+import { lockRow } from '../../common/row-lock';
+import { documentNumberPrefix, nextDocumentNumber } from '../../common/document-number';
+import { assertKatchiWriteAllowed } from '../accounting/book-gate';
+import { accountBalances, signedBalance } from '../accounting/ledger';
 import { JournalEntryService } from '../accounting/journal-entry.service';
-import { generatePayrollRunNumber } from './payroll-number';
-import { buildJE15MonthlyPayroll } from './templates/je-15-monthly-payroll';
-import { buildJE15BDailyWages } from './templates/je-15b-daily-wages';
+import { resolveFacilitySettings } from '../facility/facility.service';
+import { buildJE15Payroll } from './templates/je-15-payroll';
 import { buildJE16SalaryPayment } from './templates/je-16-salary-payment';
 import { buildJE16BGovtRemittance } from './templates/je-16b-govt-remittance';
-import { formatEmployee } from './employee.service';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 
-// EOBI rates per spec §11.2 (Pakistan, 2026 rates)
-const EOBI_EMPLOYEE_PER_MONTH = 375; // 1% of minimum wage
-const EOBI_EMPLOYER_PER_MONTH = 1875; // 5% of minimum wage
-
+type Db = PrismaClient | Prisma.TransactionClient;
 type Tx = Prisma.TransactionClient;
 
-/** Row-lock a run so a status read and the JE post that follows cannot interleave. */
-async function lockPayrollRun(tx: Tx, facilityId: string, runId: string): Promise<void> {
-  await tx.$queryRawUnsafe(
-    `SELECT id FROM payroll_runs WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-    runId,
-    facilityId,
-  );
+type LineRow = {
+  grossPayPkr: unknown;
+  eobiEmployeePkr: unknown;
+  eobiEmployerPkr: unknown;
+  incomeTaxPkr: unknown;
+  advanceRecoveryPkr: unknown;
+};
+
+/** A stored line's amounts, in the shape the shared net/total rules read. */
+function amountsOf(l: LineRow) {
+  return {
+    gross_pay_pkr: Number(l.grossPayPkr),
+    eobi_employee_pkr: Number(l.eobiEmployeePkr),
+    eobi_employer_pkr: Number(l.eobiEmployerPkr),
+    income_tax_pkr: Number(l.incomeTaxPkr),
+    advance_recovery_pkr: Number(l.advanceRecoveryPkr),
+  };
+}
+
+/** Recompute a run's stored totals from its lines — the one place they are written. */
+async function saveRunTotals(tx: Tx, runId: string) {
+  const lines = await tx.payrollLineItem.findMany({ where: { payrollRunId: runId } });
+  const t = payrollRunTotals(lines.map(amountsOf));
+  await tx.payrollRun.update({
+    where: { id: runId },
+    data: {
+      totalGrossPkr: t.gross,
+      totalDeductionsPkr: t.deductions,
+      totalEmployerEobiPkr: t.employerEobi,
+      totalNetPayablePkr: t.net,
+    },
+  });
+  return t;
 }
 
 export class PayrollRunService {
@@ -31,23 +67,16 @@ export class PayrollRunService {
     private journalEntry: JournalEntryService,
   ) {}
 
-  async createDraft(facilityId: string, userId: string, body: any) {
+  async createDraft(facilityId: string, role: string, body: CreatePayrollRunRequestType) {
     const { payroll_type, period_year, period_month } = body;
     const bookType = body.book_type ?? 'PACCI';
+    assertKatchiWriteAllowed(role, bookType);
 
     return this.prisma.$transaction(async (tx) => {
-      // Serialize concurrent creates for the same period+type before checking.
-      //
-      // This check used to run on `this.prisma`, outside the transaction opened below,
-      // and the table carries only a NON-unique index on
-      // (facility_id, period_year, period_month) — so two concurrent creates could both
-      // see nothing and both insert. Moving it inside the transaction is not enough on
-      // its own: under Read Committed both would still read before either wrote.
-      //
-      // An advisory lock is used rather than a unique constraint deliberately. The rule
-      // is "no *live* run for this period" — a reversed run must remain replaceable
-      // (audit P1-3) — and a partial unique index carrying that predicate cannot be
-      // expressed in the Prisma schema, so it would register as permanent drift.
+      // Serialize concurrent creates for the same period+type before checking. The rule
+      // is "no *live* run for this period" — a reversed run must stay replaceable — and
+      // a partial unique index carrying that predicate cannot be expressed in the Prisma
+      // schema, so an advisory lock guards it.
       await advisoryXactLock(
         tx,
         `${facilityId}:payroll-run:${payroll_type}:${period_year}:${period_month}`,
@@ -64,7 +93,16 @@ export class PayrollRunService {
       });
       if (existing) throw Errors.PAYROLL_RUN_DUPLICATE_PERIOD();
 
-      const runNumber = await generatePayrollRunNumber(tx, facilityId, period_year, period_month);
+      const runNumber = await nextDocumentNumber(
+        tx,
+        facilityId,
+        'payroll_runs',
+        documentNumberPrefix('PAY', new Date(Date.UTC(period_year, period_month - 1, 1)), 'monthly'),
+        3,
+      );
+
+      const facility = await tx.facility.findUniqueOrThrow({ where: { id: facilityId }, select: { settings: true } });
+      const settings = resolveFacilitySettings(facility.settings).payroll;
 
       // Snapshot all active employees of the matching type
       const employeeType = payroll_type === 'MONTHLY_SALARY' ? 'SALARIED' : 'DAILY_WAGE';
@@ -73,11 +111,9 @@ export class PayrollRunService {
         orderBy: { name: 'asc' },
       });
 
-      // Pre-fill each employee's ACTIVE advance instalment (phase 21). One active
-      // advance per employee (enforced at issue) makes this a plain lookup — no
-      // priority ordering to decide when salary can't cover several. The accountant
-      // can edit or zero it per line before finalizing; this is a suggestion, not a
-      // commitment.
+      // Pre-fill each employee's ACTIVE advance instalment (phase 21) — a suggestion
+      // the accountant can edit per line. Finalize re-checks it against the live
+      // balance, because a later draft may pre-fill from the same balance (C-14).
       const activeAdvances = await tx.employeeAdvance.findMany({
         where: { facilityId, employeeId: { in: employees.map((e) => e.id) }, status: 'ACTIVE' },
       });
@@ -98,144 +134,147 @@ export class PayrollRunService {
         },
       });
 
-      let totalGross = 0;
-      let totalEmployeeEobi = 0;
-      let totalEmployerEobi = 0;
-      let totalNet = 0;
-
       for (let i = 0; i < employees.length; i++) {
         const e = employees[i]!;
         const isSalaried = e.employeeType === 'SALARIED';
+        const daysWorked = isSalaried ? null : settings.standard_working_days;
         const gross = isSalaried
           ? Number(e.basicSalaryPkr ?? 0)
-          : Number(e.dailyWagePkr ?? 0) * 26; // default 26 working days for daily wage default
-        const employeeEobi = e.eobiRegistered ? EOBI_EMPLOYEE_PER_MONTH : 0;
-        const employerEobi = e.eobiRegistered ? EOBI_EMPLOYER_PER_MONTH : 0;
+          : round2(settings.standard_working_days * Number(e.dailyWagePkr ?? 0));
+        const employeeEobi = e.eobiRegistered ? settings.eobi_employee_monthly_pkr : 0;
+        const employerEobi = e.eobiRegistered ? settings.eobi_employer_monthly_pkr : 0;
         const advance = advanceByEmployee.get(e.id);
+        // Never pre-fill more than the pay can cover: the line would open negative.
         const advanceRecovery = advance
-          ? Math.min(Number(advance.monthlyInstallmentPkr), Number(advance.balanceOutstandingPkr))
+          ? round2(
+              Math.max(
+                0,
+                Math.min(
+                  Number(advance.monthlyInstallmentPkr),
+                  Number(advance.balanceOutstandingPkr),
+                  gross - employeeEobi,
+                ),
+              ),
+            )
           : 0;
-        const net = round2(gross - employeeEobi - advanceRecovery);
+        const amounts = {
+          gross_pay_pkr: gross,
+          eobi_employee_pkr: employeeEobi,
+          eobi_employer_pkr: employerEobi,
+          income_tax_pkr: 0,
+          advance_recovery_pkr: advanceRecovery,
+        };
 
         await tx.payrollLineItem.create({
           data: {
             payrollRunId: run.id,
             employeeId: e.id,
-            daysWorked: isSalaried ? null : 26,
+            daysWorked,
             grossPayPkr: gross,
             eobiEmployeePkr: employeeEobi,
             eobiEmployerPkr: employerEobi,
             incomeTaxPkr: 0,
-            otherDeductionsPkr: 0,
-            advanceRecoveryPkr: round2(advanceRecovery),
-            netPayPkr: net,
+            advanceRecoveryPkr: advanceRecovery,
+            netPayPkr: payrollLineNet(amounts),
             sortOrder: i,
           },
         });
-
-        totalGross = round2(totalGross + gross);
-        totalEmployeeEobi = round2(totalEmployeeEobi + employeeEobi);
-        totalEmployerEobi = round2(totalEmployerEobi + employerEobi);
-        totalNet = round2(totalNet + net);
       }
 
-      const updated = await tx.payrollRun.update({
-        where: { id: run.id },
-        data: {
-          totalGrossPkr: totalGross,
-          totalDeductionsPkr: round2(totalGross - totalNet),
-          totalEmployerEobiPkr: totalEmployerEobi,
-          totalNetPayablePkr: totalNet,
-        },
-      });
-      return this.getByIdInternal(facilityId, updated.id, tx);
+      await saveRunTotals(tx, run.id);
+      return this.getByIdInternal(facilityId, run.id, tx);
     });
   }
 
-  async updateLine(facilityId: string, runId: string, lineId: string, body: any) {
-    const run = await this.prisma.payrollRun.findFirst({ where: { facilityId, id: runId } });
-    if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
-    if (run.status !== 'DRAFT') {
-      throw Errors.PAYROLL_RUN_INVALID_STATUS('Cannot edit lines of a non-DRAFT run');
-    }
-
+  async updateLine(facilityId: string, role: string, runId: string, lineId: string, body: UpdatePayrollLineRequestType) {
     return this.prisma.$transaction(async (tx) => {
+      if (!(await lockRow(tx, 'payroll_runs', runId, facilityId))) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      const run = await tx.payrollRun.findFirstOrThrow({ where: { facilityId, id: runId } });
+      assertKatchiWriteAllowed(role, run.bookType);
+      if (run.status !== 'DRAFT') {
+        throw Errors.PAYROLL_RUN_INVALID_STATUS('Cannot edit lines of a non-DRAFT run');
+      }
+
       const line = await tx.payrollLineItem.findFirst({
         where: { id: lineId, payrollRunId: runId },
+        include: { employee: true },
       });
       if (!line) throw Errors.PAYROLL_LINE_NOT_FOUND();
 
-      const grossPay = body.gross_pay_pkr ?? Number(line.grossPayPkr);
-      const empEobi = body.eobi_employee_pkr ?? Number(line.eobiEmployeePkr);
-      const empyEobi = body.eobi_employer_pkr ?? Number(line.eobiEmployerPkr);
-      const tax = body.income_tax_pkr ?? Number(line.incomeTaxPkr);
-      const otherDed = body.other_deductions_pkr ?? Number(line.otherDeductionsPkr);
+      // A daily-wage gross is days worked x daily wage, never typed (docs/25 C-18).
+      let daysWorked: number | null = line.daysWorked === null ? null : Number(line.daysWorked);
+      let gross: number;
+      if (line.employee.employeeType === 'DAILY_WAGE') {
+        if (body.gross_pay_pkr !== undefined) {
+          throw Errors.VALIDATION_ERROR(
+            "A daily-wage line's gross is days worked x daily wage; change the days worked instead",
+            'gross_pay_pkr',
+          );
+        }
+        const days = body.days_worked ?? daysWorked;
+        if (days === null) throw Errors.VALIDATION_ERROR('Enter the days worked', 'days_worked');
+        daysWorked = days;
+        gross = round2(days * Number(line.employee.dailyWagePkr ?? 0));
+      } else {
+        if (body.days_worked !== undefined) {
+          throw Errors.VALIDATION_ERROR('A salaried line has no days worked', 'days_worked');
+        }
+        gross = body.gross_pay_pkr ?? Number(line.grossPayPkr);
+      }
 
-      // Validate against the employee's live outstanding balance, not the amount the
-      // draft was pre-filled with — the accountant may be raising it back up after
-      // lowering it, or the balance may have moved since the draft was created.
-      const advanceRecovery = body.advance_recovery_pkr ?? Number(line.advanceRecoveryPkr);
-      if (advanceRecovery > 0.005) {
+      const amounts = {
+        gross_pay_pkr: gross,
+        eobi_employee_pkr: body.eobi_employee_pkr ?? Number(line.eobiEmployeePkr),
+        eobi_employer_pkr: body.eobi_employer_pkr ?? Number(line.eobiEmployerPkr),
+        income_tax_pkr: body.income_tax_pkr ?? Number(line.incomeTaxPkr),
+        advance_recovery_pkr: body.advance_recovery_pkr ?? Number(line.advanceRecoveryPkr),
+      };
+
+      // Against the employee's live outstanding balance, not what the draft was
+      // pre-filled with. Finalize checks again under the advance's lock.
+      if (amounts.advance_recovery_pkr > MONEY_EPSILON) {
         const advance = await tx.employeeAdvance.findFirst({
           where: { facilityId, employeeId: line.employeeId, status: 'ACTIVE' },
         });
         const outstanding = advance ? Number(advance.balanceOutstandingPkr) : 0;
-        if (advanceRecovery > outstanding + 0.005) throw Errors.EMPLOYEE_ADVANCE_OVER_RECOVERY();
+        if (amounts.advance_recovery_pkr > outstanding + MONEY_EPSILON) throw Errors.EMPLOYEE_ADVANCE_OVER_RECOVERY();
       }
 
-      const net = round2(grossPay - empEobi - tax - otherDed - advanceRecovery);
+      const net = payrollLineNet(amounts);
+      if (net < 0) {
+        throw Errors.VALIDATION_ERROR(
+          `Deductions exceed gross pay for ${line.employee.name}; net pay cannot be negative`,
+        );
+      }
 
       await tx.payrollLineItem.update({
         where: { id: lineId },
         data: {
-          ...(body.days_worked !== undefined ? { daysWorked: body.days_worked } : {}),
-          grossPayPkr: grossPay,
-          eobiEmployeePkr: empEobi,
-          eobiEmployerPkr: empyEobi,
-          incomeTaxPkr: tax,
-          otherDeductionsPkr: otherDed,
-          advanceRecoveryPkr: advanceRecovery,
+          daysWorked,
+          grossPayPkr: amounts.gross_pay_pkr,
+          eobiEmployeePkr: amounts.eobi_employee_pkr,
+          eobiEmployerPkr: amounts.eobi_employer_pkr,
+          incomeTaxPkr: amounts.income_tax_pkr,
+          advanceRecoveryPkr: amounts.advance_recovery_pkr,
           netPayPkr: net,
         },
       });
 
-      // Recompute run totals
-      const lines = await tx.payrollLineItem.findMany({ where: { payrollRunId: runId } });
-      const totals = lines.reduce(
-        (acc, l) => {
-          acc.gross += Number(l.grossPayPkr);
-          acc.empEobi += Number(l.eobiEmployeePkr);
-          acc.emperEobi += Number(l.eobiEmployerPkr);
-          acc.tax += Number(l.incomeTaxPkr);
-          acc.other += Number(l.otherDeductionsPkr);
-          acc.advanceRecovery += Number(l.advanceRecoveryPkr);
-          acc.net += Number(l.netPayPkr);
-          return acc;
-        },
-        { gross: 0, empEobi: 0, emperEobi: 0, tax: 0, other: 0, advanceRecovery: 0, net: 0 },
-      );
-
-      await tx.payrollRun.update({
-        where: { id: runId },
-        data: {
-          totalGrossPkr: round2(totals.gross),
-          totalDeductionsPkr: round2(totals.empEobi + totals.tax + totals.other + totals.advanceRecovery),
-          totalEmployerEobiPkr: round2(totals.emperEobi),
-          totalNetPayablePkr: round2(totals.net),
-        },
-      });
-
+      await saveRunTotals(tx, runId);
       return this.getByIdInternal(facilityId, runId, tx);
     });
   }
 
-  async finalize(facilityId: string, userId: string, runId: string) {
+  async finalize(facilityId: string, userId: string, role: string, runId: string) {
     return this.prisma.$transaction(async (tx) => {
-      const run = await tx.payrollRun.findFirst({
+      // A double-click used to post the payroll twice: both requests read DRAFT
+      // before either wrote (docs/25 C-13).
+      if (!(await lockRow(tx, 'payroll_runs', runId, facilityId))) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      const run = await tx.payrollRun.findFirstOrThrow({
         where: { facilityId, id: runId },
-        include: { lineItems: true },
+        include: { lineItems: { include: { employee: { select: { name: true, costAccountCode: true } } } } },
       });
-      if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      assertKatchiWriteAllowed(role, run.bookType);
       if (run.status !== 'DRAFT') {
         throw Errors.PAYROLL_RUN_INVALID_STATUS('Only DRAFT runs can be finalized');
       }
@@ -243,89 +282,66 @@ export class PayrollRunService {
         throw Errors.VALIDATION_ERROR('Cannot finalize a payroll run with no line items');
       }
 
-      // Compute totals from current line items
-      const totals = run.lineItems.reduce(
-        (acc, l) => {
-          acc.gross += Number(l.grossPayPkr);
-          acc.empEobi += Number(l.eobiEmployeePkr);
-          acc.emperEobi += Number(l.eobiEmployerPkr);
-          acc.tax += Number(l.incomeTaxPkr);
-          acc.other += Number(l.otherDeductionsPkr);
-          acc.advanceRecovery += Number(l.advanceRecoveryPkr);
-          acc.net += Number(l.netPayPkr);
-          return acc;
-        },
-        { gross: 0, empEobi: 0, emperEobi: 0, tax: 0, other: 0, advanceRecovery: 0, net: 0 },
-      );
-
-      // `other_deductions_pkr` is subtracted from net pay (updateLine) but has no
-      // journal line, so the entry came up short by exactly that amount and threw
-      // JOURNAL_UNBALANCED — a message that tells the accountant nothing.
-      //
-      // It is deliberately not given an account here. docs/09 defines the column as
-      // "Advances repaid, etc."; recovering an advance should credit an employee
-      // *receivable*, and crediting a liability instead would leave the receivable
-      // standing while inventing an obligation — the same receivable-plus-liability
-      // error as the advance-cheque bug fixed in Batch A, and one that balances, so
-      // no invariant would catch it. Employee advances do not exist yet (audit P1-2),
-      // so there is no correct account to credit. Refuse explicitly until there is.
-      if (round2(totals.other) > 0.005) {
-        throw Errors.PAYROLL_OTHER_DEDUCTIONS_UNSUPPORTED();
+      // Net pay is derived, never trusted from storage: a draft saved before
+      // other_deductions_pkr was retired may still carry a net that subtracted it
+      // (docs/25 C-17). Those deductions never had a ledger home and are ignored.
+      for (const l of run.lineItems) {
+        const net = payrollLineNet(amountsOf(l));
+        if (net < 0) {
+          throw Errors.VALIDATION_ERROR(`Deductions exceed gross pay for ${l.employee.name}; net pay cannot be negative`);
+        }
+        if (Math.abs(net - Number(l.netPayPkr)) >= MONEY_EPSILON) {
+          await tx.payrollLineItem.update({ where: { id: l.id }, data: { netPayPkr: net } });
+        }
       }
+      await saveRunTotals(tx, runId);
 
-      // Use last day of period as entry date
+      // The accrual is dated the last day of the period.
       const entryDate = new Date(Date.UTC(run.periodYear, run.periodMonth, 0));
 
-      const draft =
-        run.payrollType === 'MONTHLY_SALARY'
-          ? buildJE15MonthlyPayroll({
-              payrollRunId: run.id,
-              runNumber: run.runNumber,
-              entryDate,
-              totalGrossPkr: round2(totals.gross),
-              totalEmployerEobiPkr: round2(totals.emperEobi),
-              totalEmployeeEobiPkr: round2(totals.empEobi),
-              totalIncomeTaxPkr: round2(totals.tax),
-              totalAdvanceRecoveryPkr: round2(totals.advanceRecovery),
-              totalNetPayablePkr: round2(totals.net),
-              bookType: run.bookType,
-            })
-          : buildJE15BDailyWages({
-              payrollRunId: run.id,
-              runNumber: run.runNumber,
-              entryDate,
-              totalGrossPkr: round2(totals.gross),
-              totalEmployerEobiPkr: round2(totals.emperEobi),
-              totalEmployeeEobiPkr: round2(totals.empEobi),
-              totalIncomeTaxPkr: round2(totals.tax),
-              totalAdvanceRecoveryPkr: round2(totals.advanceRecovery),
-              totalNetPayablePkr: round2(totals.net),
-              bookType: run.bookType,
-            });
-
-      const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
-        postingStatus: 'POSTED',
-      });
+      const posted = await this.journalEntry.postInTransaction(
+        tx,
+        facilityId,
+        userId,
+        buildJE15Payroll({
+          payrollRunId: run.id,
+          runNumber: run.runNumber,
+          payrollType: run.payrollType,
+          entryDate,
+          bookType: run.bookType,
+          lines: run.lineItems.map((l) => ({
+            ...amountsOf(l),
+            employeeName: l.employee.name,
+            costAccountCode: l.employee.costAccountCode,
+          })),
+        }),
+        { postingStatus: 'POSTED' },
+      );
 
       // Recovery does not post its own journal entry — it rode inside the entry just
-      // posted, as the 1230 credit line above. This settles the subledger side: one
+      // posted, as the 1230 credit line. This settles the subledger side: one
       // EmployeeAdvanceRecovery row per line that carried a recovery, the advance
       // balance decremented, and the advance closed once it reaches zero.
-      for (const line of run.lineItems) {
-        const recoveryAmount = Number(line.advanceRecoveryPkr);
-        if (recoveryAmount <= 0.005) continue;
+      //
+      // Each advance is locked and re-read here. Two drafts (January and February)
+      // pre-fill from the same balance, so the second finalize must check the
+      // balance as it stands now, not as it stood when its draft was made (C-14).
+      // Locks are taken in id order so two finalizes cannot deadlock.
+      const recoveringLines = run.lineItems.filter((l) => Number(l.advanceRecoveryPkr) > MONEY_EPSILON);
+      const candidates = await tx.employeeAdvance.findMany({
+        where: { facilityId, employeeId: { in: recoveringLines.map((l) => l.employeeId) }, status: 'ACTIVE' },
+        select: { id: true },
+        orderBy: { id: 'asc' },
+      });
+      for (const c of candidates) await lockRow(tx, 'employee_advances', c.id, facilityId);
 
+      for (const line of recoveringLines) {
+        const recoveryAmount = Number(line.advanceRecoveryPkr);
         const advance = await tx.employeeAdvance.findFirst({
           where: { facilityId, employeeId: line.employeeId, status: 'ACTIVE' },
         });
-        if (!advance) {
-          // Line carried a recovery amount but the employee has no active advance to
-          // apply it to — the advance must have been written off or fully recovered
-          // by another path since this line was last edited. Refuse rather than post
-          // a recovery against nothing.
-          throw Errors.VALIDATION_ERROR(
-            `Line for employee ${line.employeeId} has an advance recovery but no matching ACTIVE advance`,
-          );
+        if (!advance || recoveryAmount > Number(advance.balanceOutstandingPkr) + MONEY_EPSILON) {
+          throw Errors.EMPLOYEE_ADVANCE_OVER_RECOVERY();
         }
 
         await tx.employeeAdvanceRecovery.create({
@@ -344,7 +360,7 @@ export class PayrollRunService {
           where: { id: advance.id },
           data: {
             balanceOutstandingPkr: newBalance,
-            status: newBalance <= 0.005 ? 'RECOVERED' : 'ACTIVE',
+            status: newBalance <= MONEY_EPSILON ? 'RECOVERED' : 'ACTIVE',
           },
         });
       }
@@ -363,34 +379,37 @@ export class PayrollRunService {
     });
   }
 
-  async pay(facilityId: string, userId: string, runId: string, body: any) {
+  async pay(facilityId: string, userId: string, role: string, runId: string, body: PayPayrollRequestType) {
     return this.prisma.$transaction(async (tx) => {
-      const run = await tx.payrollRun.findFirst({ where: { facilityId, id: runId } });
-      if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      if (!(await lockRow(tx, 'payroll_runs', runId, facilityId))) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      const run = await tx.payrollRun.findFirstOrThrow({
+        where: { facilityId, id: runId },
+        include: { lineItems: true },
+      });
+      assertKatchiWriteAllowed(role, run.bookType);
       if (run.status !== 'FINALIZED') {
         throw Errors.PAYROLL_RUN_INVALID_STATUS('Only FINALIZED runs can be paid');
       }
 
-      const draft = buildJE16SalaryPayment({
-        payrollRunId: run.id,
-        runNumber: run.runNumber,
-        entryDate: new Date(body.payment_date),
-        amountPkr: Number(run.totalNetPayablePkr),
-        fromAssetAccountCode: body.from_asset_account_code ?? DEFAULT_BANK_ACCOUNT_CODE,
-        bookType: run.bookType,
-      });
-
-      const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
-        postingStatus: 'POSTED',
-      });
+      const posted = await this.journalEntry.postInTransaction(
+        tx,
+        facilityId,
+        userId,
+        buildJE16SalaryPayment({
+          payrollRunId: run.id,
+          runNumber: run.runNumber,
+          entryDate: new Date(body.payment_date),
+          // The same figure the accrual credited to Salaries Payable.
+          amountPkr: payrollRunTotals(run.lineItems.map(amountsOf)).net,
+          fromAssetAccountCode: body.from_asset_account_code,
+          bookType: run.bookType,
+        }),
+        { postingStatus: 'POSTED' },
+      );
 
       await tx.payrollRun.update({
         where: { id: runId },
-        data: {
-          status: 'PAID',
-          paymentJournalEntryId: posted.id,
-          paidAt: new Date(),
-        },
+        data: { status: 'PAID', paymentJournalEntryId: posted.id, paidAt: new Date() },
       });
 
       return this.getByIdInternal(facilityId, runId, tx);
@@ -399,7 +418,7 @@ export class PayrollRunService {
 
   async remit(facilityId: string, userId: string, runId: string, body: any) {
     return this.prisma.$transaction(async (tx) => {
-      await lockPayrollRun(tx, facilityId, runId);
+      await lockRow(tx, 'payroll_runs', runId, facilityId);
 
       const run = await tx.payrollRun.findFirst({ where: { facilityId, id: runId } });
       if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
@@ -459,26 +478,24 @@ export class PayrollRunService {
   }
 
   /**
-   * Reverse a finalized or paid run posted in error (audit P1-3).
-   *
-   * Mirrors the invoice VOID pattern: post a reversing entry for each journal entry the
-   * run produced, cross-link both ways, and move the run to REVERSED — rather than
-   * mutating posted rows, which the DB guard triggers forbid outright. The generic
-   * `JournalEntryService.reverse` cannot be used here: it rejects any entry whose
-   * sourceTable is not 'manual'/'opening_balances', and payroll templates stamp
-   * 'payroll_runs'. That restriction is deliberate — system entries are meant to be
-   * corrected through their own flow, which is what this is.
-   *
-   * All of the run's entries are reversed together (payroll, payment, remittance).
-   * Reversing only some of them would leave the run half-posted with no way to express
-   * that state.
+   * Reverse a run finalized in error: undo its accrual (JE-15) and any advance
+   * recoveries it made. Only while it is unpaid — a paid run's salary cash really
+   * left, so reversing the payment along with the accrual pretended it had not
+   * (docs/25 C-15). A paid run's payment is voided first (voidPayment); a remitted
+   * run cannot be reversed, because the remittance is real cash paid to the
+   * government and has no void of its own here.
    */
-  async reverse(facilityId: string, userId: string, runId: string, body: any) {
+  async reverse(
+    facilityId: string,
+    userId: string,
+    role: string,
+    runId: string,
+    body: { reason: string; reversal_date?: string },
+  ) {
     return this.prisma.$transaction(async (tx) => {
-      await lockPayrollRun(tx, facilityId, runId);
-
-      const run = await tx.payrollRun.findFirst({ where: { facilityId, id: runId } });
-      if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      if (!(await lockRow(tx, 'payroll_runs', runId, facilityId))) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      const run = await tx.payrollRun.findFirstOrThrow({ where: { facilityId, id: runId } });
+      assertKatchiWriteAllowed(role, run.bookType);
       if (run.status === 'DRAFT') {
         throw Errors.PAYROLL_RUN_NOT_REVERSIBLE(
           'A DRAFT run has posted nothing to reverse; edit its lines instead',
@@ -487,25 +504,25 @@ export class PayrollRunService {
       if (run.status === 'REVERSED') {
         throw Errors.PAYROLL_RUN_NOT_REVERSIBLE('This run has already been reversed');
       }
+      if (run.status === 'PAID') {
+        throw Errors.PAYROLL_RUN_NOT_REVERSIBLE('This run has been paid; void the salary payment first');
+      }
+      if (run.remittanceJournalEntryId) {
+        throw Errors.PAYROLL_RUN_NOT_REVERSIBLE(
+          'EOBI / tax for this run has already been paid to the government; the run cannot be reversed',
+        );
+      }
 
-      const reversalDate = body?.reversal_date ? new Date(body.reversal_date) : new Date();
-
-      // Unwind advance recoveries BEFORE reversing the journal entries (phase 21).
-      // Getting this wrong silently forgives an employee's debt: the balance would
-      // stay reduced while the payroll that reduced it has been undone. Follows the
-      // same shape as PaymentService.dishonour() unwinding loan allocations: capture
-      // the affected rows first (they are the source of the amounts), lock each
-      // parent before mutating its balance, restore balance and status, THEN
-      // soft-void the child rows so the audit trail survives — never delete them.
+      // Unwind advance recoveries (phase 21). Getting this wrong silently forgives an
+      // employee's debt: the balance would stay reduced while the payroll that
+      // reduced it has been undone. Lock each advance (in id order) before restoring
+      // its balance, then soft-void the recovery rows so the audit trail survives.
       const recoveries = await tx.employeeAdvanceRecovery.findMany({
         where: { payrollRunId: runId, voidedAt: null },
+        orderBy: { advanceId: 'asc' },
       });
       for (const recovery of recoveries) {
-        await tx.$queryRawUnsafe(
-          `SELECT id FROM employee_advances WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-          recovery.advanceId,
-          facilityId,
-        );
+        await lockRow(tx, 'employee_advances', recovery.advanceId, facilityId);
         const advance = await tx.employeeAdvance.findFirstOrThrow({
           where: { id: recovery.advanceId, facilityId },
         });
@@ -516,15 +533,10 @@ export class PayrollRunService {
               Number(advance.balanceOutstandingPkr) + Number(recovery.amountPkr),
             ),
             // Only a RECOVERED advance can have been closed by this run's recovery;
-            // WRITTEN_OFF is a separate, OWNER-only decision this reversal must not undo.
-            //
-            // Edge case, left as-is rather than built out further: if the advance was
-            // later written off (for whatever remained after this recovery), restoring
-            // the balance here while the status stays WRITTEN_OFF is not a bug — the
-            // write-off's JE-23 only covered what was outstanding at write-off time, so
-            // the restored amount was genuinely never written off. The GL stays correct;
-            // the subledger just cannot express "partly written off, partly reopened" as
-            // a single status. There is no un-write-off flow to reconcile this further.
+            // WRITTEN_OFF is a separate decision this reversal must not undo. If the
+            // advance was later written off, the restored amount was genuinely never
+            // written off (JE-23 covered only what was outstanding then), so the GL
+            // stays correct; the status just cannot say "partly written off".
             status: advance.status === 'RECOVERED' ? 'ACTIVE' : advance.status,
           },
         });
@@ -534,32 +546,51 @@ export class PayrollRunService {
         });
       }
 
-      // Reverse in the opposite order to posting, so the ledger reads as an unwind.
-      const entryIds = [
-        run.remittanceJournalEntryId,
-        run.paymentJournalEntryId,
-        run.payrollJournalEntryId,
-      ].filter((id): id is string => Boolean(id));
-
-      for (const originalId of entryIds) {
-        const original = await tx.journalEntry.findFirstOrThrow({
-          where: { id: originalId, facilityId },
-          select: { reversedById: true },
-        });
-        if (original.reversedById) continue;
-        await this.journalEntry.reverseInTransaction(tx, facilityId, userId, originalId, {
+      if (run.payrollJournalEntryId) {
+        await this.journalEntry.reverseInTransaction(tx, facilityId, userId, run.payrollJournalEntryId, {
           reason: `payroll ${run.runNumber} reversed — ${body.reason}`,
-          date: reversalDate,
+          date: body.reversal_date ? new Date(body.reversal_date) : undefined,
         });
       }
 
-      const tag = `[REVERSED ${reversalDate.toISOString().slice(0, 10)}]: ${body.reason}`;
       await tx.payrollRun.update({
         where: { id: runId },
-        data: {
-          status: 'REVERSED',
-          notes: run.notes ? `${run.notes}\n${tag}` : tag,
-        },
+        data: { status: 'REVERSED', voidedAt: new Date(), voidedBy: userId, voidReason: body.reason },
+      });
+
+      return this.getByIdInternal(facilityId, runId, tx);
+    });
+  }
+
+  /**
+   * Void a salary payment made in error (wrong account, wrong date): reverse JE-16
+   * and return the run to FINALIZED so it can be paid again. The accrual stands.
+   */
+  async voidPayment(
+    facilityId: string,
+    userId: string,
+    role: string,
+    runId: string,
+    body: { reason: string; void_date?: string },
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await lockRow(tx, 'payroll_runs', runId, facilityId))) throw Errors.PAYROLL_RUN_NOT_FOUND();
+      const run = await tx.payrollRun.findFirstOrThrow({ where: { facilityId, id: runId } });
+      assertKatchiWriteAllowed(role, run.bookType);
+      if (run.status !== 'PAID' || !run.paymentJournalEntryId) {
+        throw Errors.PAYROLL_RUN_INVALID_STATUS('Only a PAID run has a salary payment to void');
+      }
+
+      await this.journalEntry.reverseInTransaction(tx, facilityId, userId, run.paymentJournalEntryId, {
+        reason: `salary payment for ${run.runNumber} voided — ${body.reason}`,
+        date: body.void_date ? new Date(body.void_date) : undefined,
+      });
+
+      // The reversed payment still points at this run through its source; the run's
+      // own pointer is cleared so the next payment can take it.
+      await tx.payrollRun.update({
+        where: { id: runId },
+        data: { status: 'FINALIZED', paymentJournalEntryId: null, paidAt: null },
       });
 
       return this.getByIdInternal(facilityId, runId, tx);
@@ -570,7 +601,7 @@ export class PayrollRunService {
     return this.getByIdInternal(facilityId, id, this.prisma);
   }
 
-  private async getByIdInternal(facilityId: string, id: string, db: PrismaClient | Prisma.TransactionClient) {
+  private async getByIdInternal(facilityId: string, id: string, db: Db) {
     const run = await db.payrollRun.findFirst({
       where: { facilityId, id },
       include: {
@@ -581,7 +612,10 @@ export class PayrollRunService {
       },
     });
     if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
-    return { ...formatRun(run), reconciliation: await salariesPayableReconciliation(db, run) };
+    return {
+      ...formatRun(run),
+      salaries_payable: await salariesPayableTieOut(db, facilityId, run.bookType),
+    };
   }
 
   async list(facilityId: string, query: any) {
@@ -622,12 +656,15 @@ export class PayrollRunService {
     const line = run.lineItems[0];
     if (!line) throw Errors.PAYROLL_LINE_NOT_FOUND();
 
-    const monthLabel = new Date(run.periodYear, run.periodMonth - 1, 1).toLocaleString('en', {
+    const monthLabel = new Date(Date.UTC(run.periodYear, run.periodMonth - 1, 1)).toLocaleString('en', {
       month: 'long',
       year: 'numeric',
+      timeZone: 'UTC',
     });
 
     return {
+      // A slip for a draft or reversed run is not a record of pay; it says so (C-24).
+      status: run.status,
       facilityName: run.facility.name,
       runNumber: run.runNumber,
       payrollPeriod: monthLabel,
@@ -638,51 +675,49 @@ export class PayrollRunService {
       grossPay: Number(line.grossPayPkr),
       eobiEmployee: Number(line.eobiEmployeePkr),
       incomeTax: Number(line.incomeTaxPkr),
-      otherDeductions: Number(line.otherDeductionsPkr),
       advanceRecovery: Number(line.advanceRecoveryPkr),
-      netPay: Number(line.netPayPkr),
+      netPay: payrollLineNet(amountsOf(line)),
       daysWorked: line.daysWorked ? Number(line.daysWorked) : null,
     };
   }
 }
 
 /**
- * Does the GL agree with the payroll register? (Inv-16)
- *
- * 2030 Salaries Payable is credited in aggregate — one line for the whole run —
- * while who is owed what lives in payroll_line_items. IFRS for SMEs s.28 wants
- * the liability recognised, not a GL account per employee, so the aggregate
- * posting is right and a per-employee subledger would be machinery for nothing.
- * What was missing is the tie between the two. If they ever disagree, the
- * register and the books are telling different stories about the same wages,
- * and the screen says so rather than leaving it to be discovered at year end.
- *
- * Null until the run is finalised: before that there is no journal entry to
- * reconcile against, and reporting a difference equal to the whole payroll
- * would be noise, not a finding.
+ * Does the ledger agree with the payroll register? 2030 Salaries Payable must equal
+ * the net pay of every finalised run not yet paid (docs/25 C-22). The check this
+ * replaces compared a run's own entry with the lines that entry was built from, so it
+ * could never disagree.
  */
-async function salariesPayableReconciliation(
-  db: PrismaClient | Prisma.TransactionClient,
-  run: { payrollJournalEntryId: string | null; lineItems?: { netPayPkr: unknown }[] },
-) {
-  if (!run.payrollJournalEntryId) return null;
-
-  const agg = await db.journalEntryLine.aggregate({
-    where: { journalEntryId: run.payrollJournalEntryId, accountCode: '2030' },
-    _sum: { creditAmount: true, debitAmount: true },
-  });
-  const round2 = (n: number) => Math.round(n * 100) / 100;
-  const gl = round2(Number(agg._sum.creditAmount ?? 0) - Number(agg._sum.debitAmount ?? 0));
-  const register = round2(
-    (run.lineItems ?? []).reduce((s, l) => s + Number(l.netPayPkr), 0),
-  );
-
+async function salariesPayableTieOut(db: Db, facilityId: string, book: 'PACCI' | 'KATCHI') {
+  const [balances, unpaid] = await Promise.all([
+    accountBalances(db, { facilityId, book, accounts: [SYSTEM_ACCOUNTS.SALARIES_PAYABLE] }),
+    db.payrollLineItem.aggregate({
+      where: { payrollRun: { facilityId, bookType: book, status: 'FINALIZED' } },
+      _sum: { netPayPkr: true },
+    }),
+  ]);
+  const gl = signedBalance(balances.get(SYSTEM_ACCOUNTS.SALARIES_PAYABLE), 'CREDIT');
+  const register = round2(Number(unpaid._sum.netPayPkr ?? 0));
   return {
     gl_salaries_payable_pkr: gl,
-    register_net_pay_pkr: register,
+    unpaid_net_pay_pkr: register,
     difference_pkr: round2(gl - register),
-    is_reconciled: Math.abs(gl - register) < 0.005,
+    is_reconciled: Math.abs(gl - register) < MONEY_EPSILON,
   };
+}
+
+function allowedActions(r: { status: string; remittanceJournalEntryId: string | null }): PayrollRunActionType[] {
+  const canRemit = !r.remittanceJournalEntryId;
+  switch (r.status) {
+    case 'DRAFT':
+      return ['edit_lines', 'finalize'];
+    case 'FINALIZED':
+      return canRemit ? ['pay', 'reverse', 'remit'] : ['pay'];
+    case 'PAID':
+      return canRemit ? ['void_payment', 'remit'] : ['void_payment'];
+    default:
+      return [];
+  }
 }
 
 function formatRun(r: any) {
@@ -706,24 +741,22 @@ function formatRun(r: any) {
     finalized_at: r.finalizedAt?.toISOString() ?? null,
     paid_at: r.paidAt?.toISOString() ?? null,
     notes: r.notes,
+    voided_at: r.voidedAt?.toISOString() ?? null,
+    void_reason: r.voidReason ?? null,
+    allowed_actions: allowedActions(r),
     created_at: r.createdAt.toISOString(),
     line_items: (r.lineItems ?? []).map((l: any) => ({
       id: l.id,
       employee_id: l.employeeId,
-      employee_name: l.employee?.name ?? '',
-      employee_type: l.employee?.employeeType ?? 'SALARIED',
+      employee_name: l.employee.name,
+      employee_type: l.employee.employeeType,
       days_worked: l.daysWorked ? Number(l.daysWorked) : null,
       gross_pay_pkr: Number(l.grossPayPkr),
       eobi_employee_pkr: Number(l.eobiEmployeePkr),
       eobi_employer_pkr: Number(l.eobiEmployerPkr),
       income_tax_pkr: Number(l.incomeTaxPkr),
-      other_deductions_pkr: Number(l.otherDeductionsPkr),
       advance_recovery_pkr: Number(l.advanceRecoveryPkr),
       net_pay_pkr: Number(l.netPayPkr),
     })),
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

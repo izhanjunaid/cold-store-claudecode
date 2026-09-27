@@ -4,11 +4,14 @@ import type {
   WriteOffEmployeeAdvanceRequestType,
   EmployeeAdvanceListQueryType,
 } from '@coldchain/shared';
-import { assetAccountForPaymentMethod } from '@coldchain/shared';
+import { MONEY_EPSILON, assetAccountForPaymentMethod, round2 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
+import { resolveFacilitySettings } from '../facility/facility.service';
 import { advisoryXactLock } from '../../common/advisory-lock';
+import { lockRow } from '../../common/row-lock';
+import { documentNumberPrefix, nextDocumentNumber } from '../../common/document-number';
+import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { JournalEntryService } from '../accounting/journal-entry.service';
-import { generateEmployeeAdvanceNumber } from './employee-advance-number';
 import { buildJE22EmployeeAdvanceIssued } from './templates/je-22-employee-advance-issued';
 import { buildJE23EmployeeAdvanceWriteOff } from './templates/je-23-employee-advance-write-off';
 
@@ -18,7 +21,9 @@ export class EmployeeAdvanceService {
     private journalEntry: JournalEntryService,
   ) {}
 
-  async issue(facilityId: string, userId: string, body: IssueEmployeeAdvanceRequestType) {
+  async issue(facilityId: string, userId: string, role: string, body: IssueEmployeeAdvanceRequestType) {
+    const bookType = body.book_type ?? 'PACCI';
+    assertKatchiWriteAllowed(role, bookType);
     return this.prisma.$transaction(async (tx) => {
       const employee = await tx.employee.findFirst({
         where: { facilityId, id: body.employee_id, isActive: true },
@@ -38,22 +43,29 @@ export class EmployeeAdvanceService {
       });
       if (activeExisting) throw Errors.EMPLOYEE_ADVANCE_ALREADY_ACTIVE();
 
-      // Capped at one month's pay: basic salary for SALARIED, 26 working days' wage for
-      // DAILY_WAGE — the same 26-day constant createDraft uses when snapshotting wage
-      // lines, so the cap matches what the employee will actually earn that month.
+      // Capped at one month's pay: basic salary for SALARIED, the facility's standard
+      // working days' wage for DAILY_WAGE — the same figure a payroll draft pre-fills,
+      // so the cap matches what the employee will actually earn that month (C-19).
+      const facility = await tx.facility.findUniqueOrThrow({ where: { id: facilityId }, select: { settings: true } });
+      const { standard_working_days } = resolveFacilitySettings(facility.settings).payroll;
       const monthlyPay =
         employee.employeeType === 'SALARIED'
           ? Number(employee.basicSalaryPkr ?? 0)
-          : Number(employee.dailyWagePkr ?? 0) * 26;
-      if (body.principal_pkr > monthlyPay + 0.005) {
+          : round2(Number(employee.dailyWagePkr ?? 0) * standard_working_days);
+      if (body.principal_pkr > monthlyPay + MONEY_EPSILON) {
         throw Errors.EMPLOYEE_ADVANCE_EXCEEDS_CAP(
           `Principal (${body.principal_pkr}) exceeds this employee's one-month pay cap (${monthlyPay})`,
         );
       }
 
       const issueDate = new Date(body.issue_date);
-      const advanceNumber = await generateEmployeeAdvanceNumber(tx, facilityId, issueDate);
-      const bookType = body.book_type ?? 'PACCI';
+      const advanceNumber = await nextDocumentNumber(
+        tx,
+        facilityId,
+        'employee_advances',
+        documentNumberPrefix('ADV', issueDate, 'daily'),
+        3,
+      );
       const sourceAccount =
         body.source_asset_account_code ?? assetAccountForPaymentMethod(body.payment_method);
 
@@ -99,21 +111,17 @@ export class EmployeeAdvanceService {
   async writeOff(
     facilityId: string,
     userId: string,
+    role: string,
     advanceId: string,
     body: WriteOffEmployeeAdvanceRequestType,
   ) {
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRawUnsafe(
-        `SELECT id FROM employee_advances WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-        advanceId,
-        facilityId,
-      );
-
-      const advance = await tx.employeeAdvance.findFirst({
+      if (!(await lockRow(tx, 'employee_advances', advanceId, facilityId))) throw Errors.EMPLOYEE_ADVANCE_NOT_FOUND();
+      const advance = await tx.employeeAdvance.findFirstOrThrow({
         where: { facilityId, id: advanceId },
         include: { employee: { select: { name: true } } },
       });
-      if (!advance) throw Errors.EMPLOYEE_ADVANCE_NOT_FOUND();
+      assertKatchiWriteAllowed(role, advance.bookType);
       if (advance.status !== 'ACTIVE') throw Errors.EMPLOYEE_ADVANCE_ALREADY_CLOSED();
 
       const writeOffDate = body.write_off_date ? new Date(body.write_off_date) : new Date();

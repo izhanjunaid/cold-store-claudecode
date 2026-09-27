@@ -1,7 +1,5 @@
 import type { JournalEntryDraft } from '../../accounting/templates/types';
-import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
-
-const ACCOUNT_EMPLOYEE_ADVANCES = '1230';
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 
 type Input = {
   advanceId: string;
@@ -14,13 +12,14 @@ type Input = {
 };
 
 /**
- * JE-23: Employee Advance Write-Off (bad debt).
+ * JE-23: Employee Advance Write-Off.
  *
- *   DR  6080  Bad Debt Expense               outstanding_balance
+ *   DR  6190  Staff Welfare & Benefits       outstanding_balance
  *     CR  1230  Advances to Employees          outstanding_balance
  *
- * OWNER-only. Advance transitions to WRITTEN_OFF; balance cleared. Mirrors JE-20
- * (peshgi write-off) exactly, substituting 1230 for 1140.
+ * Forgiving an employee's advance is a benefit given to staff, not a customer bad
+ * debt — it used to debit 6080 and inflate bad debts (docs/25 C-27). The advance
+ * transitions to WRITTEN_OFF; balance cleared.
  */
 export function buildJE23EmployeeAdvanceWriteOff(input: Input): JournalEntryDraft {
   const amount = round2(input.amountPkr);
@@ -33,21 +32,17 @@ export function buildJE23EmployeeAdvanceWriteOff(input: Input): JournalEntryDraf
     description: `Advance write-off — ${input.advanceNumber} (${input.employeeName}): ${input.reason}`,
     lines: [
       {
-        accountCode: SYSTEM_ACCOUNTS.BAD_DEBTS,
+        accountCode: SYSTEM_ACCOUNTS.STAFF_BENEFITS,
         debitAmount: amount,
         creditAmount: 0,
-        description: `Bad debt expense — advance ${input.advanceNumber}`,
+        description: `Advance forgiven — ${input.advanceNumber}`,
       },
       {
-        accountCode: ACCOUNT_EMPLOYEE_ADVANCES,
+        accountCode: SYSTEM_ACCOUNTS.EMPLOYEE_ADVANCES,
         debitAmount: 0,
         creditAmount: amount,
         description: `Write off advance balance — ${input.advanceNumber}`,
       },
     ],
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

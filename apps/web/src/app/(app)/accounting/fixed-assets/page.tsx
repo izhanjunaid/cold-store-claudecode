@@ -13,6 +13,7 @@ import { DataTable, useTableState, type DataTableColumn } from '@/components/dat
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
 import { AssetSchedulePreview } from './asset-schedule-preview';
+import { CATEGORY_LABELS } from './category-labels';
 
 import { formatDate } from '@/lib/format';
 interface FixedAssetSummary {
@@ -26,18 +27,30 @@ interface FixedAssetSummary {
   net_book_value_pkr: number;
   depreciation_method: string;
   status: string;
+  is_opening_balance: boolean;
+  voided_at: string | null;
 }
 
 const columns: DataTableColumn<FixedAssetSummary>[] = [
   { id: 'asset_number', header: 'Asset #', enableHiding: false, cell: (a) => <span className="font-mono text-primary-700">{a.asset_number}</span>, csv: (a) => a.asset_number },
-  { id: 'name', header: 'Name', cell: (a) => a.asset_name, csv: (a) => a.asset_name },
-  { id: 'category', header: 'Category', cell: (a) => a.asset_category, csv: (a) => a.asset_category },
+  {
+    id: 'name',
+    header: 'Name',
+    cell: (a) => (
+      <span>
+        {a.asset_name}
+        {a.is_opening_balance && <span className="ml-2 text-xs text-muted-foreground">owned at go-live</span>}
+      </span>
+    ),
+    csv: (a) => a.asset_name,
+  },
+  { id: 'category', header: 'Category', cell: (a) => CATEGORY_LABELS[a.asset_category] ?? a.asset_category, csv: (a) => a.asset_category },
   { id: 'purchase_date', header: 'Purchase Date', cell: (a) => formatDate(a.purchase_date), csv: (a) => a.purchase_date },
   { id: 'cost', header: 'Cost (PKR)', numeric: true, cell: (a) => a.purchase_cost_pkr.toLocaleString(), csv: (a) => a.purchase_cost_pkr },
   { id: 'depr', header: 'Accum. Depr.', numeric: true, cell: (a) => <span className="text-amber-700">{a.accumulated_depreciation_pkr.toLocaleString()}</span>, csv: (a) => a.accumulated_depreciation_pkr },
   { id: 'nbv', header: 'NBV (PKR)', numeric: true, cell: (a) => <span className="font-medium">{a.net_book_value_pkr.toLocaleString()}</span>, csv: (a) => a.net_book_value_pkr },
   { id: 'method', header: 'Method', cell: (a) => a.depreciation_method, csv: (a) => a.depreciation_method },
-  { id: 'status', header: 'Status', cell: (a) => <StatusBadge status={a.status} />, csv: (a) => a.status },
+  { id: 'status', header: 'Status', cell: (a) => <StatusBadge status={a.voided_at ? 'VOIDED' : a.status} />, csv: (a) => (a.voided_at ? 'VOIDED' : a.status) },
 ];
 
 const FILTER_KEYS = ['status', 'category'] as const;
@@ -74,12 +87,17 @@ export default function FixedAssetListPage() {
         description="Plant, building, vehicle and computer assets"
         actions={
           canCreate && (
-            <Button asChild>
-              <Link href="/accounting/fixed-assets/new">
-                <Plus className="h-4 w-4" aria-hidden />
-                New Asset
-              </Link>
-            </Button>
+            <>
+              <Button asChild variant="outline">
+                <Link href="/accounting/fixed-assets/opening">Assets owned at go-live</Link>
+              </Button>
+              <Button asChild>
+                <Link href="/accounting/fixed-assets/new">
+                  <Plus className="h-4 w-4" aria-hidden />
+                  New Asset
+                </Link>
+              </Button>
+            </>
           )
         }
       />
@@ -104,7 +122,7 @@ export default function FixedAssetListPage() {
         toolbar={{
           facets: [
             { key: 'status', label: 'Status', options: ['PURCHASED', 'IN_SERVICE', 'DISPOSED', 'WRITTEN_OFF'].map((v) => ({ label: v.replace(/_/g, ' '), value: v })) },
-            { key: 'category', label: 'Category', options: ['COLD_PLANT', 'BUILDING', 'VEHICLE', 'COMPUTER', 'OTHER'].map((v) => ({ label: v.replace(/_/g, ' '), value: v })) },
+            { key: 'category', label: 'Category', options: Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ label, value })) },
           ],
         }}
         csvFilename="fixed-assets"

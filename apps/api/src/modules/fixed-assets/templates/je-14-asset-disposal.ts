@@ -1,6 +1,5 @@
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import { ACCOUNT_GAIN_ON_DISPOSAL, ACCOUNT_LOSS_ON_DISPOSAL } from './types';
-import { ACCOUNT_ACCUM_IMPAIRMENT } from './je-28-asset-impairment';
 
 type Input = {
   assetId: string;
@@ -77,7 +76,7 @@ export function buildJE14AssetDisposal(input: Input): JournalEntryDraft {
 
   if (accumImpairment > 0) {
     lines.push({
-      accountCode: ACCOUNT_ACCUM_IMPAIRMENT,
+      accountCode: SYSTEM_ACCOUNTS.FA_ACC_IMPAIRMENT,
       debitAmount: accumImpairment,
       creditAmount: 0,
       description: `Clear accumulated impairment — ${input.assetNumber}`,
@@ -87,7 +86,7 @@ export function buildJE14AssetDisposal(input: Input): JournalEntryDraft {
   if (gainOrLoss < -0.005) {
     // Loss
     lines.push({
-      accountCode: ACCOUNT_LOSS_ON_DISPOSAL,
+      accountCode: SYSTEM_ACCOUNTS.LOSS_ON_DISPOSAL,
       debitAmount: round2(-gainOrLoss),
       creditAmount: 0,
       description: `Loss on disposal of ${input.assetNumber}`,
@@ -103,7 +102,7 @@ export function buildJE14AssetDisposal(input: Input): JournalEntryDraft {
 
   if (gainOrLoss > 0.005) {
     lines.push({
-      accountCode: ACCOUNT_GAIN_ON_DISPOSAL,
+      accountCode: SYSTEM_ACCOUNTS.GAIN_ON_DISPOSAL,
       debitAmount: 0,
       creditAmount: round2(gainOrLoss),
       description: `Gain on disposal of ${input.assetNumber}`,
@@ -119,8 +118,4 @@ export function buildJE14AssetDisposal(input: Input): JournalEntryDraft {
     description: `Disposal of ${input.assetName} (${input.assetNumber}) — proceeds Rs. ${proceeds.toLocaleString()}`,
     lines,
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

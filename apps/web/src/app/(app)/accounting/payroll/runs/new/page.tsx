@@ -3,7 +3,10 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { MONTH_NAMES_SHORT, PERMISSION_REGISTRY, monthEnd, toIsoDate } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
+import { formatMoney } from '@/lib/format';
+import { usePayrollSettings } from '../../use-payroll-settings';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
@@ -25,18 +28,16 @@ export default function NewPayrollRunPage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const payroll = usePayrollSettings();
 
   if (!canCreate) {
+    const need = PERMISSION_REGISTRY.find((p) => p.key === 'payroll.draft')!.label;
     return (
       <div>
         <PageHeader title="New Payroll Run" />
-        <p className="text-muted-foreground">Requires ACCOUNTANT role or higher.</p>
+        <p className="text-muted-foreground">You need the “{need}” permission to start a payroll run.</p>
       </div>
     );
-  }
-
-  function lastDayOfMonth(y: number, m: number) {
-    return new Date(y, m, 0).getDate();
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -45,7 +46,7 @@ export default function NewPayrollRunPage() {
     setError(null);
     try {
       const periodFrom = `${year}-${String(month).padStart(2, '0')}-01`;
-      const periodTo = `${year}-${String(month).padStart(2, '0')}-${String(lastDayOfMonth(year, month)).padStart(2, '0')}`;
+      const periodTo = toIsoDate(monthEnd(year, month));
       const created = await apiClient<{ id: string }>('/v1/payroll-runs', {
         method: 'POST',
         body: {
@@ -72,15 +73,19 @@ export default function NewPayrollRunPage() {
         <CardContent className="p-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              A DRAFT run snapshots all active employees of the selected type at current pay rates, with EOBI auto-calculated for
-              registered employees (Rs 375 employee + Rs 1,875 employer). You can review each line before finalizing.
+              A DRAFT run snapshots all active employees of the selected type at current pay rates, with EOBI for registered
+              employees
+              {payroll &&
+                ` (${formatMoney(payroll.eobi_employee_monthly_pkr)} employee + ${formatMoney(payroll.eobi_employer_monthly_pkr)} employer)`}
+              . Daily-wage lines start at {payroll ? payroll.standard_working_days : '…'} days worked. You can review each line
+              before finalizing.
             </p>
 
             <div className="space-y-1.5">
               <Label>Payroll Type <span className="text-destructive">*</span></Label>
               <select value={type} onChange={(e) => setType(e.target.value as 'MONTHLY_SALARY' | 'DAILY_WAGES')} className={SELECT_CLASS}>
-                <option value="MONTHLY_SALARY">Monthly Salary (DR 6010, JE-15)</option>
-                <option value="DAILY_WAGES">Daily Wages (DR 5030, JE-15B — direct cost)</option>
+                <option value="MONTHLY_SALARY">Monthly salaries</option>
+                <option value="DAILY_WAGES">Daily wages</option>
               </select>
             </div>
 
@@ -93,7 +98,7 @@ export default function NewPayrollRunPage() {
                 <Label>Month <span className="text-destructive">*</span></Label>
                 <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className={SELECT_CLASS}>
                   {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-                    <option key={m} value={m}>{m} — {new Date(2000, m - 1, 1).toLocaleString('en', { month: 'long' })}</option>
+                    <option key={m} value={m}>{m} — {MONTH_NAMES_SHORT[m - 1]}</option>
                   ))}
                 </select>
               </div>

@@ -60,7 +60,7 @@ async function createAsset(name: string) {
   return asset.id as string;
 }
 
-async function impair(id: string, amount: number, date = '2030-06-30') {
+async function impair(id: string, amount: number, date = '2030-01-20') {
   return app.inject({
     method: 'POST',
     url: `/v1/fixed-assets/${id}/impair`,
@@ -219,9 +219,16 @@ describe('disposal clears the impairment too', () => {
     expect(Number(lines.find((l) => l.accountCode === '1370')!.debitAmount)).toBeCloseTo(300_000, 2);
 
     // The loss on scrapping is the carrying amount AFTER impairment. Booking
-    // the pre-impairment figure would recognise the write-down twice.
+    // the pre-impairment figure would recognise the write-down twice. The disposal
+    // first depreciates January–September on the written-down amount.
+    const atDisposal = await prisma.fixedAsset.findUniqueOrThrow({ where: { id } });
     const loss = lines.find((l) => l.accountCode === '6110');
-    expect(Number(loss!.debitAmount)).toBeCloseTo(impaired.net_book_value_pkr, 2);
+    expect(Number(loss!.debitAmount)).toBeCloseTo(
+      COST - Number(atDisposal.accumulatedDepreciationPkr) - Number(atDisposal.accumulatedImpairmentPkr),
+      2,
+    );
+    expect(Number(atDisposal.accumulatedImpairmentPkr)).toBeCloseTo(300_000, 2);
+    expect(COST - Number(atDisposal.accumulatedDepreciationPkr)).toBeLessThan(impaired.purchase_cost_pkr);
 
     const totalD = lines.reduce((s, l) => s + Number(l.debitAmount), 0);
     const totalC = lines.reduce((s, l) => s + Number(l.creditAmount), 0);

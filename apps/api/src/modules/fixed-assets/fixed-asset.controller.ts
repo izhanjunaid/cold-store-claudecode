@@ -6,12 +6,14 @@ import {
   DisposeAssetRequest,
   ImpairAssetRequest,
   ReverseDisposalRequest,
+  ReverseAssetEntryRequest,
+  VoidAssetRequest,
+  ImportOpeningAssetsRequest,
+  ConvertToOpeningAssetRequest,
   RunDepreciationRequest,
   FixedAssetListQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { assertKatchiWriteAllowed } from '../accounting/book-gate';
-import { Errors } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 import { FixedAssetService } from './fixed-asset.service';
@@ -47,9 +49,33 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
     schema: { body: CreateFixedAssetRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateFixedAssetRequest>;
-      assertKatchiWriteAllowed(request.user!.role, body.book_type);
-      const data = await service.create(request.user!.facilityId, request.user!.userId, body);
+      const u = request.user!;
+      const data = await service.create(u.facilityId, u.userId, u.role, body);
       return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  // Go-live register (docs/25 C-30): assets the opening-balance entry already carries.
+  app.route({
+    method: 'POST',
+    url: '/v1/fixed-assets/opening',
+    preHandler: [app.authenticate, app.requirePermission('fixed_assets.manage')],
+    schema: { body: ImportOpeningAssetsRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof ImportOpeningAssetsRequest>;
+      const u = request.user!;
+      const data = await service.importOpening(u.facilityId, u.userId, u.role, body.assets);
+      return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  app.route({
+    method: 'GET',
+    url: '/v1/fixed-assets/opening-tie-out',
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
+    handler: async (request, reply) => {
+      const data = await service.openingTieOut(request.user!.facilityId);
+      return sendSuccess(reply, data);
     },
   });
 
@@ -73,9 +99,7 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof CommissionAssetRequest>;
-      const existing = await service.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.commission(request.user!.facilityId, id, body);
+      const data = await service.commission(request.user!.facilityId, request.user!.role, id, body);
       return sendSuccess(reply, data);
     },
   });
@@ -88,9 +112,8 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof DisposeAssetRequest>;
-      const existing = await service.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.dispose(request.user!.facilityId, request.user!.userId, id, body);
+      const u = request.user!;
+      const data = await service.dispose(u.facilityId, u.userId, u.role, id, body);
       return sendSuccess(reply.status(201), data);
     },
   });
@@ -103,32 +126,35 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof ImpairAssetRequest>;
-      const existing = await service.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.impair(request.user!.facilityId, request.user!.userId, id, body);
+      const u = request.user!;
+      const data = await service.impair(u.facilityId, u.userId, u.role, id, body);
       return sendSuccess(reply.status(201), data);
     },
   });
 
-  app.route({
-    method: 'POST',
-    url: '/v1/fixed-assets/:id/reverse-disposal',
-    preHandler: [app.authenticate, app.requirePermission('fixed_assets.reverse')],
-    schema: { params: IdParam, body: ReverseDisposalRequest },
-    handler: async (request, reply) => {
-      const { id } = request.params as z.infer<typeof IdParam>;
-      const body = request.body as z.infer<typeof ReverseDisposalRequest>;
-      const existing = await service.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.reverseDisposal(
-        request.user!.facilityId,
-        request.user!.userId,
-        id,
-        body,
-      );
-      return sendSuccess(reply, data);
-    },
-  });
+  // Corrections (docs/25 C-33). They share the 'fixed_assets.reverse' key — the
+  // matrix has one "undo an asset posting" permission.
+  const corrections = [
+    { path: 'reverse-disposal', body: ReverseDisposalRequest, run: service.reverseDisposal.bind(service) },
+    { path: 'reverse-depreciation', body: ReverseAssetEntryRequest, run: service.reverseLatestDepreciation.bind(service) },
+    { path: 'reverse-impairment', body: ReverseAssetEntryRequest, run: service.reverseLatestImpairment.bind(service) },
+    { path: 'void', body: VoidAssetRequest, run: service.void.bind(service) },
+    { path: 'convert-to-opening', body: ConvertToOpeningAssetRequest, run: service.convertToOpening.bind(service) },
+  ] as const;
+  for (const c of corrections) {
+    app.route({
+      method: 'POST',
+      url: `/v1/fixed-assets/:id/${c.path}`,
+      preHandler: [app.authenticate, app.requirePermission('fixed_assets.reverse')],
+      schema: { params: IdParam, body: c.body },
+      handler: async (request, reply) => {
+        const { id } = request.params as z.infer<typeof IdParam>;
+        const u = request.user!;
+        const data = await c.run(u.facilityId, u.userId, u.role, id, request.body as any);
+        return sendSuccess(reply, data);
+      },
+    });
+  }
 
   app.route({
     method: 'POST',
@@ -137,11 +163,8 @@ export async function fixedAssetRoutes(app: FastifyInstance) {
     schema: { body: RunDepreciationRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof RunDepreciationRequest>;
-      const data = await service.runMonthlyDepreciation(
-        request.user!.facilityId,
-        request.user!.userId,
-        body,
-      );
+      const u = request.user!;
+      const data = await service.runMonthlyDepreciation(u.facilityId, u.userId, u.role, body);
       return sendSuccess(reply.status(201), data);
     },
   });

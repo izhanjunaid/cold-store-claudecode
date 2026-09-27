@@ -1,3 +1,4 @@
+import { round2 } from '@coldchain/shared';
 import type { JournalEntryDraft } from './types';
 
 type Input = {
@@ -41,8 +42,4 @@ export function buildJE12AssetPurchase(input: Input): JournalEntryDraft {
       },
     ],
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
