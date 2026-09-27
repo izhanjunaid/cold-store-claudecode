@@ -29,13 +29,17 @@ export const ApplySurchargeRequest = z.object({
 });
 export type ApplySurchargeRequestType = z.infer<typeof ApplySurchargeRequest>;
 
-// A posted surcharge — one journal entry per chargeable month (the GL is the
-// system of record; there is no separate surcharge table).
+// A surcharge charged on an invoice: a SURCHARGE invoice of its own (docs/25 R-08),
+// or — status LEGACY — a JE-21 an older version posted straight to AR, one per month.
 export const AppliedSurcharge = z.object({
-  journal_entry_id: z.string().uuid(),
-  entry_number: z.string(),
+  invoice_id: z.string().uuid().nullable(),
+  invoice_number: z.string().nullable(),
+  journal_entry_id: z.string().uuid().nullable(),
+  entry_number: z.string().nullable(),
   entry_date: z.string(),
+  months: z.number(),
   amount_pkr: z.number(),
+  status: z.enum(['DRAFT', 'FINALIZED', 'VOID', 'WRITTEN_OFF', 'LEGACY']),
   description: z.string(),
 });
 export type AppliedSurchargeType = z.infer<typeof AppliedSurcharge>;
@@ -44,7 +48,8 @@ export const SurchargeApplyResponse = z.object({
   invoice_id: z.string().uuid(),
   months_charged: z.number().int(),
   amount_pkr: z.number(),
-  surcharges: z.array(AppliedSurcharge),
+  surcharge_invoice_id: z.string().uuid(),
+  surcharge_invoice_number: z.string(),
 });
 export type SurchargeApplyResponseType = z.infer<typeof SurchargeApplyResponse>;
 

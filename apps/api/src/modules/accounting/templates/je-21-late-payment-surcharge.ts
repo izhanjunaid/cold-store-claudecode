@@ -1,54 +1,56 @@
 import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft } from './types';
-
-export const ACCOUNT_LATE_PAYMENT_SURCHARGE = '4210';
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 
 type Input = {
+  /** The surcharge invoice — a document of its own, not the invoice it charges on. */
   invoiceId: string;
   invoiceNumber: string;
-  surchargeDate: Date;
+  invoiceDate: Date;
   amountPkr: number;
-  monthIndex: number;
+  /** The overdue invoice being charged on, for the narration. */
+  chargedOnInvoiceNumber: string;
   bookType: 'PACCI' | 'KATCHI';
   billingParty: ReceivableParty;
+  lotId: string;
 };
 
 /**
- * JE-21: Late Payment Surcharge applied (one entry per chargeable month).
+ * JE-21: Late-payment surcharge invoice.
  *
- *   DR  AR (1110/1120/1130/1150)   amount_pkr
- *     CR  4210 Late Payment Surcharge   amount_pkr
+ *   DR  party control account (AR)          surcharge
+ *     CR  4210 Late Payment Surcharge          surcharge
  *
- * Migration-free (phase/19): the GL is the system of record — no surcharge
- * table. sourceTable/sourceId key the entries to the invoice so they can be
- * counted (idempotency) and listed. Erroneous surcharges are corrected with a
- * manual REVERSAL — posted entries are never edited.
+ * Sourced to the surcharge's own invoice, so it is allocated, credited, written
+ * off and voided like any invoice (docs/25 R-08). Entries posted before this —
+ * sourced `invoice_surcharge` to the overdue invoice — stay as they are: the
+ * party statement and aging show them as lines of their own, cleared on account.
  */
-export function buildJE21LatePaymentSurcharge(input: Input): JournalEntryDraft {
-  const arAccount = input.billingParty.controlAccountCode;
-  const amount = Math.round(input.amountPkr * 100) / 100;
-
+export function buildJE21SurchargeInvoice(input: Input): JournalEntryDraft {
+  const amount = round2(input.amountPkr);
   return {
-    entryType: 'ACCRUAL',
+    entryType: 'LATE_PAYMENT_SURCHARGE',
     bookType: input.bookType,
-    sourceTable: 'invoice_surcharge',
+    sourceTable: 'invoices',
     sourceId: input.invoiceId,
-    entryDate: input.surchargeDate,
-    description: `Late payment surcharge (month ${input.monthIndex}) — invoice ${input.invoiceNumber} (${input.billingParty.name})`,
+    entryDate: input.invoiceDate,
+    description: `Late payment surcharge ${input.invoiceNumber} on invoice ${input.chargedOnInvoiceNumber} — ${input.billingParty.name}`,
     lines: [
       {
-        accountCode: arAccount,
+        accountCode: input.billingParty.controlAccountCode,
         debitAmount: amount,
         creditAmount: 0,
         partyId: input.billingParty.id,
-        description: `Surcharge on invoice ${input.invoiceNumber}`,
+        lotId: input.lotId,
+        description: `Surcharge on invoice ${input.chargedOnInvoiceNumber}`,
       },
       {
-        accountCode: ACCOUNT_LATE_PAYMENT_SURCHARGE,
+        accountCode: SYSTEM_ACCOUNTS.LATE_PAYMENT_SURCHARGE,
         debitAmount: 0,
         creditAmount: amount,
         partyId: input.billingParty.id,
-        description: `Late payment surcharge — invoice ${input.invoiceNumber}`,
+        lotId: input.lotId,
+        description: `Late payment surcharge — invoice ${input.chargedOnInvoiceNumber}`,
       },
     ],
   };

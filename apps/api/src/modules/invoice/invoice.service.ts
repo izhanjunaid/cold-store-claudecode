@@ -286,11 +286,13 @@ export class InvoiceService {
       if (liveAllocations > 0) {
         throw Errors.INVOICE_NOT_VOIDABLE('Invoice has active payment allocations');
       }
-      const surcharges = await tx.journalEntry.count({
-        where: { facilityId, sourceTable: 'invoice_surcharge', sourceId: invoiceId, postingStatus: 'POSTED' },
+      // A surcharge invoice stands on this one; void it first. (A legacy JE-21 is a
+      // line of its own on the party's account and does not block — docs/25 R-08.)
+      const surcharges = await tx.invoice.count({
+        where: { facilityId, surchargeOfInvoiceId: invoiceId, status: { not: 'VOID' } },
       });
       if (surcharges > 0) {
-        throw Errors.INVOICE_NOT_VOIDABLE('Invoice has late-payment surcharges; reverse those first');
+        throw Errors.INVOICE_NOT_VOIDABLE('Invoice has late-payment surcharge invoices; void those first');
       }
 
       const voidDate = body.void_date ? new Date(body.void_date) : new Date();
