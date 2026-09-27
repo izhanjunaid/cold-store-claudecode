@@ -709,7 +709,8 @@ async function standingOpeningEntry(db: Db, facilityId: string) {
  * debiting its asset account.
  */
 async function carriedByOpening(db: Db, facilityId: string, asset: Asset): Promise<boolean> {
-  if (!asset.purchaseJournalEntryId) return false;
+  // The opening-balance entry is official-book only; an informal-book asset is never in it.
+  if (asset.bookType !== 'PACCI' || !asset.purchaseJournalEntryId) return false;
   const purchase = await db.journalEntry.findFirst({
     where: { id: asset.purchaseJournalEntryId, reversedById: null },
     select: { id: true },
@@ -738,7 +739,7 @@ async function openingTieOut(db: Db, facilityId: string) {
     include: { lines: true },
   });
   const assets = await db.fixedAsset.findMany({
-    where: { facilityId, isOpeningBalance: true, voidedAt: null },
+    where: { facilityId, isOpeningBalance: true, voidedAt: null, bookType: 'PACCI' },
     include: { schedules: { where: { status: 'POSTED' }, select: { depreciationAmountPkr: true } } },
   });
 

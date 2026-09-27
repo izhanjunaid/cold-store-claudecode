@@ -318,6 +318,30 @@ describe('C-30 / L-35 — assets owned at go-live join the register without a se
     expect(tie.is_reconciled).toBe(true);
   });
 
+  // The opening-balance entry is official-book only: an informal-book asset bought
+  // before go-live is not in it, so it was never booked twice.
+  it('leaves an informal-book asset out of the go-live register', async () => {
+    const res = await post('/v1/fixed-assets', {
+      asset_name: 'KATCHI pump',
+      asset_category: 'COLD_PLANT',
+      purchase_date: '2028-01-15',
+      purchase_cost_pkr: 1000,
+      useful_life_years: 1,
+      depreciation_method: 'SLM',
+      book_type: 'KATCHI',
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    const katchi = JSON.parse(res.body).data;
+    expect(katchi.allowed_actions).not.toContain('convert_to_opening');
+
+    const convert = await post(`/v1/fixed-assets/${katchi.id}/convert-to-opening`, { reason: 'not really' });
+    expect(convert.statusCode).toBe(409);
+
+    const tie = await app.inject({ method: 'GET', url: '/v1/fixed-assets/opening-tie-out', headers: authHeaders(ownerToken) });
+    const row = JSON.parse(tie.body).data.accounts.find((a: any) => a.account_code === '1310');
+    expect(row.register_pkr).toBe(740000);
+  });
+
   it('refuses an opening asset the opening entry does not carry', async () => {
     const res = await importAssets([{ ...openingAsset, asset_name: 'Phantom', purchase_cost_pkr: 10000, accumulated_depreciation_pkr: 0 }]);
     expect(res.statusCode).toBe(400);
