@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders } from '../../test/helpers';
 import type { FastifyInstance } from 'fastify';
+import { PrismaClient } from '@coldchain/db';
+import { billingFixture, RATE_PLAN_SEASONAL } from '../invoice/__tests__/billing-fixture';
+
+const prisma = new PrismaClient();
+let fx: Awaited<ReturnType<typeof billingFixture>>;
 
 let app: FastifyInstance;
 let managerToken: string;
@@ -14,9 +19,12 @@ beforeAll(async () => {
   managerToken = (await loginAsRole(app, 'MANAGER')).accessToken;
   operatorToken = (await loginAsRole(app, 'OPERATOR')).accessToken;
   ownerToken = (await loginAsRole(app, 'OWNER')).accessToken;
+  fx = await billingFixture(app);
 });
 
 afterAll(async () => {
+  await fx.cleanup(prisma);
+  await prisma.$disconnect();
   await closeTestApp();
 });
 
@@ -101,6 +109,28 @@ describe('Rate Plan CRUD', () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.data.rate_amount_pkr).toBe(300);
+  });
+
+  // docs/25 R-29: a rate change would reprice storage already rendered on every lot
+  // still using the plan. Once any lot uses it, its rates are frozen; the name and
+  // active flag stay editable, and a new rate is a new plan.
+  it('PATCH /v1/rate-plans/:id — refuses to change the rates of a plan a lot uses', async () => {
+    await fx.draftInvoice(await fx.party('Rate Plan User'));
+    const plan = (await fx.call('GET', `/v1/rate-plans/${RATE_PLAN_SEASONAL}`, ownerToken)).body.data;
+    const rate = await app.inject({
+      method: 'PATCH',
+      url: `/v1/rate-plans/${RATE_PLAN_SEASONAL}`,
+      headers: authHeaders(managerToken),
+      payload: { rate_amount_pkr: 999 },
+    });
+    expect(rate.statusCode).toBe(400);
+    const rename = await app.inject({
+      method: 'PATCH',
+      url: `/v1/rate-plans/${RATE_PLAN_SEASONAL}`,
+      headers: authHeaders(managerToken),
+      payload: { name: plan.name },
+    });
+    expect(rename.statusCode).toBe(200);
   });
 
   it('DELETE /v1/rate-plans/:id — soft deactivate', async () => {
