@@ -12,8 +12,10 @@ export const AddInvoiceLineRequest = z.object({
 });
 export type AddInvoiceLineRequestType = z.infer<typeof AddInvoiceLineRequest>;
 
-// UpdateDraftInvoiceRequest - edit gst_rate / discount while invoice is DRAFT
+// UpdateDraftInvoiceRequest - edit the date, gst_rate or discount while the invoice is DRAFT
 export const UpdateDraftInvoiceRequest = z.object({
+  /** Defaults to the dispatch/transfer date; never before the billing period ends. */
+  invoice_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   gst_rate: z.number().min(0).max(100).optional(),
   discount: z
     .object({

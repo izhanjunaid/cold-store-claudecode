@@ -4,7 +4,7 @@ import { InvoiceRepository, type InvoiceWithRelations } from './invoice.reposito
 import { generateInvoiceNumber } from './invoice-number';
 import { renderInvoice } from '../pdf/pdf.service';
 import { lockRow } from '../../common/row-lock';
-import { round2 } from '@coldchain/shared';
+import { round2, toIsoDate } from '@coldchain/shared';
 import { settlementOf, SETTLEMENT_INCLUDE } from './invoice-settlement';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import type {
@@ -154,6 +154,16 @@ export class InvoiceService {
         throw Errors.VALIDATION_ERROR('An invoice on the KATCHI book carries no sales tax', 'gst_rate');
       }
       if (body.gst_rate !== undefined) data.gstRate = body.gst_rate;
+      if (body.invoice_date !== undefined) {
+        const invoiceDate = new Date(`${body.invoice_date}T00:00:00.000Z`);
+        if (invoiceDate < inv.periodEnd) {
+          throw Errors.VALIDATION_ERROR(
+            `An invoice cannot be dated before the storage it bills ended (${toIsoDate(inv.periodEnd)})`,
+            'invoice_date',
+          );
+        }
+        data.invoiceDate = invoiceDate;
+      }
       if (body.discount !== undefined) {
         if (body.discount === null) {
           data.discountType = null;

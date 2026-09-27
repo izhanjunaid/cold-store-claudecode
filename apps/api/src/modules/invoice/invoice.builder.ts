@@ -63,7 +63,9 @@ async function createDraftInvoice(
       lotId: params.lotId,
       outboundEventId: params.outboundEventId,
       billingPartyId: params.billingPartyId,
-      invoiceDate: new Date(),
+      // Dated when the storage it bills ended — the dispatch or the transfer — so a
+      // backdated dispatch books its revenue in its own month (docs/25 R-09).
+      invoiceDate: params.periodEnd,
       periodStart: params.periodStart,
       periodEnd: params.periodEnd,
       subTotalPkr: subTotal,
