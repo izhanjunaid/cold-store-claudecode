@@ -6,6 +6,7 @@ import { renderTransferAcknowledgment } from '../pdf/pdf.service';
 import type { TransferAcknowledgmentData } from '../pdf/pdf.service';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { buildOwnershipTransferAccruedInvoice } from '../invoice/invoice.builder';
+import { billingPeriodStart } from '../invoice/storage-charge';
 
 export interface CreateTransferInput {
   facilityId: string;
@@ -112,11 +113,11 @@ export class OwnershipTransferService {
         // exactly this case). Find where their billing window started: the
         // latest INITIAL/TRANSFER_IN on this lot, same lookup invoice
         // builder uses at withdrawal time.
-        const priorOwnership = await tx.ownershipHistory.findFirst({
-          where: { lotId: parent.id, eventType: { in: ['INITIAL', 'TRANSFER_IN'] } },
-          orderBy: { effectiveDate: 'desc' },
+        const ownershipHistory = await tx.ownershipHistory.findMany({
+          where: { lotId: parent.id },
+          select: { eventType: true, effectiveDate: true },
         });
-        const accruedPeriodStart = priorOwnership ? priorOwnership.effectiveDate : parentLot.inboundDate;
+        const accruedPeriodStart = billingPeriodStart({ inboundDate: parentLot.inboundDate, ownershipHistory });
 
         const accruedInvoice = await buildOwnershipTransferAccruedInvoice(tx, {
           facilityId: input.facilityId,

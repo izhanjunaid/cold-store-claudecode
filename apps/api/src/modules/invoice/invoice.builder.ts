@@ -1,5 +1,5 @@
 import type { Prisma, RateType, BookType } from '@coldchain/db';
-import { computeStorageCharge } from './storage-charge';
+import { computeStorageCharge, billingPeriodStart } from './storage-charge';
 import { resolveFacilitySettings } from '../facility/facility.service';
 
 const builderInclude = {
@@ -109,11 +109,7 @@ export async function buildInvoiceFromOutbound(
       lot: {
         include: {
           ratePlan: true,
-          ownershipHistory: {
-            where: { eventType: { in: ['INITIAL', 'TRANSFER_IN'] } },
-            orderBy: { effectiveDate: 'desc' },
-            take: 1,
-          },
+          ownershipHistory: { select: { eventType: true, effectiveDate: true } },
         },
       },
     },
@@ -124,9 +120,7 @@ export async function buildInvoiceFromOutbound(
   const lot = outbound.lot;
   const ratePlan = lot.ratePlan;
 
-  // periodStart: latest ownership effective date or lot inbound date
-  const latestOwnership = lot.ownershipHistory[0];
-  const periodStart: Date = latestOwnership ? latestOwnership.effectiveDate : lot.inboundDate;
+  const periodStart = billingPeriodStart(lot);
   const periodEnd: Date = outbound.outboundDate;
 
   return createDraftInvoice(tx, {

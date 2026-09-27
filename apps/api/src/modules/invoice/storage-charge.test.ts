@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeStorageCharge } from './storage-charge';
+import { computeStorageCharge, billingPeriodStart } from './storage-charge';
 
 const base = {
   rateAmountPkr: 10,
@@ -64,6 +64,32 @@ describe('computeStorageCharge', () => {
     });
     expect(r.amountPkr).toBe(Math.round(7 * 3.33 * 3 * 100) / 100);
     expect(Number.isFinite(r.amountPkr)).toBe(true);
+  });
+
+  // docs/25 R-30: the line reads Qty × Unit Price = Amount on every plan.
+  it('quantity is bags, bag-months or bag-days, so quantity × unit price = amount', () => {
+    for (const rateType of ['SEASONAL_PER_BAG', 'MONTHLY_PER_BAG', 'DAILY_PER_BAG'] as const) {
+      const r = computeStorageCharge({ ...base, rateType, ...days(45) });
+      expect(Math.round(r.quantity * r.unitPricePkr * 100) / 100).toBe(r.amountPkr);
+    }
+    expect(computeStorageCharge({ ...base, rateType: 'MONTHLY_PER_BAG', ...days(45) }).quantity).toBe(200);
+    expect(computeStorageCharge({ ...base, rateType: 'DAILY_PER_BAG', ...days(15) }).quantity).toBe(1500);
+  });
+
+  // docs/25 R-15: one rule for where the current owner's billing starts.
+  it('billingPeriodStart is the latest INITIAL/TRANSFER_IN, else the inbound date', () => {
+    const inboundDate = new Date('2026-01-01');
+    expect(billingPeriodStart({ inboundDate, ownershipHistory: [] })).toEqual(inboundDate);
+    expect(
+      billingPeriodStart({
+        inboundDate,
+        ownershipHistory: [
+          { eventType: 'INITIAL', effectiveDate: new Date('2026-01-01') },
+          { eventType: 'TRANSFER_IN', effectiveDate: new Date('2026-03-01') },
+          { eventType: 'TRANSFER_OUT', effectiveDate: new Date('2026-04-01') },
+        ],
+      }),
+    ).toEqual(new Date('2026-03-01'));
   });
 
   it('zero bags throws an error', () => {
