@@ -30,6 +30,7 @@ export const JOURNAL_SOURCES = {
   withholding_remittance: { label: 'Withholding remittance (legacy)', userReversible: false },
   payroll_runs: { label: 'Payroll run', userReversible: false },
   employee_advances: { label: 'Employee advance', userReversible: false },
+  employee_advance_recoveries: { label: 'Employee advance repayment', userReversible: false },
   fixed_assets: { label: 'Fixed asset', userReversible: false },
   expense_vouchers: { label: 'Expense voucher (legacy)', userReversible: false },
   bills: { label: 'Supplier bill', userReversible: false },

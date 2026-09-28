@@ -82,7 +82,7 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
 
   // Fixed assets
   { key: 'fixed_assets.manage', group: 'Fixed Assets', label: 'Manage fixed assets', description: 'Create, commission and dispose assets; run depreciation.', defaultMinRole: 'OWNER' },
-  { key: 'fixed_assets.reverse', group: 'Fixed Assets', label: 'Reverse asset disposal', description: 'Undo a disposal posted in error (reverses its journal entry).', defaultMinRole: 'OWNER' },
+  { key: 'fixed_assets.reverse', group: 'Fixed Assets', label: 'Correct asset postings', description: 'Void an asset, reverse its latest depreciation month or impairment, undo a disposal, or move a double-booked go-live asset onto the register (each reverses its journal entry).', defaultMinRole: 'OWNER' },
 
   // Payroll & HR
   { key: 'payroll.view', group: 'Payroll & HR', label: 'View payroll & employees', description: 'View employees, payroll runs and salary slips.', defaultMinRole: 'ACCOUNTANT' },
@@ -91,7 +91,7 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
   { key: 'payroll.draft', group: 'Payroll & HR', label: 'Draft payroll', description: 'Create payroll run drafts and edit their lines.', defaultMinRole: 'ACCOUNTANT' },
   { key: 'payroll.finalize', group: 'Payroll & HR', label: 'Finalize & pay payroll', description: 'Finalize and pay payroll runs.', defaultMinRole: 'MANAGER' },
   { key: 'payroll.remit', group: 'Payroll & HR', label: 'Remit deductions', description: 'Remit payroll deductions to authorities.', defaultMinRole: 'OWNER' },
-  { key: 'payroll.reverse', group: 'Payroll & HR', label: 'Reverse a payroll run', description: 'Reverse a finalized or paid run posted in error (reverses its journal entries).', defaultMinRole: 'OWNER' },
+  { key: 'payroll.reverse', group: 'Payroll & HR', label: 'Reverse payroll', description: 'Void a salary payment, or reverse a finalized run that has not been paid (each reverses its journal entry).', defaultMinRole: 'OWNER' },
 
   // Expenses
   { key: 'expenses.record', group: 'Expenses', label: 'Record expenses', description: 'View and record expense vouchers, petty-cash, accrue and pay.', defaultMinRole: 'ACCOUNTANT' },
@@ -104,8 +104,8 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
 
   // Employee Advances
   { key: 'employee_advances.view', group: 'Employee Advances', label: 'View employee advances', description: 'View advances issued to employees and their recovery history.', defaultMinRole: 'ACCOUNTANT' },
-  { key: 'employee_advances.issue', group: 'Employee Advances', label: 'Issue employee advances', description: 'Issue a cash advance against future salary.', defaultMinRole: 'OWNER' },
-  { key: 'employee_advances.write_off', group: 'Employee Advances', label: 'Write off employee advances', description: 'Write off an outstanding advance balance as bad debt.', defaultMinRole: 'OWNER' },
+  { key: 'employee_advances.issue', group: 'Employee Advances', label: 'Issue employee advances', description: 'Issue a cash advance against future salary, and record repayments made in cash.', defaultMinRole: 'OWNER' },
+  { key: 'employee_advances.write_off', group: 'Employee Advances', label: 'Write off or void employee advances', description: 'Forgive an outstanding balance as a staff benefit, or void an advance or a cash repayment recorded in error.', defaultMinRole: 'OWNER' },
 
   // Reports
   { key: 'reports.operational', group: 'Reports', label: 'Operational dashboard', description: 'View the operational dashboard.', defaultMinRole: 'OPERATOR' },

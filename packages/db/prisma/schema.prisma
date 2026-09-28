@@ -236,6 +236,7 @@ enum EntryType {
   SUPPLIER_PAYMENT
   TAX_REMITTANCE
   LATE_PAYMENT_SURCHARGE
+  EMPLOYEE_ADVANCE_REPAYMENT
 }
 
 // REVERSED is retired: a reversed entry stays POSTED and records reversed_by
@@ -346,6 +347,7 @@ enum EmployeeAdvanceStatus {
   ACTIVE
   RECOVERED
   WRITTEN_OFF
+  VOIDED
 }
 
 enum RepaymentMethod {
@@ -1044,6 +1046,7 @@ model JournalEntry {
   partyLoanRepayment      PartyLoanRepayment?    @relation("PartyLoanRepaymentJE")
   employeeAdvanceIssue    EmployeeAdvance?       @relation("EmployeeAdvanceIssueJE")
   employeeAdvanceWriteOff EmployeeAdvance?       @relation("EmployeeAdvanceWriteOffJE")
+  employeeAdvanceRepayment EmployeeAdvanceRecovery? @relation("EmployeeAdvanceRepaymentJE")
   bill                    Bill?
   supplierPayment         SupplierPayment?
   taxRemittance           TaxRemittance?
@@ -1344,6 +1347,9 @@ model EmployeeAdvance {
   writeOffJournalEntryId String?               @unique @map("write_off_journal_entry_id") @db.Uuid
   writeOffReason         String?               @map("write_off_reason") @db.Text
   writeOffAt             DateTime?             @map("write_off_at") @db.Timestamptz()
+  voidedAt               DateTime?             @map("voided_at") @db.Timestamptz()
+  voidedBy               String?               @map("voided_by") @db.Uuid
+  voidReason             String?               @map("void_reason") @db.Text
   notes                  String?               @db.Text
   createdAt              DateTime              @default(now()) @map("created_at") @db.Timestamptz()
   createdBy              String                @map("created_by") @db.Uuid
@@ -1361,11 +1367,16 @@ model EmployeeAdvance {
   @@map("employee_advances")
 }
 
+/// A recovery is a payroll deduction (run + line, carried inside the run's
+/// JE-15) or a cash repayment (its own journal entry + the cash account it was
+/// paid into) — never both, never neither (CHECK employee_advance_recoveries_one_kind, 0033).
 model EmployeeAdvanceRecovery {
   id                String    @id @default(uuid()) @db.Uuid
   advanceId         String    @map("advance_id") @db.Uuid
-  payrollRunId      String    @map("payroll_run_id") @db.Uuid
-  payrollLineItemId String    @map("payroll_line_item_id") @db.Uuid
+  payrollRunId      String?   @map("payroll_run_id") @db.Uuid
+  payrollLineItemId String?   @map("payroll_line_item_id") @db.Uuid
+  journalEntryId    String?   @unique @map("journal_entry_id") @db.Uuid
+  assetAccountCode  String?   @map("asset_account_code") @db.VarChar(10)
   recoveryDate      DateTime  @map("recovery_date") @db.Date
   amountPkr         Decimal   @map("amount_pkr") @db.Decimal(12, 2)
   voidedAt          DateTime? @map("voided_at") @db.Timestamptz()
@@ -1373,10 +1384,11 @@ model EmployeeAdvanceRecovery {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   createdBy         String    @map("created_by") @db.Uuid
 
-  advance         EmployeeAdvance @relation(fields: [advanceId], references: [id], onDelete: Cascade)
-  payrollRun      PayrollRun      @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
-  payrollLineItem PayrollLineItem @relation(fields: [payrollLineItemId], references: [id], onDelete: Cascade)
-  createdByUser   User            @relation("EmployeeAdvanceRecoveryCreatedBy", fields: [createdBy], references: [id])
+  advance         EmployeeAdvance  @relation(fields: [advanceId], references: [id], onDelete: Cascade)
+  payrollRun      PayrollRun?      @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  payrollLineItem PayrollLineItem? @relation(fields: [payrollLineItemId], references: [id], onDelete: Cascade)
+  journalEntry    JournalEntry?    @relation("EmployeeAdvanceRepaymentJE", fields: [journalEntryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdByUser   User             @relation("EmployeeAdvanceRecoveryCreatedBy", fields: [createdBy], references: [id])
 
   @@index([advanceId])
   @@index([payrollRunId])

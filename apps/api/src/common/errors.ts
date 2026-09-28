@@ -41,6 +41,8 @@ export const Errors = {
     new AppError('PERIOD_LOCKED', 'Accounting period is closed; cannot post entries', 409),
   ACCOUNT_NOT_FOUND: () =>
     new AppError('ACCOUNT_NOT_FOUND', 'Account code does not exist in CoA', 404),
+  NOT_A_CASH_ACCOUNT: (code: string) =>
+    new AppError('NOT_A_CASH_ACCOUNT', `Account ${code} is not an active cash or bank account`, 422),
   ACCOUNT_IN_USE: (detail: string) =>
     new AppError('ACCOUNT_IN_USE', `Account cannot be deleted: ${detail}`, 409),
   SYSTEM_ACCOUNT_PROTECTED: () =>
@@ -156,16 +158,8 @@ export const Errors = {
     new AppError('FIXED_ASSET_NOT_FOUND', 'Fixed asset does not exist', 404),
   FIXED_ASSET_INVALID_STATUS: (msg: string) =>
     new AppError('FIXED_ASSET_INVALID_STATUS', msg, 409),
-  DEPRECIATION_ALREADY_POSTED: () =>
-    new AppError('DEPRECIATION_ALREADY_POSTED', 'Depreciation already posted for this period', 409),
   DEPRECIATION_NOTHING_TO_RUN: () =>
     new AppError('DEPRECIATION_NOTHING_TO_RUN', 'No assets eligible for depreciation in this period', 422),
-  DEPRECIATION_PRIOR_PERIOD_NOT_POSTED: () =>
-    new AppError(
-      'DEPRECIATION_PRIOR_PERIOD_NOT_POSTED',
-      'The immediately preceding period has not been posted for one or more assets in this run',
-      409,
-    ),
   EMPLOYEE_NOT_FOUND: () => new AppError('EMPLOYEE_NOT_FOUND', 'Employee does not exist', 404),
   PAYROLL_RUN_NOT_FOUND: () => new AppError('PAYROLL_RUN_NOT_FOUND', 'Payroll run does not exist', 404),
   PAYROLL_RUN_INVALID_STATUS: (msg: string) =>
@@ -174,12 +168,6 @@ export const Errors = {
     new AppError('PAYROLL_LINE_NOT_FOUND', 'Payroll line item does not exist', 404),
   PAYROLL_RUN_DUPLICATE_PERIOD: () =>
     new AppError('PAYROLL_RUN_DUPLICATE_PERIOD', 'A payroll run already exists for this period and type', 409),
-  PAYROLL_OTHER_DEDUCTIONS_UNSUPPORTED: () =>
-    new AppError(
-      'PAYROLL_OTHER_DEDUCTIONS_UNSUPPORTED',
-      'Other deductions cannot be posted yet: there is no account to credit them to until employee advances are supported. Clear the other-deductions amount to finalize this run.',
-      409,
-    ),
   PAYROLL_ALREADY_REMITTED: () =>
     new AppError('PAYROLL_ALREADY_REMITTED', 'This payroll run has already been remitted', 409),
   PAYROLL_RUN_NOT_REVERSIBLE: (msg: string) =>
@@ -216,13 +204,23 @@ export const Errors = {
   EMPLOYEE_ADVANCE_ALREADY_ACTIVE: () =>
     new AppError(
       'EMPLOYEE_ADVANCE_ALREADY_ACTIVE',
-      'This employee already has an outstanding advance; it must be recovered or written off before another can be issued',
+      'This employee already has an outstanding advance; it must be recovered, written off or voided first',
       409,
     ),
   EMPLOYEE_ADVANCE_EXCEEDS_CAP: (msg: string) =>
     new AppError('EMPLOYEE_ADVANCE_EXCEEDS_CAP', msg, 409),
-  EMPLOYEE_ADVANCE_ALREADY_CLOSED: () =>
-    new AppError('EMPLOYEE_ADVANCE_ALREADY_CLOSED', 'Advance is not ACTIVE; cannot write off', 409),
+  EMPLOYEE_ADVANCE_ALREADY_CLOSED: (action: string) =>
+    new AppError('EMPLOYEE_ADVANCE_ALREADY_CLOSED', `Advance is not ACTIVE; cannot ${action}`, 409),
+  EMPLOYEE_ADVANCE_HAS_RECOVERIES: () =>
+    new AppError(
+      'EMPLOYEE_ADVANCE_HAS_RECOVERIES',
+      'Part of this advance has been recovered; reverse those payroll runs or void those repayments before voiding it',
+      409,
+    ),
+  EMPLOYEE_ADVANCE_RECOVERY_NOT_FOUND: () =>
+    new AppError('EMPLOYEE_ADVANCE_RECOVERY_NOT_FOUND', 'This advance has no such recovery', 404),
+  EMPLOYEE_ADVANCE_RECOVERY_NOT_VOIDABLE: (msg: string) =>
+    new AppError('EMPLOYEE_ADVANCE_RECOVERY_NOT_VOIDABLE', msg, 409),
   EMPLOYEE_ADVANCE_OVER_RECOVERY: () =>
     new AppError(
       'EMPLOYEE_ADVANCE_OVER_RECOVERY',
