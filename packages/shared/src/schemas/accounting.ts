@@ -432,7 +432,10 @@ export const ProfitLossResponse = z.object({
   other_expense_lines: z.array(StatementLine),
   total_other_expense_pkr: z.number(),
 
+  // Accounts in DEPRECIATION_EXPENSE_ACCOUNTS — by role, never "whatever an asset names".
   depreciation_amortisation_pkr: z.number(),
+  // 6160, a non-cash write-down: added back to EBITDA on a row of its own.
+  impairment_pkr: z.number(),
   ebitda_pkr: z.number(),
   ebitda_pct: z.number().nullable(),
 

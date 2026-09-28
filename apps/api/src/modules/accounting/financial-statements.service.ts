@@ -4,6 +4,7 @@ import type {
   BalanceSheetQueryType,
   ChangesInEquityQueryType,
 } from '@coldchain/shared';
+import { DEPRECIATION_EXPENSE_ACCOUNTS, SYSTEM_ACCOUNTS } from '@coldchain/shared';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { fiscalYearStart } from './fiscal-year';
 import {
@@ -33,11 +34,6 @@ interface StatementGroup {
   lines: StatementLine[];
   subtotal_pkr: number;
 }
-
-// The depreciation and amortisation accounts the seed ships, used for the
-// EBITDA add-back. Owner-created depreciation accounts are picked up at
-// runtime from the fixed-asset register — see daCodesFor().
-const SEEDED_DA_CODES = ['5040', '6120', '6130', '6140'];
 
 /** P&L-class net result over one window: revenue − cost of service − expense. */
 function plNetOver(accounts: Account[], window: SumMap): number {
@@ -194,21 +190,19 @@ export class FinancialStatementsService {
 
     const net_profit_pkr = round2(operating_profit_pkr + total_other_income_pkr - total_other_expense_pkr);
 
-    // Depreciation & amortisation add-back for EBITDA. The seeded four are not
-    // the whole story: an owner who opens their own depreciation account and
-    // points a fixed asset at it would otherwise have it silently left out of
-    // the add-back, understating EBITDA with nothing to indicate why. Take the
-    // seeded set plus whatever the asset register actually depreciates into.
-    const daCodes = await this.daCodesFor(facilityId);
-    let da = 0;
-    for (const a of accounts) {
-      if (daCodes.has(a.accountCode)) {
-        const s = sums.get(a.accountCode);
-        if (s) da += debit(s);
-      }
-    }
-    const depreciation_amortisation_pkr = round2(da);
-    const ebitda_pkr = round2(operating_profit_pkr + depreciation_amortisation_pkr);
+    // EBITDA adds back the depreciation and amortisation accounts by role, and
+    // impairment on a row of its own. It used to add back every account any
+    // fixed asset named as its expense account — and legacy OTHER-category
+    // assets named 6100 Miscellaneous, so the whole Miscellaneous balance was
+    // treated as depreciation (docs/25 L-21).
+    const expenseOn = (codes: readonly string[]) =>
+      round2(codes.reduce((t, code) => {
+        const s = sums.get(code);
+        return s ? t + debit(s) : t;
+      }, 0));
+    const depreciation_amortisation_pkr = expenseOn(DEPRECIATION_EXPENSE_ACCOUNTS);
+    const impairment_pkr = expenseOn([SYSTEM_ACCOUNTS.IMPAIRMENT_LOSS]);
+    const ebitda_pkr = round2(operating_profit_pkr + depreciation_amortisation_pkr + impairment_pkr);
 
     // Statement of income and retained earnings (IFRS for SMEs). Permitted in
     // place of separate statements of comprehensive income and of changes in
@@ -256,6 +250,7 @@ export class FinancialStatementsService {
       total_other_expense_pkr: round2(total_other_expense_pkr),
 
       depreciation_amortisation_pkr,
+      impairment_pkr,
       ebitda_pkr,
       ebitda_pct: pct(ebitda_pkr),
 
@@ -552,20 +547,6 @@ export class FinancialStatementsService {
       unallocated_pkr: unallocated,
       windows,
     };
-  }
-
-  /**
-   * Accounts that carry depreciation or amortisation for this facility: the
-   * seeded four, plus every account the fixed-asset register is configured to
-   * depreciate into.
-   */
-  private async daCodesFor(facilityId: string): Promise<Set<string>> {
-    const configured = await this.prisma.fixedAsset.findMany({
-      where: { facilityId },
-      select: { deprExpenseAccountCode: true },
-      distinct: ['deprExpenseAccountCode'],
-    });
-    return new Set([...SEEDED_DA_CODES, ...configured.map((a) => a.deprExpenseAccountCode)]);
   }
 
   async getBalanceSheet(facilityId: string, query: BalanceSheetQueryType) {
