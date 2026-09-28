@@ -74,10 +74,21 @@ function equitySnapshot(accounts: Account[], sums: SumMap, fySums: SumMap) {
     .map((a) => line(a, sums, crAmt))
     .filter((l) => l.amount_pkr !== 0);
 
-  const current_year_pl_pkr = round2(plNetOver(accounts, fySums));
-  const prior_years_pl_pkr = round2(plNetOver(accounts, sums) - plNetOver(accounts, fySums));
-  const posted3020 = sums.get('3020');
-  const retained_earnings_pkr = round2((posted3020 ? crAmt(posted3020) : 0) + prior_years_pl_pkr);
+  // Both derived accounts can still carry postings: 3020 from opening balances,
+  // 3030 from before the engine refused it (pre-update check C10a). Dropping
+  // either left the sheet unbalanced (docs/25 L-02). A posted 3030 balance is a
+  // result someone closed out by hand, so it belongs to the year it was posted
+  // in — this year's result inside the window, retained earnings before it.
+  const posted = (m: SumMap, code: string) => {
+    const s = m.get(code);
+    return s ? crAmt(s) : 0;
+  };
+  const CYR = SYSTEM_ACCOUNTS.CURRENT_YEAR_RESULT;
+  const current_year_pl_pkr = round2(plNetOver(accounts, fySums) + posted(fySums, CYR));
+  const prior_years_pl_pkr = round2(
+    plNetOver(accounts, sums) - plNetOver(accounts, fySums) + posted(sums, CYR) - posted(fySums, CYR),
+  );
+  const retained_earnings_pkr = round2(posted(sums, SYSTEM_ACCOUNTS.RETAINED_EARNINGS) + prior_years_pl_pkr);
   const total_equity_pkr = round2(sumLines(equity_lines) + retained_earnings_pkr + current_year_pl_pkr);
 
   return { equity_lines, current_year_pl_pkr, prior_years_pl_pkr, retained_earnings_pkr, total_equity_pkr };

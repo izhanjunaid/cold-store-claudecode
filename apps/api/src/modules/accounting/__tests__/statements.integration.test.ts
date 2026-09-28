@@ -99,6 +99,32 @@ afterAll(async () => {
   await closeTestApp();
 });
 
+describe('a legacy posting to the derived equity accounts stays on the balance sheet (L-02)', () => {
+  it('3030 carried a posting before the engine refused it — the sheet still balances', async () => {
+    // The engine now refuses 3030 from every source, but boxes carry postings
+    // from before (pre-update check C10a). The statements excluded 3030 from
+    // equity entirely, so any such balance left assets without their other side.
+    const before = await get('/v1/accounting/balance-sheet?as_of_date=2037-04-30');
+    expect(before.is_balanced).toBe(true);
+
+    await insertLegacy('2037-04-05', [
+      { accountCode: '1010', debit: 700, credit: 0 },
+      { accountCode: '3030', debit: 0, credit: 700 },
+    ]);
+
+    const bs = await get('/v1/accounting/balance-sheet?as_of_date=2037-04-30');
+    expect(bs.total_assets_pkr - before.total_assets_pkr).toBeCloseTo(700, 2);
+    expect(bs.total_equity_pkr - before.total_equity_pkr).toBeCloseTo(700, 2);
+    expect(bs.is_balanced).toBe(true);
+    // Posted in the fiscal year the sheet is drawn in: it is this year's result.
+    expect(bs.current_year_pl_pkr - before.current_year_pl_pkr).toBeCloseTo(700, 2);
+
+    // A year later it has rolled into retained earnings with the rest of that year.
+    const nextYear = await get('/v1/accounting/balance-sheet?as_of_date=2038-04-30');
+    expect(nextYear.is_balanced).toBe(true);
+  });
+});
+
 describe('EBITDA adds back depreciation and impairment, and nothing else (L-21)', () => {
   it('a legacy asset depreciating into 6100 does not add Miscellaneous back; impairment is its own row', async () => {
     // Before the registry, an OTHER-category asset defaulted its depreciation
