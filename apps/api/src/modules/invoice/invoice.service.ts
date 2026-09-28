@@ -116,21 +116,27 @@ export class InvoiceService {
     if (!inv) throw Errors.INVOICE_NOT_FOUND();
     if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
 
-    // A line adds a charge. A reduction is the invoice's discount, which already posts
-    // to 4910 and which GST and credit notes pro-rate (docs/25 R-07).
-    if (!(body.unit_price_pkr > 0)) {
-      throw Errors.VALIDATION_ERROR('A line must be a charge; give a reduction as the invoice discount', 'unit_price_pkr');
+    // A service is the catalog's: its name, its price, its revenue account (R-28).
+    // Anything else is a charge — a reduction is the invoice's discount, which posts to
+    // 4910 and which GST and credit notes pro-rate (R-07).
+    let line: { description: string; quantity: number; unitPricePkr: number; serviceChargeId: string | null };
+    if (body.line_type === 'SERVICE') {
+      const charge = await this.prisma.serviceCharge.findFirst({
+        where: { id: body.service_charge_id, facilityId, isActive: true },
+      });
+      if (!charge) throw Errors.VALIDATION_ERROR('No active service charge with that id', 'service_charge_id');
+      const quantity = charge.unitType === 'FLAT' ? 1 : body.quantity;
+      line = { description: charge.name, quantity, unitPricePkr: Number(charge.unitPricePkr), serviceChargeId: charge.id };
+    } else {
+      line = { description: body.description, quantity: body.quantity, unitPricePkr: body.unit_price_pkr, serviceChargeId: null };
     }
 
     return this.prisma.$transaction(async (tx) => {
       const maxSort = inv.lineItems.length > 0 ? Math.max(...inv.lineItems.map((l) => l.sortOrder)) : 0;
       await this.repo.addLine(tx, invoiceId, {
         lineType: body.line_type,
-        description: body.description,
-        quantity: body.quantity,
-        unitPricePkr: body.unit_price_pkr,
-        amountPkr: body.quantity * body.unit_price_pkr,
-        serviceChargeId: body.service_charge_id ?? null,
+        ...line,
+        amountPkr: round2(line.quantity * line.unitPricePkr),
         sortOrder: maxSort + 1,
       });
       await this.repo.recomputeTotals(tx, invoiceId);

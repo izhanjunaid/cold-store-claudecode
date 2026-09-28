@@ -1,15 +1,24 @@
 import { z } from 'zod';
 import { InvoiceStatus, InvoiceLineType } from './enums';
 
-// AddInvoiceLineRequest - add SERVICE or ADJUSTMENT line to a DRAFT invoice
-export const AddInvoiceLineRequest = z.object({
-  line_type: z.enum(['SERVICE', 'ADJUSTMENT']),
-  description: z.string().min(1).max(300),
-  quantity: z.number().positive(),
-  /** A charge; a reduction is the invoice discount (docs/25 R-07). */
-  unit_price_pkr: z.number().positive(),
-  service_charge_id: z.string().uuid().optional(),
-});
+// AddInvoiceLineRequest - add a line to a DRAFT invoice.
+// A SERVICE line is a catalog entry: the server names and prices it from the service
+// charge, and its revenue goes to that charge's account (docs/25 R-28). An ADJUSTMENT
+// is any other charge (misc. service revenue); a reduction is the discount (R-07).
+export const AddInvoiceLineRequest = z.discriminatedUnion('line_type', [
+  z.object({
+    line_type: z.literal('SERVICE'),
+    service_charge_id: z.string().uuid(),
+    /** Bags or tonnes for a per-bag / per-ton charge; a flat charge is always 1. */
+    quantity: z.number().positive(),
+  }),
+  z.object({
+    line_type: z.literal('ADJUSTMENT'),
+    description: z.string().min(1).max(300),
+    quantity: z.number().positive(),
+    unit_price_pkr: z.number().positive(),
+  }),
+]);
 export type AddInvoiceLineRequestType = z.infer<typeof AddInvoiceLineRequest>;
 
 // UpdateDraftInvoiceRequest - edit the date, gst_rate or discount while the invoice is DRAFT

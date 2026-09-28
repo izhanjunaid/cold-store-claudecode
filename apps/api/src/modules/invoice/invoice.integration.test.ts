@@ -333,9 +333,7 @@ describe('Invoice — Billing Engine', () => {
       headers: authHeaders(managerToken),
       payload: {
         line_type: 'SERVICE',
-        description: 'Loading charge',
         quantity: 20,
-        unit_price_pkr: 10,
         service_charge_id: SERVICE_CHARGE_ID,
       },
     });
@@ -413,9 +411,8 @@ describe('Invoice — Billing Engine', () => {
       headers: authHeaders(managerToken),
       payload: {
         line_type: 'SERVICE',
-        description: 'Handling',
         quantity: 5,
-        unit_price_pkr: 20,
+        service_charge_id: SERVICE_CHARGE_ID,
       },
     });
     const addedInv = JSON.parse(addRes.body).data;
@@ -511,7 +508,7 @@ describe('Invoice — Billing Engine', () => {
       method: 'POST',
       url: `/v1/invoices/${invoiceId}/lines`,
       headers: authHeaders(managerToken),
-      payload: { line_type: 'SERVICE', description: 'X', quantity: 1, unit_price_pkr: 10 },
+      payload: { line_type: 'SERVICE', quantity: 1, service_charge_id: SERVICE_CHARGE_ID },
     });
     expect(addAfter.statusCode).toBe(409);
     expect(JSON.parse(addAfter.body).error.code).toBe('INVOICE_ALREADY_FINALIZED');
@@ -775,7 +772,7 @@ describe('Invoice — draft-stage discount (Phase 12)', () => {
       method: 'POST',
       url: `/v1/invoices/${invoiceId}/lines`,
       headers: authHeaders(managerToken),
-      payload: { line_type: 'SERVICE', description: 'Loading', quantity: 20, unit_price_pkr: 10 },
+      payload: { line_type: 'SERVICE', quantity: 20, service_charge_id: SERVICE_CHARGE_ID },
     });
     expect(addRes.statusCode).toBe(201);
     const serviceLineId = JSON.parse(addRes.body).data.line_items.find(
