@@ -17,7 +17,6 @@ import { withGuardsDisabled } from '../../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
 import type { FastifyInstance } from 'fastify';
-import { deriveCashFlowSection } from '../cash-flow.service';
 
 const prisma = new PrismaClient();
 
@@ -27,14 +26,42 @@ let ownerToken: string;
 const DATE_FROM = '2020-01-01';
 const DATE_TO = '2035-12-31';
 
-async function cashFlow() {
+// A month no other suite writes to, so every flow in it is this file's own.
+const MONTH_FROM = '2033-11-01';
+const MONTH_TO = '2033-11-30';
+// An owner's second bank account: created, not seeded, and cash all the same.
+const SECOND_BANK = '1045';
+const createdEntryIds: string[] = [];
+
+async function cashFlow(from = DATE_FROM, to = DATE_TO) {
   const res = await app.inject({
     method: 'GET',
-    url: `/v1/accounting/cash-flow?date_from=${DATE_FROM}&date_to=${DATE_TO}`,
+    url: `/v1/accounting/cash-flow?date_from=${from}&date_to=${to}`,
     headers: authHeaders(ownerToken),
   });
   expect(res.statusCode).toBe(200);
   return JSON.parse(res.body).data;
+}
+
+async function balanceSheet(asOf: string) {
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/accounting/balance-sheet?as_of_date=${asOf}`,
+    headers: authHeaders(ownerToken),
+  });
+  expect(res.statusCode, res.body).toBe(200);
+  return JSON.parse(res.body).data;
+}
+
+async function postManual(lines: Array<{ account_code: string; debit_amount: number; credit_amount: number }>) {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/accounting/journal-entries',
+    headers: authHeaders(ownerToken),
+    payload: { entry_date: '2033-11-10', description: 'cash-flow classification', lines },
+  });
+  expect(res.statusCode, res.body).toBe(201);
+  createdEntryIds.push(JSON.parse(res.body).data.id);
 }
 
 beforeAll(async () => {
@@ -43,38 +70,67 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await withGuardsDisabled(prisma, async () => {
+    await prisma.journalEntryLine.deleteMany({ where: { journalEntryId: { in: createdEntryIds } } });
+    await prisma.journalEntry.deleteMany({ where: { id: { in: createdEntryIds } } });
+    await prisma.chartOfAccounts.deleteMany({ where: { facilityId: TEST_FACILITY_ID, accountCode: SECOND_BANK } });
+  });
   await prisma.$disconnect();
   await closeTestApp();
 });
 
-describe('the derivation places accounts without anyone tagging them', () => {
-  const base = { accountCode: 'X', accountName: 'X', cashFlowSection: null };
+/**
+ * Classification on the REAL seeded chart (docs/25 L-01, L-20). The statement
+ * read the section off the counterpart detail account itself, which is always
+ * null, so every capital purchase and loan drawdown landed in Operating; and
+ * "cash" was a list of three codes, so an owner's second bank account was a
+ * counterpart rather than cash.
+ */
+describe('flows land in the section the chart puts them in', () => {
+  it('capex paid from bank is Investing, a bank-loan draw is Financing, a bank-to-bank transfer is no flow', async () => {
+    await prisma.chartOfAccounts.create({
+      data: {
+        facilityId: TEST_FACILITY_ID,
+        accountCode: SECOND_BANK,
+        accountName: 'Bank Account — Second (cash-flow test)',
+        accountClass: 'ASSET',
+        accountType: 'DETAIL',
+        parentAccountCode: '1000',
+        normalBalance: 'DEBIT',
+        isCashEquivalent: true,
+      },
+    });
 
-  it('sends non-current assets to investing and non-current liabilities to financing', () => {
-    expect(deriveCashFlowSection({ ...base, accountClass: 'ASSET', statementSection: 'NON_CURRENT_ASSET' })).toBe('INVESTING');
-    expect(deriveCashFlowSection({ ...base, accountClass: 'LIABILITY', statementSection: 'NON_CURRENT_LIABILITY' })).toBe('FINANCING');
-  });
+    await postManual([
+      { account_code: '1310', debit_amount: 50000, credit_amount: 0 },
+      { account_code: '1020', debit_amount: 0, credit_amount: 50000 },
+    ]);
+    await postManual([
+      { account_code: '1020', debit_amount: 200000, credit_amount: 0 },
+      { account_code: '2110', debit_amount: 0, credit_amount: 200000 },
+    ]);
+    await postManual([
+      { account_code: SECOND_BANK, debit_amount: 30000, credit_amount: 0 },
+      { account_code: '1020', debit_amount: 0, credit_amount: 30000 },
+    ]);
 
-  it('sends equity to financing regardless of section', () => {
-    expect(deriveCashFlowSection({ ...base, accountClass: 'EQUITY', statementSection: null })).toBe('FINANCING');
-  });
+    const cf = await cashFlow(MONTH_FROM, MONTH_TO);
+    const codes = (ls: Array<{ account_code: string }>) => ls.map((l) => l.account_code);
 
-  it('sends working capital and P&L accounts to operating', () => {
-    expect(deriveCashFlowSection({ ...base, accountClass: 'ASSET', statementSection: 'CURRENT_ASSET' })).toBe('OPERATING');
-    expect(deriveCashFlowSection({ ...base, accountClass: 'REVENUE', statementSection: 'REVENUE' })).toBe('OPERATING');
-    expect(deriveCashFlowSection({ ...base, accountClass: 'EXPENSE', statementSection: 'OPERATING_EXPENSE' })).toBe('OPERATING');
-  });
+    expect(cf.investing_lines).toEqual([expect.objectContaining({ account_code: '1310', amount_pkr: -50000 })]);
+    expect(cf.financing_lines).toEqual([expect.objectContaining({ account_code: '2110', amount_pkr: 200000 })]);
+    expect(codes(cf.operating_lines)).not.toContain('1310');
+    expect(codes(cf.operating_lines)).not.toContain('2110');
+    // Moving money between two of the facility's own accounts changes nothing.
+    expect(codes(cf.operating_lines)).not.toContain(SECOND_BANK);
+    expect(cf.net_change_pkr).toBeCloseTo(150000, 2);
 
-  it('lets an explicit tag win — that is the whole reason the column exists', () => {
-    // 1140 peshgi is a current asset, so it derives to operating anyway; the
-    // tag pins it so a later reclassification cannot silently move it.
-    expect(
-      deriveCashFlowSection({ ...base, accountClass: 'ASSET', statementSection: 'NON_CURRENT_ASSET', cashFlowSection: 'OPERATING' }),
-    ).toBe('OPERATING');
-  });
-
-  it('defaults an unclassified account to operating rather than dropping it', () => {
-    expect(deriveCashFlowSection({ ...base, accountClass: 'EXPENSE', statementSection: null })).toBe('OPERATING');
+    // The second bank account is cash: it is in the composition, and the
+    // closing figure is the balance sheet's cash and cash equivalents.
+    expect(codes(cf.cash_composition)).toContain(SECOND_BANK);
+    const bs = await balanceSheet(MONTH_TO);
+    expect(cf.closing_cash_pkr).toBeCloseTo(bs.cash_and_cash_equivalents_pkr, 2);
+    expect(cf.is_reconciled).toBe(true);
   });
 });
 
@@ -84,18 +140,8 @@ describe('the statement reconciles to the balance sheet', () => {
     expect(cf.is_reconciled).toBe(true);
     expect(cf.opening_cash_pkr + cf.net_change_pkr).toBeCloseTo(cf.closing_cash_pkr, 2);
 
-    // Same figure the balance sheet shows for 1010 + 1020 + 1030.
-    const agg = await prisma.journalEntryLine.aggregate({
-      where: {
-        facilityId: TEST_FACILITY_ID,
-        accountCode: { in: ['1010', '1020', '1030'] },
-        journalEntry: { postingStatus: 'POSTED', bookType: 'PACCI', entryDate: { lte: new Date(`${DATE_TO}T00:00:00.000Z`) } },
-      },
-      _sum: { debitAmount: true, creditAmount: true },
-    });
-    const balanceSheetCash =
-      Math.round((Number(agg._sum.debitAmount ?? 0) - Number(agg._sum.creditAmount ?? 0)) * 100) / 100;
-    expect(cf.closing_cash_pkr).toBeCloseTo(balanceSheetCash, 2);
+    const bs = await balanceSheet(DATE_TO);
+    expect(cf.closing_cash_pkr).toBeCloseTo(bs.cash_and_cash_equivalents_pkr, 2);
   });
 
   it('discloses cheques in hand separately instead of counting them as cash', async () => {

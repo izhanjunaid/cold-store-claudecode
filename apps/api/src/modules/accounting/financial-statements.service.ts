@@ -20,7 +20,7 @@ const DERIVED = new Set<string>(DERIVED_EQUITY_ACCOUNTS);
 
 type Sums = { debit: number; credit: number };
 type SumMap = Map<string, Sums>;
-type Account = { accountCode: string; accountName: string; accountClass: string; accountType: string; parentAccountCode: string | null; normalBalance: 'DEBIT' | 'CREDIT'; statementSection: string | null };
+type Account = { accountCode: string; accountName: string; accountClass: string; accountType: string; parentAccountCode: string | null; normalBalance: 'DEBIT' | 'CREDIT'; statementSection: string | null; isCashEquivalent: boolean };
 
 interface StatementLine {
   account_code: string;
@@ -644,8 +644,21 @@ export class FinancialStatementsService {
       equitySnapshot(accounts, sums, fySums);
     const total_liabilities_and_equity_pkr = round2(total_liabilities_pkr + total_equity_pkr);
 
+    // Cash and cash equivalents (IFRS for SMEs 7.2): what the chart flags as
+    // cash, not the Cash & Bank header — which also holds 1025 Cheques in Hand,
+    // money that can still bounce. The cash-flow statement closes on this.
+    const cash_and_cash_equivalents_pkr = round2(
+      accounts
+        .filter((a) => a.isCashEquivalent)
+        .reduce((t, a) => {
+          const s = sums.get(a.accountCode);
+          return s ? t + assetAmt(s) : t;
+        }, 0),
+    );
+
     return {
       as_of_date: query.as_of_date,
+      cash_and_cash_equivalents_pkr,
 
       current_asset_groups,
       total_current_assets_pkr,
@@ -692,7 +705,7 @@ export class FinancialStatementsService {
     return this.prisma.chartOfAccounts.findMany({
       where: { facilityId },
       orderBy: { accountCode: 'asc' },
-      select: { accountCode: true, accountName: true, accountClass: true, accountType: true, parentAccountCode: true, normalBalance: true, statementSection: true },
+      select: { accountCode: true, accountName: true, accountClass: true, accountType: true, parentAccountCode: true, normalBalance: true, statementSection: true, isCashEquivalent: true },
     }) as unknown as Promise<Account[]>;
   }
 

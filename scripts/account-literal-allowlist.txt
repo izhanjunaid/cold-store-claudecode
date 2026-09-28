@@ -1,5 +1,4 @@
 # Files still holding account-code literals. Remove a line when you remove its literals.
-apps/api/src/modules/accounting/cash-flow.service.ts
 apps/api/src/modules/accounting/equity-accounts.ts
 apps/api/src/modules/accounting/financial-statements.service.ts
 apps/api/src/modules/accounting/opening-balance.service.ts

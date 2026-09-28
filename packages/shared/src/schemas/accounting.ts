@@ -476,6 +476,9 @@ export type ProfitLossQueryType = z.infer<typeof ProfitLossQuery>;
 
 export const BalanceSheetResponse = z.object({
   as_of_date: z.string(),
+  // Accounts the chart flags is_cash_equivalent — not the Cash & Bank header,
+  // which also holds uncleared cheques. The cash-flow statement closes on it.
+  cash_and_cash_equivalents_pkr: z.number(),
 
   current_asset_groups: z.array(StatementGroup),
   total_current_assets_pkr: z.number(),
