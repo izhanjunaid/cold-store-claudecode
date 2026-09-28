@@ -28,6 +28,7 @@ const STATUS_TONES: Record<string, Tone> = {
   PARTIAL: 'warning',
   OVERDUE: 'danger',
   VOID: 'muted',
+  VOIDED: 'muted',
   CANCELLED: 'muted',
   PENDING: 'warning',
   DISPATCHED: 'success',

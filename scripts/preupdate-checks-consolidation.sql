@@ -85,8 +85,9 @@ SELECT fa.asset_number, fa.asset_name, fa.asset_account_code, fa.purchase_date, 
        ob.entry_date AS opening_balance_date
 FROM fixed_assets fa
 JOIN journal_entries ob ON ob.facility_id = fa.facility_id AND ob.source_table = 'opening_balances'
-     AND ob.posting_status = 'POSTED' AND ob.reversed_by IS NULL
+     AND ob.posting_status = 'POSTED' AND ob.reversed_by IS NULL AND ob.book_type = 'PACCI'
 WHERE fa.purchase_journal_entry_id IS NOT NULL
+  AND fa.book_type = 'PACCI'
   AND fa.purchase_date <= ob.entry_date
   AND EXISTS (SELECT 1 FROM journal_entry_lines l
               WHERE l.journal_entry_id = ob.id AND l.account_code = fa.asset_account_code AND l.debit_amount > 0);
@@ -171,3 +172,11 @@ WHERE e.source_table = 'invoice_surcharge' AND e.posting_status = 'POSTED';
 \echo '== C20 owner-created accounts (review against the codes the new seed claims) =='
 SELECT account_code, account_name, account_class, account_type, parent_account_code
 FROM chart_of_accounts WHERE NOT is_system_account ORDER BY account_code;
+
+\echo '== C21 (C-17) DRAFT payroll runs with other deductions — the new code ignores them; clear or move them to an advance before the update =='
+SELECT r.run_number, e.name AS employee, li.other_deductions_pkr
+FROM payroll_line_items li
+JOIN payroll_runs r ON r.id = li.payroll_run_id
+JOIN employees e ON e.id = li.employee_id
+WHERE r.status = 'DRAFT' AND li.other_deductions_pkr > 0
+ORDER BY r.run_number, e.name;
