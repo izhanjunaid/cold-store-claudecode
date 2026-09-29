@@ -14,31 +14,31 @@ import {
 } from '@/components/billing/allocation-columns';
 import { formatMoney } from '@/lib/format';
 
-export interface ApplyAdvanceFormProps<T> {
+export interface AllocatePaymentFormProps<T> {
   paymentId: string;
   partyId: string;
-  /** The advance amount — the ceiling on what can be applied. */
-  amountPkr: number;
+  /** An advance moves out of customer advances as it is applied; a receipt was already credited to the party. */
+  isAdvance: boolean;
+  /** What is still unapplied — the ceiling on this application. */
+  availablePkr: number;
   onDone: (updated: T) => void;
   onCancel?: () => void;
 }
 
 /**
- * Applies an ADVANCE payment against open invoices. Shared by the payments
- * list (in a drawer) and `/payments/[id]` (inline), so the JE-04 rules live in
- * one place.
- *
- * An advance can only be applied while status is ADVANCE — the one envelope in
- * which the backend posts JE-04 (DR 2010 / CR receivable). Once applied, status
- * flips to ALLOCATED and the caller unmounts this.
+ * Applies a receipt's unapplied money — an advance, or a payment received on
+ * account — to the party's open invoices. Shared by the payments list (in a
+ * drawer) and `/payments/[id]` (inline). It can be used as many times as money
+ * is left: every application of an advance posts its own entry (docs/25 R-02, R-13).
  */
-export function ApplyAdvanceForm<T>({
+export function AllocatePaymentForm<T>({
   paymentId,
   partyId,
-  amountPkr,
+  isAdvance,
+  availablePkr,
   onDone,
   onCancel,
-}: ApplyAdvanceFormProps<T>) {
+}: AllocatePaymentFormProps<T>) {
   const [invoices, setInvoices] = useState<AllocationInvoiceOption[]>([]);
   const [rows, setRows] = useState<AllocationRow[]>([]);
   const [applying, setApplying] = useState(false);
@@ -72,8 +72,8 @@ export function ApplyAdvanceForm<T>({
       setError('Select an invoice and enter an amount to apply.');
       return;
     }
-    if (totalToApply > amountPkr + 0.001) {
-      setError('Total to apply exceeds the advance amount.');
+    if (totalToApply > availablePkr + 0.001) {
+      setError(`Only ${formatMoney(availablePkr)} is left to apply.`);
       return;
     }
     applyingRef.current = true;
@@ -84,12 +84,11 @@ export function ApplyAdvanceForm<T>({
         method: 'POST',
         body: { allocations: valid },
       });
-      toast.success('Advance applied');
+      toast.success(isAdvance ? 'Advance applied' : 'Receipt applied');
       onDone(updated);
-      // Deliberately not resetting the guard: this unmounts once status is no
-      // longer ADVANCE, and re-enabling would allow a second application.
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to apply advance');
+      setError(err instanceof Error ? err.message : 'Failed to apply the receipt');
+    } finally {
       applyingRef.current = false;
       setApplying(false);
     }
@@ -106,8 +105,9 @@ export function ApplyAdvanceForm<T>({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Applying drains the advance liability (2010) and settles the invoice (JE-04). This can only
-        be done once.
+        {isAdvance
+          ? 'Applying moves this much of the advance off the party’s advance balance and settles the invoice.'
+          : 'This receipt is already on the party’s account; applying it only marks which invoices it paid.'}
       </p>
       {error && (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -124,7 +124,7 @@ export function ApplyAdvanceForm<T>({
           <span className="text-sm text-muted-foreground">
             To apply:{' '}
             <span className="font-medium tabular-nums">{formatMoney(totalToApply)}</span> /{' '}
-            {formatMoney(amountPkr)}
+            {formatMoney(availablePkr)}
           </span>
         }
       />
@@ -135,43 +135,39 @@ export function ApplyAdvanceForm<T>({
           </Button>
         )}
         <Button onClick={handleApply} disabled={applying}>
-          {applying ? 'Applying…' : 'Apply Advance'}
+          {applying ? 'Applying…' : isAdvance ? 'Apply Advance' : 'Apply Receipt'}
         </Button>
       </div>
     </div>
   );
 }
 
-interface ApplyAdvanceSheetProps<T> {
+interface AllocatePaymentSheetProps<T> {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  payment: { id: string; party_id: string; party_name: string; amount_pkr: number } | null;
+  payment: { id: string; party_id: string; party_name: string; is_advance: boolean; unallocated_pkr: number } | null;
   onDone: (updated: T) => void;
 }
 
-/**
- * The list-row surface for the same form. A drawer rather than a dialog per
- * spec §5 — it carries an allocation editor, not a couple of fields.
- */
-export function ApplyAdvanceSheet<T>({
-  open,
-  onOpenChange,
-  payment,
-  onDone,
-}: ApplyAdvanceSheetProps<T>) {
+/** The list-row surface for the same form — a drawer, since it carries an allocation editor. */
+export function AllocatePaymentSheet<T>({ open, onOpenChange, payment, onDone }: AllocatePaymentSheetProps<T>) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent size="lg">
         <SheetHeader>
-          <SheetTitle>Apply Advance{payment ? ` — ${payment.party_name}` : ''}</SheetTitle>
+          <SheetTitle>
+            {payment?.is_advance ? 'Apply Advance' : 'Apply Receipt'}
+            {payment ? ` — ${payment.party_name}` : ''}
+          </SheetTitle>
         </SheetHeader>
         <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-4">
           {open && payment && (
-            <ApplyAdvanceForm<T>
+            <AllocatePaymentForm<T>
               key={payment.id}
               paymentId={payment.id}
               partyId={payment.party_id}
-              amountPkr={payment.amount_pkr}
+              isAdvance={payment.is_advance}
+              availablePkr={payment.unallocated_pkr}
               onDone={(updated) => {
                 onOpenChange(false);
                 onDone(updated);

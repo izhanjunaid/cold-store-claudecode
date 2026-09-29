@@ -17,7 +17,7 @@ import { RecordPaymentSheet } from '@/components/billing/record-payment-sheet';
 import { qk } from '@/lib/query-keys';
 import { getPaymentColumns, type PaymentRow } from './columns';
 import { PaymentClearDialog, PaymentDishonourDialog } from './payment-dialogs';
-import { ApplyAdvanceSheet } from './apply-advance-form';
+import { AllocatePaymentSheet } from './apply-advance-form';
 
 const FILTER_KEYS = ['status', 'payment_method', 'date_from', 'date_to', 'party_id'] as const;
 
@@ -36,7 +36,7 @@ export default function PaymentListPage() {
   const [recordOpen, setRecordOpen] = useState(false);
   const [clearTarget, setClearTarget] = useState<PaymentRow | null>(null);
   const [dishonourTarget, setDishonourTarget] = useState<PaymentRow | null>(null);
-  const [advanceTarget, setAdvanceTarget] = useState<PaymentRow | null>(null);
+  const [allocateTarget, setAllocateTarget] = useState<PaymentRow | null>(null);
 
   const params = useMemo(
     () => ({ page: state.page, page_size: state.perPage, ...state.filters }),
@@ -63,7 +63,7 @@ export default function PaymentListPage() {
         canRecord,
         onClear: setClearTarget,
         onDishonour: setDishonourTarget,
-        onApplyAdvance: setAdvanceTarget,
+        onAllocate: setAllocateTarget,
       }),
     [canRecord],
   );
@@ -197,12 +197,12 @@ export default function PaymentListPage() {
         }}
       />
 
-      <ApplyAdvanceSheet
-        open={!!advanceTarget}
-        onOpenChange={(o) => !o && setAdvanceTarget(null)}
-        payment={advanceTarget}
+      <AllocatePaymentSheet
+        open={!!allocateTarget}
+        onOpenChange={(o) => !o && setAllocateTarget(null)}
+        payment={allocateTarget}
         onDone={() => {
-          setAdvanceTarget(null);
+          setAllocateTarget(null);
           refreshAfterAction();
         }}
       />

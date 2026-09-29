@@ -65,8 +65,8 @@ export function PaymentClearDialog<T>({
           <DialogTitle>Mark Cheque Cleared</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          This cheque is parked in 1025 (Cheques in Hand) until the bank processes it. Marking it
-          cleared moves the amount into Bank Account — Main.
+          A cheque sits in Cheques in Hand until the bank processes it. Marking it cleared moves
+          the amount into the main bank account.
         </p>
         <div className="space-y-1">
           <Label>Cleared date</Label>
@@ -125,7 +125,9 @@ export function PaymentDishonourDialog<T>({
           <DialogTitle>Mark Cheque Dishonoured</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          All allocations will be reversed and invoice balances restored.
+          Every entry this cheque made is reversed — the receipt, any advance applied from it,
+          its clearing if it had cleared, and any peshgi it repaid — and the invoices it paid owe
+          again. The date cannot be earlier than the cheque's last entry.
         </p>
         <div className="space-y-1">
           <Label>Dishonour date</Label>
