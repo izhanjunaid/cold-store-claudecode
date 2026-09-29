@@ -24,10 +24,14 @@ import { cn } from '@/lib/utils';
 interface Column {
   account_code: string;
   account_name: string;
+  role: string;
+  partner_name: string | null;
   opening_pkr: number;
   capital_introduced_pkr: number;
   drawings_pkr: number;
+  other_movements_pkr: number;
   result_pkr: number;
+  transfer_pkr: number;
   closing_pkr: number;
 }
 
@@ -38,6 +42,7 @@ interface ChangesInEquity {
   total_opening_pkr: number;
   total_capital_introduced_pkr: number;
   total_drawings_pkr: number;
+  total_other_movements_pkr: number;
   total_result_pkr: number;
   total_closing_pkr: number;
   is_reconciled: boolean;
@@ -159,6 +164,7 @@ export default function ChangesInEquityPage() {
                   <TableHead key={c.account_code} className="whitespace-nowrap text-right">
                     <span className="block text-[11px] font-normal text-muted-foreground">
                       {c.account_code}
+                      {c.partner_name ? ` · ${c.partner_name}` : ''}
                     </span>
                     {c.account_name}
                   </TableHead>
@@ -188,11 +194,23 @@ export default function ChangesInEquityPage() {
                     total={data.total_capital_introduced_pkr}
                   />
                   <Row label="Drawings" pick={(c) => c.drawings_pkr} total={data.total_drawings_pkr} />
+                  {data.columns.some((c) => c.other_movements_pkr !== 0) && (
+                    <Row
+                      label="Other movements"
+                      pick={(c) => c.other_movements_pkr}
+                      total={data.total_other_movements_pkr}
+                    />
+                  )}
                   <Row
                     label="Result for the period"
                     pick={(c) => c.result_pkr}
                     total={data.total_result_pkr}
                   />
+                  {/* A finished year's result moving into retained earnings; it
+                      nets to zero across the two columns, so its total is 0. */}
+                  {data.columns.some((c) => c.transfer_pkr !== 0) && (
+                    <Row label="Transfer to retained earnings" pick={(c) => c.transfer_pkr} total={0} />
+                  )}
                   <Row
                     label="Closing balance"
                     pick={(c) => c.closing_pkr}

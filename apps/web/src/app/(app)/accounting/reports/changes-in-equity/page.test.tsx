@@ -11,23 +11,28 @@ vi.mock('@/lib/api-client', () => ({ apiClient: (...a: unknown[]) => apiClient(.
 
 import ChangesInEquityPage from './page';
 
-const column = (account_code: string, account_name: string, closing_pkr: number) => ({
+const column = (account_code: string, account_name: string, closing_pkr: number, partner_name: string | null = null) => ({
   account_code,
   account_name,
+  role: 'PARTNER_CAPITAL',
+  partner_name,
   opening_pkr: 0,
   capital_introduced_pkr: closing_pkr,
   drawings_pkr: 0,
+  other_movements_pkr: 0,
   result_pkr: 0,
+  transfer_pkr: 0,
   closing_pkr,
 });
 
 const BASE = {
   date_from: '2026-01-01',
   date_to: '2026-12-31',
-  columns: [column('3110', 'Junaid — Capital', 500000), column('3120', 'Umair — Capital', 300000)],
+  columns: [column('3110', 'Junaid — Capital', 500000, 'Junaid'), column('3120', 'Umair — Capital', 300000, 'Umair')],
   total_opening_pkr: 0,
   total_capital_introduced_pkr: 800000,
   total_drawings_pkr: 0,
+  total_other_movements_pkr: 0,
   total_result_pkr: 1000000,
   total_closing_pkr: 1800000,
   is_reconciled: true,
@@ -40,6 +45,31 @@ const mount = (data: Record<string, unknown>) => {
   apiClient.mockResolvedValue({ ...BASE, ...data });
   return render(<ChangesInEquityPage />);
 };
+
+describe('ChangesInEquityPage — the one equity roll-forward (L-24)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('shows a year-end transfer row only when the range crosses a year end', async () => {
+    mount({
+      columns: [
+        { ...column('3020', 'Retained Earnings', 900), role: 'RETAINED_EARNINGS', capital_introduced_pkr: 0, transfer_pkr: 900 },
+        { ...column('3030', 'Current Year Profit / (Loss)', 50), role: 'CURRENT_YEAR_RESULT', capital_introduced_pkr: 0, result_pkr: 950, transfer_pkr: -900 },
+      ],
+    });
+    await waitFor(() => expect(screen.getByText(/Transfer to retained earnings/)).toBeTruthy());
+  });
+
+  it('has no transfer row when nothing crossed a year end', async () => {
+    mount({});
+    await waitFor(() => expect(screen.getByText(/Closing balance/)).toBeTruthy());
+    expect(screen.queryByText(/Transfer to retained earnings/)).toBeNull();
+  });
+
+  it('names the owner a column belongs to', async () => {
+    mount({});
+    await waitFor(() => expect(screen.getByText(/3110 · Junaid/)).toBeTruthy());
+  });
+});
 
 /**
  * IFRS for SMEs 4.13 asks for the changes in EACH category of equity, and the

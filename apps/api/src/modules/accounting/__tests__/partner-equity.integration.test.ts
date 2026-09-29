@@ -1,85 +1,60 @@
 /**
- * Equity for an entity with more than one owner.
+ * Equity for an entity with more than one owner (IFRS for SMEs 6.2/6.3, 4.13).
  *
- * The facility is an AOP whose two owners contribute and withdraw separately,
- * in different amounts. Phase 29 built the equity presentation for a single
- * owner: one seeded capital account, one seeded drawings account, and the
- * combined statement of income and retained earnings that IFRS for SMEs 6.4
- * permits.
+ * The facility is an AOP whose two owners contribute and withdraw separately, in
+ * different amounts. What each equity account IS comes from the partners table —
+ * a partner's capital and drawings accounts are the ones their row names — never
+ * from the account's normal balance (docs/25 L-22). The inference this replaced
+ * treated the opening-balance plug as an owner's capital and counted every
+ * opening-balance entry to it as "capital introduced".
  *
- * Two things follow, and both are asserted here rather than argued:
- *
- *   1. 6.4's permission is conditional — the sole equity movements must be
- *      profit or loss, distributions, error corrections and policy changes.
- *      Capital introduced is not among them, so the moment an owner puts money
- *      in, that statement may not be presented and the statement of changes in
- *      equity (6.2/6.3) is required. `combined_statement_permitted` is the
- *      standard's own test, and the P&L block hides on it.
- *
- *   2. 4.13 requires an entity without share capital to show the changes in
- *      *each* category of equity. Each equity account is a category, so a
- *      second owner's accounts must appear without any code knowing their
- *      codes — which is why drawings are derived from being DEBIT-normal
- *      rather than from the literal '3015' the seed ships.
- *
- * Before this file, `equityRollforward` read one hardcoded code and had no test
- * at all, and the rollforward could not foot once capital was introduced.
+ * The statement of changes in equity is the one roll-forward (L-24): the P&L no
+ * longer carries a second one, so what its equity block used to assert — both
+ * owners' drawings, capital introduced, a foot — is asserted here.
  */
+import { randomUUID } from 'crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { withGuardsDisabled } from '../../../test/financial-guards';
-import {
-  getTestApp,
-  closeTestApp,
-  loginAsRole,
-  authHeaders,
-  TEST_FACILITY_ID,
-} from '../../../test/helpers';
+import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
 import type { FastifyInstance } from 'fastify';
 
 const prisma = new PrismaClient();
 
-// Owner B's pair, in the equity range but clear of everything the seed ships.
-const B_CAPITAL = '3061';
-const B_DRAWINGS = '3066';
-// Owner A's drawings account. Deliberately NOT the seeded 3015: that account is
-// not a system account, and docs/09 now tells an owner moving to per-owner
-// accounts to delete it — this suite started failing the moment someone did.
-// Nothing here should depend on a deletable account existing, and the point of
-// the file is that drawings are recognised by being DEBIT-normal rather than by
-// their code, so borrowing the seed's code proved nothing anyway.
-const A_DRAWINGS = '3056';
-const OWNED_CODES = [B_CAPITAL, B_DRAWINGS, A_DRAWINGS];
-
-// A year of its own, so no other suite's postings land inside the window.
+// A year of its own, so no other suite's postings land inside the window. It
+// crosses the July fiscal-year end, so the transfer row is exercised too.
 const FROM = '2044-01-01';
 const TO = '2044-12-31';
-const ENTRY_PREFIX = 'PEQ-';
 
 let app: FastifyInstance;
 let token: string;
+let userId: string;
+const entryIds: string[] = [];
+const partners: Record<'A' | 'B', { id: string; capital: string; drawings: string }> = {} as never;
 
-/** A balanced two-line entry, posted straight in — this is fixture, not the thing under test. */
-async function post(entryNumber: string, date: string, lines: [string, number, number][]) {
-  const d = new Date(date);
-  const user = await prisma.user.findFirstOrThrow({
-    where: { facilityId: TEST_FACILITY_ID },
-    select: { id: true },
-  });
+/**
+ * A balanced two-line entry, posted straight in: this is fixture, not the thing
+ * under test. `owner_equity` is the legacy owner-movement source — posted before
+ * owner movements became documents — so it counts as capital in / drawings.
+ */
+async function post(date: string, sourceTable: 'owner_equity' | 'manual', lines: [string, number, number][]) {
+  const d = new Date(`${date}T00:00:00.000Z`);
+  const id = randomUUID();
   await prisma.journalEntry.create({
     data: {
+      id,
       facilityId: TEST_FACILITY_ID,
-      entryNumber,
+      entryNumber: `PEQ-${id.slice(0, 8)}`,
       entryDate: d,
       entryType: 'ADJUSTMENT',
       bookType: 'PACCI',
-      sourceTable: 'manual',
-      sourceId: TEST_FACILITY_ID,
-      description: `partner equity fixture ${entryNumber}`,
+      sourceTable,
+      sourceId: id,
+      description: 'partner equity fixture',
       postingStatus: 'POSTED',
       periodYear: d.getUTCFullYear(),
       periodMonth: d.getUTCMonth() + 1,
-      createdBy: user.id,
+      createdBy: userId,
       lines: {
         create: lines.map(([accountCode, debitAmount, creditAmount], i) => ({
           lineNumber: i + 1,
@@ -87,11 +62,11 @@ async function post(entryNumber: string, date: string, lines: [string, number, n
           accountCode,
           debitAmount,
           creditAmount,
-          description: 'partner equity fixture',
         })),
       },
     },
   });
+  entryIds.push(id);
 }
 
 const equity = async (from = FROM, to = TO) =>
@@ -103,89 +78,89 @@ const equity = async (from = FROM, to = TO) =>
     })
   ).json().data;
 
-const pl = async (from = FROM, to = TO) =>
-  (
-    await app.inject({
-      method: 'GET',
-      url: `/v1/accounting/profit-loss?date_from=${from}&date_to=${to}`,
-      headers: authHeaders(token),
-    })
-  ).json().data;
-
 beforeAll(async () => {
   app = await getTestApp();
-  token = (await loginAsRole(app, 'OWNER')).accessToken;
+  const login = await loginAsRole(app, 'OWNER');
+  token = login.accessToken;
+  userId = login.user.id;
 
-  // Each owner's own capital and drawings accounts, created the way an owner
-  // creates them — nothing seeds these, and nothing may need to. Owner A keeps
-  // the seeded 3010 for capital because it is a system account that is always
-  // present; every other account this file posts to, it creates.
-  for (const [code, name, normal] of [
-    [B_CAPITAL, 'Owner B — Capital', 'CREDIT'],
-    [B_DRAWINGS, 'Owner B — Drawings', 'DEBIT'],
-    [A_DRAWINGS, 'Owner A — Drawings', 'DEBIT'],
-  ] as const) {
-    await prisma.chartOfAccounts.upsert({
-      where: { facilityId_accountCode: { facilityId: TEST_FACILITY_ID, accountCode: code } },
-      create: {
-        facilityId: TEST_FACILITY_ID,
-        accountCode: code,
-        accountName: name,
-        accountClass: 'EQUITY',
-        accountType: 'DETAIL',
-        normalBalance: normal,
-        isActive: true,
-      },
-      update: { accountName: name, normalBalance: normal, isActive: true },
+  // Each owner added the way an owner adds them: the partner row and their two
+  // accounts in one step. Nothing seeds these.
+  for (const key of ['A', 'B'] as const) {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/partners',
+      headers: authHeaders(token),
+      payload: { name: `Equity Owner ${key} ${Date.now()}`, admitted_on: FROM },
     });
+    expect(res.statusCode, res.body).toBe(201);
+    const row = await prisma.partner.findUniqueOrThrow({ where: { id: res.json().data.id } });
+    partners[key] = { id: row.id, capital: row.capitalAccountCode, drawings: row.drawingsAccountCode };
   }
 
   // Owner A puts in 500,000; Owner B puts in 300,000 — different amounts, which
   // is the whole reason they cannot share one account.
-  await post(`${ENTRY_PREFIX}A-CAP`, '2044-02-01', [['1010', 500000, 0], ['3010', 0, 500000]]);
-  await post(`${ENTRY_PREFIX}B-CAP`, '2044-02-01', [['1010', 300000, 0], [B_CAPITAL, 0, 300000]]);
+  await post('2044-02-01', 'owner_equity', [['1010', 500000, 0], [partners.A.capital, 0, 500000]]);
+  await post('2044-02-01', 'owner_equity', [['1010', 300000, 0], [partners.B.capital, 0, 300000]]);
   // And each takes a different amount out.
-  await post(`${ENTRY_PREFIX}A-DRW`, '2044-06-01', [[A_DRAWINGS, 40000, 0], ['1010', 0, 40000]]);
-  await post(`${ENTRY_PREFIX}B-DRW`, '2044-06-01', [[B_DRAWINGS, 25000, 0], ['1010', 0, 25000]]);
+  await post('2044-06-01', 'owner_equity', [[partners.A.drawings, 40000, 0], ['1010', 0, 40000]]);
+  await post('2044-06-01', 'owner_equity', [[partners.B.drawings, 25000, 0], ['1010', 0, 25000]]);
+  // Opening equity booked to the plug: belongs to nobody, and is not capital
+  // anybody introduced.
+  await post('2044-03-01', 'manual', [['1010', 100000, 0], ['3010', 0, 100000]]);
 });
 
 afterAll(async () => {
   await withGuardsDisabled(prisma, async () => {
-    const ids = (
-      await prisma.journalEntry.findMany({
-        where: { facilityId: TEST_FACILITY_ID, entryNumber: { startsWith: ENTRY_PREFIX } },
-        select: { id: true },
-      })
-    ).map((e) => e.id);
-    await prisma.journalEntryLine.deleteMany({ where: { journalEntryId: { in: ids } } });
-    await prisma.journalEntry.deleteMany({ where: { id: { in: ids } } });
-    await prisma.chartOfAccounts.deleteMany({
-      where: { facilityId: TEST_FACILITY_ID, accountCode: { in: OWNED_CODES } },
-    });
+    await prisma.journalEntryLine.deleteMany({ where: { journalEntryId: { in: entryIds } } });
+    await prisma.journalEntry.deleteMany({ where: { id: { in: entryIds } } });
+    const ids = Object.values(partners).map((p) => p.id);
+    const codes = Object.values(partners).flatMap((p) => [p.capital, p.drawings]);
+    await prisma.partnerProfitShare.deleteMany({ where: { partnerId: { in: ids } } });
+    await prisma.partner.deleteMany({ where: { id: { in: ids } } });
+    await prisma.chartOfAccounts.deleteMany({ where: { facilityId: TEST_FACILITY_ID, accountCode: { in: codes } } });
   });
   await prisma.$disconnect();
   await closeTestApp();
 });
 
-describe('statement of changes in equity (IFRS for SMEs 6.2/6.3, 4.13)', () => {
-  it('gives each owner their own column — both capital accounts and both drawings accounts', async () => {
+type Column = {
+  account_code: string;
+  role: string;
+  partner_id: string | null;
+  capital_introduced_pkr: number;
+  drawings_pkr: number;
+  other_movements_pkr: number;
+};
+
+describe('statement of changes in equity reads the partners table (L-22)', () => {
+  const col = (d: { columns: Column[] }, code: string) => d.columns.find((c) => c.account_code === code)!;
+
+  it('gives each owner their own columns, named for them', async () => {
     const d = await equity();
-    const codes = d.columns.map((c: { account_code: string }) => c.account_code);
-    expect(codes).toContain('3010');
-    expect(codes).toContain(B_CAPITAL);
-    expect(codes).toContain(A_DRAWINGS);
-    expect(codes).toContain(B_DRAWINGS);
+    for (const key of ['A', 'B'] as const) {
+      expect(col(d, partners[key].capital)).toMatchObject({ role: 'PARTNER_CAPITAL', partner_id: partners[key].id });
+      expect(col(d, partners[key].drawings)).toMatchObject({ role: 'PARTNER_DRAWINGS', partner_id: partners[key].id });
+    }
   });
 
   it('keeps the two owners apart — B is not folded into A', async () => {
     const d = await equity();
-    const col = (code: string) =>
-      d.columns.find((c: { account_code: string }) => c.account_code === code);
-    expect(col('3010').capital_introduced_pkr).toBe(500000);
-    expect(col(B_CAPITAL).capital_introduced_pkr).toBe(300000);
+    expect(col(d, partners.A.capital).capital_introduced_pkr).toBe(500000);
+    expect(col(d, partners.B.capital).capital_introduced_pkr).toBe(300000);
     // Drawings are a debit to a contra-equity account, so the movement is negative.
-    expect(col(A_DRAWINGS).drawings_pkr).toBe(-40000);
-    expect(col(B_DRAWINGS).drawings_pkr).toBe(-25000);
+    expect(col(d, partners.A.drawings).drawings_pkr).toBe(-40000);
+    expect(col(d, partners.B.drawings).drawings_pkr).toBe(-25000);
+    expect(d.total_capital_introduced_pkr).toBe(800000);
+    expect(d.total_drawings_pkr).toBe(-65000);
+  });
+
+  it('does not count opening equity in the plug as capital anybody introduced', async () => {
+    const d = await equity();
+    const plug = col(d, '3010');
+    expect(plug.role).toBe('OPENING_BALANCE_EQUITY');
+    expect(plug.capital_introduced_pkr).toBe(0);
+    expect(plug.other_movements_pkr).toBe(100000);
   });
 
   it('foots: every column closes at opening plus its movements', async () => {
@@ -193,7 +168,7 @@ describe('statement of changes in equity (IFRS for SMEs 6.2/6.3, 4.13)', () => {
     for (const c of d.columns) {
       const expected =
         Math.round(
-          (c.opening_pkr + c.capital_introduced_pkr + c.drawings_pkr + c.result_pkr) * 100,
+          (c.opening_pkr + c.capital_introduced_pkr + c.drawings_pkr + c.other_movements_pkr + c.result_pkr + c.transfer_pkr) * 100,
         ) / 100;
       expect(expected, `column ${c.account_code} does not foot`).toBe(c.closing_pkr);
     }
@@ -202,7 +177,6 @@ describe('statement of changes in equity (IFRS for SMEs 6.2/6.3, 4.13)', () => {
   it('reconciles to the balance sheet at the same date', async () => {
     const d = await equity();
     expect(d.is_reconciled).toBe(true);
-
     const bs = (
       await app.inject({
         method: 'GET',
@@ -213,46 +187,27 @@ describe('statement of changes in equity (IFRS for SMEs 6.2/6.3, 4.13)', () => {
     expect(d.total_closing_pkr).toBeCloseTo(bs.total_equity_pkr, 2);
   });
 
-  it('does not invent a profit split, because no agreement says what it is', async () => {
+  it('gives no owner a share of the result inside their own columns', async () => {
     const d = await equity();
-    expect(d.result_is_unallocated).toBe(true);
-    // The result belongs to no owner's column — it sits undivided.
     for (const c of d.columns) {
-      if (c.account_code === '3020' || c.account_code === '3030') continue;
+      if (c.role === 'CURRENT_YEAR_RESULT') continue;
       expect(c.result_pkr, `${c.account_code} was allocated a share of profit`).toBe(0);
     }
   });
 });
 
-describe('the P&L block obeys IFRS for SMEs 6.4 rather than assuming it applies', () => {
-  it('counts BOTH owners drawings, not just the seeded account', async () => {
-    // Against the shipped code this read 0: '3015' was hardcoded, so neither
-    // owner's drawings reached the face of the statement once they had accounts
-    // of their own.
-    const d = await pl();
-    expect(d.drawings_pkr).toBe(65000);
-  });
-
-  it('discloses capital introduced, so the rollforward can foot', async () => {
-    const d = await pl();
-    expect(d.capital_introduced_pkr).toBe(800000);
-    const rolled =
-      Math.round(
-        (d.opening_equity_pkr + d.capital_introduced_pkr + d.net_profit_pkr - d.drawings_pkr) * 100,
-      ) / 100;
-    expect(rolled).toBeCloseTo(d.closing_equity_pkr, 2);
-  });
-
-  it('withdraws the combined statement once capital has been introduced', async () => {
-    // 6.4 permits it only where equity moved solely through profit or loss,
-    // distributions, error corrections and policy changes.
-    const d = await pl();
-    expect(d.combined_statement_permitted).toBe(false);
-  });
-
-  it('permits it again over a period with no capital introduced', async () => {
-    const d = await pl('2044-07-01', '2044-12-31');
-    expect(d.capital_introduced_pkr).toBe(0);
-    expect(d.combined_statement_permitted).toBe(true);
+describe('the balance sheet labels each equity line by what it is', () => {
+  it('names the owner of each capital and drawings line, and the plug as the plug', async () => {
+    const bs = (
+      await app.inject({
+        method: 'GET',
+        url: `/v1/accounting/balance-sheet?as_of_date=${TO}`,
+        headers: authHeaders(token),
+      })
+    ).json().data;
+    const line = (code: string) => bs.equity_lines.find((l: { account_code: string }) => l.account_code === code);
+    expect(line(partners.A.capital)).toMatchObject({ role: 'PARTNER_CAPITAL', partner_id: partners.A.id, amount_pkr: 500000 });
+    expect(line(partners.B.drawings)).toMatchObject({ role: 'PARTNER_DRAWINGS', partner_id: partners.B.id, amount_pkr: -25000 });
+    expect(line('3010')).toMatchObject({ role: 'OPENING_BALANCE_EQUITY', partner_id: null });
   });
 });

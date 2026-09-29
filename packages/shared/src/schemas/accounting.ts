@@ -368,7 +368,6 @@ export const TrialBalanceResponse = z.object({
   // The same rows grouped by statement section, so a subtotal here can be
   // traced onto the face of the P&L or balance sheet.
   section_groups: z.array(TrialBalanceSectionGroup),
-  rows: z.array(TrialBalanceRow),
   total_opening_debit_pkr: z.number(),
   total_opening_credit_pkr: z.number(),
   total_movement_debit_pkr: z.number(),
@@ -405,6 +404,27 @@ export const StatementGroup = z.object({
 });
 export type StatementGroupType = z.infer<typeof StatementGroup>;
 
+/**
+ * What an equity account is, read from the partners table and the account
+ * registry — never inferred from its normal balance (docs/25 L-22).
+ */
+export const EquityRole = z.enum([
+  'PARTNER_CAPITAL',
+  'PARTNER_DRAWINGS',
+  'OPENING_BALANCE_EQUITY',
+  'RETAINED_EARNINGS',
+  'CURRENT_YEAR_RESULT',
+  'OTHER',
+]);
+export type EquityRoleType = z.infer<typeof EquityRole>;
+
+export const EquityLine = StatementLine.extend({
+  role: EquityRole,
+  partner_id: z.string().uuid().nullable(),
+  partner_name: z.string().nullable(),
+});
+export type EquityLineType = z.infer<typeof EquityLine>;
+
 export const ProfitLossResponse = z.object({
   date_from: z.string(),
   date_to: z.string(),
@@ -439,34 +459,17 @@ export const ProfitLossResponse = z.object({
   ebitda_pkr: z.number(),
   ebitda_pct: z.number().nullable(),
 
+  // resultFor() — the one definition of the result the balance sheet and the
+  // statement of changes in equity use too. The owners' equity roll-forward is
+  // the statement of changes in equity's job, not this one's (docs/25 L-24).
   net_profit_pkr: z.number(),
   net_profit_pct: z.number().nullable(),
 
-  // Statement of income and retained earnings (IFRS for SMEs §3.18 style):
-  // opening equity + profit − drawings = closing equity. Ties to the balance
-  // sheet's total_equity_pkr at date_to, but only when the range starts on the
-  // fiscal-year start — equity carries FY-to-date profit, not range profit.
-  opening_equity_pkr: z.number(),
-  capital_introduced_pkr: z.number(),
-  drawings_pkr: z.number(),
-  closing_equity_pkr: z.number(),
-  is_fiscal_year_to_date: z.boolean(),
-  // False once an owner has put capital in during the period: IFRS for SMEs 6.4
-  // then no longer permits the combined statement, and the statement of changes
-  // in equity is the one to read.
-  combined_statement_permitted: z.boolean(),
-
-  // Activity in accounts the header rollups could not place (F-6b);
-  // amounts are signed as their contribution to net profit.
+  // P&L accounts under no sectioned header (F-6b), signed as their contribution
+  // to the result. Their amounts are already in the section their class belongs
+  // to above; this only names them.
   unclassified_lines: z.array(StatementLine),
-  total_unclassified_pkr: z.number(),
   has_unclassified: z.boolean(),
-
-  // Back-compat flat fields
-  revenue_lines: z.array(StatementLine),
-  total_revenue_pkr: z.number(),
-  expense_lines: z.array(StatementLine),
-  total_expense_pkr: z.number(),
 });
 export type ProfitLossResponseType = z.infer<typeof ProfitLossResponse>;
 
@@ -495,7 +498,7 @@ export const BalanceSheetResponse = z.object({
   total_non_current_liabilities_pkr: z.number(),
   total_liabilities_pkr: z.number(),
 
-  equity_lines: z.array(StatementLine),
+  equity_lines: z.array(EquityLine),
   // Retained earnings = posted 3020 + accumulated prior fiscal-year results;
   // current_year_pl covers only the fiscal year containing as_of_date (virtual
   // closing). fiscal_year_start is that FY's first day (ISO date).
@@ -516,10 +519,6 @@ export const BalanceSheetResponse = z.object({
   has_unclassified: z.boolean(),
 
   is_balanced: z.boolean(),
-
-  // Back-compat flat fields
-  asset_lines: z.array(StatementLine),
-  liability_lines: z.array(StatementLine),
 });
 export type BalanceSheetResponseType = z.infer<typeof BalanceSheetResponse>;
 
@@ -554,10 +553,20 @@ export type ChangesInEquityQueryType = z.infer<typeof ChangesInEquityQuery>;
 export const EquityColumn = z.object({
   account_code: z.string(),
   account_name: z.string(),
+  role: EquityRole,
+  partner_id: z.string().uuid().nullable(),
+  partner_name: z.string().nullable(),
   opening_pkr: z.number(),
+  // Owner-equity documents on a partner's own capital / drawings account.
   capital_introduced_pkr: z.number(),
   drawings_pkr: z.number(),
+  // Everything else: opening balances, attributing the plug, corrections.
+  other_movements_pkr: z.number(),
+  // Only on the current-year column.
   result_pkr: z.number(),
+  // A finished fiscal year's result moving into retained earnings when the
+  // range crosses a year end. Nets to zero across the two columns.
+  transfer_pkr: z.number(),
   closing_pkr: z.number(),
 });
 
@@ -568,6 +577,7 @@ export const ChangesInEquityResponse = z.object({
   total_opening_pkr: z.number(),
   total_capital_introduced_pkr: z.number(),
   total_drawings_pkr: z.number(),
+  total_other_movements_pkr: z.number(),
   total_result_pkr: z.number(),
   total_closing_pkr: z.number(),
   // Closing across the columns equals total_equity_pkr on the balance sheet at

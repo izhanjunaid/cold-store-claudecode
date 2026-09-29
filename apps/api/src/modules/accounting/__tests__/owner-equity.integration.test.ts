@@ -88,10 +88,29 @@ beforeAll(async () => {
       update: { accountName: name, normalBalance: normal, isActive: true },
     });
   }
+
+  // The two accounts are an owner's because a partner row says so — the
+  // statements read roles from the partners table, not the normal balance.
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/partners',
+    headers: authHeaders(token),
+    payload: {
+      name: `Owner C ${Date.now()}`,
+      admitted_on: FROM,
+      capital_account_code: CAPITAL,
+      drawings_account_code: DRAWINGS,
+    },
+  });
+  expect(res.statusCode, res.body).toBe(201);
+  partnerId = res.json().data.id;
 });
+
+let partnerId: string;
 
 afterAll(async () => {
   await withGuardsDisabled(prisma, async () => {
+    await prisma.partner.deleteMany({ where: { id: partnerId } });
     const ids = (
       await prisma.journalEntry.findMany({
         where: { facilityId: TEST_FACILITY_ID, sourceTable: 'owner_equity' },

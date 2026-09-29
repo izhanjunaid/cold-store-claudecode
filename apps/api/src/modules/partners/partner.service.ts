@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import {
+  SYSTEM_ACCOUNTS,
   suggestNextCode,
   type CodedAccount,
   type CreatePartnerRequestType,
@@ -8,7 +9,9 @@ import {
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { CoaService } from '../accounting/coa.service';
-import { PARTNER_CAPITAL_HEADER, PARTNER_DRAWINGS_HEADER } from '../accounting/equity-accounts';
+
+const PARTNER_CAPITAL_HEADER = SYSTEM_ACCOUNTS.PARTNERS_CAPITAL;
+const PARTNER_DRAWINGS_HEADER = SYSTEM_ACCOUNTS.PARTNERS_DRAWINGS;
 
 type Tx = Prisma.TransactionClient;
 

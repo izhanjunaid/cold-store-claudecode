@@ -4,9 +4,10 @@ import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
 import { type JournalEntryLineDraft } from './templates/types';
 import type { JournalEntryService } from './journal-entry.service';
-import { standingEntriesWhere } from './ledger';
-import { EQUITY_PLUG_ACCOUNT, unattributedPlug } from './equity-accounts';
-import { defaultControlAccountForPartyType } from '@coldchain/shared';
+import { accountBalances, signedBalance, standingEntriesWhere } from './ledger';
+import { SYSTEM_ACCOUNTS, defaultControlAccountForPartyType } from '@coldchain/shared';
+
+const EQUITY_PLUG_ACCOUNT = SYSTEM_ACCOUNTS.OPENING_BALANCE_EQUITY;
 
 /**
  * Guided opening balances (audit Gap 1): one balanced PACCI entry holding
@@ -58,17 +59,8 @@ export class OpeningBalanceService {
         orderBy: { entryDate: 'asc' },
         select: { entryNumber: true, entryDate: true },
       }),
-      this.prisma.journalEntryLine.aggregate({
-        where: {
-          facilityId,
-          accountCode: EQUITY_PLUG_ACCOUNT,
-          journalEntry: { postingStatus: 'POSTED', bookType: 'PACCI' },
-        },
-        _sum: { debitAmount: true, creditAmount: true },
-      }),
+      accountBalances(this.prisma, { facilityId, book: 'PACCI', accounts: [EQUITY_PLUG_ACCOUNT] }),
     ]);
-
-    const plugCredit = Number(plugSums._sum.creditAmount ?? 0) - Number(plugSums._sum.debitAmount ?? 0);
 
     return {
       entered: existing !== null,
@@ -79,7 +71,7 @@ export class OpeningBalanceService {
       earliest_posting_entry_number: firstPosting?.entryNumber ?? null,
       // Anything sitting in the plug is unattributed by definition — the account
       // is no longer anybody's capital. Zero is the healthy answer.
-      unattributed_plug_pkr: unattributedPlug(plugCredit),
+      unattributed_plug_pkr: signedBalance(plugSums.get(EQUITY_PLUG_ACCOUNT), 'CREDIT'),
     };
   }
 

@@ -30,7 +30,7 @@ import { PeriodLockService } from './period-lock.service';
 import { OpeningBalanceService } from './opening-balance.service';
 import { CASH_TRANSFER_ACCOUNTS } from './templates/je-27-cash-transfer';
 import { buildJE30OwnerEquity } from './templates/je-30-owner-equity';
-import { DERIVED_EQUITY_ACCOUNTS } from './equity-accounts';
+import { DERIVED_EQUITY_ACCOUNTS } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 
 const CodeParam = z.object({ code: z.string().regex(/^[0-9]+$/) });

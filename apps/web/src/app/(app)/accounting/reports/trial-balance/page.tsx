@@ -51,7 +51,6 @@ interface TB {
   date_to: string;
   groups: Group[];
   section_groups: SectionGroup[];
-  rows: Row[];
   total_opening_debit_pkr: number;
   total_opening_credit_pkr: number;
   total_movement_debit_pkr: number;
@@ -86,7 +85,7 @@ export default function TrialBalancePage() {
   function exportCsv() {
     if (!data) return;
     const csv = buildCsv(
-      data.rows,
+      data.groups.flatMap((g) => g.rows),
       [
         { header: 'Class', value: (r) => r.account_class },
         { header: 'Code', value: (r) => r.account_code },

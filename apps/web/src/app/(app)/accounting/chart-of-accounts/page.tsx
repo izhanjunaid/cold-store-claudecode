@@ -145,8 +145,8 @@ export default function ChartOfAccountsPage() {
   const [balances, setBalances] = useState<Map<string, TbRow>>(new Map());
 
   useEffect(() => {
-    apiClient<{ rows: TbRow[] }>(`/v1/accounting/trial-balance?date_to=${tbAsOf}`)
-      .then((tb) => setBalances(new Map((tb?.rows ?? []).map((r) => [r.account_code, r]))))
+    apiClient<{ groups: { rows: TbRow[] }[] }>(`/v1/accounting/trial-balance?date_to=${tbAsOf}`)
+      .then((tb) => setBalances(new Map(tb.groups.flatMap((g) => g.rows).map((r) => [r.account_code, r]))))
       .catch(() => setBalances(new Map()));
   }, [tbAsOf]);
 

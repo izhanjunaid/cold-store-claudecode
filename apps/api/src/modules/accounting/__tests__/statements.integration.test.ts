@@ -125,6 +125,83 @@ describe('a legacy posting to the derived equity accounts stays on the balance s
   });
 });
 
+describe('one equity roll-forward, with the year-end rollover as a transfer (L-24, L-17)', () => {
+  // June and July 2038 straddle the default (Pakistan) fiscal-year end.
+  const FROM = '2038-06-01';
+  const TO = '2038-07-31';
+
+  beforeAll(async () => {
+    const bs = await get('/v1/accounting/balance-sheet?as_of_date=2038-07-15');
+    expect(bs.fiscal_year_start, 'these assertions assume a July fiscal year').toBe('2038-07-01');
+    await postManual('2038-06-10', [
+      { account_code: '1010', debit_amount: 100, credit_amount: 0 },
+      { account_code: '4150', debit_amount: 0, credit_amount: 100 },
+    ]);
+    await postManual('2038-07-10', [
+      { account_code: '1010', debit_amount: 50, credit_amount: 0 },
+      { account_code: '4150', debit_amount: 0, credit_amount: 50 },
+    ]);
+  });
+
+  it('shows the result once, on the result column, and moves the finished year into retained earnings', async () => {
+    const [soce, pl, juneEnd] = await Promise.all([
+      get(`/v1/accounting/changes-in-equity?date_from=${FROM}&date_to=${TO}`),
+      get(`/v1/accounting/profit-loss?date_from=${FROM}&date_to=${TO}`),
+      get('/v1/accounting/balance-sheet?as_of_date=2038-06-30'),
+    ]);
+    const col = (code: string) => soce.columns.find((c: { account_code: string }) => c.account_code === code);
+    const retained = col('3020');
+    const current = col('3030');
+
+    // The period's result, once — the same figure as the P&L's bottom line.
+    expect(current.result_pkr).toBeCloseTo(pl.net_profit_pkr, 2);
+    expect(soce.total_result_pkr).toBeCloseTo(pl.net_profit_pkr, 2);
+    // Retained earnings earned nothing in the period; the year that ended on
+    // 30 June moved into it, and out of the current-year column, on its own row.
+    expect(retained.result_pkr).toBe(0);
+    expect(retained.transfer_pkr).toBeCloseTo(juneEnd.current_year_pl_pkr, 2);
+    expect(current.transfer_pkr).toBeCloseTo(-juneEnd.current_year_pl_pkr, 2);
+    expect(soce.is_reconciled).toBe(true);
+  });
+
+  it('a range starting on the fiscal-year start has nothing to transfer', async () => {
+    const soce = await get('/v1/accounting/changes-in-equity?date_from=2038-07-01&date_to=2038-07-31');
+    for (const c of soce.columns) expect(c.transfer_pkr, c.account_code).toBe(0);
+  });
+
+  it('the P&L carries no equity roll-forward of its own, and no back-compat duplicates (L-42)', async () => {
+    const pl = await get(`/v1/accounting/profit-loss?date_from=${FROM}&date_to=${TO}`);
+    for (const field of ['opening_equity_pkr', 'closing_equity_pkr', 'combined_statement_permitted', 'revenue_lines', 'total_revenue_pkr']) {
+      expect(pl, field).not.toHaveProperty(field);
+    }
+  });
+
+  it('this year’s P&L is the balance sheet’s current-year result', async () => {
+    const [pl, bs] = await Promise.all([
+      get('/v1/accounting/profit-loss?date_from=2038-07-01&date_to=2038-07-31'),
+      get('/v1/accounting/balance-sheet?as_of_date=2038-07-31'),
+    ]);
+    expect(bs.current_year_pl_pkr).toBeCloseTo(pl.net_profit_pkr, 2);
+  });
+
+  it('the trial balance’s section subtotals are the balance sheet’s section totals (L-16, L-18)', async () => {
+    const [tb, bs] = await Promise.all([
+      get(`/v1/accounting/trial-balance?date_to=${TO}`),
+      get(`/v1/accounting/balance-sheet?as_of_date=${TO}`),
+    ]);
+    const net = (section: string, side: 'DEBIT' | 'CREDIT') => {
+      const g = tb.section_groups.find((s: { statement_section: string }) => s.statement_section === section);
+      if (!g) return 0;
+      const d = g.subtotal.debit_balance_pkr - g.subtotal.credit_balance_pkr;
+      return side === 'DEBIT' ? d : -d;
+    };
+    expect(net('CURRENT_ASSET', 'DEBIT')).toBeCloseTo(bs.total_current_assets_pkr, 2);
+    expect(net('NON_CURRENT_ASSET', 'DEBIT')).toBeCloseTo(bs.total_non_current_assets_pkr, 2);
+    expect(net('CURRENT_LIABILITY', 'CREDIT')).toBeCloseTo(bs.total_current_liabilities_pkr, 2);
+    expect(tb.is_balanced).toBe(true);
+  });
+});
+
 describe('EBITDA adds back depreciation and impairment, and nothing else (L-21)', () => {
   it('a legacy asset depreciating into 6100 does not add Miscellaneous back; impairment is its own row', async () => {
     // Before the registry, an OTHER-category asset defaulted its depreciation
