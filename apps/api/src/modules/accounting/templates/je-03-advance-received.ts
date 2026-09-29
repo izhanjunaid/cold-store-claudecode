@@ -1,5 +1,5 @@
 import type { JournalEntryDraft } from './types';
-import { assetAccountForPaymentMethod, SYSTEM_ACCOUNTS } from '@coldchain/shared';
+import { assetAccountForPaymentMethod, SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 
 type Input = {
   paymentId: string;
@@ -50,6 +50,3 @@ export function buildJE03AdvanceReceived(input: Input): JournalEntryDraft {
   };
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}

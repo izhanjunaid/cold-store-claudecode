@@ -5,8 +5,9 @@ import type {
   WriteOffPeshgiRequestType,
   PartyLoanListQueryType,
 } from '@coldchain/shared';
-import { assetAccountForPaymentMethod } from '@coldchain/shared';
+import { assetAccountForPaymentMethod, round2 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
+import { assertCashEquivalent } from '../payment/cash-account';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { generatePeshgiNumber } from './peshgi-number';
 import { buildJE18PeshgiIssued } from './templates/je-18-peshgi-issued';
@@ -31,6 +32,7 @@ export class PeshgiService {
       const bookType = body.book_type ?? 'PACCI';
       const sourceAccount =
         body.source_asset_account_code ?? assetAccountForPaymentMethod(body.payment_method);
+      await assertCashEquivalent(tx, facilityId, sourceAccount, 'source_asset_account_code');
 
       const loan = await tx.partyLoan.create({
         data: {
@@ -108,6 +110,7 @@ export class PeshgiService {
       if ((body.payment_method as string) === 'DEDUCTED_FROM_PRODUCE' || !assetAccount) {
         throw Errors.PESHGI_REPAYMENT_REQUIRES_SETTLEMENT();
       }
+      await assertCashEquivalent(tx, facilityId, assetAccount, 'asset_account_code');
 
       const repayment = await tx.partyLoanRepayment.create({
         data: {
@@ -290,6 +293,3 @@ function formatLoan(l: any) {
   };
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}

@@ -1,3 +1,4 @@
+import { round2 } from '@coldchain/shared';
 import type { Prisma, RateType, BookType } from '@coldchain/db';
 import { computeStorageCharge, billingPeriodStart } from './storage-charge';
 import { resolveFacilitySettings } from '../facility/facility.service';
@@ -54,8 +55,8 @@ async function createDraftInvoice(
   // The informal book carries no sales tax: nothing settles KATCHI output tax,
   // so charging it would only grow a liability no return ever clears (docs/25 R-06).
   const gstRate = settings.gst_registered && params.bookType === 'PACCI' ? settings.gst_default_rate : 0;
-  const gstAmount = Math.round(subTotal * (gstRate / 100) * 100) / 100;
-  const total = Math.round((subTotal + gstAmount) * 100) / 100;
+  const gstAmount = round2(subTotal * (gstRate / 100));
+  const total = round2(subTotal + gstAmount);
 
   return tx.invoice.create({
     data: {

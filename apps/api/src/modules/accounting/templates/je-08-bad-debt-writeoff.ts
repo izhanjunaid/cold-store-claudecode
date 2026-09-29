@@ -1,6 +1,6 @@
 import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft } from './types';
-import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 
 type Input = {
   invoiceId: string;
@@ -51,6 +51,3 @@ export function buildJE08BadDebtWriteOff(input: Input): JournalEntryDraft {
   };
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}

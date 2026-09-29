@@ -1,7 +1,5 @@
 import type { JournalEntryDraft } from '../../accounting/templates/types';
-import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
-
-const ACCOUNT_PESHGI_AR = '1140';
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 
 type Input = {
   loanId: string;
@@ -40,7 +38,7 @@ export function buildJE20PeshgiWriteOff(input: Input): JournalEntryDraft {
         description: `Bad debt expense — peshgi ${input.loanNumber}`,
       },
       {
-        accountCode: ACCOUNT_PESHGI_AR,
+        accountCode: SYSTEM_ACCOUNTS.PESHGI_LOANS,
         debitAmount: 0,
         creditAmount: amount,
         partyId: input.partyId,
@@ -50,6 +48,3 @@ export function buildJE20PeshgiWriteOff(input: Input): JournalEntryDraft {
   };
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}

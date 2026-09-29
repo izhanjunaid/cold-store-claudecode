@@ -2,9 +2,7 @@
 apps/api/src/modules/accounting/cash-flow.service.ts
 apps/api/src/modules/accounting/equity-accounts.ts
 apps/api/src/modules/accounting/financial-statements.service.ts
-apps/api/src/modules/accounting/gst-settlement.service.ts
 apps/api/src/modules/accounting/opening-balance.service.ts
-apps/api/src/modules/accounting/templates/je-26-gst-settlement.ts
 apps/api/src/modules/accounting/templates/je-27-cash-transfer.ts
 apps/api/src/modules/accounting/withholding-remittance.service.ts
 apps/api/src/modules/expenses/templates/je-17b-expense-accrued.ts
@@ -12,9 +10,6 @@ apps/api/src/modules/expenses/templates/je-17b-pay-accrued-payment.ts
 apps/api/src/modules/expenses/templates/je-17c-petty-cash-replenish.ts
 apps/api/src/modules/expenses/templates/withholding.ts
 apps/api/src/modules/payroll/templates/je-16b-govt-remittance.ts
-apps/api/src/modules/peshgi/templates/je-18-peshgi-issued.ts
-apps/api/src/modules/peshgi/templates/je-19-peshgi-recovered.ts
-apps/api/src/modules/peshgi/templates/je-20-peshgi-write-off.ts
 apps/api/src/modules/reporting/reports/cash-exceptions.ts
 apps/web/src/app/(app)/accounting/cash-transfers/page.tsx
 apps/web/src/app/(app)/accounting/gst-settlement/page.tsx

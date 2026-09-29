@@ -1,3 +1,4 @@
+import { round2 } from '@coldchain/shared';
 import type { PrismaClient, Prisma, InvoiceStatus } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { SETTLEMENT_INCLUDE } from './invoice-settlement';
@@ -10,7 +11,7 @@ export function computeDiscountAmount(
   if (!discountType || discountValue == null) return 0;
   const amount =
     discountType === 'PERCENT'
-      ? Math.round(subTotal * (discountValue / 100) * 100) / 100
+      ? round2(subTotal * (discountValue / 100))
       : discountValue;
   if (amount > subTotal) throw Errors.INVOICE_DISCOUNT_EXCEEDS_SUBTOTAL();
   return amount;
@@ -121,8 +122,8 @@ export class InvoiceRepository {
       invoice?.discountValue != null ? Number(invoice.discountValue) : null,
     );
     // GST applies to the post-discount taxable value
-    const gstAmount = Math.round((subTotal - discount) * (gstRate / 100) * 100) / 100;
-    const total = Math.round((subTotal - discount + gstAmount) * 100) / 100;
+    const gstAmount = round2((subTotal - discount) * (gstRate / 100));
+    const total = round2(subTotal - discount + gstAmount);
 
     await tx.invoice.update({
       where: { id: invoiceId },
