@@ -87,7 +87,7 @@ export type LoanStatus = z.infer<typeof LoanStatus>;
 export const LoanRepaymentMethod = z.enum(['CASH', 'BANK_TRANSFER', 'DEDUCTED_FROM_PRODUCE']);
 export type LoanRepaymentMethod = z.infer<typeof LoanRepaymentMethod>;
 
-export const EmployeeAdvanceStatus = z.enum(['ACTIVE', 'RECOVERED', 'WRITTEN_OFF']);
+export const EmployeeAdvanceStatus = z.enum(['ACTIVE', 'RECOVERED', 'WRITTEN_OFF', 'VOIDED']);
 export type EmployeeAdvanceStatus = z.infer<typeof EmployeeAdvanceStatus>;
 
 export const AccountClass = z.enum([
@@ -159,6 +159,7 @@ export const JournalEntryType = z.enum([
   'SUPPLIER_PAYMENT',
   'TAX_REMITTANCE',
   'LATE_PAYMENT_SURCHARGE',
+  'EMPLOYEE_ADVANCE_REPAYMENT',
 ]);
 export type JournalEntryType = z.infer<typeof JournalEntryType>;
 

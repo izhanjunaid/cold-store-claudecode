@@ -3,11 +3,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import {
+  SYSTEM_ACCOUNTS,
+  localIsoDate,
+  type EmployeeAdvanceRecoveryResponseType,
+  type EmployeeAdvanceResponseType,
+} from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
+import { useAccounts } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -18,53 +26,46 @@ import { PageSkeleton } from '@/components/page-skeleton';
 import { formatDate, formatMoney } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
-interface Recovery {
-  id: string;
-  payroll_run_id: string;
-  payroll_run_number?: string;
-  recovery_date: string;
-  amount_pkr: number;
-}
-interface Advance {
-  id: string;
-  advance_number: string;
-  employee_id: string;
-  employee_name?: string;
-  issue_date: string;
-  principal_pkr: number;
-  monthly_installment_pkr: number;
-  balance_outstanding_pkr: number;
-  status: 'ACTIVE' | 'RECOVERED' | 'WRITTEN_OFF';
-  source_asset_account_code: string;
-  issue_journal_entry_id: string | null;
-  write_off_journal_entry_id: string | null;
-  write_off_reason: string | null;
-  write_off_at: string | null;
-  notes: string | null;
-  recoveries?: Recovery[];
-}
+const SELECT_CLASS = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+
+type Dialogs =
+  | { kind: 'repay' }
+  | { kind: 'write_off' }
+  | { kind: 'void' }
+  | { kind: 'void_repayment'; recovery: EmployeeAdvanceRecoveryResponseType }
+  | null;
 
 export default function EmployeeAdvanceDetailPage() {
   const router = useRouter();
   const params = useParams();
   const advanceId = params['id'] as string;
   const { user } = useAuthStore();
+  const { data: accounts = [] } = useAccounts();
+  // Repayments land in cash or a bank account — whatever the chart flags as such.
+  const cashAccounts = accounts.filter((a) => a.is_cash_equivalent);
 
   const canView = can(user, 'employee_advances.view');
-  const canWriteOff = can(user, 'employee_advances.write_off');
+  // The server says which actions the advance allows; the matrix says who may take them.
+  const permitted = {
+    repay: can(user, 'employee_advances.issue'),
+    write_off: can(user, 'employee_advances.write_off'),
+    void: can(user, 'employee_advances.write_off'),
+  };
 
-  const [advance, setAdvance] = useState<Advance | null>(null);
+  const [advance, setAdvance] = useState<EmployeeAdvanceResponseType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [writeOffModal, setWriteOffModal] = useState(false);
-  const [writeOffReason, setWriteOffReason] = useState('');
-  const [writeOffLoading, setWriteOffLoading] = useState(false);
+  const [dialog, setDialog] = useState<Dialogs>(null);
+  const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState('');
+  const [repayDate, setRepayDate] = useState(() => localIsoDate());
+  const [repayAmount, setRepayAmount] = useState('');
+  const [repayTo, setRepayTo] = useState<string>(SYSTEM_ACCOUNTS.CASH_ON_HAND);
 
   const fetchAdvance = useCallback(async () => {
     setLoading(true);
     try {
-      setAdvance(await apiClient<Advance>(`/v1/employee-advances/${advanceId}`));
+      setAdvance(await apiClient<EmployeeAdvanceResponseType>(`/v1/employee-advances/${advanceId}`));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load advance');
@@ -77,22 +78,23 @@ export default function EmployeeAdvanceDetailPage() {
     fetchAdvance();
   }, [fetchAdvance]);
 
-  async function submitWriteOff() {
-    setWriteOffLoading(true);
+  function open(next: NonNullable<Dialogs>) {
+    setReason('');
+    if (next.kind === 'repay') setRepayAmount(String(advance?.balance_outstanding_pkr ?? ''));
+    setDialog(next);
+  }
+
+  async function act(path: string, body: Record<string, unknown>, done: string) {
+    setBusy(true);
     try {
-      if (writeOffReason.trim().length < 3) throw new Error('Reason must be at least 3 characters');
-      await apiClient(`/v1/employee-advances/${advanceId}/write-off`, {
-        method: 'POST',
-        body: { reason: writeOffReason.trim() },
-      });
-      setWriteOffModal(false);
-      setWriteOffReason('');
-      toast.success('Advance written off');
+      await apiClient(`/v1/employee-advances/${advanceId}/${path}`, { method: 'POST', body });
+      setDialog(null);
+      toast.success(done);
       await fetchAdvance();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Write-off failed');
+      toast.error(err instanceof Error ? err.message : 'Action failed');
     } finally {
-      setWriteOffLoading(false);
+      setBusy(false);
     }
   }
 
@@ -108,7 +110,11 @@ export default function EmployeeAdvanceDetailPage() {
   if (error) return <p className="text-destructive">{error}</p>;
   if (!advance) return <p className="text-muted-foreground">Advance not found</p>;
 
-  const recovered = Number(advance.principal_pkr) - Number(advance.balance_outstanding_pkr);
+  const actions = advance.allowed_actions.filter((a) => permitted[a]);
+  const recovered = advance.status === 'VOIDED' ? 0 : advance.principal_pkr - advance.balance_outstanding_pkr;
+  const reasonValid = reason.trim().length >= 3;
+  const accountName = (code: string | null) =>
+    accounts.find((a) => a.account_code === code)?.account_name ?? code ?? '—';
 
   return (
     <div>
@@ -117,11 +123,18 @@ export default function EmployeeAdvanceDetailPage() {
         crumb={advance.advance_number}
         description={`${advance.employee_name ?? '—'} · Issued ${formatDate(advance.issue_date)}`}
         actions={
-          advance.status === 'ACTIVE' &&
-          canWriteOff && (
-            <Button variant="outline" className="text-destructive" onClick={() => setWriteOffModal(true)}>
-              Write Off
-            </Button>
+          actions.length > 0 && (
+            <div className="flex gap-2">
+              {actions.includes('repay') && <Button onClick={() => open({ kind: 'repay' })}>Record Repayment</Button>}
+              {actions.includes('write_off') && (
+                <Button variant="outline" onClick={() => open({ kind: 'write_off' })}>Write Off</Button>
+              )}
+              {actions.includes('void') && (
+                <Button variant="outline" className="text-destructive" onClick={() => open({ kind: 'void' })}>
+                  Void
+                </Button>
+              )}
+            </div>
           )
         }
       />
@@ -134,11 +147,11 @@ export default function EmployeeAdvanceDetailPage() {
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Principal</div>
-            <div className="text-lg font-semibold tabular-nums">{formatMoney(Number(advance.principal_pkr))}</div>
+            <div className="text-lg font-semibold tabular-nums">{formatMoney(advance.principal_pkr)}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Instalment / month</div>
-            <div className="text-lg font-semibold tabular-nums">{formatMoney(Number(advance.monthly_installment_pkr))}</div>
+            <div className="text-lg font-semibold tabular-nums">{formatMoney(advance.monthly_installment_pkr)}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Recovered</div>
@@ -147,44 +160,35 @@ export default function EmployeeAdvanceDetailPage() {
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Balance Outstanding</div>
             <div className={cn('text-lg font-semibold tabular-nums', advance.balance_outstanding_pkr > 0 ? 'text-green-700' : 'text-muted-foreground')}>
-              {formatMoney(Number(advance.balance_outstanding_pkr))}
+              {formatMoney(advance.balance_outstanding_pkr)}
             </div>
           </div>
         </CardContent>
         <CardContent className="pt-0 text-sm text-muted-foreground">
           <div className="flex flex-wrap gap-x-6 gap-y-1">
-            <span>Paid from: <span className="font-mono">{advance.source_asset_account_code}</span></span>
+            <span>Paid from: {accountName(advance.source_asset_account_code)}</span>
             {advance.issue_journal_entry_id && (
-              <span>
-                Issue JE-22:{' '}
-                <Button
-                  variant="link"
-                  className="h-auto p-0 font-mono"
-                  onClick={() => router.push(`/accounting/journal-entries/${advance.issue_journal_entry_id}`)}
-                >
-                  {advance.issue_journal_entry_id.slice(0, 8)}…
-                </Button>
-              </span>
+              <JournalLink label="Issue entry" id={advance.issue_journal_entry_id} onOpen={router.push} />
             )}
             {advance.write_off_journal_entry_id && (
-              <span>
-                Write-off JE-23:{' '}
-                <Button
-                  variant="link"
-                  className="h-auto p-0 font-mono"
-                  onClick={() => router.push(`/accounting/journal-entries/${advance.write_off_journal_entry_id}`)}
-                >
-                  {advance.write_off_journal_entry_id.slice(0, 8)}…
-                </Button>
-              </span>
+              <JournalLink label="Write-off entry" id={advance.write_off_journal_entry_id} onOpen={router.push} />
             )}
           </div>
         </CardContent>
         {advance.status === 'WRITTEN_OFF' && advance.write_off_reason && (
           <CardContent className="pt-0">
             <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              <strong>Write-off reason:</strong> {advance.write_off_reason}
+              <strong>Written off:</strong> {advance.write_off_reason}
               {advance.write_off_at && <span className="ml-2">on {formatDate(advance.write_off_at)}</span>}
+            </div>
+          </CardContent>
+        )}
+        {advance.status === 'VOIDED' && (
+          <CardContent className="pt-0">
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <strong>Voided:</strong> {advance.void_reason}
+              {advance.voided_at && <span className="ml-2">on {formatDate(advance.voided_at)}</span>} — the issue entry
+              has been reversed.
             </div>
           </CardContent>
         )}
@@ -200,21 +204,43 @@ export default function EmployeeAdvanceDetailPage() {
                   <TableHead className="h-8">Date</TableHead>
                   <TableHead className="h-8 text-right">Amount</TableHead>
                   <TableHead className="h-8">Recovered via</TableHead>
+                  <TableHead className="h-8" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {advance.recoveries.map((r) => (
                   <TableRow key={r.id} className="h-7">
                     <TableCell className="py-1">{formatDate(r.recovery_date)}</TableCell>
-                    <TableCell className="py-1 text-right font-medium tabular-nums">{formatMoney(Number(r.amount_pkr))}</TableCell>
+                    <TableCell className="py-1 text-right font-medium tabular-nums">{formatMoney(r.amount_pkr)}</TableCell>
                     <TableCell className="py-1">
-                      <Button
-                        variant="link"
-                        className="h-auto p-0 font-mono"
-                        onClick={() => router.push(`/accounting/payroll/runs/${r.payroll_run_id}`)}
-                      >
-                        {r.payroll_run_number ?? r.payroll_run_id.slice(0, 8)}
-                      </Button>
+                      {r.kind === 'PAYROLL' && r.payroll_run_id ? (
+                        <Button
+                          variant="link"
+                          className="h-auto p-0 font-mono"
+                          onClick={() => router.push(`/accounting/payroll/runs/${r.payroll_run_id}`)}
+                        >
+                          Payroll {r.payroll_run_number}
+                        </Button>
+                      ) : (
+                        <span>
+                          Repaid into {accountName(r.asset_account_code)}
+                          {r.journal_entry_id && (
+                            <JournalLink label="" id={r.journal_entry_id} onOpen={router.push} />
+                          )}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="py-1 text-right">
+                      {r.can_void && permitted.void && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-destructive"
+                          onClick={() => open({ kind: 'void_repayment', recovery: r })}
+                        >
+                          Void
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -223,44 +249,113 @@ export default function EmployeeAdvanceDetailPage() {
           ) : (
             <p className="text-sm text-muted-foreground">
               No recoveries yet. The instalment is deducted automatically when a payroll run covering this employee is
-              finalized.
+              finalized, or the employee can repay in cash.
             </p>
           )}
           <p className="mt-3 text-xs text-muted-foreground">
-            Recovery posts no journal entry of its own — it rides inside the payroll run&apos;s entry, reducing what the
-            employee owes.
+            A payroll deduction is part of the payroll run&apos;s entry; a cash repayment has an entry of its own.
           </p>
         </CardContent>
       </Card>
 
-      <Dialog open={writeOffModal} onOpenChange={setWriteOffModal}>
+      <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Write Off Advance</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Forgives the outstanding balance of {formatMoney(Number(advance.balance_outstanding_pkr))}: it is
-            expensed as a staff benefit and the advance is marked WRITTEN_OFF. This cannot be undone.
-          </p>
-          <div className="space-y-1.5">
-            <Label>Reason <span className="text-destructive">*</span></Label>
-            <Textarea
-              value={writeOffReason}
-              onChange={(e) => setWriteOffReason(e.target.value)}
-              rows={3}
-              placeholder="Employee left with an unrecovered balance"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setWriteOffModal(false)}>Cancel</Button>
-            <Button
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={submitWriteOff}
-              disabled={writeOffLoading}
-            >
-              {writeOffLoading ? 'Writing off…' : 'Write Off'}
-            </Button>
-          </DialogFooter>
+          {dialog?.kind === 'repay' && (
+            <>
+              <DialogHeader><DialogTitle>Record Repayment</DialogTitle></DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                Cash the employee hands back. Outstanding: {formatMoney(advance.balance_outstanding_pkr)}.
+              </p>
+              <div className="space-y-1.5">
+                <Label>Date</Label>
+                <Input type="date" value={repayDate} onChange={(e) => setRepayDate(e.target.value)} className="tabular-nums" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Amount</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={repayAmount}
+                  onChange={(e) => setRepayAmount(e.target.value)}
+                  className="tabular-nums"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Received Into</Label>
+                <select value={repayTo} onChange={(e) => setRepayTo(e.target.value)} className={SELECT_CLASS}>
+                  {cashAccounts.map((a) => (
+                    <option key={a.account_code} value={a.account_code}>{a.account_name}</option>
+                  ))}
+                </select>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
+                <Button
+                  disabled={busy || !(Number(repayAmount) > 0)}
+                  onClick={() =>
+                    act(
+                      'repayments',
+                      { repayment_date: repayDate, amount_pkr: Number(repayAmount), asset_account_code: repayTo },
+                      'Repayment recorded',
+                    )
+                  }
+                >
+                  Record
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {dialog && dialog.kind !== 'repay' && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {dialog.kind === 'write_off' ? 'Write Off Advance' : dialog.kind === 'void' ? 'Void Advance' : 'Void Repayment'}
+                </DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                {dialog.kind === 'write_off' &&
+                  `Forgives the outstanding ${formatMoney(advance.balance_outstanding_pkr)}: it is expensed as a staff benefit and the advance is closed. This cannot be undone.`}
+                {dialog.kind === 'void' &&
+                  'For an advance issued in error: its issue entry is reversed and the advance is closed. The employee can be given a new one.'}
+                {dialog.kind === 'void_repayment' &&
+                  `For a repayment recorded in error: its entry is reversed and ${formatMoney(dialog.recovery.amount_pkr)} is owed again.`}
+              </p>
+              <div className="space-y-1.5">
+                <Label>Reason <span className="text-destructive">*</span></Label>
+                <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
+                <Button
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  disabled={busy || !reasonValid}
+                  onClick={() => {
+                    const body = { reason: reason.trim() };
+                    if (dialog.kind === 'write_off') act('write-off', body, 'Advance written off');
+                    else if (dialog.kind === 'void') act('void', body, 'Advance voided');
+                    else act(`repayments/${dialog.recovery.id}/void`, body, 'Repayment voided');
+                  }}
+                >
+                  {dialog.kind === 'write_off' ? 'Write Off' : 'Void'}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function JournalLink({ label, id, onOpen }: { label: string; id: string; onOpen: (href: string) => void }) {
+  return (
+    <span>
+      {label && `${label}: `}
+      <Button variant="link" className="ml-1 h-auto p-0 font-mono" onClick={() => onOpen(`/accounting/journal-entries/${id}`)}>
+        {id.slice(0, 8)}…
+      </Button>
+    </span>
   );
 }

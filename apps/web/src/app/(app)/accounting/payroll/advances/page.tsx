@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
+import type { EmployeeAdvanceStatus } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
@@ -23,7 +24,7 @@ interface AdvanceSummary {
   principal_pkr: number;
   monthly_installment_pkr: number;
   balance_outstanding_pkr: number;
-  status: 'ACTIVE' | 'RECOVERED' | 'WRITTEN_OFF';
+  status: EmployeeAdvanceStatus;
 }
 
 const columns: DataTableColumn<AdvanceSummary>[] = [
@@ -129,6 +130,7 @@ export default function EmployeeAdvancesPage() {
                 { label: 'Active', value: 'ACTIVE' },
                 { label: 'Recovered', value: 'RECOVERED' },
                 { label: 'Written Off', value: 'WRITTEN_OFF' },
+                { label: 'Voided', value: 'VOIDED' },
               ],
             },
           ],

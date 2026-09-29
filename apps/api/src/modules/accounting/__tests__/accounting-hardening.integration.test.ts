@@ -918,7 +918,7 @@ describe('KATCHI source-document gates (F-9)', () => {
         issue_date: '2026-05-01',
         principal_pkr: 5000,
         monthly_installment_pkr: 1000,
-        payment_method: 'CASH',
+        source_asset_account_code: '1010',
         book_type: 'KATCHI',
       },
     });
@@ -1852,6 +1852,7 @@ describe('every JE sourceId resolves to a live row in its sourceTable (invariant
     party_loans: async (id) => (await prisma.partyLoan.count({ where: { id } })) > 0,
     party_loan_repayments: async (id) => (await prisma.partyLoanRepayment.count({ where: { id } })) > 0,
     employee_advances: async (id) => (await prisma.employeeAdvance.count({ where: { id } })) > 0,
+    employee_advance_recoveries: async (id) => (await prisma.employeeAdvanceRecovery.count({ where: { id } })) > 0,
     invoices: async (id) => (await prisma.invoice.count({ where: { id } })) > 0,
     fixed_assets: async (id) => (await prisma.fixedAsset.count({ where: { id } })) > 0,
     payroll_runs: async (id) => (await prisma.payrollRun.count({ where: { id } })) > 0,

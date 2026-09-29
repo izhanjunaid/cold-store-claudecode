@@ -70,6 +70,10 @@ export async function testRoutes(app: FastifyInstance) {
           where: { facilityId: E2E_FACILITY_ID },
           data: { journalEntryId: null },
         });
+        // A cash repayment must name its entry (CHECK employee_advance_recoveries_one_kind).
+        await app.prisma.employeeAdvanceRecovery.deleteMany({
+          where: { advance: { facilityId: E2E_FACILITY_ID }, journalEntryId: { not: null } },
+        });
         await app.prisma.journalEntry.deleteMany({ where: { facilityId: E2E_FACILITY_ID } });
 
         await app.prisma.payment.deleteMany({ where: { facilityId: E2E_FACILITY_ID } });

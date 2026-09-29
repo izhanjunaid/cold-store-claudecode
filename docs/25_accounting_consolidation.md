@@ -578,7 +578,7 @@ proves the SQL, not the client's books).
 | C05 advance allocations without JE-04 | R-02 | "Post missing advance application" (Stream R), sourced to the payment so dishonour can find it |
 | C06 reversed opening-balance entries | L-03 | None needed once the AR read model is GL-based; confirm totals after the update |
 | C07 reversed payroll runs that had been paid/remitted | C-15 | Re-post the payment/remittance legs that really happened |
-| C08 assets double-booked at go-live | C-30 | "Reverse purchase entry, keep register row" (Stream C-a) |
+| C08 assets double-booked at go-live (official book only) | C-30 | "Convert to go-live asset" (`convert-to-opening`, Stream C-a) |
 | C09 KATCHI invoices with GST | R-06 | Credit-note the GST portion |
 | C10a postings to 3030 / off-prefix accounts | L-02, L-31 | Reclass JE to the right account |
 | C10b non-equity details with no sectioned header | L-38 | Re-parent (unposted) or reclass (posted) before the bucket is removed |
@@ -592,6 +592,7 @@ proves the SQL, not the client's books).
 | C18 open 2040 accrued vouchers | C-03 | "Convert to bill" (Stream C-b) |
 | C19 legacy JE-21 surcharges | R-08 | None; they stay visible and clearable on account |
 | C20 owner-created accounts | kernel sync | Must not sit on a code the new seed claims — rename/renumber first |
+| C21 DRAFT payroll lines with other deductions | C-17 | Clear them on the current version before the update (the new code no longer posts them); a salary advance is recovered as an advance |
 
 ## 8a. PR #25 browser pass (2026-09-25, before this branch was cut)
 
