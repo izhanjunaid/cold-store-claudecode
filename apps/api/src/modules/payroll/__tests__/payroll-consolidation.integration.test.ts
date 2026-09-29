@@ -87,7 +87,7 @@ async function issueAdvance(employeeId: string, principal: number, installment: 
       issue_date: date,
       principal_pkr: principal,
       monthly_installment_pkr: installment,
-      payment_method: 'CASH',
+      source_asset_account_code: '1010',
     },
   });
   expect(res.statusCode, res.body).toBe(201);
@@ -257,7 +257,7 @@ describe('C-18 / C-19 — daily-wage gross is days x wage; statutory figures com
             issue_date: '2027-12-10',
             principal_pkr: 25000, // within 26 days' wage, above 22 days'
             monthly_installment_pkr: 5000,
-            payment_method: 'CASH',
+            source_asset_account_code: '1010',
           },
         });
         expect(res.statusCode).toBe(409);

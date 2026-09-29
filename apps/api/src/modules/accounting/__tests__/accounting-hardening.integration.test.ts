@@ -918,7 +918,7 @@ describe('KATCHI source-document gates (F-9)', () => {
         issue_date: '2026-05-01',
         principal_pkr: 5000,
         monthly_installment_pkr: 1000,
-        payment_method: 'CASH',
+        source_asset_account_code: '1010',
         book_type: 'KATCHI',
       },
     });

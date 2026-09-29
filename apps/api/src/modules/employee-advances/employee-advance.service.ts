@@ -9,7 +9,7 @@ import type {
   WriteOffEmployeeAdvanceRequestType,
   EmployeeAdvanceListQueryType,
 } from '@coldchain/shared';
-import { MONEY_EPSILON, assetAccountForPaymentMethod, round2, toIsoDate } from '@coldchain/shared';
+import { MONEY_EPSILON, round2, toIsoDate } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { advisoryXactLock } from '../../common/advisory-lock';
@@ -67,8 +67,7 @@ export class EmployeeAdvanceService {
         );
       }
 
-      const sourceAccount =
-        body.source_asset_account_code ?? assetAccountForPaymentMethod(body.payment_method);
+      const sourceAccount = body.source_asset_account_code;
       await assertCashAccount(tx, facilityId, sourceAccount);
 
       const issueDate = new Date(body.issue_date);

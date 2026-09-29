@@ -15,7 +15,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/layout/page-header';
 import { formatMoney } from '@/lib/format';
-import { localIsoDate, round2 } from '@coldchain/shared';
+import { SYSTEM_ACCOUNTS, localIsoDate, round2 } from '@coldchain/shared';
+import { useAccounts } from '@/hooks/use-reference-data';
 import { usePayrollSettings } from '../../use-payroll-settings';
 
 interface EmployeeOption {
@@ -48,7 +49,10 @@ export default function IssueEmployeeAdvancePage() {
 
   const [principal, setPrincipal] = useState('');
   const [installment, setInstallment] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK_TRANSFER'>('CASH');
+  // Paid out of any account the chart flags as cash or bank.
+  const { data: accounts = [] } = useAccounts();
+  const cashAccounts = accounts.filter((a) => a.is_cash_equivalent);
+  const [paidFrom, setPaidFrom] = useState<string>(SYSTEM_ACCOUNTS.CASH_ON_HAND);
   const [issueDate, setIssueDate] = useState(() => localIsoDate());
   const payroll = usePayrollSettings();
   const [notes, setNotes] = useState('');
@@ -103,7 +107,7 @@ export default function IssueEmployeeAdvancePage() {
           issue_date: issueDate,
           principal_pkr: principalNum,
           monthly_installment_pkr: installmentNum,
-          payment_method: paymentMethod,
+          source_asset_account_code: paidFrom,
           ...(notes.trim() ? { notes: notes.trim() } : {}),
         },
       });
@@ -181,14 +185,16 @@ export default function IssueEmployeeAdvancePage() {
               <Input type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} required className="tabular-nums" />
             </div>
             <div className="space-y-1.5">
-              <Label>Payment method <span className="text-destructive">*</span></Label>
-              <div className="flex gap-2">
-                {(['CASH', 'BANK_TRANSFER'] as const).map((m) => (
-                  <Button key={m} type="button" variant={paymentMethod === m ? 'default' : 'outline'} size="sm" onClick={() => setPaymentMethod(m)}>
-                    {m === 'CASH' ? 'Cash' : 'Bank Transfer'}
-                  </Button>
+              <Label>Paid from <span className="text-destructive">*</span></Label>
+              <select
+                value={paidFrom}
+                onChange={(e) => setPaidFrom(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {cashAccounts.map((a) => (
+                  <option key={a.account_code} value={a.account_code}>{a.account_name}</option>
                 ))}
-              </div>
+              </select>
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label>Notes</Label>

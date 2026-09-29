@@ -6,16 +6,13 @@ const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 // One active advance per employee, capped at one month's pay — see IssueEmployeeAdvanceRequest.
 export { EmployeeAdvanceStatus };
 
-export const IssueAdvancePaymentMethod = z.enum(['CASH', 'BANK_TRANSFER']);
-export type IssueAdvancePaymentMethodType = z.infer<typeof IssueAdvancePaymentMethod>;
-
 export const IssueEmployeeAdvanceRequest = z.object({
   employee_id: z.string().uuid(),
   issue_date: dateOnly,
   principal_pkr: z.number().positive(),
   monthly_installment_pkr: z.number().positive(),
-  payment_method: IssueAdvancePaymentMethod,
-  source_asset_account_code: z.string().regex(/^[0-9]+$/).optional(),
+  // Any account the chart flags as cash or bank (docs/25 C-06/C-07).
+  source_asset_account_code: z.string().regex(/^[0-9]+$/),
   book_type: BookType.optional(),
   notes: z.string().optional(),
 });

@@ -88,7 +88,7 @@ async function issueAdvance(employeeId: string, principal = 10000, installment =
       issue_date: date,
       principal_pkr: principal,
       monthly_installment_pkr: installment,
-      payment_method: 'CASH',
+      source_asset_account_code: '1010',
     },
   });
   return res;
@@ -197,7 +197,7 @@ describe('Phase 21 — Employee Advances', () => {
         issue_date: '2026-05-10',
         principal_pkr: 5000,
         monthly_installment_pkr: 2500,
-        payment_method: 'CASH',
+        source_asset_account_code: '1010',
       },
     });
     expect(issueAsAccountant.statusCode).toBe(403);
@@ -278,10 +278,16 @@ describe('C-26 — void an advance, repay one in cash', () => {
   }
 
   it('a cash repayment posts DR cash / CR 1230 and closes the advance when it clears the balance', async () => {
-    await cleanup();
     const empId = await createSalaried(`Advance-Repay-${Date.now()}`, 50000);
     const issued = JSON.parse((await issueAdvance(empId, 10000)).body).data;
     expect(issued.allowed_actions).toEqual(['repay', 'write_off', 'void']);
+    const listed = await app.inject({
+      method: 'GET',
+      url: `/v1/employee-advances?employee_id=${empId}`,
+      headers: authHeaders(ownerToken),
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(JSON.parse(listed.body).data[0].allowed_actions).toEqual(['repay', 'write_off', 'void']);
 
     const first = await repay(issued.id, 4000, '2026-05-20', '1020');
     expect(first.statusCode).toBe(201);
@@ -313,7 +319,6 @@ describe('C-26 — void an advance, repay one in cash', () => {
   });
 
   it('a repayment must land in a cash or bank account, on or after the issue date', async () => {
-    await cleanup();
     const empId = await createSalaried(`Advance-RepayAcct-${Date.now()}`, 50000);
     const issued = JSON.parse((await issueAdvance(empId, 5000, 2500, '2026-05-10')).body).data;
 
@@ -330,7 +335,6 @@ describe('C-26 — void an advance, repay one in cash', () => {
   });
 
   it('voids an advance issued in error — only while nothing has been recovered', async () => {
-    await cleanup();
     const empId = await createSalaried(`Advance-Void-${Date.now()}`, 50000);
     const issued = JSON.parse((await issueAdvance(empId, 9000)).body).data;
     const repaid = JSON.parse((await repay(issued.id, 2000)).body).data;
@@ -363,7 +367,6 @@ describe('C-26 — void an advance, repay one in cash', () => {
   });
 
   it('voiding a repayment reopens the advance — unless it was written off or another is now active', async () => {
-    await cleanup();
     const empA = await createSalaried(`Advance-Reopen-${Date.now()}`, 50000);
     const first = JSON.parse((await issueAdvance(empA, 5000)).body).data;
     const cleared = JSON.parse((await repay(first.id, 5000)).body).data;
@@ -395,7 +398,6 @@ describe('C-26 — void an advance, repay one in cash', () => {
   // Reopening a RECOVERED advance and issuing a new one both create an ACTIVE
   // advance for the employee; they must serialise on the same lock.
   it('reopening an advance races a new issue — exactly one wins', async () => {
-    await cleanup();
     const empId = await createSalaried(`Advance-ReopenRace-${Date.now()}`, 50000);
     const issued = JSON.parse((await issueAdvance(empId, 5000)).body).data;
     const cleared = JSON.parse((await repay(issued.id, 5000)).body).data;

@@ -100,7 +100,7 @@ async function issueAdvance(employeeId: string, principal: number, installment: 
       issue_date: date,
       principal_pkr: principal,
       monthly_installment_pkr: installment,
-      payment_method: 'CASH',
+      source_asset_account_code: '1010',
     },
   });
   expect(res.statusCode).toBe(201);
