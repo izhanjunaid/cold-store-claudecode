@@ -290,15 +290,7 @@ export class EmployeeAdvanceService {
       const refusal = repaymentVoidRefusal(advance, recovery);
       if (refusal) throw Errors.EMPLOYEE_ADVANCE_RECOVERY_NOT_VOIDABLE(refusal);
 
-      // A RECOVERED advance becomes ACTIVE again: the same one-active-advance rule
-      // as issue(), under the same lock.
-      if (advance.status === 'RECOVERED') {
-        await lockEmployeeAdvances(tx, facilityId, advance.employeeId);
-        const otherActive = await tx.employeeAdvance.findFirst({
-          where: { facilityId, employeeId: advance.employeeId, status: 'ACTIVE', id: { not: advanceId } },
-        });
-        if (otherActive) throw Errors.EMPLOYEE_ADVANCE_ALREADY_ACTIVE();
-      }
+      await assertAdvanceCanReopen(tx, facilityId, advance);
 
       await this.journalEntry.reverseInTransaction(tx, facilityId, userId, recovery.journalEntryId!, {
         reason: `repayment of ${advance.advanceNumber} voided — ${body.reason}`,
@@ -380,6 +372,24 @@ async function lockAdvance(tx: Tx, facilityId: string, advanceId: string) {
 
 function lockEmployeeAdvances(tx: Tx, facilityId: string, employeeId: string) {
   return advisoryXactLock(tx, `${facilityId}:employee-advance:${employeeId}`);
+}
+
+/**
+ * Undoing a recovery (a voided repayment, a reversed payroll run) makes a RECOVERED
+ * advance ACTIVE again: the same one-active-advance rule as issue(), under the
+ * same lock. Call with the advance row already locked.
+ */
+export async function assertAdvanceCanReopen(
+  tx: Tx,
+  facilityId: string,
+  advance: { id: string; employeeId: string; status: string },
+) {
+  if (advance.status !== 'RECOVERED') return;
+  await lockEmployeeAdvances(tx, facilityId, advance.employeeId);
+  const otherActive = await tx.employeeAdvance.findFirst({
+    where: { facilityId, employeeId: advance.employeeId, status: 'ACTIVE', id: { not: advance.id } },
+  });
+  if (otherActive) throw Errors.EMPLOYEE_ADVANCE_ALREADY_ACTIVE();
 }
 
 type AdvanceState = { status: string };

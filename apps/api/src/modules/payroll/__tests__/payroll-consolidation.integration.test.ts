@@ -580,4 +580,21 @@ describe('C-15 — reversing a run undoes the accrual; voiding a payment is its 
     expect(JSON.parse(res.body).error.code).toBe('PAYROLL_RUN_NOT_REVERSIBLE');
     expect(await entriesOf(run.id, 'REVERSAL')).toHaveLength(0);
   });
+
+  // Reversing a run that cleared an advance makes it ACTIVE again; one active
+  // advance per employee holds here exactly as at issue (docs/25 C-26 follow-up).
+  it('cannot reopen a cleared advance while the employee has another one active', async () => {
+    const emp = await salaried(40000);
+    const first = await issueAdvance(emp.id, 5000, 5000, '2031-01-10');
+    const run = await draft(2031, 2);
+    expect((await finalize(run.id)).statusCode).toBe(200);
+    expect((await prisma.employeeAdvance.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('RECOVERED');
+    await issueAdvance(emp.id, 3000, 1000, '2031-03-05');
+
+    const res = await reverse(run.id, { reason: 'posted in error', reversal_date: '2031-03-10' });
+    expect(res.statusCode, res.body).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('EMPLOYEE_ADVANCE_ALREADY_ACTIVE');
+    expect(await prisma.employeeAdvance.count({ where: { employeeId: emp.id, status: 'ACTIVE' } })).toBe(1);
+    expect((await prisma.payrollRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe('FINALIZED');
+  });
 });
