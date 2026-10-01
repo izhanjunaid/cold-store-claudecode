@@ -134,6 +134,20 @@ describe('flows land in the section the chart puts them in', () => {
   });
 });
 
+describe('the cash-exceptions report watches what the chart calls cash (L-20)', () => {
+  it('lists every cash-flagged account and not cheques in hand, which sit under the same header', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/reports/cash-exceptions?as_of_date=${MONTH_TO}`,
+      headers: authHeaders(ownerToken),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const codes = (JSON.parse(res.body).data.rows as { account_code: string }[]).map((r) => r.account_code);
+    expect(codes).toEqual(expect.arrayContaining(['1010', '1020', '1030', SECOND_BANK]));
+    expect(codes).not.toContain('1025');
+  });
+});
+
 describe('the statement reconciles to the balance sheet', () => {
   it('opening + net change = closing, and closing equals cash on the balance sheet', async () => {
     const cf = await cashFlow();

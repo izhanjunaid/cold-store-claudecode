@@ -6,6 +6,5 @@ apps/api/src/modules/expenses/templates/je-17b-pay-accrued-payment.ts
 apps/api/src/modules/expenses/templates/je-17c-petty-cash-replenish.ts
 apps/api/src/modules/expenses/templates/withholding.ts
 apps/api/src/modules/payroll/templates/je-16b-govt-remittance.ts
-apps/api/src/modules/reporting/reports/cash-exceptions.ts
 apps/web/src/app/(app)/accounting/cash-transfers/page.tsx
 apps/web/src/hooks/use-reference-data.ts
