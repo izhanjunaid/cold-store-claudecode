@@ -1,5 +1,7 @@
 'use client';
 
+import { localIsoDate } from '@coldchain/shared';
+
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
@@ -30,7 +32,8 @@ interface Line {
 }
 
 const SELECT_CLASS = 'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
-const today = () => new Date().toISOString().slice(0, 10);
+// The viewer's own today, not the UTC date (docs/25 L-39).
+const today = () => localIsoDate();
 const emptyLine = (): Line => ({ account_code: '', debit_amount: '', credit_amount: '', description: '' });
 
 export default function NewJournalEntryPage() {

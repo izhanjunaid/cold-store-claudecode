@@ -9,10 +9,13 @@ describe('presetRange', () => {
     expect(r.as_of).toBe('2026-03-31');
   });
 
-  it('this_quarter spans the calendar quarter', () => {
-    const r = presetRange('this_quarter', 7, new Date(2026, 1, 10)); // Feb → Q1
+  it('this_quarter is the fiscal quarter — counted from the fiscal-year start', () => {
+    const r = presetRange('this_quarter', 7, new Date(2026, 1, 10)); // Feb 2026 → Q3 of FY 2025–26
     expect(r.date_from).toBe('2026-01-01');
     expect(r.date_to).toBe('2026-03-31');
+    expect(r.label).toBe('Q3 FY 2025–26');
+    const q1 = presetRange('this_quarter', 7, new Date(2026, 7, 20)); // Aug 2026 → Q1 of FY 2026–27
+    expect([q1.date_from, q1.date_to]).toEqual(['2026-07-01', '2026-09-30']);
   });
 
   it('this_fy uses prior calendar year start when before FY start month', () => {
@@ -40,6 +43,11 @@ describe('priorRange', () => {
     expect(p.date_from).toBe('2025-01-01');
     expect(p.date_to).toBe('2025-12-31');
     expect(p.as_of).toBe('2025-12-31');
+  });
+
+  it('a leap day compares with 28 February, not 1 March', () => {
+    const p = priorRange({ date_from: '2028-02-01', date_to: '2028-02-29', as_of: '2028-02-29', label: 'x' }, 'year');
+    expect(p.date_to).toBe('2027-02-28');
   });
 
   it('period mode is the contiguous preceding span', () => {
