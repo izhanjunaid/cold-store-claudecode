@@ -1,54 +1,65 @@
-import type { PrismaClient, Prisma } from '@coldchain/db';
+import type { Prisma, PrismaClient } from '@coldchain/db';
 import { Errors } from '../../common/errors';
-import type {
-  ChartOfAccountsListQueryType,
-  CreateAccountRequestType,
-  UpdateAccountRequestType,
+import {
+  CLASS_CODE_PREFIX,
+  CLASS_SECTIONS,
+  moneyEquals,
+  normalBalanceForClass,
+  type AccountClassName,
+  type ChartOfAccountsListQueryType,
+  type CreateAccountRequestType,
+  type UpdateAccountRequestType,
 } from '@coldchain/shared';
-import { normalBalanceForClass } from '@coldchain/shared';
 
 type Tx = Prisma.TransactionClient;
+type Row = Prisma.ChartOfAccountsGetPayload<{}>;
 
-// The seed numbers every class by its leading digit (1 asset … 6 expense).
-// We reject only a code whose leading digit is *another* class's assigned
-// range — e.g. an EXPENSE numbered 1999 collides with assets. Unassigned
-// leading digits (0/7/8/9) stay legal so owners can still open custom heads
-// outside the seeded ranges; those surface via the statements' unclassified
-// bucket (F-6b), which is a shipped capability, not a bug (phase/19 audit).
-const CLASS_CODE_PREFIX: Record<string, string> = {
-  ASSET: '1',
-  LIABILITY: '2',
-  EQUITY: '3',
-  REVENUE: '4',
-  COST_OF_SERVICE: '5',
-  EXPENSE: '6',
-};
-const ASSIGNED_CLASS_PREFIXES = new Set(Object.values(CLASS_CODE_PREFIX));
+/**
+ * The chart's own rules, enforced here for every caller — the Chart of Accounts
+ * screen and the partner service, which creates accounts inside its own
+ * transaction without passing through the request schema. Class digits and
+ * sections come from `@coldchain/shared` chart.ts, which the web reads too.
+ */
+function validateNewAccount(body: CreateAccountRequestType): void {
+  const cls = body.account_class as AccountClassName;
+  // Every class's codes start with its digit. The unassigned 0/7/8/9 ranges were
+  // a route into the statements' "unclassified" bucket (docs/25 L-31).
+  if (!body.account_code.startsWith(CLASS_CODE_PREFIX[cls])) {
+    throw Errors.VALIDATION_ERROR(
+      `${body.account_class} account codes start with ${CLASS_CODE_PREFIX[cls]}; ${body.account_code} does not`,
+      'account_code',
+    );
+  }
+  // A detail rolls up through its parent header; without one it could never
+  // reach the statements (F-6a). Equity is presented by owner and by role
+  // rather than by header, so an equity detail may sit at the root.
+  if (body.account_type === 'DETAIL' && body.account_class !== 'EQUITY' && !body.parent_account_code) {
+    throw Errors.INVALID_PARENT_ACCOUNT('Detail accounts must sit under a header account (equity excepted)');
+  }
+  // Headers stay root-level: the statements classify a detail by its parent's
+  // section one level deep, so a header under a header would orphan its children.
+  if (body.account_type === 'HEADER' && body.parent_account_code) {
+    throw Errors.INVALID_PARENT_ACCOUNT('Header accounts cannot have a parent — headers are always root-level');
+  }
+  // A non-equity header with no section would send every child to
+  // "unclassified" (docs/25 L-38).
+  if (body.account_type === 'HEADER' && body.account_class !== 'EQUITY' && !body.statement_section) {
+    throw Errors.VALIDATION_ERROR(
+      'A header account must declare the statement section its children roll up into',
+      'statement_section',
+    );
+  }
+  validateStatementSection(body.account_type, cls, body.statement_section);
+  validateFlags({ accountType: body.account_type, accountClass: cls }, body);
+}
 
-// Which statement_section values a HEADER of a given class may take
-// (phase/24). EQUITY has no entry on purpose: equity aggregates by class, not
-// by header — 3010/3020/3030 sit at the root and the balance sheet places
-// equity lines directly off accountClass (financial-statements.service.ts).
-const CLASS_SECTIONS: Record<string, Set<string>> = {
-  ASSET: new Set(['CURRENT_ASSET', 'NON_CURRENT_ASSET']),
-  LIABILITY: new Set(['CURRENT_LIABILITY', 'NON_CURRENT_LIABILITY']),
-  REVENUE: new Set(['REVENUE', 'CONTRA_REVENUE', 'OTHER_INCOME']),
-  COST_OF_SERVICE: new Set(['COST_OF_SERVICE']),
-  EXPENSE: new Set(['OPERATING_EXPENSE', 'OTHER_EXPENSE']),
-};
-
-function validateStatementSection(
-  accountType: string,
-  accountClass: string,
-  section: string | null | undefined,
-): void {
+function validateStatementSection(accountType: string, accountClass: AccountClassName, section: string | null | undefined): void {
   if (section === undefined || section === null) return;
   if (accountType !== 'HEADER') {
     throw Errors.VALIDATION_ERROR('statement_section can only be set on a HEADER account', 'statement_section');
   }
-  const allowed = CLASS_SECTIONS[accountClass];
-  if (!allowed || !allowed.has(section)) {
-    const equityNote = accountClass === 'EQUITY' ? ' — equity aggregates by class, not by header' : '';
+  if (!CLASS_SECTIONS[accountClass].includes(section)) {
+    const equityNote = accountClass === 'EQUITY' ? ' — equity is presented by owner and role, not by header' : '';
     throw Errors.VALIDATION_ERROR(
       `${section} is not a valid statement section for ${accountClass}${equityNote}`,
       'statement_section',
@@ -56,52 +67,106 @@ function validateStatementSection(
   }
 }
 
-// Every place an account code is stored as configuration rather than as a
-// posting. None of these are foreign keys (they are plain VarChar(10)), so
-// nothing in the database stops an account being deleted out from under
-// them — a rate plan pointing at a deleted revenue account fails at the next
-// invoice, long after the delete.
-//
-// Each entry builds its own where-clause because the models are not
-// uniformly shaped: party_loan_repayments has no facility_id of its own and
-// scopes through its parent loan. Adding a new *_account_code column means
-// adding a line here.
-const CONFIG_REFERENCES: Array<{
-  model: string;
-  label: string;
-  where: (facilityId: string, code: string) => Record<string, unknown>;
-}> = [
-  { model: 'ratePlan', label: 'rate plan', where: (f, c) => ({ facilityId: f, revenueAccountCode: c }) },
-  { model: 'serviceCharge', label: 'service charge', where: (f, c) => ({ facilityId: f, revenueAccountCode: c }) },
-  { model: 'payment', label: 'payment', where: (f, c) => ({ facilityId: f, assetAccountCode: c }) },
+type Flags = { is_cash_equivalent?: boolean; allow_manual_posting?: boolean; requires_party?: boolean };
+
+/** Cash is an asset you can pay from; a party is required only on balance-sheet details. */
+function validateFlags(a: { accountType: string; accountClass: string }, flags: Flags): void {
+  const set = [flags.is_cash_equivalent, flags.allow_manual_posting === false, flags.requires_party].some(Boolean);
+  if (set && a.accountType !== 'DETAIL') {
+    throw Errors.VALIDATION_ERROR('Only a detail account carries posting flags', 'account_type');
+  }
+  if (flags.is_cash_equivalent && a.accountClass !== 'ASSET') {
+    throw Errors.VALIDATION_ERROR('Only an asset account can be cash or a bank account', 'is_cash_equivalent');
+  }
+  if (flags.requires_party && a.accountClass !== 'ASSET' && a.accountClass !== 'LIABILITY') {
+    throw Errors.VALIDATION_ERROR(
+      'Only a receivable or payable (asset or liability) account can require a party on every line',
+      'requires_party',
+    );
+  }
+  if (flags.is_cash_equivalent && flags.requires_party) {
+    throw Errors.VALIDATION_ERROR('A cash account is not a party control account', 'requires_party');
+  }
+}
+
+type Reference = { label: string; count: (tx: Tx, facilityId: string, code: string) => Promise<number> };
+
+/**
+ * Configuration that stores an account code WITHOUT a foreign key, so nothing in
+ * the database stops a delete. Everything else that stores a code (rate plans,
+ * service charges, payments, fixed assets, vouchers, loans, advances, the new
+ * documents) is a foreign key since 0030 and the database refuses the delete
+ * itself — see remove(). Partners have SQL-only foreign keys that no Prisma
+ * relation describes, so they are named here too, for a clear message.
+ */
+const DELETE_REFERENCES: Reference[] = [
   {
-    model: 'fixedAsset',
-    label: 'fixed asset',
-    where: (f, c) => ({
-      facilityId: f,
-      OR: [{ assetAccountCode: c }, { accumDeprAccountCode: c }, { deprExpenseAccountCode: c }],
-    }),
-  },
-  {
-    model: 'expenseVoucher',
-    label: 'expense voucher',
-    where: (f, c) => ({ facilityId: f, OR: [{ expenseAccountCode: c }, { assetAccountCode: c }] }),
-  },
-  { model: 'partyLoan', label: 'peshgi loan', where: (f, c) => ({ facilityId: f, sourceAssetAccountCode: c }) },
-  {
-    model: 'partyLoanRepayment',
     label: 'peshgi repayment',
-    // No facility_id column — scope through the parent loan.
-    where: (f, c) => ({ loan: { facilityId: f }, assetAccountCode: c }),
+    count: (tx, f, c) => tx.partyLoanRepayment.count({ where: { loan: { facilityId: f }, assetAccountCode: c } }),
   },
   {
-    model: 'employeeAdvance',
-    label: 'employee advance',
-    where: (f, c) => ({ facilityId: f, sourceAssetAccountCode: c }),
+    label: 'credit-note line',
+    count: (tx, f, c) => tx.creditNoteLineItem.count({ where: { creditNote: { facilityId: f }, revenueAccountCode: c } }),
+  },
+  {
+    label: 'owner',
+    count: (tx, f, c) =>
+      tx.partner.count({ where: { facilityId: f, OR: [{ capitalAccountCode: c }, { drawingsAccountCode: c }] } }),
   },
 ];
 
-function format(a: Prisma.ChartOfAccountsGetPayload<{}>) {
+/**
+ * Configuration that will post to an account in future. Foreign keys ignore
+ * is_active, so deactivating one of these would pass every constraint and fail
+ * at the next invoice, depreciation run, payroll or owner movement (docs/25 L-34).
+ */
+const DEACTIVATION_REFERENCES: Reference[] = [
+  {
+    label: 'active rate plan',
+    count: (tx, f, c) => tx.ratePlan.count({ where: { facilityId: f, isActive: true, revenueAccountCode: c } }),
+  },
+  {
+    label: 'active service charge',
+    count: (tx, f, c) => tx.serviceCharge.count({ where: { facilityId: f, isActive: true, revenueAccountCode: c } }),
+  },
+  {
+    label: 'fixed asset in use',
+    count: (tx, f, c) =>
+      tx.fixedAsset.count({
+        where: {
+          facilityId: f,
+          voidedAt: null,
+          status: { in: ['PLANNED', 'PURCHASED', 'IN_SERVICE'] },
+          OR: [{ assetAccountCode: c }, { accumDeprAccountCode: c }, { deprExpenseAccountCode: c }],
+        },
+      }),
+  },
+  {
+    label: 'active employee',
+    count: (tx, f, c) => tx.employee.count({ where: { facilityId: f, isActive: true, costAccountCode: c } }),
+  },
+  {
+    label: 'active party',
+    count: (tx, f, c) => tx.party.count({ where: { facilityId: f, isActive: true, controlAccountCode: c } }),
+  },
+  {
+    label: 'current owner',
+    count: (tx, f, c) =>
+      tx.partner.count({
+        where: { facilityId: f, retiredOn: null, OR: [{ capitalAccountCode: c }, { drawingsAccountCode: c }] },
+      }),
+  },
+];
+
+async function firstReference(tx: Tx, refs: Reference[], facilityId: string, code: string) {
+  for (const ref of refs) {
+    const used = await ref.count(tx, facilityId, code);
+    if (used > 0) return `${used} ${ref.label}(s)`;
+  }
+  return null;
+}
+
+function format(a: Row) {
   return {
     id: a.id,
     facility_id: a.facilityId,
@@ -112,7 +177,6 @@ function format(a: Prisma.ChartOfAccountsGetPayload<{}>) {
     parent_account_code: a.parentAccountCode,
     normal_balance: a.normalBalance,
     statement_section: a.statementSection,
-    cash_flow_section: a.cashFlowSection,
     is_system_account: a.isSystemAccount,
     is_active: a.isActive,
     is_cash_equivalent: a.isCashEquivalent,
@@ -130,10 +194,7 @@ export class CoaService {
     if (query.account_class) where.accountClass = query.account_class;
     if (query.is_active !== undefined) where.isActive = query.is_active;
 
-    const data = await this.prisma.chartOfAccounts.findMany({
-      where,
-      orderBy: { accountCode: 'asc' },
-    });
+    const data = await this.prisma.chartOfAccounts.findMany({ where, orderBy: { accountCode: 'asc' } });
     return data.map(format);
   }
 
@@ -151,142 +212,91 @@ export class CoaService {
   }
 
   /**
-   * The same creation, inside a transaction the caller already owns.
-   *
-   * Adding a partner creates two accounts and a partner row, and half a partner
-   * is exactly the state this project spent a week finding in a live chart — an
-   * owner with a drawings account and no capital account, invisible because
-   * nothing knew a partner needed both. Three separate transactions cannot
-   * promise that; one can. Same shape as journal-entry.service's
-   * postInTransaction, and for the same reason.
+   * The same creation, inside a transaction the caller already owns — adding a
+   * partner creates two accounts and a partner row, and half a partner is exactly
+   * the state that went unnoticed in a live chart. Every rule above applies here
+   * too: this is the path that skips the request schema.
    */
   async createInTransaction(tx: Tx, facilityId: string, body: CreateAccountRequestType) {
-    {
-      const exists = await tx.chartOfAccounts.findUnique({
-        where: { facilityId_accountCode: { facilityId, accountCode: body.account_code } },
+    validateNewAccount(body);
+    const exists = await tx.chartOfAccounts.findUnique({
+      where: { facilityId_accountCode: { facilityId, accountCode: body.account_code } },
+    });
+    if (exists) throw Errors.VALIDATION_ERROR('Account code already exists', 'account_code');
+
+    if (body.parent_account_code) {
+      const parent = await tx.chartOfAccounts.findUnique({
+        where: { facilityId_accountCode: { facilityId, accountCode: body.parent_account_code } },
       });
-      if (exists) {
-        throw Errors.VALIDATION_ERROR('Account code already exists', 'account_code');
+      if (!parent) throw Errors.INVALID_PARENT_ACCOUNT('Parent account does not exist');
+      if (parent.accountType !== 'HEADER') throw Errors.INVALID_PARENT_ACCOUNT('Parent must be a HEADER account');
+      if (parent.accountClass !== body.account_class) {
+        throw Errors.INVALID_PARENT_ACCOUNT('Parent must belong to the same account class');
       }
-      const expectedPrefix = CLASS_CODE_PREFIX[body.account_class];
-      const leadDigit = body.account_code.charAt(0);
-      if (
-        expectedPrefix &&
-        leadDigit !== expectedPrefix &&
-        ASSIGNED_CLASS_PREFIXES.has(leadDigit)
-      ) {
-        throw Errors.VALIDATION_ERROR(
-          `Account code ${body.account_code} starts with ${leadDigit}, which is reserved for another account class; ${body.account_class} codes use ${expectedPrefix} (or an unassigned 0/7/8/9 range)`,
-          'account_code',
-        );
-      }
-      // Statements roll detail accounts up through their parent; an invalid
-      // parent silently drops the account from the P&L / balance sheet (F-6a).
-      // Equity is the one class built by class rather than by header (the
-      // seed's 3010/3020/3030 sit at the root) — everything else needs one.
-      if (body.account_type === 'DETAIL' && body.account_class !== 'EQUITY' && !body.parent_account_code) {
-        throw Errors.INVALID_PARENT_ACCOUNT('Detail accounts must sit under a header account (equity excepted)');
-      }
-      // buildGroups/buildLines match exactly one level (parentAccountCode ===
-      // headerCode); a HEADER-under-a-HEADER would orphan its own children
-      // into the unclassified bucket even when its grandparent is a seeded
-      // section header. Headers stay root-level so the one-level assumption
-      // holds everywhere it's relied on, not just at report time (phase/24).
-      if (body.account_type === 'HEADER' && body.parent_account_code) {
-        throw Errors.INVALID_PARENT_ACCOUNT('Header accounts cannot have a parent — headers are always root-level');
-      }
-      validateStatementSection(body.account_type, body.account_class, body.statement_section);
-      if (body.parent_account_code) {
-        const parent = await tx.chartOfAccounts.findUnique({
-          where: {
-            facilityId_accountCode: { facilityId, accountCode: body.parent_account_code },
-          },
-        });
-        if (!parent) {
-          throw Errors.INVALID_PARENT_ACCOUNT('Parent account does not exist');
-        }
-        if (parent.accountType !== 'HEADER') {
-          throw Errors.INVALID_PARENT_ACCOUNT('Parent must be a HEADER account');
-        }
-        if (parent.accountClass !== body.account_class) {
-          throw Errors.INVALID_PARENT_ACCOUNT('Parent must belong to the same account class');
-        }
-      }
-      const created = await tx.chartOfAccounts.create({
-        data: {
-          facilityId,
-          accountCode: body.account_code,
-          accountName: body.account_name,
-          accountClass: body.account_class,
-          accountType: body.account_type,
-          parentAccountCode: body.parent_account_code ?? null,
-          // Derived from the class unless the caller explicitly declared a
-          // contra account (CreateAccountRequest.superRefine enforces that).
-          normalBalance: body.normal_balance ?? normalBalanceForClass(body.account_class),
-          statementSection: body.statement_section ?? null,
-          isSystemAccount: false,
-        },
-      });
-      return format(created);
     }
+
+    const created = await tx.chartOfAccounts.create({
+      data: {
+        facilityId,
+        accountCode: body.account_code,
+        accountName: body.account_name,
+        accountClass: body.account_class,
+        accountType: body.account_type,
+        parentAccountCode: body.parent_account_code ?? null,
+        // Derived from the class unless the caller explicitly declared a contra
+        // account (CreateAccountRequest.superRefine enforces that).
+        normalBalance: body.normal_balance ?? normalBalanceForClass(body.account_class),
+        statementSection: body.statement_section ?? null,
+        isSystemAccount: false,
+        isCashEquivalent: body.is_cash_equivalent ?? false,
+        allowManualPosting: body.allow_manual_posting ?? true,
+        requiresParty: body.requires_party ?? false,
+      },
+    });
+    return format(created);
   }
 
   /**
-   * Delete an account outright. Only ever legal for one thing: an account
-   * opened by mistake that nothing has touched yet. Deactivation is the
-   * route for an account with history — it keeps that history on every
-   * report, which is why there was no delete at all before this.
+   * Delete an account outright — legal only for one opened by mistake that
+   * nothing has touched. Deactivation is the route for an account with history.
    *
-   * The journal-entry-line FK is ON DELETE RESTRICT, so Postgres is the
-   * backstop if a check below is ever missed. The config references are
-   * plain VarChar columns, not FKs, so they must be checked by hand — a
-   * rate plan pointing at a deleted revenue account would fail at the next
-   * invoice, long after the delete.
+   * The journal-line FK and, since 0030, every configuration column that has one
+   * are ON DELETE RESTRICT, so the database refuses a delete that would strand
+   * them; that refusal is reported as ACCOUNT_IN_USE rather than a raw failure.
+   * The columns with no foreign key are checked by hand (DELETE_REFERENCES).
    */
   async remove(facilityId: string, code: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const a = await tx.chartOfAccounts.findUnique({
-        where: { facilityId_accountCode: { facilityId, accountCode: code } },
-      });
-      if (!a) throw Errors.ACCOUNT_NOT_FOUND();
-      if (a.isSystemAccount) throw Errors.SYSTEM_ACCOUNT_PROTECTED();
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const a = await tx.chartOfAccounts.findUnique({
+          where: { facilityId_accountCode: { facilityId, accountCode: code } },
+        });
+        if (!a) throw Errors.ACCOUNT_NOT_FOUND();
+        if (a.isSystemAccount) throw Errors.SYSTEM_ACCOUNT_PROTECTED();
 
-      const postings = await tx.journalEntryLine.count({
-        where: { facilityId, accountCode: code },
-      });
-      if (postings > 0) {
-        throw Errors.ACCOUNT_IN_USE(
-          `it has ${postings} journal posting(s). Deactivate it instead — its history stays on every report.`,
-        );
-      }
-
-      const children = await tx.chartOfAccounts.count({
-        where: { facilityId, parentAccountCode: code },
-      });
-      if (children > 0) {
-        throw Errors.ACCOUNT_IN_USE(`${children} account(s) sit under it. Delete or re-parent those first.`);
-      }
-
-      for (const ref of CONFIG_REFERENCES) {
-        const delegate = (tx as unknown as Record<
-          string,
-          { count: (a: unknown) => Promise<number> } | undefined
-        >)[ref.model];
-        // A missing delegate means the table above names a model that no
-        // longer exists. Fail loudly: silently skipping the check would let
-        // an account be deleted out from under live configuration.
-        if (!delegate) {
-          throw new Error(`CONFIG_REFERENCES names unknown Prisma model '${ref.model}'`);
+        const postings = await tx.journalEntryLine.count({ where: { facilityId, accountCode: code } });
+        if (postings > 0) {
+          throw Errors.ACCOUNT_IN_USE(
+            `it has ${postings} journal posting(s). Deactivate it instead — its history stays on every report.`,
+          );
         }
-        const used = await delegate.count({ where: ref.where(facilityId, code) });
-        if (used > 0) {
-          throw Errors.ACCOUNT_IN_USE(`${used} ${ref.label}(s) are configured to post to it.`);
+        const children = await tx.chartOfAccounts.count({ where: { facilityId, parentAccountCode: code } });
+        if (children > 0) {
+          throw Errors.ACCOUNT_IN_USE(`${children} account(s) sit under it. Delete or re-parent those first.`);
         }
-      }
+        const used = await firstReference(tx, DELETE_REFERENCES, facilityId, code);
+        if (used) throw Errors.ACCOUNT_IN_USE(`${used} use it.`);
 
-      await tx.chartOfAccounts.delete({ where: { id: a.id } });
-      return { deleted: true, account_code: code };
-    });
+        await tx.chartOfAccounts.delete({ where: { id: a.id } });
+        return { deleted: true, account_code: code };
+      });
+    } catch (e) {
+      // P2003: a foreign key refused the delete.
+      if (e instanceof Error && 'code' in e && (e as { code: string }).code === 'P2003') {
+        throw Errors.ACCOUNT_IN_USE('a document or a configuration still points at it. Deactivate it instead.');
+      }
+      throw e;
+    }
   }
 
   async update(facilityId: string, code: string, body: UpdateAccountRequestType) {
@@ -296,40 +306,96 @@ export class CoaService {
         where: { facilityId_accountCode: { facilityId, accountCode: code } },
       });
       if (!a) throw Errors.ACCOUNT_NOT_FOUND();
-      // System accounts anchor the posting templates: they cannot be
-      // deactivated, and renaming one would desync the UI (which hides the
-      // control) from the API (phase/19 audit).
-      const isRename = body.account_name !== undefined && body.account_name !== a.accountName;
-      if (a.isSystemAccount && (body.is_active === false || isRename)) {
+
+      const changes = (key: keyof UpdateAccountRequestType, current: unknown) =>
+        body[key] !== undefined && body[key] !== current;
+      const renames = changes('account_name', a.accountName);
+      const moves = changes('statement_section', a.statementSection);
+      const flagsChange =
+        changes('is_cash_equivalent', a.isCashEquivalent) ||
+        changes('allow_manual_posting', a.allowManualPosting) ||
+        changes('requires_party', a.requiresParty);
+
+      // System accounts anchor the posting templates and the statements: they
+      // cannot be deactivated, renamed, moved between sections or re-flagged.
+      if (a.isSystemAccount && (body.is_active === false || renames || moves || flagsChange)) {
         throw Errors.SYSTEM_ACCOUNT_PROTECTED();
       }
-      // Section is presentation, not structure (unlike code/class/type/parent/
-      // normal_balance), so it stays outside the system-account protection
-      // above — a seeded header's section is meant to be editable.
-      validateStatementSection(a.accountType, a.accountClass, body.statement_section);
-      // Deactivating an account that still carries a balance would freeze that
-      // balance behind an inactive account; require it be zeroed first. Zero
-      // net with history is fine (a fully-settled account may be retired).
-      if (body.is_active === false && a.isActive) {
-        const agg = await tx.journalEntryLine.aggregate({
-          where: { facilityId, accountCode: code, journalEntry: { postingStatus: 'POSTED' } },
-          _sum: { debitAmount: true, creditAmount: true },
-        });
-        const debit = Number(agg._sum.debitAmount ?? 0);
-        const credit = Number(agg._sum.creditAmount ?? 0);
-        if (Math.abs(debit - credit) > 0.005) {
-          throw Errors.ACCOUNT_HAS_BALANCE();
+
+      if (moves) {
+        validateStatementSection(a.accountType, a.accountClass, body.statement_section);
+        if (body.statement_section === null && a.accountType === 'HEADER' && a.accountClass !== 'EQUITY') {
+          throw Errors.VALIDATION_ERROR(
+            'A header must keep a statement section — without one every account under it would be unclassified',
+            'statement_section',
+          );
         }
       }
+
+      if (flagsChange) {
+        const next = {
+          is_cash_equivalent: body.is_cash_equivalent ?? a.isCashEquivalent,
+          allow_manual_posting: body.allow_manual_posting ?? a.allowManualPosting,
+          requires_party: body.requires_party ?? a.requiresParty,
+        };
+        validateFlags(a, next);
+        // What an account IS — cash, or a party control account — cannot change
+        // under postings already made on the other assumption. The chart guard
+        // trigger enforces the same freeze; this says so before it fires.
+        if (changes('is_cash_equivalent', a.isCashEquivalent) || changes('requires_party', a.requiresParty)) {
+          const postings = await tx.journalEntryLine.count({ where: { facilityId, accountCode: code } });
+          if (postings > 0) {
+            throw Errors.VALIDATION_ERROR(
+              `${code} already carries ${postings} posting(s); whether it is cash, or requires a party, is fixed once it is used`,
+              'is_cash_equivalent',
+            );
+          }
+        }
+      }
+
+      if (body.is_active === false && a.isActive) {
+        await this.assertDeactivatable(tx, facilityId, a);
+      }
+
       const updated = await tx.chartOfAccounts.update({
         where: { id: a.id },
         data: {
           ...(body.account_name !== undefined ? { accountName: body.account_name } : {}),
           ...(body.is_active !== undefined ? { isActive: body.is_active } : {}),
           ...(body.statement_section !== undefined ? { statementSection: body.statement_section } : {}),
+          ...(body.is_cash_equivalent !== undefined ? { isCashEquivalent: body.is_cash_equivalent } : {}),
+          ...(body.allow_manual_posting !== undefined ? { allowManualPosting: body.allow_manual_posting } : {}),
+          ...(body.requires_party !== undefined ? { requiresParty: body.requires_party } : {}),
         },
       });
       return format(updated);
     });
+  }
+
+  /**
+   * An account may be retired only when nothing depends on it staying open: no
+   * active child (a header's own balance is always 0, so the balance check alone
+   * never stopped a header with live children), a zero balance in both books,
+   * and no configuration that will post to it.
+   */
+  private async assertDeactivatable(tx: Tx, facilityId: string, a: Row) {
+    if (a.accountType === 'HEADER') {
+      const active = await tx.chartOfAccounts.count({ where: { facilityId, parentAccountCode: a.accountCode, isActive: true } });
+      if (active > 0) {
+        throw Errors.VALIDATION_ERROR(`${active} active account(s) sit under ${a.accountCode}; deactivate those first`, 'is_active');
+      }
+      return;
+    }
+    const agg = await tx.journalEntryLine.aggregate({
+      where: { facilityId, accountCode: a.accountCode, journalEntry: { postingStatus: 'POSTED' } },
+      _sum: { debitAmount: true, creditAmount: true },
+    });
+    if (!moneyEquals(Number(agg._sum.debitAmount ?? 0), Number(agg._sum.creditAmount ?? 0))) {
+      throw Errors.ACCOUNT_HAS_BALANCE();
+    }
+    const used = await firstReference(tx, DEACTIVATION_REFERENCES, facilityId, a.accountCode);
+    if (used) {
+      throw Errors.VALIDATION_ERROR(`${used} still post to ${a.accountCode}; change them before deactivating it`, 'is_active');
+    }
   }
 }

@@ -2,7 +2,6 @@ import { z } from 'zod';
 import {
   AccountClass,
   AccountType,
-  CashFlowSection,
   NormalBalance,
   StatementSection,
   JournalEntryType,
@@ -27,7 +26,6 @@ export const ChartOfAccountsResponse = z.object({
   parent_account_code: z.string().nullable(),
   normal_balance: NormalBalance,
   statement_section: StatementSection.nullable(),
-  cash_flow_section: CashFlowSection.nullable(),
   is_system_account: z.boolean(),
   is_active: z.boolean(),
   // What every "paid from" picker offers and the cash-flow statement counts.
@@ -80,6 +78,11 @@ export const CreateAccountRequest = z
     is_contra: z.boolean().optional(),
     // HEADER only — which statement section its children roll up into.
     statement_section: StatementSection.optional(),
+    // The properties an owner-created account can share with a system one
+    // (docs/25 §2 invariant 2). Frozen once the account carries a posting.
+    is_cash_equivalent: z.boolean().optional(),
+    allow_manual_posting: z.boolean().optional(),
+    requires_party: z.boolean().optional(),
   })
   .superRefine((v, ctx) => {
     // A header with no section appears in no section's list, so every detail
@@ -115,12 +118,17 @@ export type CreateAccountRequestType = z.infer<typeof CreateAccountRequest>;
 export const UpdateAccountRequest = z.object({
   account_name: z.string().min(1).max(200).optional(),
   is_active: z.boolean().optional(),
-  // A header's section is presentation, not structure — it stays editable
-  // even once the header has DETAIL children with postings (unlike code,
-  // class, type, parent and normal_balance, which guard_chart_of_accounts
-  // locks the moment the account carries activity). null clears it back to
-  // unclassified.
+  // A header's section is presentation, not structure — it stays editable on
+  // an owner-created header even once its children carry postings (unlike
+  // code, class, type, parent and normal_balance, which guard_chart_of_accounts
+  // locks). It may not be cleared on a non-equity header: that is how its
+  // children would become unclassified (docs/25 L-38).
   statement_section: StatementSection.nullable().optional(),
+  // Editable on owner-created accounts only; is_cash_equivalent and
+  // requires_party freeze once the account carries a posting.
+  is_cash_equivalent: z.boolean().optional(),
+  allow_manual_posting: z.boolean().optional(),
+  requires_party: z.boolean().optional(),
 });
 export type UpdateAccountRequestType = z.infer<typeof UpdateAccountRequest>;
 
