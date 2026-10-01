@@ -18,6 +18,8 @@ import {
   UnlockPeriodRequest,
   EnterOpeningBalancesRequest,
   CreateOwnerEquityRequest,
+  OwnerEquityListQuery,
+  VoidOwnerEquityRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { assertKatchiWriteAllowed, resolveBookTypeForRead } from './book-gate';
@@ -28,10 +30,7 @@ import { FinancialStatementsService } from './financial-statements.service';
 import { CashFlowService } from './cash-flow.service';
 import { PeriodLockService } from './period-lock.service';
 import { OpeningBalanceService } from './opening-balance.service';
-import { CASH_TRANSFER_ACCOUNTS } from './templates/je-27-cash-transfer';
-import { buildJE30OwnerEquity } from './templates/je-30-owner-equity';
-import { DERIVED_EQUITY_ACCOUNTS } from '@coldchain/shared';
-import { Errors } from '../../common/errors';
+import { OwnerEquityService } from '../partners/owner-equity.service';
 
 const CodeParam = z.object({ code: z.string().regex(/^[0-9]+$/) });
 const IdParam = z.object({ id: z.string().uuid() });
@@ -44,6 +43,7 @@ export async function accountingRoutes(app: FastifyInstance) {
   const financials = new FinancialStatementsService(app.prisma);
   const cashFlow = new CashFlowService(app.prisma);
   const openingBalance = new OpeningBalanceService(app.prisma, journalEntry);
+  const ownerEquity = new OwnerEquityService(app.prisma);
 
   // ==========================================================
   // CHART OF ACCOUNTS — S-35
@@ -323,6 +323,17 @@ export async function accountingRoutes(app: FastifyInstance) {
   // ==========================================================
 
   app.route({
+    method: 'GET',
+    url: '/v1/accounting/owner-equity',
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
+    schema: { querystring: OwnerEquityListQuery },
+    handler: async (request, reply) => {
+      const q = request.query as z.infer<typeof OwnerEquityListQuery>;
+      return sendSuccess(reply, await ownerEquity.list(request.user!.facilityId, q));
+    },
+  });
+
+  app.route({
     method: 'POST',
     url: '/v1/accounting/owner-equity',
     preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
@@ -330,60 +341,31 @@ export async function accountingRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateOwnerEquityRequest>;
       assertKatchiWriteAllowed(request.user!.role, body.book_type);
+      const { journalEntryId } = await ownerEquity.create(request.user!.facilityId, request.user!.userId, body);
+      const full = await journalEntry.getById(request.user!.facilityId, journalEntryId);
+      return sendSuccess(reply.status(201), full);
+    },
+  });
 
-      const cashAllowed = CASH_TRANSFER_ACCOUNTS as readonly string[];
-      if (!cashAllowed.includes(body.cash_account_code)) {
-        throw Errors.VALIDATION_ERROR(
-          `Money must move to or from a cash or bank account (${cashAllowed.join(', ')}).`,
-          'cash_account_code',
-        );
-      }
-
-      // The equity side must be a real, postable equity account belonging to an
-      // owner. Retained earnings and the current-year result are computed by the
-      // statements rather than posted, so they are refused by name.
-      if ((DERIVED_EQUITY_ACCOUNTS as readonly string[]).includes(body.equity_account_code)) {
-        throw Errors.VALIDATION_ERROR(
-          `${body.equity_account_code} is worked out by the statements and cannot be posted to. Use the owner's own capital or drawings account.`,
-          'equity_account_code',
-        );
-      }
-      const equityAccount = await app.prisma.chartOfAccounts.findUnique({
-        where: {
-          facilityId_accountCode: {
-            facilityId: request.user!.facilityId,
-            accountCode: body.equity_account_code,
-          },
-        },
-        select: { accountClass: true, accountType: true, isActive: true },
+  app.route({
+    method: 'POST',
+    url: '/v1/accounting/owner-equity/:id/void',
+    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
+    schema: { params: IdParam, body: VoidOwnerEquityRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const existing = await app.prisma.ownerEquityMovement.findFirst({
+        where: { id, facilityId: request.user!.facilityId },
+        select: { bookType: true },
       });
-      if (!equityAccount || !equityAccount.isActive) {
-        throw Errors.VALIDATION_ERROR('That account does not exist, or is inactive.', 'equity_account_code');
-      }
-      if (equityAccount.accountClass !== 'EQUITY' || equityAccount.accountType !== 'DETAIL') {
-        throw Errors.VALIDATION_ERROR(
-          "An owner's money in or out belongs to an equity account. What an owner takes is a share of profit, not a business cost — booking it anywhere else understates both profit and taxable income (Income Tax Ordinance 2001 s.21(j)).",
-          'equity_account_code',
-        );
-      }
-
-      const posted = await journalEntry.post(
+      assertKatchiWriteAllowed(request.user!.role, existing?.bookType);
+      const data = await ownerEquity.void(
         request.user!.facilityId,
         request.user!.userId,
-        buildJE30OwnerEquity({
-          movementDate: new Date(body.movement_date),
-          amountPkr: body.amount_pkr,
-          direction: body.direction,
-          equityAccountCode: body.equity_account_code,
-          cashAccountCode: body.cash_account_code,
-          bookType: body.book_type,
-          userId: request.user!.userId,
-          note: body.note,
-        }),
-        { postingStatus: 'POSTED' },
+        id,
+        request.body as z.infer<typeof VoidOwnerEquityRequest>,
       );
-      const full = await journalEntry.getById(request.user!.facilityId, posted.id);
-      return sendSuccess(reply.status(201), full);
+      return sendSuccess(reply, data);
     },
   });
 

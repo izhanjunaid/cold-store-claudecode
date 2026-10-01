@@ -571,7 +571,13 @@ export class FinancialStatementsService {
       byDate.set(key, window);
     }
 
-    const slices = sliceByRatio(query.date_from, query.date_to, [...byDate.values()]);
+    const retirements = (
+      await this.prisma.partner.findMany({
+        where: { facilityId, retiredOn: { not: null } },
+        select: { id: true, retiredOn: true },
+      })
+    ).map((p) => ({ partner_id: p.id, retired_on: toIsoDate(p.retiredOn!) }));
+    const slices = sliceByRatio(query.date_from, query.date_to, [...byDate.values()], retirements);
     const totals = new Map<string, { name: string; code: string; amount: number }>();
     let unallocated = 0;
     const windows: { from: string; to: string; result_pkr: number; ratio_from: string | null }[] = [];

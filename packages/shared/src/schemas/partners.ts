@@ -12,25 +12,36 @@ const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
  * only while nothing has posted, and that window closes the first time an owner
  * takes money out.
  */
+/**
+ * A Pakistani CNIC: 13 digits, usually written 12345-1234567-1. Payroll compares
+ * on the digits alone, so either form is accepted (docs/25 C-21).
+ */
+const Cnic = z.string().regex(/^\d{5}-?\d{7}-?\d$/, 'Expected a 13-digit CNIC, e.g. 35202-1234567-1');
+
 export const CreatePartnerRequest = z.object({
   name: z.string().min(1).max(200),
   admitted_on: dateOnly,
   capital_account_code: z.string().max(10).optional(),
   drawings_account_code: z.string().max(10).optional(),
+  // Recorded so payroll can refuse to employ an owner: an owner's pay is a
+  // drawing, never a salary (ITO 2001 s.21(j)).
+  cnic: Cnic.optional(),
 });
 export type CreatePartnerRequestType = z.infer<typeof CreatePartnerRequest>;
 
 export const UpdatePartnerRequest = z.object({
   name: z.string().min(1).max(200).optional(),
-  // Retiring a partner stops their share; it removes nothing. Their accounts and
-  // history stay on every statement, which is what the standard requires.
+  // Retiring a partner stops their share after this date — their last day in.
+  // It removes nothing: their accounts and history stay on every statement.
   retired_on: dateOnly.nullable().optional(),
+  cnic: Cnic.nullable().optional(),
 });
 export type UpdatePartnerRequestType = z.infer<typeof UpdatePartnerRequest>;
 
 export const PartnerResponse = z.object({
   id: z.string().uuid(),
   name: z.string(),
+  cnic: z.string().nullable(),
   capital_account_code: z.string(),
   capital_account_name: z.string(),
   drawings_account_code: z.string(),
@@ -39,6 +50,17 @@ export const PartnerResponse = z.object({
   retired_on: z.string().nullable(),
 });
 export type PartnerResponseType = z.infer<typeof PartnerResponse>;
+
+/**
+ * Move opening equity out of the plug (3010) into this owner's capital account
+ * (docs/25 L-32) — the one-step replacement for a hand-written reclass.
+ */
+export const AttributeOpeningEquityRequest = z.object({
+  amount_pkr: z.number().positive(),
+  date: dateOnly,
+  note: z.string().max(300).optional(),
+});
+export type AttributeOpeningEquityRequestType = z.infer<typeof AttributeOpeningEquityRequest>;
 
 /**
  * The profit-sharing ratio, from a date.

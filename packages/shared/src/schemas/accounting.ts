@@ -710,17 +710,52 @@ export const OwnerEquityDirection = z.enum(['CAPITAL_IN', 'DRAWING']);
  * taxable income as well as profit.
  */
 export const CreateOwnerEquityRequest = z.object({
+  /**
+   * Whose money it is. The equity account is derived from the partner and the
+   * direction — capital for CAPITAL_IN, drawings for DRAWING — never chosen
+   * separately (docs/25 L-23).
+   */
+  partner_id: z.string().uuid(),
   movement_date: dateOnly,
   direction: OwnerEquityDirection,
-  /** The owner's own capital or drawings account. */
-  equity_account_code: z.string().regex(/^[0-9]+$/),
-  /** Cash or bank — where the money actually moves. */
+  /** Where the money actually moves: any account the chart flags as cash. */
   cash_account_code: z.string().regex(/^[0-9]+$/),
   amount_pkr: z.number().positive(),
   note: z.string().max(300).optional(),
   book_type: BookType.optional().default('PACCI'),
 });
 export type CreateOwnerEquityRequestType = z.infer<typeof CreateOwnerEquityRequest>;
+
+export const OwnerEquityListQuery = z.object({
+  partner_id: z.string().uuid().optional(),
+});
+export type OwnerEquityListQueryType = z.infer<typeof OwnerEquityListQuery>;
+
+/** A movement is corrected by voiding it: its entry is reversed, never edited. */
+export const VoidOwnerEquityRequest = z.object({
+  reason: z.string().min(1).max(400),
+  // Defaults to today; may not be before the movement.
+  date: dateOnly.optional(),
+});
+export type VoidOwnerEquityRequestType = z.infer<typeof VoidOwnerEquityRequest>;
+
+export const OwnerEquityMovementResponse = z.object({
+  id: z.string().uuid(),
+  partner_id: z.string().uuid(),
+  partner_name: z.string(),
+  direction: OwnerEquityDirection,
+  movement_date: z.string(),
+  amount_pkr: z.number(),
+  cash_account_code: z.string(),
+  equity_account_code: z.string(),
+  note: z.string().nullable(),
+  book_type: BookType,
+  journal_entry_id: z.string().uuid().nullable(),
+  entry_number: z.string().nullable(),
+  voided_at: z.string().nullable(),
+  void_reason: z.string().nullable(),
+});
+export type OwnerEquityMovementResponseType = z.infer<typeof OwnerEquityMovementResponse>;
 
 // ============================================================
 // Withholding tax remittance (JE-29)

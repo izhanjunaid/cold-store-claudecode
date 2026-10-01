@@ -6,7 +6,8 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/accounting/owner-equity',
 }));
 
-vi.mock('@/lib/api-client', () => ({ apiClient: vi.fn() }));
+const apiClient = vi.fn();
+vi.mock('@/lib/api-client', () => ({ apiClient: (...a: unknown[]) => apiClient(...a) }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@/lib/permissions', () => ({ useCan: () => true }));
 
@@ -17,78 +18,77 @@ vi.mock('@/hooks/use-reference-data', () => ({
 
 import OwnerEquityPage from './page';
 
-const acct = (
-  account_code: string,
-  account_name: string,
-  normal_balance: 'DEBIT' | 'CREDIT',
-  account_class = 'EQUITY',
-  parent_account_code: string | null = null,
-) => ({
+const acct = (account_code: string, account_name: string, is_cash_equivalent: boolean) => ({
   account_code,
   account_name,
-  account_class,
+  account_class: 'ASSET',
   account_type: 'DETAIL' as const,
-  parent_account_code,
-  normal_balance,
+  parent_account_code: null,
+  normal_balance: 'DEBIT' as const,
   is_active: true,
+  is_cash_equivalent,
+  allow_manual_posting: true,
+  requires_party: false,
 });
 
-const BANK = acct('1020', 'Bank Account — Main', 'DEBIT', 'ASSET', '1000');
-const PLUG = acct('3010', 'Opening Balance Equity', 'CREDIT');
+const partner = (name: string, retired_on: string | null = null) => ({
+  id: `${name}-id`,
+  name,
+  cnic: null,
+  capital_account_code: '3110',
+  capital_account_name: `${name} — Capital`,
+  drawings_account_code: '3210',
+  drawings_account_name: `${name} — Drawings`,
+  admitted_on: '2026-01-01',
+  retired_on,
+});
+
+function mount(partners: ReturnType<typeof partner>[]) {
+  apiClient.mockReset();
+  apiClient.mockImplementation((url: string) => {
+    if (url === '/v1/partners') return Promise.resolve(partners);
+    if (url === '/v1/accounting/owner-equity') return Promise.resolve([]);
+    return Promise.resolve(null);
+  });
+  return render(<OwnerEquityPage />);
+}
 
 /**
- * 3010 is where the opening-balance entry balances to, not a person. It used to
- * appear in this picker labelled "(opening balances)" — a warning standing in for
- * a barrier — because while it doubled as a sole proprietor's capital account,
- * hiding it would have left that facility with nothing to choose. Every owner now
- * has a named account under 3100, so it is excluded outright.
+ * The request names the owner; the server derives their account from the
+ * direction (docs/25 L-23). The screen used to offer every equity account in one
+ * picker, so a "capital in" could be posted to a drawings account or the plug.
  */
-describe('OwnerEquityPage — the plug is not an owner', () => {
-  beforeEach(() => accounts.mockReset());
+describe('OwnerEquityPage — the owner, not an account', () => {
+  beforeEach(() => accounts.mockReturnValue([acct('1020', 'Bank Account — Main', true)]));
 
-  it('keeps 3010 out of the owner dropdown entirely', async () => {
-    accounts.mockReturnValue([
-      PLUG,
-      acct('3110', 'Junaid — Capital', 'CREDIT', 'EQUITY', '3100'),
-      acct('3210', 'Junaid — Drawings', 'DEBIT', 'EQUITY', '3200'),
-      BANK,
-    ]);
-    render(<OwnerEquityPage />);
-    await waitFor(() => expect(screen.getByRole('option', { name: /Junaid — Capital/ })).toBeTruthy());
-    expect(screen.queryByRole('option', { name: /3010/ })).toBeNull();
-    expect(screen.queryByRole('option', { name: /Opening Balance Equity/ })).toBeNull();
+  it('picks the owner, and no equity account at all', async () => {
+    mount([partner('Junaid'), partner('Umair')]);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Junaid' })).toBeTruthy());
+    expect(screen.getByRole('option', { name: 'Umair' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /Capital|Drawings|Opening Balance Equity/ })).toBeNull();
   });
 
-  it('says what to create when the facility has no owner accounts yet', async () => {
-    // The empty picker is a real state now, and it has one specific remedy —
-    // so it is named rather than left as a dropdown with nothing in it.
-    accounts.mockReturnValue([PLUG, BANK]);
-    render(<OwnerEquityPage />);
-    await waitFor(() => expect(screen.getByText(/No owner accounts exist yet/)).toBeTruthy());
-    expect(screen.queryByRole('option', { name: /3010/ })).toBeNull();
+  it('says where to add owners when none are recorded', async () => {
+    mount([]);
+    await waitFor(() => expect(screen.getByText(/No owners recorded yet/)).toBeTruthy());
   });
 
-  it('leaves out the accounts the statements work out for themselves', async () => {
-    accounts.mockReturnValue([
-      acct('3110', 'Junaid — Capital', 'CREDIT', 'EQUITY', '3100'),
-      acct('3020', 'Retained Earnings', 'CREDIT'),
-      acct('3030', 'Current Year Profit / (Loss)', 'CREDIT'),
-      BANK,
-    ]);
-    render(<OwnerEquityPage />);
-    await waitFor(() => expect(screen.getByRole('option', { name: /Junaid — Capital/ })).toBeTruthy());
-    expect(screen.queryByRole('option', { name: /Retained Earnings/ })).toBeNull();
-    expect(screen.queryByRole('option', { name: /Current Year/ })).toBeNull();
+  it('leaves out an owner who retired before the date', async () => {
+    mount([partner('Junaid'), partner('Gone', '2020-01-01')]);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Junaid' })).toBeTruthy());
+    expect(screen.queryByRole('option', { name: 'Gone' })).toBeNull();
   });
+});
 
-  it('offers both capital and drawings accounts — either side of a movement', async () => {
+describe('OwnerEquityPage — money moves through cash, as the chart defines it (L-20)', () => {
+  it('offers every account flagged as cash — an owner’s second bank too — and nothing else', async () => {
     accounts.mockReturnValue([
-      acct('3110', 'Junaid — Capital', 'CREDIT', 'EQUITY', '3100'),
-      acct('3210', 'Junaid — Drawings', 'DEBIT', 'EQUITY', '3200'),
-      BANK,
+      acct('1020', 'Bank Account — Main', true),
+      acct('1045', 'Bank Account — Second', true),
+      acct('1025', 'Cheques in Hand (Under Collection)', false),
     ]);
-    render(<OwnerEquityPage />);
-    await waitFor(() => expect(screen.getByRole('option', { name: /Junaid — Capital/ })).toBeTruthy());
-    expect(screen.getByRole('option', { name: /Junaid — Drawings/ })).toBeTruthy();
+    mount([partner('Junaid')]);
+    await waitFor(() => expect(screen.getByRole('option', { name: /Bank Account — Second/ })).toBeTruthy());
+    expect(screen.queryByRole('option', { name: /Cheques in Hand/ })).toBeNull();
   });
 });

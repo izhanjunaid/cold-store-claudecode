@@ -121,3 +121,26 @@ describe('dividing the result by weight', () => {
     expect(divideByWeight(1000, [])).toEqual([]);
   });
 });
+
+/** A retirement is a ratio change too: the retiree's last day is the one they share (docs/25 L-25). */
+describe('slicing at a retirement', () => {
+  const A = share('a', 1);
+  const B = share('b', 1);
+
+  it('cuts the day after the last day in, and drops the retiree from then on', () => {
+    const slices = sliceByRatio('2047-01-01', '2047-01-31', [ratio('2047-01-01', A, B)], [
+      { partner_id: 'b', retired_on: '2047-01-15' },
+    ]);
+    expect(slices.map((s) => [s.from, s.to, s.ratio?.shares.map((x) => x.partner_id)])).toEqual([
+      ['2047-01-01', '2047-01-15', ['a', 'b']],
+      ['2047-01-16', '2047-01-31', ['a']],
+    ]);
+  });
+
+  it('leaves the result undivided once everyone has retired', () => {
+    const slices = sliceByRatio('2047-02-01', '2047-02-28', [ratio('2047-01-01', A)], [
+      { partner_id: 'a', retired_on: '2047-01-31' },
+    ]);
+    expect(slices).toEqual([{ from: '2047-02-01', to: '2047-02-28', ratio: null }]);
+  });
+});
