@@ -4,10 +4,23 @@ import { render, screen, waitFor } from '@testing-library/react';
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn() }),
   usePathname: () => '/accounting/reports/changes-in-equity',
+  useSearchParams: () => searchParams,
 }));
+let searchParams = new URLSearchParams();
 
 const apiClient = vi.fn();
 vi.mock('@/lib/api-client', () => ({ apiClient: (...a: unknown[]) => apiClient(...a) }));
+vi.mock('@/components/accounting/statement-toolbar', () => ({ StatementToolbar: () => null }));
+vi.mock('@/components/accounting/statement-frame', () => ({
+  StatementFrame: ({ children, title }: { children: React.ReactNode; title: string }) => (
+    <div>
+      <h2>{title}</h2>
+      {children}
+    </div>
+  ),
+  StatementSkeleton: () => null,
+}));
+vi.mock('@/hooks/use-reference-data', () => ({ useFacility: () => ({ data: { settings: {} } }) }));
 
 import ChangesInEquityPage from './page';
 
@@ -68,6 +81,20 @@ describe('ChangesInEquityPage — the one equity roll-forward (L-24)', () => {
   it('names the owner a column belongs to', async () => {
     mount({});
     await waitFor(() => expect(screen.getByText(/3110 · Junaid/)).toBeTruthy());
+  });
+
+  it('opens on the period the P&L linked from, in that book', async () => {
+    searchParams = new URLSearchParams({ date_from: '2026-02-01', date_to: '2026-04-30', book_type: 'KATCHI' });
+    try {
+      mount({});
+      await waitFor(() =>
+        expect(apiClient).toHaveBeenCalledWith(
+          '/v1/accounting/changes-in-equity?date_from=2026-02-01&date_to=2026-04-30&book_type=KATCHI',
+        ),
+      );
+    } finally {
+      searchParams = new URLSearchParams();
+    }
   });
 });
 
