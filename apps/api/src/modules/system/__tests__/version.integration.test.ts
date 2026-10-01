@@ -74,6 +74,31 @@ describe('GET /v1/system/version', () => {
     expect(db.migrations_applied).toBeGreaterThanOrEqual(db.migrations_in_image);
   });
 
+  // docs/25 §8 release blocker: an update that fails AFTER its migrations applied
+  // leaves the previous version running with nothing pending, so the migration
+  // comparison above says all is well. deploy.ts records every run; the latest
+  // one must reach the panel.
+  it('reports the last database update, and a failed one with its reason', async () => {
+    const [failed] = await app.prisma.$queryRaw<{ id: number }[]>`
+      INSERT INTO deploy_runs (target_version, started_at, succeeded, error)
+      VALUES ('v9.9.9', now(), false, 'Chart of accounts: 2050 already exist with a different class or type')
+      RETURNING id`;
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/system/version',
+        headers: authHeaders(ownerToken),
+      });
+      expect(res.json().data.last_update).toMatchObject({
+        target_version: 'v9.9.9',
+        succeeded: false,
+        error: expect.stringContaining('2050'),
+      });
+    } finally {
+      await app.prisma.$executeRaw`DELETE FROM deploy_runs WHERE id = ${failed!.id}`;
+    }
+  });
+
   it('is gated on settings.manage', async () => {
     const res = await app.inject({
       method: 'GET',

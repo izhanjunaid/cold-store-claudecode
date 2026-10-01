@@ -617,6 +617,14 @@ Before v0.6.0 ships, `deploy.ts` must record its last outcome (success, or the e
 the version endpoint reads it, and the settings screen must show it. Pre-update check C20 is the
 first line of defence; this is the second.
 
+**Resolved (migration 0034):** `deploy.ts` writes a `deploy_runs` row for every run (target version,
+success, Prisma's or the chart sync's own error text); `/v1/system/version` returns the latest as
+`last_update`, and the Software panel shows a failed one ahead of the migration comparison.
+`scripts/verify-migration-repair.sh` reproduces the chart-collision failure and asserts it is
+recorded. Limit: the update that *introduces* 0034 cannot record a failure that happens before 0034
+applies, and the panel that would show it is the old image's — for v0.6.0 itself, C20 on the
+restored backup is the defence.
+
 ## 9. Fix program
 
 See the approved plan: Kernel PR (all schema, registry, engine, ledger read path, shared

@@ -73,6 +73,16 @@ export async function systemRoutes(app: FastifyInstance) {
         app.log.warn({ err }, 'version: could not read _prisma_migrations');
       }
 
+      // How the last database update ended (deploy.ts, migration 0034). This, not the
+      // migration comparison below, is what catches an update that failed after its
+      // migrations applied: the previous version keeps running with nothing pending.
+      let lastUpdate: Awaited<ReturnType<typeof app.prisma.deployRun.findFirst>> = null;
+      try {
+        lastUpdate = await app.prisma.deployRun.findFirst({ orderBy: { id: 'desc' } });
+      } catch (err) {
+        app.log.warn({ err }, 'version: could not read deploy_runs');
+      }
+
       const appliedNames = applied?.map((m) => m.name) ?? null;
       const pending =
         shipped && appliedNames ? shipped.filter((m) => !appliedNames.includes(m)) : null;
@@ -92,6 +102,13 @@ export async function systemRoutes(app: FastifyInstance) {
           // null = could not be determined, [] = nothing pending. The web
           // distinguishes the two: "unknown" is not the same as "fine".
           pending_migrations: pending,
+        },
+        last_update: lastUpdate && {
+          target_version: lastUpdate.targetVersion,
+          started_at: lastUpdate.startedAt.toISOString(),
+          finished_at: lastUpdate.finishedAt.toISOString(),
+          succeeded: lastUpdate.succeeded,
+          error: lastUpdate.error,
         },
       });
     },

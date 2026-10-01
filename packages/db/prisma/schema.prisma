@@ -1878,3 +1878,17 @@ model OwnerEquityMovement {
   @@index([facilityId, partnerId], map: "owner_equity_movements_facility_partner_idx")
   @@map("owner_equity_movements")
 }
+
+/// One row per database update run by deploy.ts (migration 0034). A failed update
+/// keeps the previous version running and every migration may already be applied,
+/// so the version panel reads the latest row instead of trusting the migration count.
+model DeployRun {
+  id            Int      @id @default(autoincrement())
+  targetVersion String   @map("target_version") @db.VarChar(50)
+  startedAt     DateTime @map("started_at") @db.Timestamptz()
+  finishedAt    DateTime @default(now()) @map("finished_at") @db.Timestamptz()
+  succeeded     Boolean
+  error         String?  @db.Text
+
+  @@map("deploy_runs")
+}

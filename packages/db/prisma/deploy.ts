@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
@@ -40,10 +40,32 @@ const LOCK_KEY = 'coldchain:db:deploy';
 
 const prisma = new PrismaClient();
 
+// Stamped into the image at build time; the migrate service runs the new image.
+const TARGET_VERSION = process.env['COLDCHAIN_VERSION'] || 'dev';
+
 function prismaCli(args: string): void {
   // Shell form so this works from a pnpm script on both Linux (the container)
-  // and Windows (a developer running it locally).
-  execSync(`pnpm exec prisma ${args}`, { stdio: 'inherit' });
+  // and Windows (a developer running it locally). Output is captured, not
+  // inherited, so a failure can be recorded with Prisma's own reason.
+  const run = spawnSync(`pnpm exec prisma ${args}`, { shell: true, encoding: 'utf8' });
+  process.stdout.write(run.stdout ?? '');
+  process.stderr.write(run.stderr ?? '');
+  if (run.status !== 0) {
+    throw new Error(`prisma ${args} failed:\n${(run.stderr || run.stdout || String(run.error)).trim()}`);
+  }
+}
+
+/**
+ * One deploy_runs row per run (migration 0034), read by /v1/system/version. The
+ * table does not exist until 0034 applies, so only the update that introduces it
+ * can fail without a record — every later one is recorded.
+ */
+async function recordOutcome(startedAt: Date, failure: unknown): Promise<void> {
+  if (!(await tableExists('deploy_runs'))) return;
+  const error = failure === undefined ? null : failure instanceof Error ? failure.message : String(failure);
+  await prisma.deployRun.create({
+    data: { targetVersion: TARGET_VERSION, startedAt, succeeded: failure === undefined, error: error?.slice(-4000) ?? null },
+  });
 }
 
 async function tableExists(name: string): Promise<boolean> {
@@ -153,10 +175,14 @@ async function main(): Promise<void> {
   console.log('\nDatabase is ready for this release.');
 }
 
+const startedAt = new Date();
 main()
-  .catch((e) => {
+  .then(() => recordOutcome(startedAt, undefined))
+  .catch(async (e) => {
     console.error('\nDatabase update FAILED — the previous version is still running.\n');
     console.error(e);
-    process.exit(1);
+    // The settings screen shows this; a failure to record must not hide the real one.
+    await recordOutcome(startedAt, e).catch((r) => console.error('Could not record the failure:', r));
+    process.exitCode = 1;
   })
   .finally(() => prisma.$disconnect());
