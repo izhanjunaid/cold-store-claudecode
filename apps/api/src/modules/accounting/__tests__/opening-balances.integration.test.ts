@@ -156,12 +156,10 @@ const FULL_BODY = () => ({
   ],
   cash_pkr: 12000,
   bank_pkr: 88000,
+  // Its own field now, like cash and bank (docs/25 L-36) — not a stray other line.
+  wallet_pkr: 5000,
   other_lines: [
     { account_code: '1310', debit_pkr: 200000, credit_pkr: 0, description: 'Plant at book value' },
-    // 1030 has no dedicated request field (only cash_pkr -> 1010, bank_pkr -> 1020),
-    // so the web routes an opening mobile-wallet balance through other_lines.
-    // Covering that path here rather than trusting a read of the validation code.
-    { account_code: '1030', debit_pkr: 5000, credit_pkr: 0, description: 'Opening mobile wallet balance' },
   ],
 });
 
@@ -234,6 +232,8 @@ describe('Gap 1 · opening balances', () => {
     expect(je.posting_status).toBe('POSTED');
     expect(je.book_type).toBe('PACCI');
     expect(je.source_table).toBe('opening_balances');
+    // Its own entry type, not ADJUSTMENT shared with manual journals (docs/25 L-10).
+    expect(je.entry_type).toBe('OPENING_BALANCE');
     expect(je.entry_date).toBe('2026-01-01');
     expect(je.total_debit_pkr).toBe(370000);
     expect(je.total_credit_pkr).toBe(370000);
@@ -245,14 +245,15 @@ describe('Gap 1 · opening balances', () => {
     expect(traderLine.account_code).toBe('1120');
     expect(traderLine.debit_amount).toBe(25000);
 
-    // All three cash-class accounts can carry an opening balance: 1010/1020 via
-    // their own request fields, 1030 through other_lines.
+    // All three seeded cash accounts have their own request field.
     expect(je.lines.find((l: any) => l.account_code === '1010').debit_amount).toBe(12000);
     expect(je.lines.find((l: any) => l.account_code === '1020').debit_amount).toBe(88000);
     expect(je.lines.find((l: any) => l.account_code === '1030').debit_amount).toBe(5000);
 
     const plug = je.lines.find((l: any) => l.account_code === '3010');
     expect(plug.credit_amount).toBe(370000);
+    // The plug belongs to nobody — it used to be described as "owner capital".
+    expect(plug.description).toMatch(/not yet attributed/i);
   });
 
   it('status flips to entered with the entry reference', async () => {
@@ -467,7 +468,7 @@ describe('unattributed opening equity', () => {
     expect(body.unattributed_plug_pkr).toBe(0);
   });
 
-  // One helper, two endpoints: the screen and the balance sheet must not tell an
+  // One query, two endpoints: the screen and the balance sheet must not tell an
   // owner different things about the same rupees.
   it('agrees with the balance sheet about the same figure', async () => {
     await cleanup();
@@ -484,5 +485,99 @@ describe('unattributed opening equity', () => {
       ).body,
     ).data;
     expect(bs.unattributed_opening_equity_pkr).toBe(st.unattributed_plug_pkr);
+  });
+});
+
+/**
+ * What an opening balance may touch comes from the chart's own flags (docs/25
+ * L-26). The web and the server each kept a list of codes and the two lists
+ * disagreed: the server took 1010/1020 twice (fields and other lines), the web
+ * allowed 1250, and neither blocked 1025, 1230, 2010 or 3030.
+ */
+describe('the chart flags decide what an opening balance may touch (L-26, L-36)', () => {
+  afterAll(cleanup);
+
+  it('serves the accounts an "other" line may use, read from the flags', async () => {
+    const body = JSON.parse((await status(managerToken)).body).data;
+    const codes = (body.other_line_accounts as { account_code: string }[]).map((a) => a.account_code);
+    // An ordinary balance-sheet detail, and retained earnings — opening balances
+    // are the one place 3020 may be posted.
+    expect(codes).toEqual(expect.arrayContaining(['1310', '1311', '2110', '3020']));
+    for (const blocked of [
+      '1010', '1020', '1030', // their own fields
+      '1110', '1140', '2050', // need a party: the receivable / payable sections
+      '1025', '1230', '1250', '2010', '2030', // moved only by their own documents
+      '3010', '3030', // the plug, and the computed result
+      '4010', '6010', // not balance-sheet accounts
+      '1000', // a header
+    ]) {
+      expect(codes, `${blocked} should not be offered`).not.toContain(blocked);
+    }
+  });
+
+  it.each(['1010', '1025', '1230', '2010', '3030'])('the server refuses %s on an "other" line too', async (code) => {
+    await cleanup();
+    const res = await enter(managerToken, {
+      as_of_date: '2026-01-01',
+      other_lines: [{ account_code: code, debit_pkr: 5000, credit_pkr: 0 }],
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('enters what is owed to each supplier on that supplier, mirroring receivables', async () => {
+    await cleanup();
+    const sup = await app.inject({
+      method: 'POST',
+      url: '/v1/parties',
+      headers: authHeaders(operatorToken),
+      payload: {
+        name: `OB Supplier ${Date.now()}`,
+        party_type: 'SUPPLIER',
+        phone_primary: `0301${Date.now() % 10000000}`.slice(0, 11),
+        credit_terms_days: 30,
+      },
+    });
+    expect(sup.statusCode, sup.body).toBe(201);
+    const supplierId = JSON.parse(sup.body).data.id as string;
+
+    const res = await enter(managerToken, {
+      as_of_date: '2026-01-01',
+      bank_pkr: 50000,
+      party_payables: [{ party_id: supplierId, amount_pkr: 20000 }],
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    const line = JSON.parse(res.body).data.lines.find((l: any) => l.party_id === supplierId);
+    expect(line).toMatchObject({ account_code: '2050', credit_amount: 20000 });
+
+    await cleanup();
+    await prisma.party.delete({ where: { id: supplierId } });
+  });
+
+  it('posts a receivable to the party’s own control account, not one derived from its type', async () => {
+    await cleanup();
+    // Retyped after creation: the stamped control account is the answer (R-01).
+    await prisma.party.update({ where: { id: traderId }, data: { controlAccountCode: '1150' } });
+    try {
+      const res = await enter(managerToken, {
+        as_of_date: '2026-01-01',
+        party_receivables: [{ party_id: traderId, amount_pkr: 1000 }],
+      });
+      expect(res.statusCode, res.body).toBe(201);
+      expect(JSON.parse(res.body).data.lines.find((l: any) => l.party_id === traderId).account_code).toBe('1150');
+    } finally {
+      await cleanup();
+      await prisma.party.update({ where: { id: traderId }, data: { controlAccountCode: '1120' } });
+    }
+  });
+
+  it('refuses a customer among the payables', async () => {
+    await cleanup();
+    const res = await enter(managerToken, {
+      as_of_date: '2026-01-01',
+      party_receivables: [{ party_id: farmerId, amount_pkr: 1000 }],
+      party_payables: [{ party_id: farmerId, amount_pkr: 1000 }],
+    });
+    // A farmer's control account is a receivable, so it cannot carry a payable.
+    expect(res.statusCode).toBe(400);
   });
 });

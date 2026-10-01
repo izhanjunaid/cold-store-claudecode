@@ -244,8 +244,22 @@ export const EnterOpeningBalancesRequest = z.object({
     )
     .optional()
     .default([]),
+  // What the facility owed each supplier at the cutover — credited to that
+  // supplier's own control account, the mirror of party_receivables.
+  party_payables: z
+    .array(
+      z.object({
+        party_id: z.string().uuid(),
+        amount_pkr: z.number().positive(),
+      }),
+    )
+    .optional()
+    .default([]),
   cash_pkr: z.number().min(0).optional().default(0),
   bank_pkr: z.number().min(0).optional().default(0),
+  wallet_pkr: z.number().min(0).optional().default(0),
+  // Any other balance-sheet account — only those in the status endpoint's
+  // other_line_accounts, which the server derives from the chart's flags.
   other_lines: z
     .array(
       z.object({
@@ -273,6 +287,21 @@ export const OpeningBalanceStatusResponse = z.object({
   // Opening equity still sitting in the plug (3010 Opening Balance Equity),
   // which belongs to no owner by definition. 0 is the healthy answer.
   unattributed_plug_pkr: z.number(),
+  // The accounts an "other" line may use, read from the chart's flags (docs/25
+  // L-26): active balance-sheet details that have no field of their own, need
+  // no party, and are not moved only by their own documents. The screen offers
+  // exactly these; the server refuses anything else.
+  other_line_accounts: z.array(
+    z.object({
+      account_code: z.string(),
+      account_name: z.string(),
+      account_class: AccountClass,
+      normal_balance: NormalBalance,
+      // Where it sits on the balance sheet (ledger.classify), so the screen can
+      // tell a fixed-asset cost line without a list of codes.
+      statement_section: z.string(),
+    }),
+  ),
 });
 export type OpeningBalanceStatusResponseType = z.infer<typeof OpeningBalanceStatusResponse>;
 

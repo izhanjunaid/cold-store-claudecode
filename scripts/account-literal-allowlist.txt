@@ -1,5 +1,4 @@
 # Files still holding account-code literals. Remove a line when you remove its literals.
-apps/api/src/modules/accounting/opening-balance.service.ts
 apps/api/src/modules/accounting/templates/je-27-cash-transfer.ts
 apps/api/src/modules/accounting/withholding-remittance.service.ts
 apps/api/src/modules/expenses/templates/je-17b-expense-accrued.ts
@@ -9,6 +8,5 @@ apps/api/src/modules/expenses/templates/withholding.ts
 apps/api/src/modules/payroll/templates/je-16b-govt-remittance.ts
 apps/api/src/modules/reporting/reports/cash-exceptions.ts
 apps/web/src/app/(app)/accounting/cash-transfers/page.tsx
-apps/web/src/app/(app)/accounting/opening-balances/page.tsx
 apps/web/src/app/(app)/accounting/owner-equity/page.tsx
 apps/web/src/hooks/use-reference-data.ts
