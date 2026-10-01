@@ -145,8 +145,12 @@ export function PaymentForm({
     fetchInvoices(partyId);
   }, [partyId, fetchInvoices]);
 
+  // A supplier is paid, never paid by: the server refuses its receipts, so it is not offered.
   const partyOptions = useMemo(
-    () => parties.map((p) => ({ value: p.id, label: p.name, hint: p.party_type })),
+    () =>
+      parties
+        .filter((p) => p.party_type !== 'SUPPLIER')
+        .map((p) => ({ value: p.id, label: p.name, hint: p.party_type })),
     [parties],
   );
 
@@ -322,8 +326,8 @@ export function PaymentForm({
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">
                     Enter the amount above as what settles the invoice, before any deduction. The
-                    deduction is an advance of your own income tax, held in 1240 — not a discount
-                    and not a shortfall.
+                    deduction is an advance of your own income tax, held as tax withheld at source —
+                    not a discount and not a shortfall.
                   </TooltipContent>
                 </Tooltip>
               </div>

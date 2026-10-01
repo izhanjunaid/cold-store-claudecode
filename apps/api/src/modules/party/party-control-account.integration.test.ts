@@ -96,6 +96,8 @@ describe('party control account (R-01)', () => {
       payload: { party_type: 'TRADER' },
     });
     expect(res.statusCode).toBe(400);
+    const detail = await app.inject({ method: 'GET', url: `/v1/parties/${party.id}`, headers: authHeaders(operatorToken) });
+    expect(JSON.parse(detail.body).data.can_change_type).toBe(false);
     const row = await prisma.party.findUniqueOrThrow({ where: { id: party.id } });
     expect(row.partyType).toBe('FARMER');
     expect(row.controlAccountCode).toBe('1110');
@@ -115,6 +117,18 @@ describe('party control account (R-01)', () => {
     const supplier = await createParty('CA Supplier', 'SUPPLIER', '03009990004');
     expect(supplier.control_account_code).toBe('2050');
     const res = await payOnAccount(supplier.id, 100);
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('refuses a peshgi to a supplier', async () => {
+    const supplier = await createParty('CA Supplier Loan', 'SUPPLIER', '03009990005');
+    const owner = (await loginAsRole(app, 'OWNER')).accessToken;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/loans/issue',
+      headers: authHeaders(owner),
+      payload: { party_id: supplier.id, issue_date: '2026-05-10', principal_pkr: 100, payment_method: 'CASH' },
+    });
     expect(res.statusCode).toBe(400);
   });
 });

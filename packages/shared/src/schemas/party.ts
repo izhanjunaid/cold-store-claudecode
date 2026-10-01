@@ -47,4 +47,6 @@ export const PartyResponse = z.object({
   /** Only set on GET :id when a credit limit exists; never the outstanding
    * PKR figure itself, since this endpoint is reachable below ACCOUNTANT. */
   over_credit_limit: z.boolean().optional(),
+  /** Only on GET :id — false once the party has postings (its control account is frozen). */
+  can_change_type: z.boolean().optional(),
 });

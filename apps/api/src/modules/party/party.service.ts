@@ -107,7 +107,9 @@ export class PartyService {
       const outstandingPkr = await this.repo.getOutstandingPkr(facilityId, id);
       overCreditLimit = outstandingPkr > party.creditLimitPkr.toNumber();
     }
-    return toResponse(party as PartyRecord, overCreditLimit);
+    // The type decides the control account, which freezes at the first posting (R-01).
+    const canChangeType = !(await this.repo.hasPostings(facilityId, id));
+    return { ...toResponse(party as PartyRecord, overCreditLimit), can_change_type: canChangeType };
   }
 
   async create(input: CreatePartyInput) {

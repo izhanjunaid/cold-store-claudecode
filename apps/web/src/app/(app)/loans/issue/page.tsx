@@ -32,7 +32,9 @@ export default function IssuePeshgiPage() {
   const isOwner = can(user, 'loans.issue');
 
   const { data: parties = [] } = useParties();
-  const partyOptions = parties.map((p) => ({ value: p.id, label: p.name, hint: p.party_type }));
+  const partyOptions = parties
+    .filter((p) => p.party_type !== 'SUPPLIER')
+    .map((p) => ({ value: p.id, label: p.name, hint: p.party_type }));
 
   const [partyId, setPartyId] = useState(search.get('party_id') ?? '');
   const [principal, setPrincipal] = useState('');

@@ -54,15 +54,19 @@ const PARTY_TYPES = [
   { value: 'ARHTI', label: 'Arhti' },
   { value: 'BUYER', label: 'Buyer' },
   { value: 'OTHER', label: 'Other' },
+  // A supplier is paid, never billed: it has no lots, invoices or receipts.
+  { value: 'SUPPLIER', label: 'Supplier' },
 ];
 
 interface PartyFormProps {
   initialData?: Partial<PartyFormValues>;
   partyId?: string;
   mode: 'create' | 'edit';
+  /** False once the party has postings: its type decides its account, which is then frozen. */
+  canChangeType?: boolean;
 }
 
-export function PartyForm({ initialData, partyId, mode }: PartyFormProps) {
+export function PartyForm({ initialData, partyId, mode, canChangeType = true }: PartyFormProps) {
   const router = useRouter();
   const { data: parties = [] } = useParties();
 
@@ -100,7 +104,7 @@ export function PartyForm({ initialData, partyId, mode }: PartyFormProps) {
   const onSubmit = (values: PartyFormValues) => {
     const payload: Record<string, unknown> = {
       name: values.name,
-      party_type: values.party_type,
+      ...(canChangeType ? { party_type: values.party_type } : {}),
       phone_primary: values.phone_primary,
       credit_terms_days: parseInt(values.credit_terms_days) || 30,
     };
@@ -129,7 +133,14 @@ export function PartyForm({ initialData, partyId, mode }: PartyFormProps) {
           <EntryGroup title="Identity" columns={4}>
             <TextField control={control} name="name" label="Name" required />
             <TextField control={control} name="name_urdu" label="Name (Urdu)" dir="rtl" />
-            <SelectField control={control} name="party_type" label="Party type" options={PARTY_TYPES} />
+            <SelectField
+              control={control}
+              name="party_type"
+              label="Party type"
+              // Once the party has entries its type (and so its account) is fixed: offer only the current one.
+              options={canChangeType ? PARTY_TYPES : PARTY_TYPES.filter((t) => t.value === initialData?.party_type)}
+              description={canChangeType ? undefined : 'Fixed: this party already has entries on its account'}
+            />
             <SelectField
               control={control}
               name="parent_arhti_id"

@@ -30,7 +30,11 @@ export default function ReceivablesAgingPage() {
   const [partyId, setPartyId] = useState('');
 
   const { data: parties = [] } = useParties();
-  const partyOptions = useMemo(() => parties.map((p) => ({ value: p.id, label: p.name })), [parties]);
+  // A supplier has no receivable: it is never billed, paid by or lent to.
+  const partyOptions = useMemo(
+    () => parties.filter((p) => p.party_type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
+    [parties],
+  );
 
   const { data, isLoading } = useQuery<ReceivablesAgingResponseType>({
     queryKey: ['receivables-aging', user?.facility_id, asOfDate, partyId],

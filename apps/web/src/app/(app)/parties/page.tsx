@@ -64,6 +64,7 @@ export default function PartyListPage() {
               label: 'Type',
               options: [
                 { label: 'Farmer', value: 'FARMER' },
+                { label: 'Supplier', value: 'SUPPLIER' },
                 { label: 'Trader', value: 'TRADER' },
                 { label: 'Arhti', value: 'ARHTI' },
                 { label: 'Buyer', value: 'BUYER' },

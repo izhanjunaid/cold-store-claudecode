@@ -31,7 +31,10 @@ export default function PaymentListPage() {
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(FILTER_KEYS);
 
   const { data: parties = [] } = useParties();
-  const partyOptions = useMemo(() => parties.map((p) => ({ value: p.id, label: p.name })), [parties]);
+  const partyOptions = useMemo(
+    () => parties.filter((p) => p.party_type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
+    [parties],
+  );
 
   const [recordOpen, setRecordOpen] = useState(false);
   const [clearTarget, setClearTarget] = useState<PaymentRow | null>(null);

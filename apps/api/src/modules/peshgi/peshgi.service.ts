@@ -8,6 +8,7 @@ import type {
 import { assetAccountForPaymentMethod, round2 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { assertCashEquivalent } from '../payment/cash-account';
+import { receivableParty } from '../party/receivable-party';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { generatePeshgiNumber } from './peshgi-number';
 import { buildJE18PeshgiIssued } from './templates/je-18-peshgi-issued';
@@ -26,6 +27,8 @@ export class PeshgiService {
         where: { facilityId, id: body.party_id, isActive: true },
       });
       if (!party) throw Errors.PARTY_NOT_FOUND();
+      // A peshgi is lent to a customer; a supplier has no receivable account (docs/25 R-01).
+      receivableParty(party);
 
       const issueDate = new Date(body.issue_date);
       const loanNumber = await generatePeshgiNumber(tx, facilityId, issueDate);

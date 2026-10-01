@@ -7,6 +7,7 @@ import { Pencil, Plus, UserX } from 'lucide-react';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
+import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -69,10 +70,12 @@ interface PaymentSummary {
   reference_number: string | null;
   status: string;
 }
+/** One journal entry's effect on the party's receivable — the statement is the ledger (docs/25 R-11). */
 interface LedgerEntry {
   id: string;
   date: string;
-  type: 'INVOICE' | 'PAYMENT';
+  type: string;
+  reference: string | null;
   description: string;
   debit_pkr: number;
   credit_pkr: number;
@@ -124,6 +127,8 @@ export default function PartyDetailPage() {
   const [payments, setPayments] = useState<PaymentSummary[]>([]);
   const [ledger, setLedger] = useState<LedgerData | null>(null);
   const [ledgerError, setLedgerError] = useState(false);
+  // The credit limit covers what the party owes on both books; only KATCHI readers see that half.
+  const [katchiOutstanding, setKatchiOutstanding] = useState(0);
   const [loans, setLoans] = useState<LoanSummary[]>([]);
   const [loansError, setLoansError] = useState(false);
   const [tabLoaded, setTabLoaded] = useState<Record<string, boolean>>({});
@@ -151,13 +156,18 @@ export default function PartyDetailPage() {
         setLedgerError(false);
       })
       .catch(() => setLedgerError(true));
+    if (hasMinRole(user?.role, 'MANAGER')) {
+      apiClient<LedgerData>(`/v1/parties/${partyId}/ledger?book_type=KATCHI`)
+        .then((d) => setKatchiOutstanding(d.closing_balance_pkr))
+        .catch(() => setKatchiOutstanding(0));
+    }
     apiClientList<LoanSummary>(`/v1/loans?party_id=${partyId}&page_size=100`)
       .then((res) => {
         setLoans(res.data);
         setLoansError(false);
       })
       .catch(() => setLoansError(true));
-  }, [partyId]);
+  }, [partyId, user?.role]);
 
   useEffect(() => {
     refreshHeaderStats();
@@ -225,8 +235,10 @@ export default function PartyDetailPage() {
 
   const activeLoans = loans.filter((l) => l.status === 'ACTIVE');
   const activeLoanBalance = activeLoans.reduce((s, l) => s + Number(l.balance_outstanding_pkr), 0);
+  // The same exposure the server checks the limit against: both books.
+  const exposure = ledger ? ledger.closing_balance_pkr + katchiOutstanding : null;
   const limitUsedPct =
-    party.credit_limit_pkr && ledger ? Math.round((ledger.closing_balance_pkr / party.credit_limit_pkr) * 100) : null;
+    party.credit_limit_pkr && exposure != null ? Math.round((exposure / party.credit_limit_pkr) * 100) : null;
 
   return (
     <div>
@@ -256,8 +268,8 @@ export default function PartyDetailPage() {
         <StatTile
           size="compact"
           label="Outstanding"
-          value={ledgerError ? '—' : ledger ? formatMoney(ledger.closing_balance_pkr) : '…'}
-          tone={ledger && ledger.closing_balance_pkr > 0 && party.over_credit_limit ? 'negative' : 'default'}
+          value={ledgerError ? '—' : exposure != null ? formatMoney(exposure) : '…'}
+          tone={exposure != null && exposure > 0 && party.over_credit_limit ? 'negative' : 'default'}
         />
         <StatTile
           size="compact"
@@ -441,8 +453,11 @@ export default function PartyDetailPage() {
                       {ledger.entries.map((e) => (
                         <TableRow key={e.id} className="h-7">
                           <TableCell className="py-1">{e.date}</TableCell>
-                          <TableCell className="py-1"><StatusBadge status={e.type} tone={e.type === 'INVOICE' ? 'warning' : 'success'} /></TableCell>
-                          <TableCell className="py-1">{e.description}</TableCell>
+                          <TableCell className="py-1"><StatusBadge status={e.type} tone={e.debit_pkr > 0 ? 'warning' : 'success'} /></TableCell>
+                          <TableCell className="py-1">
+                            {e.reference && <span className="mr-2 font-mono text-xs text-muted-foreground">{e.reference}</span>}
+                            {e.description}
+                          </TableCell>
                           <TableCell className="py-1 text-right tabular-nums">{e.debit_pkr > 0 ? e.debit_pkr.toLocaleString() : '—'}</TableCell>
                           <TableCell className="py-1 text-right tabular-nums">{e.credit_pkr > 0 ? e.credit_pkr.toLocaleString() : '—'}</TableCell>
                           <TableCell className="py-1 text-right tabular-nums font-medium">{e.balance_pkr.toLocaleString()}</TableCell>
@@ -451,8 +466,8 @@ export default function PartyDetailPage() {
                     </TableBody>
                   </Table>
                   <div className="mt-3 flex flex-wrap justify-between gap-3 border-t pt-3 text-sm">
-                    <span className="text-muted-foreground">Total Invoiced: <strong className="text-foreground">{formatMoney(ledger.total_debit_pkr)}</strong></span>
-                    <span className="text-muted-foreground">Total Paid: <strong className="text-foreground">{formatMoney(ledger.total_credit_pkr)}</strong></span>
+                    <span className="text-muted-foreground">Debits: <strong className="text-foreground">{formatMoney(ledger.total_debit_pkr)}</strong></span>
+                    <span className="text-muted-foreground">Credits: <strong className="text-foreground">{formatMoney(ledger.total_credit_pkr)}</strong></span>
                     <span className={ledger.closing_balance_pkr > 0 ? 'font-semibold text-destructive' : 'font-semibold text-green-600'}>
                       Outstanding: {formatMoney(ledger.closing_balance_pkr)}
                     </span>
