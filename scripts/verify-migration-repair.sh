@@ -106,5 +106,23 @@ out="$(pnpm --filter @coldchain/db run db:deploy 2>&1)" || fail "second db:deplo
 echo "$out" | grep -q "No pending migrations to apply" || fail "second run tried to apply migrations again"
 pass "idempotent"
 
+# docs/25 §8: an update that fails AFTER its migrations applied leaves the old
+# version running with nothing pending, so the settings screen can only know from
+# deploy_runs. Reproduce exactly that: an owner account on a code the chart needs.
+echo "==> A failed update must be recorded where the settings screen reads it"
+recorded=$(psql -tAq -d "$DB" -c "SELECT count(*) FROM deploy_runs WHERE succeeded;")
+[ "$recorded" = "2" ] || fail "expected the 2 successful runs recorded, found $recorded"
+psql -q -d "$DB" -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+INSERT INTO facilities (id, name, updated_at) VALUES ('00000000-0000-4000-8000-00000000d0e1', 'Repair check', now());
+INSERT INTO chart_of_accounts (id, facility_id, account_code, account_name, account_class, account_type, normal_balance)
+VALUES (gen_random_uuid(), '00000000-0000-4000-8000-00000000d0e1', '2050', 'Owner account on a claimed code', 'EXPENSE', 'DETAIL', 'DEBIT');
+SQL
+if pnpm --filter @coldchain/db run db:deploy >/dev/null 2>&1; then
+  fail "db:deploy succeeded with an owner account on a code the chart needs"
+fi
+last=$(psql -tAq -d "$DB" -c "SELECT succeeded::text || '|' || (error LIKE '%2050%')::text FROM deploy_runs ORDER BY id DESC LIMIT 1;")
+[ "$last" = "false|true" ] || fail "the failed run was not recorded with its reason (got '$last')"
+pass "a failed update is recorded with its reason"
+
 echo ""
 echo "Migration repair verified."

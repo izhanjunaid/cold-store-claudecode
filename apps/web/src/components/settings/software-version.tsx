@@ -31,6 +31,13 @@ interface VersionInfo {
     latest_applied_at: string | null;
     pending_migrations: string[] | null;
   };
+  /** How the last database update ended; null before the first recorded one. */
+  last_update: {
+    target_version: string;
+    finished_at: string;
+    succeeded: boolean;
+    error: string | null;
+  } | null;
 }
 
 /** Small-caps label + monospace value. One row of the plate. */
@@ -73,11 +80,18 @@ export function SoftwareVersion() {
 
   const { database: db } = info;
   const pending = db.pending_migrations;
-  // Three states, and the third is not a pass. "Could not tell" must never
-  // read like "everything is fine" — that conflation is what let a broken
-  // update sit unnoticed in the first place.
-  const state: 'current' | 'behind' | 'unknown' =
-    pending === null ? 'unknown' : pending.length > 0 ? 'behind' : 'current';
+  // "Could not tell" must never read like "everything is fine" — that
+  // conflation is what let a broken update sit unnoticed in the first place.
+  // A recorded failure comes first: an update can fail after all its
+  // migrations applied, leaving the old version running with nothing pending.
+  const lastFailed = info.last_update && !info.last_update.succeeded ? info.last_update : null;
+  const state: 'failed' | 'current' | 'behind' | 'unknown' = lastFailed
+    ? 'failed'
+    : pending === null
+      ? 'unknown'
+      : pending.length > 0
+        ? 'behind'
+        : 'current';
 
   const verdict = {
     current: 'The database carries every change in this version.',
@@ -86,7 +100,11 @@ export function SoftwareVersion() {
         ? 'The database is missing 1 change from this version — the last update did not finish.'
         : `The database is missing ${pending?.length ?? 0} changes from this version — the last update did not finish.`,
     unknown: 'The database’s update history could not be read.',
+    failed: lastFailed
+      ? `The update to ${lastFailed.target_version} failed on ${formatDateTime(lastFailed.finished_at)} — this box is still running ${info.version}.`
+      : '',
   }[state];
+  const alarming = state === 'behind' || state === 'failed';
 
   return (
     <Card>
@@ -100,18 +118,23 @@ export function SoftwareVersion() {
             className={cn(
               'mt-1.5 h-2 w-2 shrink-0 rounded-full',
               state === 'current' && 'bg-green-600',
-              state === 'behind' && 'bg-destructive',
+              alarming && 'bg-destructive',
               state === 'unknown' && 'bg-muted-foreground',
             )}
           />
           <p
             className={cn(
               'text-sm',
-              state === 'behind' ? 'font-medium text-destructive' : 'text-muted-foreground',
+              alarming ? 'font-medium text-destructive' : 'text-muted-foreground',
             )}
           >
             {verdict}
-            {state === 'behind' && (
+            {lastFailed?.error && (
+              <span className="mt-1 block whitespace-pre-wrap font-mono text-xs font-normal text-muted-foreground">
+                {lastFailed.error}
+              </span>
+            )}
+            {alarming && (
               <span className="mt-1 block font-normal text-muted-foreground">
                 Run the update again, or send <span className="font-mono">logs\update.log</span> to
                 your ColdChain provider.
