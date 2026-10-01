@@ -30,6 +30,7 @@ export class PaymentRepository {
     facilityId: string,
     filters: {
       partyId?: string;
+      invoiceId?: string;
       status?: PaymentStatus;
       paymentMethod?: PaymentMethod;
       dateFrom?: string;
@@ -40,6 +41,7 @@ export class PaymentRepository {
     const where: Prisma.PaymentWhereInput = {
       facilityId,
       ...(filters.partyId ? { partyId: filters.partyId } : {}),
+      ...(filters.invoiceId ? { allocations: { some: { invoiceId: filters.invoiceId, voidedAt: null } } } : {}),
       ...(filters.status ? { status: filters.status } : {}),
       ...(filters.paymentMethod ? { paymentMethod: filters.paymentMethod } : {}),
       ...(filters.dateFrom || filters.dateTo

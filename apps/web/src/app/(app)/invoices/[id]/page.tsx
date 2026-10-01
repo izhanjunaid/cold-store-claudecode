@@ -24,14 +24,14 @@ import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 import { RecordPaymentSheet } from '@/components/billing/record-payment-sheet';
 import { VoidInvoiceDialog } from '@/components/billing/void-invoice-dialog';
+import { IssueCreditNoteDialog, CancelCreditNoteDialog } from '@/components/billing/credit-note-dialog';
+import { openInvoicePdf } from '@/components/billing/invoice-pdf';
 
 import { formatDate, formatDateTime, formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
-
 interface InvoiceLine {
   id: string;
-  line_type: 'STORAGE' | 'SERVICE' | 'ADJUSTMENT' | 'ADVANCE_APPLIED';
+  line_type: 'STORAGE' | 'SERVICE' | 'ADJUSTMENT' | 'ADVANCE_APPLIED' | 'SURCHARGE';
   description: string;
   quantity: number;
   unit_price_pkr: number;
@@ -62,10 +62,43 @@ interface Invoice {
   gst_amount_pkr: number;
   total_pkr: number;
   amount_paid_pkr: number;
+  amount_credited_pkr: number;
+  amount_written_off_pkr: number;
   balance_due_pkr: number;
-  status: 'DRAFT' | 'FINALIZED' | 'VOID';
+  status: 'DRAFT' | 'FINALIZED' | 'VOID' | 'WRITTEN_OFF';
+  book_type: 'PACCI' | 'KATCHI';
   finalized_at: string | null;
+  void_reason: string | null;
+  surcharge_of_invoice_id: string | null;
+  can_void: boolean;
   line_items: InvoiceLine[];
+}
+interface ServiceChargeOption {
+  id: string;
+  name: string;
+  unit_type: 'PER_BAG' | 'PER_TON' | 'FLAT';
+  unit_price_pkr: number;
+  is_active: boolean;
+}
+interface Surcharge {
+  invoice_id: string | null;
+  invoice_number: string | null;
+  journal_entry_id: string | null;
+  entry_date: string;
+  months: number;
+  amount_pkr: number;
+  status: string;
+  description: string;
+}
+interface CreditNote {
+  id: string;
+  credit_note_number: string | null;
+  credit_date: string;
+  reason: string;
+  total_pkr: number;
+  gst_amount_pkr: number;
+  status: string;
+  can_cancel: boolean;
 }
 
 const LINE_TYPE_TONE: Record<string, 'info' | 'success' | 'danger' | 'warning'> = {
@@ -73,6 +106,7 @@ const LINE_TYPE_TONE: Record<string, 'info' | 'success' | 'danger' | 'warning'> 
   SERVICE: 'success',
   ADJUSTMENT: 'danger',
   ADVANCE_APPLIED: 'warning',
+  SURCHARGE: 'warning',
 };
 
 function Info({ label, value }: { label: string; value: React.ReactNode }) {
@@ -95,6 +129,8 @@ export default function InvoiceDetailPage() {
 
   const [showAddLine, setShowAddLine] = useState(false);
   const [lineType, setLineType] = useState<'SERVICE' | 'ADJUSTMENT'>('SERVICE');
+  const [serviceChargeId, setServiceChargeId] = useState('');
+  const [serviceCharges, setServiceCharges] = useState<ServiceChargeOption[]>([]);
   const [lineDesc, setLineDesc] = useState('');
   const [lineQty, setLineQty] = useState('1');
   const [linePrice, setLinePrice] = useState('');
@@ -102,6 +138,7 @@ export default function InvoiceDetailPage() {
 
   const [showAdjust, setShowAdjust] = useState(false);
   const [adjGstRate, setAdjGstRate] = useState('0');
+  const [adjInvoiceDate, setAdjInvoiceDate] = useState('');
   const [adjDiscountType, setAdjDiscountType] = useState<'PERCENT' | 'FIXED'>('PERCENT');
   const [adjDiscountValue, setAdjDiscountValue] = useState('');
   const [adjSubmitting, setAdjSubmitting] = useState(false);
@@ -109,7 +146,10 @@ export default function InvoiceDetailPage() {
   const [showPay, setShowPay] = useState(false);
   const [showVoid, setShowVoid] = useState(false);
 
-  const [surcharges, setSurcharges] = useState<{ journal_entry_id: string; entry_date: string; amount_pkr: number; description: string }[]>([]);
+  const [surcharges, setSurcharges] = useState<Surcharge[]>([]);
+  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
+  const [showCredit, setShowCredit] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<CreditNote | null>(null);
   const [surchargeTotal, setSurchargeTotal] = useState(0);
   const [surchargeSubmitting, setSurchargeSubmitting] = useState(false);
 
@@ -128,6 +168,14 @@ export default function InvoiceDetailPage() {
     }
   }, [id]);
 
+  const fetchCreditNotes = useCallback(async () => {
+    try {
+      setCreditNotes(await apiClient<CreditNote[]>(`/v1/invoices/${id}/credit-notes`));
+    } catch {
+      /* billing.view may be absent */
+    }
+  }, [id]);
+
   const fetchInvoice = useCallback(async () => {
     setLoading(true);
     try {
@@ -142,20 +190,27 @@ export default function InvoiceDetailPage() {
   useEffect(() => {
     fetchInvoice();
     fetchSurcharges();
-  }, [fetchInvoice, fetchSurcharges]);
+    fetchCreditNotes();
+  }, [fetchInvoice, fetchSurcharges, fetchCreditNotes]);
 
-  // No /v1/payments filter targets an invoice directly — fetch the party's
-  // payments and keep only allocations against this invoice, same approach
-  // the party detail Ledger tab uses for its own party-scoped payment reads.
-  const fetchLinkedPayments = useCallback(async (partyId: string) => {
+  useEffect(() => {
+    if (showAddLine && serviceCharges.length === 0) {
+      apiClient<ServiceChargeOption[]>('/v1/service-charges')
+        .then((rows) => setServiceCharges(rows.filter((r) => r.is_active)))
+        .catch(() => {});
+    }
+  }, [showAddLine, serviceCharges.length]);
+
+  // Every receipt applied to this invoice, however many the party has (docs/25 R-36).
+  const fetchLinkedPayments = useCallback(async () => {
     try {
       const res = await apiClientList<{
         id: string;
         payment_date: string;
         payment_method: string;
         receipt_number: string | null;
-        allocations: { invoice_id: string; allocated_amount_pkr: number }[];
-      }>(`/v1/payments?party_id=${partyId}&page_size=100`);
+        allocations: { invoice_id: string | null; allocated_amount_pkr: number }[];
+      }>(`/v1/payments?invoice_id=${id}&page_size=100`);
       setLinkedPayments(
         res.data.flatMap((p) =>
           p.allocations
@@ -175,14 +230,17 @@ export default function InvoiceDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    if (invoice?.billing_party_id) fetchLinkedPayments(invoice.billing_party_id);
-  }, [invoice?.billing_party_id, fetchLinkedPayments]);
+    if (invoice?.status && invoice.status !== 'DRAFT') fetchLinkedPayments();
+  }, [invoice?.status, fetchLinkedPayments]);
 
   async function handleAssessSurcharge() {
     setSurchargeSubmitting(true);
     try {
-      const res = await apiClient<{ months_charged: number; amount_pkr: number }>(`/v1/invoices/${id}/surcharges`, { method: 'POST', body: {} });
-      toast.success(`Surcharge applied — ${res.months_charged} month(s), ${formatMoney(res.amount_pkr)}`);
+      const res = await apiClient<{ months_charged: number; amount_pkr: number; surcharge_invoice_number: string }>(
+        `/v1/invoices/${id}/surcharges`,
+        { method: 'POST', body: {} },
+      );
+      toast.success(`Surcharge ${res.surcharge_invoice_number} — ${res.months_charged} month(s), ${formatMoney(res.amount_pkr)}`);
       await fetchSurcharges();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to apply surcharge');
@@ -191,20 +249,29 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  const selectedCharge = serviceCharges.find((c) => c.id === serviceChargeId);
+  const lineReady =
+    lineType === 'SERVICE' ? !!selectedCharge : !!lineDesc.trim() && parseFloat(linePrice) > 0;
+
   async function handleAddLine() {
-    if (!lineDesc.trim() || !linePrice) return;
+    if (!lineReady) return;
     setLineSubmitting(true);
     try {
+      // A service is the catalog's: the server names and prices it (docs/25 R-28).
       await apiClient(`/v1/invoices/${id}/lines`, {
         method: 'POST',
-        body: {
-          line_type: lineType,
-          description: lineDesc,
-          quantity: parseFloat(lineQty) || 1,
-          unit_price_pkr: parseFloat(linePrice),
-        },
+        body:
+          lineType === 'SERVICE'
+            ? { line_type: 'SERVICE', service_charge_id: serviceChargeId, quantity: parseFloat(lineQty) || 1 }
+            : {
+                line_type: 'ADJUSTMENT',
+                description: lineDesc,
+                quantity: parseFloat(lineQty) || 1,
+                unit_price_pkr: parseFloat(linePrice),
+              },
       });
       setShowAddLine(false);
+      setServiceChargeId('');
       setLineDesc('');
       setLineQty('1');
       setLinePrice('');
@@ -237,6 +304,7 @@ export default function InvoiceDetailPage() {
   function openAdjust() {
     if (!invoice) return;
     setAdjGstRate(String(invoice.gst_rate));
+    setAdjInvoiceDate(invoice.invoice_date);
     setAdjDiscountType(invoice.discount_type ?? 'PERCENT');
     setAdjDiscountValue(invoice.discount_value != null ? String(invoice.discount_value) : '');
     setShowAdjust(true);
@@ -250,6 +318,7 @@ export default function InvoiceDetailPage() {
         method: 'PATCH',
         body: {
           gst_rate: parseFloat(adjGstRate) || 0,
+          ...(adjInvoiceDate && adjInvoiceDate !== invoice?.invoice_date ? { invoice_date: adjInvoiceDate } : {}),
           discount: clearDiscount
             ? null
             : adjDiscountValue && value > 0
@@ -286,16 +355,7 @@ export default function InvoiceDetailPage() {
 
   async function handlePdf() {
     try {
-      const token = localStorage.getItem('access_token');
-      const facilityId = localStorage.getItem('facility_id');
-      const res = await fetch(`${API_URL}/v1/invoices/${id}/pdf`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
-        },
-      });
-      if (!res.ok) throw new Error('Failed to load PDF');
-      window.open(URL.createObjectURL(await res.blob()), '_blank');
+      await openInvoicePdf(id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load PDF');
     }
@@ -327,7 +387,12 @@ export default function InvoiceDetailPage() {
                 Record Payment
               </Button>
             )}
-            {canVoid && invoice.status === 'FINALIZED' && invoice.amount_paid_pkr === 0 && (
+            {canManage && invoice.status === 'FINALIZED' && invoice.balance_due_pkr > 0 && (
+              <Button variant="outline" onClick={() => setShowCredit(true)}>
+                Credit Note
+              </Button>
+            )}
+            {canVoid && invoice.can_void && (
               <Button variant="destructive" onClick={() => setShowVoid(true)}>
                 Void Invoice
               </Button>
@@ -355,6 +420,17 @@ export default function InvoiceDetailPage() {
           <Info label="Period Start" value={formatDate(invoice.period_start)} />
           <Info label="Period End" value={formatDate(invoice.period_end)} />
           {invoice.finalized_at && <Info label="Finalized At" value={formatDateTime(invoice.finalized_at)} />}
+          {invoice.surcharge_of_invoice_id && (
+            <Info
+              label="Surcharge on"
+              value={
+                <Button variant="link" className="h-auto p-0" onClick={() => router.push(`/invoices/${invoice.surcharge_of_invoice_id}`)}>
+                  overdue invoice
+                </Button>
+              }
+            />
+          )}
+          {invoice.void_reason && <Info label="Void Reason" value={invoice.void_reason} />}
         </CardContent>
       </Card>
 
@@ -391,7 +467,7 @@ export default function InvoiceDetailPage() {
                 <TableCell className="text-right tabular-nums font-medium">{line.amount_pkr.toLocaleString()}</TableCell>
                 {canManage && isDraft && (
                   <TableCell className="text-center">
-                    {line.line_type !== 'STORAGE' && line.line_type !== 'ADVANCE_APPLIED' && (
+                    {line.line_type !== 'STORAGE' && (
                       <Button
                         variant="ghost"
                         size="icon"
@@ -414,7 +490,7 @@ export default function InvoiceDetailPage() {
             {canManage && isDraft && (
               <div className="flex justify-end pb-1">
                 <Button variant="link" className="h-auto p-0 text-xs" onClick={openAdjust}>
-                  Edit discount / GST
+                  Edit date / discount / GST
                 </Button>
               </div>
             )}
@@ -440,6 +516,18 @@ export default function InvoiceDetailPage() {
               <span>Amount Paid</span>
               <span className="tabular-nums">{formatMoney(invoice.amount_paid_pkr)}</span>
             </div>
+            {invoice.amount_credited_pkr > 0 && (
+              <div className="flex justify-between text-green-700">
+                <span>Credited</span>
+                <span className="tabular-nums">{formatMoney(invoice.amount_credited_pkr)}</span>
+              </div>
+            )}
+            {invoice.amount_written_off_pkr > 0 && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>Written Off</span>
+                <span className="tabular-nums">{formatMoney(invoice.amount_written_off_pkr)}</span>
+              </div>
+            )}
             <div className="flex justify-between font-bold text-destructive">
               <span>Balance Due</span>
               <span className="tabular-nums">{formatMoney(invoice.balance_due_pkr)}</span>
@@ -476,7 +564,48 @@ export default function InvoiceDetailPage() {
         </Card>
       )}
 
-      {(surcharges.length > 0 || (canManage && invoice.status === 'FINALIZED' && invoice.balance_due_pkr > 0)) && (
+      {creditNotes.length > 0 && (
+        <Card className="mt-4">
+          <div className="border-b px-4 py-3">
+            <h2 className="text-sm font-semibold">Credit Notes</h2>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Number</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Status</TableHead>
+                {canManage && <TableHead />}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {creditNotes.map((cn) => (
+                <TableRow key={cn.id}>
+                  <TableCell className="font-mono">{cn.credit_note_number}</TableCell>
+                  <TableCell>{formatDate(cn.credit_date)}</TableCell>
+                  <TableCell>{cn.reason}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatMoney(cn.total_pkr)}</TableCell>
+                  <TableCell><StatusBadge status={cn.status} /></TableCell>
+                  {canManage && (
+                    <TableCell className="text-right">
+                      {cn.can_cancel && invoice.status === 'FINALIZED' && (
+                        <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setCancelTarget(cn)}>
+                          Cancel
+                        </Button>
+                      )}
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+
+      {!invoice.surcharge_of_invoice_id &&
+        (surcharges.length > 0 || (canManage && invoice.status === 'FINALIZED' && invoice.balance_due_pkr > 0)) && (
         <Card className="mt-4">
           <CardContent className="pt-4">
             <div className="mb-2 flex items-center justify-between">
@@ -490,13 +619,23 @@ export default function InvoiceDetailPage() {
             {surcharges.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No surcharges applied. If the invoice is overdue beyond the grace period and the facility rule is
-                enabled, assessing will post a surcharge to the ledger.
+                enabled, assessing bills the overdue months as a surcharge invoice of its own.
               </p>
             ) : (
               <div className="space-y-1 text-sm">
                 {surcharges.map((s) => (
-                  <div key={s.journal_entry_id} className="flex justify-between">
-                    <span className="text-muted-foreground">{s.entry_date} — {s.description}</span>
+                  <div key={s.invoice_id ?? s.journal_entry_id} className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      {s.invoice_id ? (
+                        <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/invoices/${s.invoice_id}`)}>
+                          {s.invoice_number}
+                        </Button>
+                      ) : (
+                        s.status === 'LEGACY' && <span className="font-mono">{s.entry_date}</span>
+                      )}{' '}
+                      — {s.description}
+                      {s.status === 'VOID' && ' (void)'}
+                    </span>
                     <span className="tabular-nums">{formatMoney(s.amount_pkr)}</span>
                   </div>
                 ))}
@@ -528,24 +667,49 @@ export default function InvoiceDetailPage() {
                 <option value="ADJUSTMENT">Adjustment</option>
               </select>
             </div>
-            <div className="space-y-1">
-              <Label>Description</Label>
-              <Input value={lineDesc} onChange={(e) => setLineDesc(e.target.value)} placeholder="e.g. Loading charge" />
-            </div>
+            {lineType === 'SERVICE' ? (
+              <div className="space-y-1">
+                <Label>Service</Label>
+                <select
+                  value={serviceChargeId}
+                  onChange={(e) => setServiceChargeId(e.target.value)}
+                  className="flex h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="">Choose a service…</option>
+                  {serviceCharges.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} — {formatMoney(c.unit_price_pkr)} {c.unit_type === 'FLAT' ? 'flat' : c.unit_type === 'PER_BAG' ? 'per bag' : 'per ton'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <Label>Description</Label>
+                <Input value={lineDesc} onChange={(e) => setLineDesc(e.target.value)} placeholder="e.g. Extra handling" />
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Quantity</Label>
-                <Input type="number" min={0.01} step={0.01} value={lineQty} onChange={(e) => setLineQty(e.target.value)} className="tabular-nums" />
-              </div>
-              <div className="space-y-1">
-                <Label>Unit Price (PKR){lineType === 'ADJUSTMENT' ? ' (±)' : ''}</Label>
-                <Input type="number" step={0.01} value={linePrice} onChange={(e) => setLinePrice(e.target.value)} className="tabular-nums" />
-              </div>
+              {(lineType === 'ADJUSTMENT' || selectedCharge?.unit_type !== 'FLAT') && (
+                <div className="space-y-1">
+                  <Label>{selectedCharge?.unit_type === 'PER_TON' ? 'Tons' : selectedCharge?.unit_type === 'PER_BAG' ? 'Bags' : 'Quantity'}</Label>
+                  <Input type="number" min={0.01} step={0.01} value={lineQty} onChange={(e) => setLineQty(e.target.value)} className="tabular-nums" />
+                </div>
+              )}
+              {lineType === 'ADJUSTMENT' && (
+                <div className="space-y-1">
+                  <Label>Unit Price (PKR)</Label>
+                  <Input type="number" min={0.01} step={0.01} value={linePrice} onChange={(e) => setLinePrice(e.target.value)} className="tabular-nums" />
+                </div>
+              )}
             </div>
+            {lineType === 'ADJUSTMENT' && (
+              <p className="text-xs text-muted-foreground">An adjustment adds a charge. To reduce the invoice, give a discount.</p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddLine(false)}>Cancel</Button>
-            <Button onClick={handleAddLine} disabled={lineSubmitting || !lineDesc.trim() || !linePrice}>
+            <Button onClick={handleAddLine} disabled={lineSubmitting || !lineReady}>
               {lineSubmitting ? 'Adding…' : 'Add Line'}
             </Button>
           </DialogFooter>
@@ -556,12 +720,20 @@ export default function InvoiceDetailPage() {
       <Dialog open={showAdjust} onOpenChange={setShowAdjust}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Discount &amp; GST</DialogTitle>
+            <DialogTitle>Date, Discount &amp; GST</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1">
-              <Label>GST Rate (%)</Label>
-              <Input type="number" min={0} max={100} step={0.5} value={adjGstRate} onChange={(e) => setAdjGstRate(e.target.value)} className="tabular-nums" />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Invoice Date</Label>
+                <Input type="date" min={invoice.period_end} value={adjInvoiceDate} onChange={(e) => setAdjInvoiceDate(e.target.value)} className="tabular-nums" />
+              </div>
+              {invoice.book_type === 'PACCI' && (
+                <div className="space-y-1">
+                  <Label>GST Rate (%)</Label>
+                  <Input type="number" min={0} max={100} step={0.5} value={adjGstRate} onChange={(e) => setAdjGstRate(e.target.value)} className="tabular-nums" />
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
@@ -613,6 +785,27 @@ export default function InvoiceDetailPage() {
         onSuccess={() => {
           setShowPay(false);
           fetchInvoice();
+        }}
+      />
+      <IssueCreditNoteDialog
+        open={showCredit}
+        onOpenChange={setShowCredit}
+        invoiceId={invoice.id}
+        invoiceNumber={invoice.invoice_number}
+        lines={invoice.line_items}
+        onDone={() => {
+          fetchInvoice();
+          fetchCreditNotes();
+        }}
+      />
+      <CancelCreditNoteDialog
+        open={!!cancelTarget}
+        onOpenChange={(o) => !o && setCancelTarget(null)}
+        creditNote={cancelTarget}
+        onDone={() => {
+          setCancelTarget(null);
+          fetchInvoice();
+          fetchCreditNotes();
         }}
       />
       <VoidInvoiceDialog

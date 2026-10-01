@@ -73,6 +73,8 @@ export type ClearPaymentRequestType = z.infer<typeof ClearPaymentRequest>;
 // PaymentListQuery
 export const PaymentListQuery = z.object({
   party_id: z.string().uuid().optional(),
+  /** Only receipts with a live allocation to this invoice. */
+  invoice_id: z.string().uuid().optional(),
   status: PaymentStatus.optional(),
   payment_method: PaymentMethod.optional(),
   date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),

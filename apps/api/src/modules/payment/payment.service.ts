@@ -274,6 +274,7 @@ export class PaymentService {
     facilityId: string,
     query: {
       partyId?: string;
+      invoiceId?: string;
       status?: string;
       paymentMethod?: string;
       dateFrom?: string;
@@ -286,6 +287,7 @@ export class PaymentService {
       facilityId,
       {
         partyId: query.partyId,
+        invoiceId: query.invoiceId,
         status: query.status as any,
         paymentMethod: query.paymentMethod as any,
         dateFrom: query.dateFrom,

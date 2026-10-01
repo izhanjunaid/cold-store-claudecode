@@ -52,8 +52,9 @@ export function settlementOf(inv: {
   return { paidPkr, creditedPkr, writtenOffPkr: round2(settledPkr - paidPkr - creditedPkr), settledPkr };
 }
 
-/** Include these on any invoice read that reports its settlement. */
+/** Include these on any invoice read that reports its settlement (and what may still be done to it). */
 export const SETTLEMENT_INCLUDE = {
   allocations: { where: { voidedAt: null }, select: { allocatedAmountPkr: true } },
   creditNotes: { where: { voidedAt: null }, select: { totalPkr: true } },
+  surcharges: { where: { status: { not: 'VOID' as const } }, select: { id: true } },
 } as const;

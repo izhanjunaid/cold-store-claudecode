@@ -112,6 +112,9 @@ export const InvoiceResponse = z.object({
   notes: z.string().nullable(),
   voided_at: z.string().nullable(),
   void_reason: z.string().nullable(),
+  /** Set on a late-payment surcharge invoice: the overdue invoice it charges on. */
+  surcharge_of_invoice_id: z.string().uuid().nullable(),
+  can_void: z.boolean(),
   created_at: z.string(),
   line_items: z.array(InvoiceLineResponse),
 });

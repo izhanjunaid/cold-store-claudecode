@@ -51,6 +51,9 @@ function formatInvoice(inv: InvoiceWithRelations) {
     notes: inv.notes,
     voided_at: inv.voidedAt?.toISOString() ?? null,
     void_reason: inv.voidReason,
+    surcharge_of_invoice_id: inv.surchargeOfInvoiceId,
+    /** The server's own void rule: finalized, nothing settled, no standing surcharge on it. */
+    can_void: inv.status === 'FINALIZED' && settlement.settledPkr <= 0.005 && inv.surcharges.length === 0,
     created_at: inv.createdAt.toISOString(),
     line_items: inv.lineItems.map((l) => ({
       id: l.id,

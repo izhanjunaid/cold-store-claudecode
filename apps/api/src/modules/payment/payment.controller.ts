@@ -63,6 +63,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       const query = request.query as z.infer<typeof PaymentListQuery>;
       const result = await service.list(request.user!.facilityId, {
         partyId: query.party_id,
+        invoiceId: query.invoice_id,
         status: query.status,
         paymentMethod: query.payment_method,
         dateFrom: query.date_from,

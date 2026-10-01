@@ -58,6 +58,10 @@ describe('invoice settlement (R-21)', () => {
     expect(after.amount_written_off_pkr).toBeCloseTo(total - paid - credited, 2);
     expect(after.balance_due_pkr).toBeCloseTo(0, 2);
 
+    expect(after.can_void).toBe(false);
+    const receipts = await fx.call('GET', `/v1/payments?invoice_id=${id}`, fx.tokens.manager);
+    expect(receipts.body.data.map((p: { id: string }) => p.id)).toEqual([pay.body.data.id]);
+
     const list = await fx.call('GET', `/v1/invoices?status=WRITTEN_OFF&party_id=${partyId}`, fx.tokens.manager);
     expect(list.status).toBe(200);
     expect(list.body.data.map((i: { id: string }) => i.id)).toEqual([id]);
