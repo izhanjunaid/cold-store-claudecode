@@ -19,6 +19,7 @@ import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { accountBalances, signedBalance } from '../accounting/ledger';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { resolveFacilitySettings } from '../facility/facility.service';
+import { assertAdvanceCanReopen } from '../employee-advances/employee-advance.service';
 import { buildJE15Payroll } from './templates/je-15-payroll';
 import { buildJE16SalaryPayment } from './templates/je-16-salary-payment';
 import { buildJE16BGovtRemittance } from './templates/je-16b-govt-remittance';
@@ -526,6 +527,7 @@ export class PayrollRunService {
         const advance = await tx.employeeAdvance.findFirstOrThrow({
           where: { id: recovery.advanceId, facilityId },
         });
+        await assertAdvanceCanReopen(tx, facilityId, advance);
         await tx.employeeAdvance.update({
           where: { id: advance.id },
           data: {
