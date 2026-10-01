@@ -1,6 +1,7 @@
 import { round2 } from '@coldchain/shared';
 import type { Prisma, RateType, BookType } from '@coldchain/db';
 import { computeStorageCharge, billingPeriodStart } from './storage-charge';
+import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 import { resolveFacilitySettings } from '../facility/facility.service';
 
 const builderInclude = {
@@ -35,6 +36,14 @@ async function createDraftInvoice(
   tx: Prisma.TransactionClient,
   params: DraftInvoiceParams,
 ): Promise<BuiltInvoice> {
+  // A supplier has no receivable, so a draft billed to one could never be finalized —
+  // and a draft nothing can finalize stops its month from closing (docs/25 R-01).
+  const billingParty = await tx.party.findUniqueOrThrow({
+    where: { id: params.billingPartyId },
+    select: RECEIVABLE_PARTY_SELECT,
+  });
+  receivableParty(billingParty);
+
   const charge = computeStorageCharge({
     rateType: params.rateType,
     rateAmountPkr: params.rateAmountPkr,

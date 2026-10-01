@@ -110,7 +110,10 @@ describe('Commodity CRUD', () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(Array.isArray(body.data)).toBe(true);
-    const mine = body.data.find((v: { name: string }) => v.name === 'Sindhri');
+    // Commodities are global and never cleaned up, so an earlier run's 'Sindhri' may exist too.
+    const mine = body.data.find(
+      (v: { name: string; commodity_id: string }) => v.name === 'Sindhri' && v.commodity_id === createdCommodityId,
+    );
     expect(mine).toBeDefined();
     expect(mine.commodity_id).toBe(createdCommodityId);
   });

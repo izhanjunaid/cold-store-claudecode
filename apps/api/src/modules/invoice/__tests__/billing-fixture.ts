@@ -81,7 +81,8 @@ export async function billingFixture(app: FastifyInstance) {
         select: { id: true, lotId: true, outboundEventId: true },
       });
       const invoiceIds = invoices.map((i) => i.id);
-      const lotIds = [...new Set(invoices.map((i) => i.lotId))];
+      const ownLots = await prisma.lot.findMany({ where: { ownerPartyId: { in: parties } }, select: { id: true } });
+      const lotIds = [...new Set([...invoices.map((i) => i.lotId), ...ownLots.map((l) => l.id)])];
       const entries = await prisma.journalEntry.findMany({
         where: { facilityId: TEST_FACILITY_ID, lines: { some: { partyId: { in: parties } } } },
         select: { id: true },

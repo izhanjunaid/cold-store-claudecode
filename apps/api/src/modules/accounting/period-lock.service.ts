@@ -126,7 +126,9 @@ export class PeriodLockService {
           reason: reason ?? null,
         },
       });
-    });
+      // The close reads every lot and posts the accrual and its reversal; the 5 s
+      // interactive-transaction default is too short for a full store.
+    }, { timeout: 60_000, maxWait: 10_000 });
   }
 
   async unlock(facilityId: string, userId: string, year: number, month: number, reason: string) {
