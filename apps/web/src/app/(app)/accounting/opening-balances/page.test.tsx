@@ -52,7 +52,7 @@ function mount(status: Record<string, unknown>) {
   apiClientList.mockResolvedValue({ data: [] });
   apiClient.mockImplementation((url: string) => {
     if (url === '/v1/accounting/opening-balances') return Promise.resolve({ ...BASE_STATUS, ...status });
-    if (String(url).startsWith('/v1/accounting/period-locks')) return Promise.resolve([]);
+    if (String(url).startsWith('/v1/accounting/period-locks/closed-through')) return Promise.resolve({ closed_through: null });
     return Promise.resolve(null);
   });
   return render(<OpeningBalancesPage />);

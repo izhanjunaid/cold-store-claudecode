@@ -34,11 +34,6 @@ interface OtherRow {
   credit: string;
   description: string;
 }
-interface PeriodLock {
-  period_year: number;
-  period_month: number;
-  is_locked: boolean;
-}
 
 const SELECT_CLASS =
   'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
@@ -69,24 +64,13 @@ export default function OpeningBalancesPage() {
     Promise.all([
       apiClient<OpeningBalanceStatusResponseType>('/v1/accounting/opening-balances'),
       apiClientList<Party>('/v1/parties?page_size=200&is_active=true').then((r) => r.data),
-      // Advisory only — never let it take the screen down with it.
-      apiClient<PeriodLock[]>('/v1/accounting/period-locks').catch(() => [] as PeriodLock[]),
+      // The closed-through watermark, as the API states it (docs/25 L-15).
+      apiClient<{ closed_through: { year: number; month: number } | null }>('/v1/accounting/period-locks/closed-through'),
     ])
-      .then(([st, ps, locks]) => {
+      .then(([st, ps, watermark]) => {
         setStatus(st);
         setParties(ps);
-        // The watermark: the highest still-locked period closes everything at or
-        // below it, months nobody explicitly locked included.
-        const active = locks.filter((l) => l.is_locked);
-        if (active.length > 0) {
-          const top = active.reduce((a, b) =>
-            b.period_year > a.period_year ||
-            (b.period_year === a.period_year && b.period_month > a.period_month)
-              ? b
-              : a,
-          );
-          setLockedThrough({ year: top.period_year, month: top.period_month });
-        }
+        setLockedThrough(watermark.closed_through);
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));

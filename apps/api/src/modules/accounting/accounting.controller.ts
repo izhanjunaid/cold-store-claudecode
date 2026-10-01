@@ -414,6 +414,29 @@ export async function accountingRoutes(app: FastifyInstance) {
     },
   });
 
+  // The closed-through watermark: the highest actively locked period closes it
+  // and every period before it (period-lock.service). Stated here once, so no
+  // page recomputes it from the list (docs/25 L-15). An explicit reopen below
+  // the watermark is an exception the list itself shows.
+  app.route({
+    method: 'GET',
+    url: '/v1/accounting/period-locks/closed-through',
+    preHandler: [app.authenticate, app.requirePermission('accounting.view')],
+    handler: async (request, reply) => {
+      const locked = (await periodLock.list(request.user!.facilityId)).filter((l) => l.is_locked);
+      const top = locked.reduce<(typeof locked)[number] | null>(
+        (best, l) =>
+          !best || l.period_year > best.period_year || (l.period_year === best.period_year && l.period_month > best.period_month)
+            ? l
+            : best,
+        null,
+      );
+      return sendSuccess(reply, {
+        closed_through: top ? { year: top.period_year, month: top.period_month } : null,
+      });
+    },
+  });
+
   app.route({
     method: 'POST',
     url: '/v1/accounting/period-locks',

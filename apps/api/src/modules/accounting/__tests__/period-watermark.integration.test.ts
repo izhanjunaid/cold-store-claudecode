@@ -133,3 +133,36 @@ describe('F-4 · closed-through watermark', () => {
     expect(JSON.parse(res.body).error.code).toBe('PERIOD_NOT_LOCKED');
   });
 });
+
+/**
+ * The watermark is the API's to state, not each page's to recompute (docs/25
+ * L-15): the period-locks and opening-balances pages each derived it from the
+ * lock list, a third copy of the rule period-lock.service applies.
+ */
+describe('the API states how far the books are closed', () => {
+  const closedThrough = async () =>
+    JSON.parse(
+      (await app.inject({ method: 'GET', url: '/v1/accounting/period-locks/closed-through', headers: authHeaders(managerToken) })).body,
+    ).data.closed_through;
+
+  it('reports the highest actively locked period, and falls back when it is reopened', async () => {
+    const before = await closedThrough();
+    const lock = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/period-locks',
+      headers: authHeaders(ownerToken),
+      payload: { period_year: YEAR, period_month: 9, reason: 'closed-through test' },
+    });
+    expect(lock.statusCode, lock.body).toBe(201);
+    expect(await closedThrough()).toEqual({ year: YEAR, month: 9 });
+
+    const unlock = await app.inject({
+      method: 'POST',
+      url: `/v1/accounting/period-locks/${YEAR}/9/unlock`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'closed-through test done' },
+    });
+    expect(unlock.statusCode, unlock.body).toBe(200);
+    expect(await closedThrough()).toEqual(before);
+  });
+});

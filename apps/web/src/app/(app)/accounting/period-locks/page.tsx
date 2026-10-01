@@ -35,10 +35,10 @@ interface PeriodLock {
   is_locked: boolean;
 }
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
+// Month names from the platform rather than another hand-written array (docs/25 L-39).
+const MONTHS = Array.from({ length: 12 }, (_, i) =>
+  new Date(Date.UTC(2000, i, 1)).toLocaleString('en-GB', { month: 'long', timeZone: 'UTC' }),
+);
 
 const SELECT_CLASS =
   'flex h-8 w-auto rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
@@ -59,6 +59,7 @@ export default function PeriodLocksPage() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [locks, setLocks] = useState<PeriodLock[]>([]);
+  const [closedThrough, setClosedThrough] = useState<{ year: number; month: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<PendingAction>(null);
   const [reason, setReason] = useState('');
@@ -67,7 +68,12 @@ export default function PeriodLocksPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setLocks(await apiClient<PeriodLock[]>('/v1/accounting/period-locks'));
+      const [list, watermark] = await Promise.all([
+        apiClient<PeriodLock[]>('/v1/accounting/period-locks'),
+        apiClient<{ closed_through: { year: number; month: number } | null }>('/v1/accounting/period-locks/closed-through'),
+      ]);
+      setLocks(list);
+      setClosedThrough(watermark.closed_through);
     } finally {
       setLoading(false);
     }
@@ -79,14 +85,11 @@ export default function PeriodLocksPage() {
 
   const lockFor = (m: number) => locks.find((l) => l.period_year === year && l.period_month === m);
 
-  // Closed-through watermark: the latest actively-locked month closes every
-  // month before it too, unless a month was explicitly reopened.
-  const watermark = locks.reduce(
-    (acc, l) => (l.is_locked ? Math.max(acc, l.period_year * 100 + l.period_month) : acc),
-    0,
-  );
-  const watermarkLabel =
-    watermark > 0 ? `${MONTHS[(watermark % 100) - 1]} ${Math.floor(watermark / 100)}` : null;
+  // Closed-through watermark, as the API states it (docs/25 L-15): the latest
+  // actively-locked month closes every month before it too, unless a month was
+  // explicitly reopened.
+  const watermark = closedThrough ? closedThrough.year * 100 + closedThrough.month : 0;
+  const watermarkLabel = closedThrough ? `${MONTHS[closedThrough.month - 1]} ${closedThrough.year}` : null;
 
   const submit = async () => {
     if (!pending) return;
