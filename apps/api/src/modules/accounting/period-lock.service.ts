@@ -18,17 +18,17 @@ export class PeriodLockService {
    * unlock row (reopen exception, OWNER-created via unlock()).
    */
   async assertOpen(db: Db, facilityId: string, entryDate: Date): Promise<void> {
-    const { month, year } = periodOf(entryDate);
+    if (!(await this.isOpen(db, facilityId, entryDate))) throw Errors.PERIOD_LOCKED();
+  }
+
+  async isOpen(db: Db, facilityId: string, date: Date): Promise<boolean> {
+    const { month, year } = periodOf(date);
     const explicit = await db.periodLock.findUnique({
       where: { facilityId_periodYear_periodMonth: { facilityId, periodYear: year, periodMonth: month } },
     });
-    if (explicit) {
-      if (explicit.unlockedAt === null) throw Errors.PERIOD_LOCKED();
-      return; // explicit reopen exception
-    }
-    if (await this.hasActiveLockAtOrAbove(db, facilityId, year, month)) {
-      throw Errors.PERIOD_LOCKED();
-    }
+    // An explicit unlock row is a reopen exception below the watermark.
+    if (explicit) return explicit.unlockedAt !== null;
+    return !(await this.hasActiveLockAtOrAbove(db, facilityId, year, month));
   }
 
   /** True when some period >= (year, month) is actively locked — i.e. the watermark covers this period. */

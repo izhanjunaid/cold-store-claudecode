@@ -1,11 +1,15 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import {
   DEFAULT_FACILITY_SETTINGS,
+  fiscalYearStart,
+  fromIsoDate,
+  toIsoDate,
   type FacilitySettingsType,
   type UpdateFacilityRequestType,
   type FacilityResponseType,
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
+import { PeriodLockService } from '../accounting/period-lock.service';
 import { encryptSecret } from '../../common/crypto';
 
 // Top-level settings keys that are managed by dedicated endpoints and must never
@@ -114,6 +118,28 @@ export class FacilityService {
           'The fiscal year start cannot change once entries are posted: it would restate every past balance sheet',
           'settings.fiscal_year_start_month',
         );
+      }
+
+      // Monthly accrual is the policy from a fiscal-year boundary, applied
+      // prospectively (docs/25 Q2, IFRS for SMEs s.10.12): a start mid-year, or in
+      // a month already closed, would change figures that were already reported.
+      const accrualStart = patch.settings.revenue_accrual?.start_date;
+      if (accrualStart) {
+        const fyMonth =
+          patch.settings.fiscal_year_start_month ?? resolveFacilitySettings(existing.settings).fiscal_year_start_month;
+        const start = fromIsoDate(accrualStart);
+        if (toIsoDate(fiscalYearStart(start, fyMonth)) !== accrualStart) {
+          throw Errors.VALIDATION_ERROR(
+            'The accrual must start on the first day of a fiscal year',
+            'settings.revenue_accrual.start_date',
+          );
+        }
+        if (!(await new PeriodLockService(this.prisma).isOpen(this.prisma, facilityId, start))) {
+          throw Errors.VALIDATION_ERROR(
+            'The accrual cannot start in a closed period; choose the start of a fiscal year that is still open',
+            'settings.revenue_accrual.start_date',
+          );
+        }
       }
 
       if (settingsPatch['email'] !== undefined) {

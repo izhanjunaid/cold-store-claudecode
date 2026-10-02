@@ -4,7 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { AlertTriangle } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { DEFAULT_FY_START_MONTH, fiscalYearStart, toIsoDate } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
+import { useAuthStore } from '@/stores/auth.store';
+import { can } from '@/lib/permissions';
+import { useFacility } from '@/hooks/use-reference-data';
+import { qk } from '@/lib/query-keys';
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -51,6 +58,20 @@ export default function RevenueAccrualPage() {
   const [data, setData] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // The start is a fiscal-year boundary in an open period (docs/25 Q2); the server
+  // enforces both, this only offers the boundaries around today.
+  const { user } = useAuthStore();
+  const canSetStart = can(user, 'settings.manage');
+  const facility = useFacility();
+  const queryClient = useQueryClient();
+  const fyMonth = facility.data?.settings?.fiscal_year_start_month ?? DEFAULT_FY_START_MONTH;
+  const thisFyStart = fiscalYearStart(now, fyMonth);
+  const fyStarts = [-1, 0, 1].map((k) =>
+    toIsoDate(new Date(Date.UTC(thisFyStart.getUTCFullYear() + k, thisFyStart.getUTCMonth(), 1))),
+  );
+  const [newStart, setNewStart] = useState(fyStarts[1]!);
+  const [saving, setSaving] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -70,6 +91,23 @@ export default function RevenueAccrualPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function saveStart() {
+    setSaving(true);
+    try {
+      await apiClient('/v1/facilities/me', {
+        method: 'PATCH',
+        body: { settings: { revenue_accrual: { start_date: newStart } } },
+      });
+      toast.success(`Storage revenue is accrued from ${newStart}`);
+      await queryClient.invalidateQueries({ queryKey: qk.facility.me });
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not set the start date');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div>
@@ -124,6 +162,26 @@ export default function RevenueAccrualPage() {
               ))}
             </select>
           </div>
+          {canSetStart && data && (
+            <div className="flex items-end gap-2">
+              <div className="space-y-1">
+                <Label htmlFor="accrual-start">Accrue from</Label>
+                <select
+                  id="accrual-start"
+                  className={SELECT_CLASS}
+                  value={newStart}
+                  onChange={(e) => setNewStart(e.target.value)}
+                >
+                  {fyStarts.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+              <Button size="sm" disabled={saving || newStart === data.start_date} onClick={() => void saveStart()}>
+                Set start
+              </Button>
+            </div>
+          )}
           <div className="ml-auto flex items-center gap-3">
             {data?.already_run && (
               <span className="text-xs text-muted-foreground">Accrued when this month was closed.</span>

@@ -67,6 +67,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Invoices', href: '/invoices', icon: ReceiptText, permission: 'billing.view' },
       { label: 'Payments', href: '/payments', icon: Banknote, permission: 'billing.view' },
+      { label: 'Credit Notes', href: '/credit-notes', icon: ReceiptText, permission: 'billing.view' },
       { label: 'Rate Plans', href: '/billing/rate-plans', icon: Tags },
       { label: 'Service Charges', href: '/billing/service-charges', icon: CircleDollarSign },
     ],
