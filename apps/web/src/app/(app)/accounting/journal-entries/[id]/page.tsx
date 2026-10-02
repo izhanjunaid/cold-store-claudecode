@@ -5,8 +5,10 @@ import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { CheckCircle2, TriangleAlert, Undo2 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { moneyEquals } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
+import { JournalStatusBadge } from '@/components/accounting/journal-status-badge';
 import { useConfirm } from '@/components/form/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -20,7 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 
@@ -46,21 +47,18 @@ interface JournalEntry {
   source_table: string;
   source_id: string;
   description: string;
-  posting_status: 'AUTO_DRAFT' | 'POSTED' | 'REVERSED';
+  posting_status: 'AUTO_DRAFT' | 'POSTED';
   reversed_by_id: string | null;
   reversed_by_entry_number: string | null;
+  is_reversed: boolean;
+  /** Whether a person may reverse it from the journal — the API decides (JOURNAL_SOURCES). */
+  is_user_reversible: boolean;
   total_debit_pkr: number;
   total_credit_pkr: number;
   created_at: string;
   created_by_name: string;
   lines: JournalEntryLine[];
 }
-
-const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger'> = {
-  POSTED: 'success',
-  AUTO_DRAFT: 'warning',
-  REVERSED: 'danger',
-};
 
 export default function JournalEntryDetailPage() {
   const params = useParams<{ id: string }>();
@@ -81,21 +79,15 @@ export default function JournalEntryDetailPage() {
   if (loading) return <PageSkeleton />;
   if (!entry) return <p className="text-muted-foreground">Entry not found</p>;
 
-  const balanced = Math.abs(entry.total_debit_pkr - entry.total_credit_pkr) < 0.01;
-  // KATCHI writes are OWNER-only; PACCI needs MANAGER+.
-  const canWriteBook =
-    entry.book_type === 'KATCHI' ? user?.role === 'OWNER' : hasMinRole(user?.role, 'MANAGER');
+  const balanced = moneyEquals(entry.total_debit_pkr, entry.total_credit_pkr);
+  // The server's two gates, not a role ladder of its own (docs/25 L-45): the
+  // posting permission, and KATCHI writes for the owner only (book-gate.ts).
+  const canWriteBook = can(user, 'accounting.post_journal') && (entry.book_type !== 'KATCHI' || user?.role === 'OWNER');
   const canPostDraft = entry.posting_status === 'AUTO_DRAFT' && canWriteBook;
-  // Only manual and opening-balance entries are reversible here — system
-  // entries are corrected through their source document (credit note,
-  // dishonour, write-off).
-  // A reversed entry now stays POSTED — "already reversed" is reversed_by_id,
-  // never the status — so without this an entry could be reversed twice.
-  const canReverse =
-    entry.posting_status === 'POSTED' &&
-    !entry.reversed_by_id &&
-    (entry.source_table === 'manual' || entry.source_table === 'opening_balances') &&
-    canWriteBook;
+  // Whether this entry may be reversed from the journal is the API's call
+  // (posted, not already reversed, not itself a reversal, and a source with no
+  // document behind it) — the page used to keep its own, narrower whitelist.
+  const canReverse = entry.is_user_reversible && canWriteBook;
 
   const postDraft = async () => {
     const period = new Date(`${entry.entry_date}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -145,7 +137,7 @@ export default function JournalEntryDetailPage() {
       <Card className="mb-4">
         <CardContent className="p-4">
           <div className="mb-3 flex items-center justify-between">
-            <StatusBadge status={entry.posting_status} tone={STATUS_TONE[entry.posting_status]} />
+            <JournalStatusBadge entry={entry} />
             <div className="flex items-center gap-2">
               {canPostDraft && (
                 <Button size="sm" onClick={postDraft} disabled={posting}>

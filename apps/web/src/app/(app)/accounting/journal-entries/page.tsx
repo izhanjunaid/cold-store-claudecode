@@ -10,6 +10,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState, type DataTableColumn } from '@/components/data-table';
 import { JournalEntryPeek } from '@/components/accounting/journal-entry-peek';
+import { JournalStatusBadge, journalStatusLabel } from '@/components/accounting/journal-status-badge';
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
 import { useAuthStore } from '@/stores/auth.store';
@@ -30,11 +31,6 @@ interface JournalEntry {
   total_debit_pkr: number;
 }
 
-const STATUS_TONE: Record<string, 'success' | 'warning'> = {
-  POSTED: 'success',
-  AUTO_DRAFT: 'warning',
-};
-
 const columns: DataTableColumn<JournalEntry>[] = [
   { id: 'entry_number', header: 'Number', enableHiding: false, cell: (e) => <span className="font-mono text-primary-700">{e.entry_number ?? '—'}</span>, csv: (e) => e.entry_number ?? '' },
   { id: 'date', header: 'Date', cell: (e) => formatDate(e.entry_date), csv: (e) => e.entry_date },
@@ -45,15 +41,8 @@ const columns: DataTableColumn<JournalEntry>[] = [
   {
     id: 'status',
     header: 'Status',
-    // A reversed entry stays POSTED — it really happened, and its mirror
-    // cancels it — so the badge reads is_reversed, never the status.
-    cell: (e) =>
-      e.is_reversed ? (
-        <StatusBadge status="REVERSED" tone="danger" />
-      ) : (
-        <StatusBadge status={e.posting_status} tone={STATUS_TONE[e.posting_status]} />
-      ),
-    csv: (e) => (e.is_reversed ? 'REVERSED' : e.posting_status),
+    cell: (e) => <JournalStatusBadge entry={e} />,
+    csv: (e) => journalStatusLabel(e),
   },
 ];
 

@@ -6,12 +6,12 @@ import { toast } from 'sonner';
 import { ExternalLink } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
-import { hasMinRole } from '@/lib/rbac';
 import { useConfirm } from '@/components/form/confirm-dialog';
 import { Button } from '@/components/ui/button';
-import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDate, formatDateTime } from '@/lib/format';
+import { can } from '@/lib/permissions';
+import { JournalStatusBadge } from './journal-status-badge';
 
 interface JournalEntryLine {
   id: string;
@@ -31,20 +31,14 @@ interface JournalEntry {
   entry_type: string;
   book_type: 'PACCI' | 'KATCHI';
   description: string;
-  posting_status: 'AUTO_DRAFT' | 'POSTED' | 'REVERSED';
-  reversed_by_entry_number: string | null;
+  posting_status: 'AUTO_DRAFT' | 'POSTED';
+  is_reversed: boolean;
   total_debit_pkr: number;
   total_credit_pkr: number;
   created_at: string;
   created_by_name: string;
   lines: JournalEntryLine[];
 }
-
-const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger'> = {
-  POSTED: 'success',
-  AUTO_DRAFT: 'warning',
-  REVERSED: 'danger',
-};
 
 /**
  * The JE facts + lines + a Post action, without leaving whatever list put
@@ -72,8 +66,9 @@ export function JournalEntryPeek({ entryId, onPosted }: { entryId: string; onPos
   if (loading) return <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>;
   if (!entry) return <p className="py-6 text-center text-sm text-muted-foreground">Entry not found</p>;
 
-  // KATCHI writes are OWNER-only; PACCI needs MANAGER+ — mirrors the detail page.
-  const canWriteBook = entry.book_type === 'KATCHI' ? user?.role === 'OWNER' : hasMinRole(user?.role, 'MANAGER');
+  // The server's two gates, not a role ladder of its own (docs/25 L-45): the
+  // posting permission, and KATCHI writes for the owner only (book-gate.ts).
+  const canWriteBook = can(user, 'accounting.post_journal') && (entry.book_type !== 'KATCHI' || user?.role === 'OWNER');
   const canPostDraft = entry.posting_status === 'AUTO_DRAFT' && canWriteBook;
 
   const postDraft = async () => {
@@ -103,7 +98,7 @@ export function JournalEntryPeek({ entryId, onPosted }: { entryId: string; onPos
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span className="font-mono text-sm font-semibold">{entry.entry_number}</span>
-            <StatusBadge status={entry.reversed_by_entry_number ? 'REVERSED' : entry.posting_status} tone={STATUS_TONE[entry.reversed_by_entry_number ? 'REVERSED' : entry.posting_status]} />
+            <JournalStatusBadge entry={entry} />
             <span className={entry.book_type === 'KATCHI' ? 'text-2xs font-medium text-amber-600' : 'text-2xs font-medium text-muted-foreground'}>
               {entry.book_type}
             </span>
