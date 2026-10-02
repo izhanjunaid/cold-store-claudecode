@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 vi.mock('next/navigation', () => ({
@@ -179,7 +179,7 @@ describe('ChartOfAccountsPage — owner management', () => {
 
     fireEvent.change(screen.getByLabelText(/^type$/i), { target: { value: 'HEADER' } });
     fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Custom Head' } });
-    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '7500' } });
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '1500' } });
 
     apiClient.mockClear();
     const create = screen.getByRole('button', { name: /create account/i }) as HTMLButtonElement;
@@ -267,8 +267,37 @@ describe('ChartOfAccountsPage — owner management', () => {
     fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Generator Fuel' } });
     fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '1999' } });
 
-    expect(screen.getByText(/belong to another class/i)).toBeTruthy();
+    expect(screen.getByText(/Expenses codes start with 6/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: /create account/i })).toHaveProperty('disabled', true);
+  });
+
+  // The unassigned 7/8/9/0 ranges used to be allowed here — and in the API — as a
+  // route for custom heads; they landed in "unclassified" (docs/25 L-31).
+  it('refuses an unassigned range too — a class prefix is required', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+
+    fireEvent.change(screen.getByLabelText(/class/i), { target: { value: 'EXPENSE' } });
+    fireEvent.change(screen.getByLabelText(/parent/i), { target: { value: '6000' } });
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Generator Fuel' } });
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '7050' } });
+
+    expect(screen.getByText(/Expenses codes start with 6/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /create account/i })).toHaveProperty('disabled', true);
+  });
+
+  it('opens a cash account with its flag set', async () => {
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /add account/i }));
+    fireEvent.change(screen.getByLabelText(/account name/i), { target: { value: 'Bank — Second' } });
+    // ASSET is the default class — the only one an account can be cash in.
+    fireEvent.change(screen.getByLabelText(/account code/i), { target: { value: '1045' } });
+    fireEvent.click(screen.getByLabelText(/cash, bank or wallet/i));
+    expect((screen.getByLabelText(/cash, bank or wallet/i) as HTMLInputElement).checked).toBe(true);
+    // Choosing cash rules out "requires a party": a cash account is not a control account.
+    expect((screen.getByLabelText(/must name a party/i) as HTMLInputElement).checked).toBe(false);
   });
 
   it('flags a duplicate code without a round trip', async () => {
@@ -404,6 +433,26 @@ describe('ChartOfAccountsPage — owner management', () => {
 
     fireEvent.change(screen.getByLabelText(/parent/i), { target: { value: '6000' } });
     expect(screen.getByRole('button', { name: /create account/i })).not.toBeDisabled();
+  });
+
+  // A header never posts, so its figure is its children's, on its own side; the
+  // column used to be blank on every header and PACCI-only (docs/25 L-40).
+  it('shows a header the sum of its children, in the chosen book', async () => {
+    apiClient.mockImplementation((url: string) => {
+      if (String(url).startsWith('/v1/accounting/trial-balance')) {
+        return Promise.resolve({
+          groups: [{ rows: [{ account_code: '6090', debit_balance_pkr: 1234, credit_balance_pkr: 0 }] }],
+        });
+      }
+      return Promise.resolve(ACCOUNTS);
+    });
+    render(<ChartOfAccountsPage />);
+    await waitFor(() => expect(screen.getAllByText('1,234').length).toBe(2)); // 6090 and its header 6000
+
+    fireEvent.change(screen.getByLabelText('Book'), { target: { value: 'KATCHI' } });
+    await waitFor(() =>
+      expect(apiClient.mock.calls.some(([u]) => String(u).includes('book_type=KATCHI'))).toBe(true),
+    );
   });
 
   it('offers no rename/deactivate on system accounts', async () => {

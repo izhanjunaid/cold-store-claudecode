@@ -1135,7 +1135,12 @@ describe('account creation validates the parent (F-6a)', () => {
     expect(JSON.parse(res.body).error.code).toBe('INVALID_PARENT_ACCOUNT');
   });
 
-  it('accepts a parentless EQUITY DETAIL account — equity sits at the root by design', async () => {
+  it('rejects a parentless EQUITY DETAIL account once the facility has equity headers (docs/25 L-34)', async () => {
+    // The web always required a parent here while the server accepted none — a
+    // rule only the browser enforced. With 3100/3200 seeded, an owner's account
+    // adrift of both headers is exactly what the Owners page exists to prevent.
+    // (Where a facility has no equity header at all, a root account stays legal
+    // rather than leaving no way to create one.)
     const res = await app.inject({
       method: 'POST',
       url: '/v1/accounting/accounts',
@@ -1151,7 +1156,8 @@ describe('account creation validates the parent (F-6a)', () => {
         is_contra: true,
       },
     });
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error.code).toBe('INVALID_PARENT_ACCOUNT');
   });
 });
 

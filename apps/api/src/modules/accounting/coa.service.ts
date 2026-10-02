@@ -224,6 +224,20 @@ export class CoaService {
     });
     if (exists) throw Errors.VALIDATION_ERROR('Account code already exists', 'account_code');
 
+    // An equity detail sits under an equity header once the facility has one —
+    // an owner's account adrift of the 3100/3200 blocks is what the Owners page
+    // exists to prevent. With no equity header at all, a root account stays
+    // legal rather than leaving no way to create one (docs/25 L-34: this was a
+    // rule only the browser enforced).
+    if (body.account_type === 'DETAIL' && body.account_class === 'EQUITY' && !body.parent_account_code) {
+      const equityHeaders = await tx.chartOfAccounts.count({
+        where: { facilityId, accountClass: 'EQUITY', accountType: 'HEADER', isActive: true },
+      });
+      if (equityHeaders > 0) {
+        throw Errors.INVALID_PARENT_ACCOUNT('An equity account must sit under one of the equity headers');
+      }
+    }
+
     if (body.parent_account_code) {
       const parent = await tx.chartOfAccounts.findUnique({
         where: { facilityId_accountCode: { facilityId, accountCode: body.parent_account_code } },
