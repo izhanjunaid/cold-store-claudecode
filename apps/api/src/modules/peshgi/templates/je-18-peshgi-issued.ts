@@ -1,4 +1,6 @@
+import { round2 } from '@coldchain/shared';
 import type { JournalEntryDraft } from '../../accounting/templates/types';
+import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
 
 type Input = {
   loanId: string;
@@ -28,7 +30,7 @@ export function buildJE18PeshgiIssued(input: Input): JournalEntryDraft {
     description: `Peshgi ${input.loanNumber} — issued to ${input.partyName}`,
     lines: [
       {
-        accountCode: '1140',
+        accountCode: SYSTEM_ACCOUNTS.PESHGI_LOANS,
         debitAmount: amount,
         creditAmount: 0,
         partyId: input.partyId,
@@ -45,6 +47,3 @@ export function buildJE18PeshgiIssued(input: Input): JournalEntryDraft {
   };
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}

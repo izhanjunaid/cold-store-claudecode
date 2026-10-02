@@ -317,7 +317,11 @@ describe('Gap 1 · opening balances', () => {
       headers: authHeaders(accountantToken),
     });
     const data = JSON.parse(aging.body).data;
-    expect(data.buckets.total_pkr).toBe(25000);
+    // The opening balance stays an open item; the receipt is the party's unapplied
+    // credit until applied, and the party's net due is its GL balance (docs/25 R-10).
+    expect(data.buckets.total_pkr).toBe(40000);
+    expect(data.total_unapplied_credit_pkr).toBe(15000);
+    expect(data.net_total_pkr).toBe(25000);
 
     const stmt = await app.inject({
       method: 'GET',

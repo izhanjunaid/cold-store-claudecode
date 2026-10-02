@@ -1,5 +1,7 @@
+import { round2 } from '@coldchain/shared';
 import type { Prisma, RateType, BookType } from '@coldchain/db';
-import { computeStorageCharge } from './storage-charge';
+import { computeStorageCharge, billingPeriodStart } from './storage-charge';
+import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 import { resolveFacilitySettings } from '../facility/facility.service';
 
 const builderInclude = {
@@ -34,6 +36,14 @@ async function createDraftInvoice(
   tx: Prisma.TransactionClient,
   params: DraftInvoiceParams,
 ): Promise<BuiltInvoice> {
+  // A supplier has no receivable, so a draft billed to one could never be finalized —
+  // and a draft nothing can finalize stops its month from closing (docs/25 R-01).
+  const billingParty = await tx.party.findUniqueOrThrow({
+    where: { id: params.billingPartyId },
+    select: RECEIVABLE_PARTY_SELECT,
+  });
+  receivableParty(billingParty);
+
   const charge = computeStorageCharge({
     rateType: params.rateType,
     rateAmountPkr: params.rateAmountPkr,
@@ -51,9 +61,11 @@ async function createDraftInvoice(
     where: { id: params.facilityId },
   });
   const settings = resolveFacilitySettings(facility?.settings ?? null);
-  const gstRate = settings.gst_registered ? settings.gst_default_rate : 0;
-  const gstAmount = Math.round(subTotal * (gstRate / 100) * 100) / 100;
-  const total = Math.round((subTotal + gstAmount) * 100) / 100;
+  // The informal book carries no sales tax: nothing settles KATCHI output tax,
+  // so charging it would only grow a liability no return ever clears (docs/25 R-06).
+  const gstRate = settings.gst_registered && params.bookType === 'PACCI' ? settings.gst_default_rate : 0;
+  const gstAmount = round2(subTotal * (gstRate / 100));
+  const total = round2(subTotal + gstAmount);
 
   return tx.invoice.create({
     data: {
@@ -61,7 +73,9 @@ async function createDraftInvoice(
       lotId: params.lotId,
       outboundEventId: params.outboundEventId,
       billingPartyId: params.billingPartyId,
-      invoiceDate: new Date(),
+      // Dated when the storage it bills ended — the dispatch or the transfer — so a
+      // backdated dispatch books its revenue in its own month (docs/25 R-09).
+      invoiceDate: params.periodEnd,
       periodStart: params.periodStart,
       periodEnd: params.periodEnd,
       subTotalPkr: subTotal,
@@ -105,11 +119,7 @@ export async function buildInvoiceFromOutbound(
       lot: {
         include: {
           ratePlan: true,
-          ownershipHistory: {
-            where: { eventType: { in: ['INITIAL', 'TRANSFER_IN'] } },
-            orderBy: { effectiveDate: 'desc' },
-            take: 1,
-          },
+          ownershipHistory: { select: { eventType: true, effectiveDate: true } },
         },
       },
     },
@@ -120,9 +130,7 @@ export async function buildInvoiceFromOutbound(
   const lot = outbound.lot;
   const ratePlan = lot.ratePlan;
 
-  // periodStart: latest ownership effective date or lot inbound date
-  const latestOwnership = lot.ownershipHistory[0];
-  const periodStart: Date = latestOwnership ? latestOwnership.effectiveDate : lot.inboundDate;
+  const periodStart = billingPeriodStart(lot);
   const periodEnd: Date = outbound.outboundDate;
 
   return createDraftInvoice(tx, {

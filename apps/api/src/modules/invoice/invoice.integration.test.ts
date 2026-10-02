@@ -333,9 +333,7 @@ describe('Invoice — Billing Engine', () => {
       headers: authHeaders(managerToken),
       payload: {
         line_type: 'SERVICE',
-        description: 'Loading charge',
         quantity: 20,
-        unit_price_pkr: 10,
         service_charge_id: SERVICE_CHARGE_ID,
       },
     });
@@ -349,7 +347,9 @@ describe('Invoice — Billing Engine', () => {
     expect(inv.total_pkr).toBe(1200);
   });
 
-  it('6. POST ADJUSTMENT (negative) line recomputes totals', async () => {
+  // docs/25 R-07: a negative line could never finalize (JE-01 skipped it but still lowered
+  // the AR debit). A reduction is the discount; an adjustment line is a charge.
+  it('6. a negative ADJUSTMENT line is refused — the reduction is the discount', async () => {
     const lot = await createLot({
       ratePlanId: RATE_PLAN_SEASONAL,
       quantity: 10,
@@ -372,11 +372,24 @@ describe('Invoice — Billing Engine', () => {
         unit_price_pkr: -100,
       },
     });
-    expect(addRes.statusCode).toBe(201);
-    const inv = JSON.parse(addRes.body).data;
-    // Seasonal 10 × 50 = 500, minus 100 adjustment = 400
-    expect(inv.sub_total_pkr).toBe(400);
-    expect(inv.total_pkr).toBe(400);
+    expect(addRes.statusCode).toBe(400);
+
+    const discount = await app.inject({
+      method: 'PATCH',
+      url: `/v1/invoices/${invoiceId}`,
+      headers: authHeaders(managerToken),
+      payload: { discount: { type: 'FIXED', value: 100 } },
+    });
+    expect(discount.statusCode).toBe(200);
+    const fin = await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${invoiceId}/finalize`,
+      headers: authHeaders(managerToken),
+      payload: {},
+    });
+    expect(fin.statusCode).toBe(200);
+    // Seasonal 10 × 50 = 500, less the 100 discount = 400
+    expect(JSON.parse(fin.body).data.total_pkr).toBe(400);
   });
 
   it('7. DELETE SERVICE line succeeds; DELETE STORAGE line → 422 INVOICE_LINE_IMMUTABLE', async () => {
@@ -398,9 +411,8 @@ describe('Invoice — Billing Engine', () => {
       headers: authHeaders(managerToken),
       payload: {
         line_type: 'SERVICE',
-        description: 'Handling',
         quantity: 5,
-        unit_price_pkr: 20,
+        service_charge_id: SERVICE_CHARGE_ID,
       },
     });
     const addedInv = JSON.parse(addRes.body).data;
@@ -496,7 +508,7 @@ describe('Invoice — Billing Engine', () => {
       method: 'POST',
       url: `/v1/invoices/${invoiceId}/lines`,
       headers: authHeaders(managerToken),
-      payload: { line_type: 'SERVICE', description: 'X', quantity: 1, unit_price_pkr: 10 },
+      payload: { line_type: 'SERVICE', quantity: 1, service_charge_id: SERVICE_CHARGE_ID },
     });
     expect(addAfter.statusCode).toBe(409);
     expect(JSON.parse(addAfter.body).error.code).toBe('INVOICE_ALREADY_FINALIZED');
@@ -760,7 +772,7 @@ describe('Invoice — draft-stage discount (Phase 12)', () => {
       method: 'POST',
       url: `/v1/invoices/${invoiceId}/lines`,
       headers: authHeaders(managerToken),
-      payload: { line_type: 'SERVICE', description: 'Loading', quantity: 20, unit_price_pkr: 10 },
+      payload: { line_type: 'SERVICE', quantity: 20, service_charge_id: SERVICE_CHARGE_ID },
     });
     expect(addRes.statusCode).toBe(201);
     const serviceLineId = JSON.parse(addRes.body).data.line_items.find(
@@ -1034,7 +1046,16 @@ describe('Party GET — over_credit_limit (credit exposure)', () => {
         payload: { reason: 'issued against the wrong party' },
       });
       expect(res.statusCode).toBe(200);
-      expect(JSON.parse(res.body).data.status).toBe('VOID');
+      const voided = JSON.parse(res.body).data;
+      expect(voided.status).toBe('VOID');
+
+      // R-24: the cancellation is recorded in its own columns, never appended to notes.
+      expect(voided.void_reason).toBe('issued against the wrong party');
+      expect(voided.voided_at).toBeTruthy();
+      const row = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+      expect(row.voidReason).toBe('issued against the wrong party');
+      expect(row.voidedBy).toBeTruthy();
+      expect(row.notes).toBeNull();
 
       // Original JE-01 stays POSTED and is cross-linked to its mirror. It
       // really happened; the mirror is what reverses it. Flipping the original

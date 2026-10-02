@@ -16,6 +16,13 @@ export interface PaymentRow {
   // Returned by the list (PaymentResponse), and what gates the Clear action.
   clearance_status: 'NA' | 'PENDING' | 'CLEARED' | 'BOUNCED';
   allocations: { id: string }[];
+  is_advance: boolean;
+  /** Still on account (a receipt) or still in customer advances (an advance). */
+  unallocated_pkr: number;
+  // The actions the server will accept on this receipt, decided by the server.
+  can_allocate: boolean;
+  can_clear: boolean;
+  can_dishonour: boolean;
 }
 
 export interface PaymentColumnHandlers {
@@ -23,7 +30,7 @@ export interface PaymentColumnHandlers {
   canRecord: boolean;
   onClear: (payment: PaymentRow) => void;
   onDishonour: (payment: PaymentRow) => void;
-  onApplyAdvance: (payment: PaymentRow) => void;
+  onAllocate: (payment: PaymentRow) => void;
 }
 
 const METHOD_LABELS: Record<string, string> = {
@@ -54,7 +61,7 @@ export function getPaymentColumns(
         canRecord={handlers.canRecord}
         onClear={handlers.onClear}
         onDishonour={handlers.onDishonour}
-        onApplyAdvance={handlers.onApplyAdvance}
+        onAllocate={handlers.onAllocate}
       />
     ),
   },

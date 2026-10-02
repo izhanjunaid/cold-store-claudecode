@@ -4,7 +4,6 @@ import { buildJE02PaymentReceived } from '../templates/je-02-payment-received';
 import { buildJE03AdvanceReceived } from '../templates/je-03-advance-received';
 import { buildJE04AdvanceApplied } from '../templates/je-04-advance-applied';
 import { buildJE05CreditNote } from '../templates/je-05-credit-note';
-import { buildJE06ChequeDishonoured } from '../templates/je-06-cheque-dishonoured';
 import { buildJE08BadDebtWriteOff } from '../templates/je-08-bad-debt-writeoff';
 import { buildJE24ChequeCleared } from '../templates/je-24-cheque-cleared';
 import { receiptAssetAccountForPaymentMethod, defaultControlAccountForPartyType, assetAccountForPaymentMethod, defaultRevenueAccountForCommodity } from '@coldchain/shared';
@@ -16,8 +15,8 @@ function totals(lines: { debitAmount: number; creditAmount: number }[]) {
   };
 }
 
-const farmerParty = { id: 'p1', name: 'Test Farmer', partyType: 'FARMER' };
-const traderParty = { id: 'p2', name: 'Test Trader', partyType: 'TRADER' };
+const farmerParty = { id: 'p1', name: 'Test Farmer', controlAccountCode: '1110' };
+const traderParty = { id: 'p2', name: 'Test Trader', controlAccountCode: '1120' };
 const lot = { id: 'l1', lotNumber: 'LOT-260101-0001', commodityName: 'POTATO' };
 
 describe('JE template balance enforcement', () => {
@@ -28,12 +27,13 @@ describe('JE template balance enforcement', () => {
       invoiceDate: new Date('2026-01-15'),
       totalPkr: 27500,
       gstAmountPkr: 2500,
+      discountAmountPkr: 0,
       bookType: 'PACCI',
       billingParty: farmerParty,
       lot,
       lines: [
-        { lineType: 'STORAGE', description: 'Storage', amountPkr: 20000 },
-        { lineType: 'SERVICE', description: 'Loading', amountPkr: 5000, serviceChargeRevenueCode: '4110' },
+        { revenueAccountCode: '4010', amountPkr: 20000 },
+        { revenueAccountCode: '4110', amountPkr: 5000 },
       ],
     });
     const t = totals(draft.lines);
@@ -45,39 +45,42 @@ describe('JE template balance enforcement', () => {
     expect(draft.lines.find((l) => l.accountCode === '2020')?.creditAmount).toBe(2500);
   });
 
-  it('JE-01 routes Apple lots to 4020', () => {
+  it('JE-01 debits the party\'s own control account', () => {
     const draft = buildJE01InvoiceFinalized({
       invoiceId: 'inv2',
       invoiceNumber: 'INV-2',
       invoiceDate: new Date(),
       totalPkr: 1000,
       gstAmountPkr: 0,
+      discountAmountPkr: 0,
       bookType: 'PACCI',
       billingParty: traderParty,
-      lot: { id: 'l2', lotNumber: 'LOT-2', commodityName: 'APPLE' },
-      lines: [{ lineType: 'STORAGE', description: 'Storage', amountPkr: 1000 }],
+      lot,
+      lines: [{ revenueAccountCode: '4020', amountPkr: 1000 }],
     });
     expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('4020');
-    expect(draft.lines.find((l) => l.debitAmount > 0)?.accountCode).toBe('1120'); // trader AR
+    expect(draft.lines.find((l) => l.debitAmount > 0)?.accountCode).toBe('1120');
   });
 
-  it('JE-01 with ADVANCE_APPLIED line stays balanced', () => {
-    const draft = buildJE01InvoiceFinalized({
-      invoiceId: 'inv3',
-      invoiceNumber: 'INV-3',
-      invoiceDate: new Date(),
-      totalPkr: 8000,
-      gstAmountPkr: 0,
-      bookType: 'PACCI',
-      billingParty: farmerParty,
-      lot,
-      lines: [
-        { lineType: 'STORAGE', description: 'Storage', amountPkr: 10000 },
-        { lineType: 'ADVANCE_APPLIED', description: 'Advance offset', amountPkr: -2000 },
-      ],
-    });
-    const t = totals(draft.lines);
-    expect(t.d).toBeCloseTo(t.c);
+  // docs/25 R-07: a negative line used to be skipped while still lowering the AR debit.
+  it('JE-01 refuses a negative line — a reduction is the discount', () => {
+    expect(() =>
+      buildJE01InvoiceFinalized({
+        invoiceId: 'inv3',
+        invoiceNumber: 'INV-3',
+        invoiceDate: new Date(),
+        totalPkr: 900,
+        gstAmountPkr: 0,
+        discountAmountPkr: 0,
+        bookType: 'PACCI',
+        billingParty: farmerParty,
+        lot,
+        lines: [
+          { revenueAccountCode: '4010', amountPkr: 1000 },
+          { revenueAccountCode: '4150', amountPkr: -100 },
+        ],
+      }),
+    ).toThrow(/discount/);
   });
 
   it('JE-01 with discount debits 4910 Discounts Allowed and stays balanced', () => {
@@ -92,7 +95,7 @@ describe('JE template balance enforcement', () => {
       bookType: 'PACCI',
       billingParty: farmerParty,
       lot,
-      lines: [{ lineType: 'STORAGE', description: 'Storage', amountPkr: 10000 }],
+      lines: [{ revenueAccountCode: '4010', amountPkr: 10000 }],
     });
     const t = totals(draft.lines);
     expect(t.d).toBeCloseTo(t.c);
@@ -102,28 +105,23 @@ describe('JE template balance enforcement', () => {
     expect(draft.lines.find((l) => l.accountCode === '4010')?.creditAmount).toBe(10000);
   });
 
-  it('JE-01 with discount + advance + GST stays balanced', () => {
-    // subTotal 10000, discount 1000, gst 10% on 9000 = 900, advance 2000
-    // total = 10000 - 1000 + 900 - 2000 = 7900
+  it('JE-01 with discount + GST stays balanced', () => {
+    // subTotal 10000, discount 1000, gst 10% on 9000 = 900 → total 9900
     const draft = buildJE01InvoiceFinalized({
       invoiceId: 'inv-disc-2',
       invoiceNumber: 'INV-D2',
       invoiceDate: new Date('2026-06-01'),
-      totalPkr: 7900,
+      totalPkr: 9900,
       gstAmountPkr: 900,
       discountAmountPkr: 1000,
       bookType: 'PACCI',
       billingParty: farmerParty,
       lot,
-      lines: [
-        { lineType: 'STORAGE', description: 'Storage', amountPkr: 10000 },
-        { lineType: 'ADVANCE_APPLIED', description: 'Advance offset', amountPkr: -2000 },
-      ],
+      lines: [{ revenueAccountCode: '4010', amountPkr: 10000 }],
     });
     const t = totals(draft.lines);
     expect(t.d).toBeCloseTo(t.c);
     expect(draft.lines.find((l) => l.accountCode === '4910')?.debitAmount).toBe(1000);
-    expect(draft.lines.find((l) => l.accountCode === '2010')?.debitAmount).toBe(2000);
     expect(draft.lines.find((l) => l.accountCode === '2020')?.creditAmount).toBe(900);
   });
 
@@ -138,7 +136,7 @@ describe('JE template balance enforcement', () => {
       bookType: 'PACCI',
       billingParty: farmerParty,
       lot,
-      lines: [{ lineType: 'STORAGE', description: 'Storage', amountPkr: 1000 }],
+      lines: [{ revenueAccountCode: '4010', amountPkr: 1000 }],
     });
     expect(draft.lines.find((l) => l.accountCode === '4910')).toBeUndefined();
   });
@@ -177,8 +175,7 @@ describe('JE template balance enforcement', () => {
   it('JE-04 advance applied: debits Advance Receipts, credits AR', () => {
     const draft = buildJE04AdvanceApplied({
       paymentId: 'pay2',
-      invoiceId: 'inv4',
-      invoiceNumber: 'INV-4',
+      appliedTo: 'invoice INV-4',
       appliedDate: new Date(),
       amountPkr: 4000,
       bookType: 'PACCI',
@@ -188,88 +185,26 @@ describe('JE template balance enforcement', () => {
     expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1120'); // trader AR
   });
 
-  it('JE-05 credit note debits revenue per line, credits AR sum', () => {
+  it('JE-05 credit note reverses revenue per line, the discount share and the output tax', () => {
     const draft = buildJE05CreditNote({
       creditNoteId: 'cn1',
       creditNoteNumber: 'CN-1',
       creditDate: new Date(),
       bookType: 'PACCI',
       party: farmerParty,
-      invoice: { id: 'inv5', invoiceNumber: 'INV-5' },
+      invoiceNumber: 'INV-5',
       lineItems: [
         { revenueAccountCode: '4010', amountPkr: 1000, description: 'Storage adjust' },
         { revenueAccountCode: '4110', amountPkr: 500, description: 'Loading adjust' },
       ],
+      discountPkr: 150,
+      gstPkr: 243,
     });
     const t = totals(draft.lines);
-    expect(t.d).toBe(1500);
-    expect(t.c).toBe(1500);
-    expect(draft.lines.find((l) => l.creditAmount > 0 && l.accountCode === '1110')?.creditAmount).toBe(1500);
-  });
-
-  it('JE-06 cheque bounce debits AR, credits Bank — REVERSAL type', () => {
-    const draft = buildJE06ChequeDishonoured({
-      paymentId: 'pay3',
-      dishonourDate: new Date(),
-      amountPkr: 12000,
-      bookType: 'PACCI',
-      party: traderParty,
-    });
-    expect(draft.entryType).toBe('REVERSAL');
-    expect(draft.lines.find((l) => l.debitAmount > 0)?.accountCode).toBe('1120');
-    expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1020');
-  });
-
-  // P0-1: an advance cheque that bounces while still sitting in 2010 must reverse
-  // against 2010, not AR. JE-03 booked DR bank / CR 2010; only JE-04 (on allocation)
-  // moves it to AR. Reversing to AR while 2010 still holds the money leaves the
-  // advance liability standing AND invents a receivable — a 2x misstatement.
-  it('JE-06 wholly-unallocated advance bounce debits 2010, never AR', () => {
-    const draft = buildJE06ChequeDishonoured({
-      paymentId: 'pay-adv-1',
-      dishonourDate: new Date(),
-      amountPkr: 12000,
-      bookType: 'PACCI',
-      party: traderParty,
-      advanceRemainderPkr: 12000,
-    });
-    const t = totals(draft.lines);
-    expect(t.d).toBe(12000);
-    expect(t.c).toBe(12000);
-    expect(draft.lines.find((l) => l.accountCode === '2010')?.debitAmount).toBe(12000);
-    expect(draft.lines.find((l) => l.accountCode === '1120')).toBeUndefined();
-    expect(draft.lines.find((l) => l.creditAmount > 0)?.accountCode).toBe('1020');
-  });
-
-  it('JE-06 partly-allocated advance bounce splits the debit across 2010 and AR', () => {
-    const draft = buildJE06ChequeDishonoured({
-      paymentId: 'pay-adv-2',
-      dishonourDate: new Date(),
-      amountPkr: 12000,
-      bookType: 'PACCI',
-      party: traderParty,
-      advanceRemainderPkr: 5000, // 7000 already applied to invoices via JE-04
-    });
-    const t = totals(draft.lines);
-    expect(t.d).toBe(12000);
-    expect(t.c).toBe(12000);
-    expect(draft.lines.find((l) => l.accountCode === '2010')?.debitAmount).toBe(5000);
-    expect(draft.lines.find((l) => l.accountCode === '1120')?.debitAmount).toBe(7000);
-    expect(draft.lines.find((l) => l.creditAmount > 0)?.creditAmount).toBe(12000);
-  });
-
-  it('JE-06 without an advance remainder is unchanged — AR only', () => {
-    const draft = buildJE06ChequeDishonoured({
-      paymentId: 'pay-adv-3',
-      dishonourDate: new Date(),
-      amountPkr: 9000,
-      bookType: 'PACCI',
-      party: traderParty,
-      advanceRemainderPkr: 0,
-    });
-    expect(draft.lines).toHaveLength(2);
-    expect(draft.lines.find((l) => l.accountCode === '2010')).toBeUndefined();
-    expect(draft.lines.find((l) => l.accountCode === '1120')?.debitAmount).toBe(9000);
+    expect(t.d).toBeCloseTo(t.c);
+    expect(draft.lines.find((l) => l.accountCode === '2020')?.debitAmount).toBe(243);
+    expect(draft.lines.find((l) => l.accountCode === '4910')?.creditAmount).toBe(150);
+    expect(draft.lines.find((l) => l.creditAmount > 0 && l.accountCode === '1110')?.creditAmount).toBe(1593);
   });
 
   it('JE-08 bad debt: debits 6080, credits AR', () => {

@@ -7,9 +7,8 @@ import { Button } from '@/components/ui/button';
 import { useConfirm } from '@/components/form';
 import { qk } from '@/lib/query-keys';
 import { formatMoney } from '@/lib/format';
+import { openInvoicePdf } from '@/components/billing/invoice-pdf';
 import type { InvoiceRow } from './columns';
-
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
 /**
  * Finalize fires directly (single no-field POST, mirrors the detail page's
@@ -52,16 +51,7 @@ export function InvoiceRowActions({
 
   async function downloadPdf() {
     try {
-      const token = localStorage.getItem('access_token');
-      const facilityId = localStorage.getItem('facility_id');
-      const res = await fetch(`${API_URL}/v1/invoices/${invoice.id}/pdf`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
-        },
-      });
-      if (!res.ok) throw new Error('Failed to load PDF');
-      window.open(URL.createObjectURL(await res.blob()), '_blank');
+      await openInvoicePdf(invoice.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load PDF');
     }
@@ -82,7 +72,7 @@ export function InvoiceRowActions({
       <Button size="sm" variant="ghost" onClick={downloadPdf}>
         PDF
       </Button>
-      {canVoid && invoice.status === 'FINALIZED' && invoice.amount_paid_pkr === 0 && (
+      {canVoid && invoice.can_void && (
         <Button size="sm" variant="ghost" className="text-destructive" onClick={onVoid}>
           Void
         </Button>

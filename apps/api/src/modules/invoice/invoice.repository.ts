@@ -1,5 +1,7 @@
+import { round2 } from '@coldchain/shared';
 import type { PrismaClient, Prisma, InvoiceStatus } from '@coldchain/db';
 import { Errors } from '../../common/errors';
+import { SETTLEMENT_INCLUDE } from './invoice-settlement';
 
 export function computeDiscountAmount(
   subTotal: number,
@@ -9,7 +11,7 @@ export function computeDiscountAmount(
   if (!discountType || discountValue == null) return 0;
   const amount =
     discountType === 'PERCENT'
-      ? Math.round(subTotal * (discountValue / 100) * 100) / 100
+      ? round2(subTotal * (discountValue / 100))
       : discountValue;
   if (amount > subTotal) throw Errors.INVOICE_DISCOUNT_EXCEEDS_SUBTOTAL();
   return amount;
@@ -19,6 +21,7 @@ const invoiceInclude = {
   lot: { select: { lotNumber: true } },
   billingParty: { select: { name: true } },
   lineItems: { orderBy: { sortOrder: 'asc' as const } },
+  ...SETTLEMENT_INCLUDE,
 } satisfies Prisma.InvoiceInclude;
 
 export type InvoiceWithRelations = Prisma.InvoiceGetPayload<{ include: typeof invoiceInclude }>;
@@ -111,15 +114,16 @@ export class InvoiceRepository {
     const lines = await tx.invoiceLineItem.findMany({ where: { invoiceId } });
     const subTotal = lines.reduce((sum, l) => sum + Number(l.amountPkr), 0);
     const invoice = await tx.invoice.findUnique({ where: { id: invoiceId } });
-    const gstRate = Number(invoice?.gstRate ?? 0);
+    // KATCHI never carries sales tax (docs/25 R-06), whatever rate an older row holds.
+    const gstRate = invoice?.bookType === 'KATCHI' ? 0 : Number(invoice?.gstRate ?? 0);
     const discount = computeDiscountAmount(
       subTotal,
       (invoice?.discountType as 'PERCENT' | 'FIXED' | null) ?? null,
       invoice?.discountValue != null ? Number(invoice.discountValue) : null,
     );
     // GST applies to the post-discount taxable value
-    const gstAmount = Math.round((subTotal - discount) * (gstRate / 100) * 100) / 100;
-    const total = Math.round((subTotal - discount + gstAmount) * 100) / 100;
+    const gstAmount = round2((subTotal - discount) * (gstRate / 100));
+    const total = round2(subTotal - discount + gstAmount);
 
     await tx.invoice.update({
       where: { id: invoiceId },

@@ -742,7 +742,7 @@ describe('Phase 8 — Bad debt write-off', () => {
 describe('Phase 8 — Credit notes (JE-05)', () => {
   it('issuing a credit note posts JE-05 and reduces invoice balance', async () => {
     const { invoiceId } = await createInvoiceAndFinalize();
-    const inv = await prisma.invoice.findUnique({ where: { id: invoiceId } });
+    const inv = await prisma.invoice.findUnique({ where: { id: invoiceId }, include: { lineItems: true } });
 
     const res = await app.inject({
       method: 'POST',
@@ -752,9 +752,7 @@ describe('Phase 8 — Credit notes (JE-05)', () => {
         original_invoice_id: invoiceId,
         credit_date: '2026-04-30',
         reason: 'Loading fee disputed',
-        line_items: [
-          { revenue_account_code: '4010', description: 'Storage adjust', amount_pkr: 500 },
-        ],
+        line_items: [{ invoice_line_item_id: inv!.lineItems[0]!.id, description: 'Storage adjust', amount_pkr: 500 }],
       },
     });
     expect(res.statusCode).toBe(201);
@@ -776,7 +774,7 @@ describe('Phase 8 — Credit notes (JE-05)', () => {
         original_invoice_id: invoiceId,
         credit_date: '2026-04-30',
         reason: 'Try',
-        line_items: [{ revenue_account_code: '4010', description: 'attempt', amount_pkr: 100 }],
+        line_items: [{ invoice_line_item_id: invoiceId, description: 'attempt', amount_pkr: 100 }],
       },
     });
     expect(res.statusCode).toBe(403);

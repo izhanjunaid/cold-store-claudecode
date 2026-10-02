@@ -123,13 +123,15 @@ async function payInvoice(partyId: string, invoiceId: string, amount: number): P
   expect(res.statusCode).toBe(201);
 }
 
-function creditNotePayload(invoiceId: string, amount: number, bookType?: 'PACCI' | 'KATCHI') {
+/** A credit note on the invoice's storage line (credit notes are built from the invoice's lines, docs/25 R-03). */
+async function creditNotePayload(invoiceId: string, amount: number, extra: Record<string, unknown> = {}) {
+  const line = await prisma.invoiceLineItem.findFirstOrThrow({ where: { invoiceId, lineType: 'STORAGE' } });
   return {
     original_invoice_id: invoiceId,
     credit_date: '2026-05-02',
     reason: 'hardening test credit',
-    ...(bookType ? { book_type: bookType } : {}),
-    line_items: [{ revenue_account_code: '4010', description: 'storage adjustment', amount_pkr: amount }],
+    ...extra,
+    line_items: [{ invoice_line_item_id: line.id, description: 'storage adjustment', amount_pkr: amount }],
   };
 }
 
@@ -674,15 +676,18 @@ describe('KATCHI source-document gates (F-9)', () => {
     expect(asOwner.statusCode).toBe(201);
   });
 
-  it('MANAGER cannot issue a KATCHI credit note', async () => {
+  // A credit note's book is its invoice's (docs/25 R-04): the request cannot move it
+  // onto KATCHI. (A KATCHI invoice's credit note needs the OWNER — credit-note.integration.)
+  it('a credit note takes its book from the invoice, not the request', async () => {
     const { invoiceId } = await finalizedInvoice(testParty);
     const res = await app.inject({
       method: 'POST',
       url: '/v1/credit-notes',
       headers: authHeaders(managerToken),
-      payload: creditNotePayload(invoiceId, 10, 'KATCHI'),
+      payload: await creditNotePayload(invoiceId, 10, { book_type: 'KATCHI' }),
     });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).data.book_type).toBe('PACCI');
   });
 
   // Below (phase/22, P2-10 / H5): the gate above only covered create. Every
@@ -1793,7 +1798,7 @@ describe('credit notes are bounded by the invoice balance due (F-5)', () => {
       method: 'POST',
       url: '/v1/credit-notes',
       headers: authHeaders(managerToken),
-      payload: creditNotePayload(invoiceId, 100),
+      payload: await creditNotePayload(invoiceId, 100),
     });
     expect(res.statusCode).toBe(422);
     expect(JSON.parse(res.body).error.code).toBe('CREDIT_NOTE_EXCEEDS_INVOICE');
@@ -1808,7 +1813,7 @@ describe('credit notes are bounded by the invoice balance due (F-5)', () => {
       method: 'POST',
       url: '/v1/credit-notes',
       headers: authHeaders(managerToken),
-      payload: creditNotePayload(invoiceId, totalPkr - paid + 50),
+      payload: await creditNotePayload(invoiceId, totalPkr - paid + 50),
     });
     expect(res.statusCode).toBe(422);
     expect(JSON.parse(res.body).error.code).toBe('CREDIT_NOTE_EXCEEDS_INVOICE');
@@ -1823,7 +1828,7 @@ describe('credit notes are bounded by the invoice balance due (F-5)', () => {
       method: 'POST',
       url: '/v1/credit-notes',
       headers: authHeaders(managerToken),
-      payload: creditNotePayload(invoiceId, totalPkr - paid),
+      payload: await creditNotePayload(invoiceId, totalPkr - paid),
     });
     expect(res.statusCode).toBe(201);
     expect(JSON.parse(res.body).data.status).toBe('APPLIED');

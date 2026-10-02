@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 import { formatMoney } from '@/lib/format';
+import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -21,11 +22,13 @@ const MONTHS = [
 const SELECT_CLASS =
   'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
-const BANK_ACCOUNTS = [
-  { code: '1020', label: '1020 — Bank Account (Main)' },
-  { code: '1010', label: '1010 — Cash on Hand' },
-  { code: '1030', label: '1030 — Mobile Wallet' },
-];
+interface ChartAccount {
+  account_code: string;
+  account_name: string;
+  account_type: string;
+  is_active: boolean;
+  is_cash_equivalent: boolean;
+}
 
 interface Preview {
   period_year: number;
@@ -53,7 +56,9 @@ export default function GstSettlementPage() {
   const [year, setYear] = useState(now.getUTCMonth() === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear());
   const [month, setMonth] = useState(now.getUTCMonth() === 0 ? 12 : now.getUTCMonth());
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [bankAccount, setBankAccount] = useState('1020');
+  const [bankAccount, setBankAccount] = useState<string>(DEFAULT_BANK_ACCOUNT_CODE);
+  // Any active cash, bank or wallet account — the same rule the server checks (docs/25 L-20).
+  const [cashAccounts, setCashAccounts] = useState<ChartAccount[]>([]);
   const [data, setData] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
@@ -77,6 +82,12 @@ export default function GstSettlementPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    apiClient<ChartAccount[]>('/v1/accounting/accounts')
+      .then((rows) => setCashAccounts(rows.filter((a) => a.account_type === 'DETAIL' && a.is_active && a.is_cash_equivalent)))
+      .catch(() => setCashAccounts([]));
+  }, []);
 
   const settle = async () => {
     setPosting(true);
@@ -111,7 +122,7 @@ export default function GstSettlementPage() {
       />
 
       <p className="mb-4 rounded-md bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-        Every finalised invoice credits <strong>2020 GST Payable</strong>. Until the return is filed
+        Every finalised invoice credits <strong>GST payable</strong>. Until the return is filed
         and recorded here, nothing ever debits it, so the balance sheet overstates the liability by
         every rupee of tax already paid over. This posts that missing debit.
         <br />
@@ -151,8 +162,8 @@ export default function GstSettlementPage() {
           <div className="space-y-1">
             <Label htmlFor="gst-bank">Paid from</Label>
             <select id="gst-bank" className={SELECT_CLASS} value={bankAccount} onChange={(e) => setBankAccount(e.target.value)}>
-              {BANK_ACCOUNTS.map((a) => (
-                <option key={a.code} value={a.code}>{a.label}</option>
+              {cashAccounts.map((a) => (
+                <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.account_name}</option>
               ))}
             </select>
           </div>
@@ -208,11 +219,11 @@ export default function GstSettlementPage() {
                   </TableCell>
                 </TableRow>
                 <TableRow className="h-7">
-                  <TableCell className="py-1 pl-6">Output tax outstanding (2020)</TableCell>
+                  <TableCell className="py-1 pl-6">Output tax outstanding</TableCell>
                   <TableCell className="py-1 text-right tabular-nums">{formatMoney(data.outstanding_output_tax_pkr)}</TableCell>
                 </TableRow>
                 <TableRow className="h-7">
-                  <TableCell className="py-1 pl-6">Input tax available (1260)</TableCell>
+                  <TableCell className="py-1 pl-6">Input tax available</TableCell>
                   <TableCell className="py-1 text-right tabular-nums">{formatMoney(data.available_input_tax_pkr)}</TableCell>
                 </TableRow>
                 <TableRow className="h-7">
@@ -232,7 +243,7 @@ export default function GstSettlementPage() {
       {data && data.available_input_tax_pkr > data.input_tax_applied_pkr && (
         <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
           Input tax of {formatMoney(data.available_input_tax_pkr - data.input_tax_applied_pkr)} exceeds
-          the output tax and stays in 1260 to carry forward. It is an adjustable credit against future
+          the output tax and stays in input sales tax to carry forward. It is an adjustable credit against future
           output tax, not a refund receivable, so it is not claimed here.
         </p>
       )}

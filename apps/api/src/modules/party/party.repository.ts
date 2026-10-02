@@ -1,4 +1,5 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
+import { creditExposure } from '../invoice/receivables';
 
 export interface PartyFilters {
   facilityId: string;
@@ -53,17 +54,15 @@ export class PartyRepository {
     });
   }
 
-  /** Unpaid balance across FINALIZED invoices billed to this party — the AR exposure a credit limit is checked against. */
+  /** What the ledger says the party owes, both books — what a credit limit is checked against (docs/25 R-12). */
   async getOutstandingPkr(facilityId: string, partyId: string): Promise<number> {
-    const rows = await this.prisma.$queryRaw<{ outstanding: string | null }[]>`
-      SELECT COALESCE(SUM(total_pkr - amount_paid_pkr), 0)::text AS outstanding
-      FROM invoices
-      WHERE facility_id = ${facilityId}::uuid
-        AND billing_party_id = ${partyId}::uuid
-        AND status = 'FINALIZED'
-        AND total_pkr > amount_paid_pkr
-    `;
-    return Number(rows[0]?.outstanding ?? 0);
+    return creditExposure(this.prisma, facilityId, partyId);
+  }
+
+  /** True once any journal line names this party — its control account is then frozen. */
+  async hasPostings(facilityId: string, partyId: string): Promise<boolean> {
+    const line = await this.prisma.journalEntryLine.findFirst({ where: { facilityId, partyId }, select: { id: true } });
+    return line !== null;
   }
 
   async create(data: Prisma.PartyUncheckedCreateInput) {

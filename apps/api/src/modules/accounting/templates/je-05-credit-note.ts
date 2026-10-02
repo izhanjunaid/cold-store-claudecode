@@ -1,61 +1,76 @@
+import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import { defaultControlAccountForPartyType } from '@coldchain/shared';
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 
 type Input = {
   creditNoteId: string;
   creditNoteNumber: string;
   creditDate: Date;
   bookType: 'PACCI' | 'KATCHI';
-  party: { id: string; partyType: string; name: string };
-  invoice: { id: string; invoiceNumber: string | null };
+  party: ReceivableParty;
+  invoiceNumber: string;
+  /** Revenue credited, per invoice line, on that line's own revenue account. */
   lineItems: { revenueAccountCode: string; amountPkr: number; description: string }[];
+  /** The credited revenue's share of the invoice discount. */
+  discountPkr: number;
+  /** The credited revenue's share of the invoice's output tax. */
+  gstPkr: number;
 };
 
 /**
- * JE-05: Credit Note Issued (Invoice Adjustment).
+ * JE-05: Credit Note — the mirror of the part of JE-01 it cancels.
  *
- *   DR  4010-4150 Revenue Account (same as original)   credit_amount
- *     CR  1110/1120/1130 Receivable — Type               credit_amount
+ *   DR  revenue, per credited line's account     revenue credited
+ *   DR  2020 GST Payable                         pro-rata output tax
+ *     CR  4910 Discounts Allowed                 pro-rata discount
+ *     CR  party control account (AR)             revenue − discount + tax
  *
- * Reverses revenue; reduces receivable. Multi-line credit notes can debit multiple revenue accounts.
+ * It used to debit only revenue, so a credit note on a taxed invoice left the
+ * output tax in 2020 to be remitted on a supply that never happened (docs/25 R-03).
  */
 export function buildJE05CreditNote(input: Input): JournalEntryDraft {
-  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
-  const lines: JournalEntryLineDraft[] = [];
-  let total = 0;
-
-  for (const item of input.lineItems) {
-    const amt = round2(item.amountPkr);
-    total += amt;
+  const party = input.party.id;
+  const lines: JournalEntryLineDraft[] = input.lineItems.map((item) => ({
+    accountCode: item.revenueAccountCode,
+    debitAmount: round2(item.amountPkr),
+    creditAmount: 0,
+    partyId: party,
+    description: `Credit note ${input.creditNoteNumber}: ${item.description}`,
+  }));
+  const revenue = round2(input.lineItems.reduce((s, i) => s + i.amountPkr, 0));
+  if (input.gstPkr > 0) {
     lines.push({
-      accountCode: item.revenueAccountCode,
-      debitAmount: amt,
+      accountCode: SYSTEM_ACCOUNTS.GST_OUTPUT,
+      debitAmount: round2(input.gstPkr),
       creditAmount: 0,
-      partyId: input.party.id,
-      description: `Credit note ${input.creditNoteNumber}: ${item.description}`,
+      partyId: party,
+      description: `Output tax reversed — credit note ${input.creditNoteNumber}`,
     });
   }
-
+  if (input.discountPkr > 0) {
+    lines.push({
+      accountCode: SYSTEM_ACCOUNTS.DISCOUNTS_ALLOWED,
+      debitAmount: 0,
+      creditAmount: round2(input.discountPkr),
+      partyId: party,
+      description: `Discount reversed — credit note ${input.creditNoteNumber}`,
+    });
+  }
   lines.push({
-    accountCode: arAccount,
+    accountCode: input.party.controlAccountCode,
     debitAmount: 0,
-    creditAmount: round2(total),
-    partyId: input.party.id,
+    creditAmount: round2(revenue - input.discountPkr + input.gstPkr),
+    partyId: party,
     description: `Reduce AR — ${input.party.name}`,
   });
 
-  const invRef = input.invoice.invoiceNumber ?? input.invoice.id.slice(0, 8);
   return {
     entryType: 'CREDIT_NOTE',
     bookType: input.bookType,
     sourceTable: 'credit_notes',
     sourceId: input.creditNoteId,
     entryDate: input.creditDate,
-    description: `Credit note ${input.creditNoteNumber} against invoice ${invRef} — ${input.party.name}`,
+    description: `Credit note ${input.creditNoteNumber} against invoice ${input.invoiceNumber} — ${input.party.name}`,
     lines,
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

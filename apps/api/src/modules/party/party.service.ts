@@ -1,3 +1,4 @@
+import { defaultControlAccountForPartyType, type PartyType } from '@coldchain/shared';
 import { PartyRepository } from './party.repository';
 import { Errors } from '../../common/errors';
 interface PartyRecord {
@@ -17,6 +18,7 @@ interface PartyRecord {
   notes: string | null;
   createdAt: Date;
   createdBy: string;
+  controlAccountCode: string | null;
   parentArhti?: { name: string } | null;
 }
 
@@ -69,6 +71,7 @@ function toResponse(party: PartyRecord, overCreditLimit?: boolean) {
     notes: party.notes ?? null,
     created_at: party.createdAt.toISOString(),
     created_by: party.createdBy,
+    control_account_code: party.controlAccountCode,
     ...(overCreditLimit !== undefined && { over_credit_limit: overCreditLimit }),
   };
 }
@@ -104,7 +107,9 @@ export class PartyService {
       const outstandingPkr = await this.repo.getOutstandingPkr(facilityId, id);
       overCreditLimit = outstandingPkr > party.creditLimitPkr.toNumber();
     }
-    return toResponse(party as PartyRecord, overCreditLimit);
+    // The type decides the control account, which freezes at the first posting (R-01).
+    const canChangeType = !(await this.repo.hasPostings(facilityId, id));
+    return { ...toResponse(party as PartyRecord, overCreditLimit), can_change_type: canChangeType };
   }
 
   async create(input: CreatePartyInput) {
@@ -127,7 +132,9 @@ export class PartyService {
       facilityId: input.facilityId,
       name: input.name,
       nameUrdu: input.nameUrdu,
-      partyType: input.partyType as 'FARMER' | 'TRADER' | 'ARHTI' | 'BUYER' | 'OTHER',
+      partyType: input.partyType as PartyType,
+      // Stamped once from the type; every posting reads it from here (docs/25 R-01).
+      controlAccountCode: defaultControlAccountForPartyType(input.partyType),
       phonePrimary: input.phonePrimary,
       phoneSecondary: input.phoneSecondary,
       address: input.address,
@@ -155,10 +162,24 @@ export class PartyService {
       }
     }
 
+    // The type decides the control account, and the account is frozen once anything has
+    // posted to it: a retyped farmer's invoice on 1110 and payment on 1120 would leave both
+    // accounts wrong for good (docs/25 R-01).
+    const retype = input.partyType !== undefined && input.partyType !== party.partyType;
+    if (retype && (await this.repo.hasPostings(facilityId, id))) {
+      throw Errors.VALIDATION_ERROR(
+        `${party.name} already has entries on account ${party.controlAccountCode}; its type can no longer change`,
+        'party_type',
+      );
+    }
+
     const updated = await this.repo.update(id, {
       ...(input.name !== undefined && { name: input.name }),
       ...(input.nameUrdu !== undefined && { nameUrdu: input.nameUrdu }),
-      ...(input.partyType !== undefined && { partyType: input.partyType as 'FARMER' | 'TRADER' | 'ARHTI' | 'BUYER' | 'OTHER' }),
+      ...(retype && {
+        partyType: input.partyType as PartyType,
+        controlAccountCode: defaultControlAccountForPartyType(input.partyType!),
+      }),
       ...(input.phonePrimary !== undefined && { phonePrimary: input.phonePrimary }),
       ...(input.phoneSecondary !== undefined && { phoneSecondary: input.phoneSecondary }),
       ...(input.address !== undefined && { address: input.address }),

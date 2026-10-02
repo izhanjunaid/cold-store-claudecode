@@ -31,7 +31,11 @@ export const CreatePaymentRequest = z.object({
   tax_withheld_pkr: z.number().nonnegative().optional(),
   is_advance: z.boolean().optional().default(false),
   cheque_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  book_type: z.enum(['PACCI', 'KATCHI']).optional().default('PACCI'),
+  /**
+   * Only for a receipt that settles nothing yet (on account, or an advance). When it
+   * settles invoices or loans their book decides, and a conflicting value is refused.
+   */
+  book_type: z.enum(['PACCI', 'KATCHI']).optional(),
   notes: z.string().optional(),
   allocations: z.array(AllocationLine).optional().default([]),
 });
@@ -40,8 +44,16 @@ export type CreatePaymentRequestType = z.infer<typeof CreatePaymentRequest>;
 // AllocatePaymentRequest â€” add allocations to an existing payment
 export const AllocatePaymentRequest = z.object({
   allocations: z.array(AllocationLine).min(1),
+  /** When an advance is applied (its JE-04 date). Defaults to today. */
+  applied_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 export type AllocatePaymentRequestType = z.infer<typeof AllocatePaymentRequest>;
+
+export const PostMissingAdvanceApplicationRequest = z.object({
+  /** Defaults to today. */
+  entry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+export type PostMissingAdvanceApplicationRequestType = z.infer<typeof PostMissingAdvanceApplicationRequest>;
 
 // DishonourPaymentRequest
 export const DishonourPaymentRequest = z.object({
@@ -61,6 +73,8 @@ export type ClearPaymentRequestType = z.infer<typeof ClearPaymentRequest>;
 // PaymentListQuery
 export const PaymentListQuery = z.object({
   party_id: z.string().uuid().optional(),
+  /** Only receipts with a live allocation to this invoice. */
+  invoice_id: z.string().uuid().optional(),
   status: PaymentStatus.optional(),
   payment_method: PaymentMethod.optional(),
   date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -104,14 +118,35 @@ export const PaymentResponse = z.object({
   notes: z.string().nullable(),
   created_at: z.string(),
   created_by_name: z.string(),
+  unallocated_pkr: z.number(),
+  can_allocate: z.boolean(),
+  can_clear: z.boolean(),
+  can_dishonour: z.boolean(),
   allocations: z.array(PaymentAllocationResponse),
 });
 export type PaymentResponseType = z.infer<typeof PaymentResponse>;
 
-// PartyLedgerEntry
+export const PartyLedgerQuery = z.object({
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  book_type: z.enum(['PACCI', 'KATCHI']).optional(),
+});
+export type PartyLedgerQueryType = z.infer<typeof PartyLedgerQuery>;
+
+// PartyLedgerEntry — one journal entry's effect on the party's receivable (the AR read model)
 export const PartyLedgerEntry = z.object({
   date: z.string(),
-  type: z.enum(['OPENING_BALANCE', 'INVOICE', 'PAYMENT', 'CREDIT_NOTE']),
+  type: z.enum([
+    'OPENING_BALANCE',
+    'INVOICE',
+    'SURCHARGE',
+    'PAYMENT',
+    'ADVANCE_APPLIED',
+    'CREDIT_NOTE',
+    'WRITE_OFF',
+    'REVERSAL',
+    'ADJUSTMENT',
+  ]),
   reference: z.string().nullable(),
   description: z.string(),
   debit_pkr: z.number(),

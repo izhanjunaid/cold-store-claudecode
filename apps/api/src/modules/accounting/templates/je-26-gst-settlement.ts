@@ -1,7 +1,5 @@
 import type { JournalEntryDraft } from './types';
-import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
-
-export const ACCOUNT_SALES_TAX_INPUT = '1260';
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 
 type Input = {
   facilityId: string;
@@ -38,11 +36,10 @@ type Input = {
  * output tax, not a refund receivable.
  */
 export function buildJE26GstSettlement(input: Input): JournalEntryDraft {
-  const round = (n: number) => Math.round(n * 100) / 100;
   const lines: JournalEntryDraft['lines'] = [
     {
       accountCode: SYSTEM_ACCOUNTS.GST_OUTPUT,
-      debitAmount: round(input.outputTaxPkr),
+      debitAmount: round2(input.outputTaxPkr),
       creditAmount: 0,
       description: `Output tax settled to ${input.taxPeriodEnd.toISOString().slice(0, 10)}`,
     },
@@ -50,9 +47,9 @@ export function buildJE26GstSettlement(input: Input): JournalEntryDraft {
 
   if (input.inputTaxAppliedPkr > 0) {
     lines.push({
-      accountCode: ACCOUNT_SALES_TAX_INPUT,
+      accountCode: SYSTEM_ACCOUNTS.INPUT_SALES_TAX,
       debitAmount: 0,
-      creditAmount: round(input.inputTaxAppliedPkr),
+      creditAmount: round2(input.inputTaxAppliedPkr),
       description: 'Input tax adjusted against output tax',
     });
   }
@@ -61,7 +58,7 @@ export function buildJE26GstSettlement(input: Input): JournalEntryDraft {
     lines.push({
       accountCode: input.bankAccountCode,
       debitAmount: 0,
-      creditAmount: round(input.netRemittedPkr),
+      creditAmount: round2(input.netRemittedPkr),
       description: 'Net sales tax remitted',
     });
   }

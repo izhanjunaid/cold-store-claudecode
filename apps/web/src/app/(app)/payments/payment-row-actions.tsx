@@ -9,11 +9,11 @@ interface PaymentRowActionsProps {
   canRecord: boolean;
   onClear: (payment: PaymentRow) => void;
   onDishonour: (payment: PaymentRow) => void;
-  onApplyAdvance: (payment: PaymentRow) => void;
+  onAllocate: (payment: PaymentRow) => void;
 }
 
 /**
- * Cheque clearing, dishonour and advance application, from the list row —
+ * Cheque clearing, dishonour and applying a receipt to invoices, from the list row —
  * none of the three needs the detail page (spec §5: a single POST or a small
  * dialog belongs on the list). `/payments/[id]` stays as the bookmarkable
  * fallback and shares the same dialogs.
@@ -23,14 +23,15 @@ export function PaymentRowActions({
   canRecord,
   onClear,
   onDishonour,
-  onApplyAdvance,
+  onAllocate,
 }: PaymentRowActionsProps) {
-  const isCheque = payment.payment_method === 'CHEQUE';
-  const canClear = canRecord && isCheque && payment.clearance_status === 'PENDING';
-  const canDishonour = canRecord && isCheque && payment.status !== 'DISHONOURED';
-  const canApplyAdvance = canRecord && payment.status === 'ADVANCE';
+  // Which actions a receipt allows is the server's call (docs/25 R-37); the page
+  // only checks the user may take them.
+  const canClear = canRecord && payment.can_clear;
+  const canDishonour = canRecord && payment.can_dishonour;
+  const canAllocate = canRecord && payment.can_allocate;
 
-  if (!canClear && !canDishonour && !canApplyAdvance) return null;
+  if (!canClear && !canDishonour && !canAllocate) return null;
 
   return (
     // Buttons are size="sm" (28px) to hold the compact row height, and this one
@@ -51,9 +52,9 @@ export function PaymentRowActions({
           Dishonour
         </Button>
       )}
-      {canApplyAdvance && (
-        <Button variant="outline" size="sm" onClick={() => onApplyAdvance(payment)}>
-          Apply advance
+      {canAllocate && (
+        <Button variant="outline" size="sm" onClick={() => onAllocate(payment)}>
+          {payment.is_advance ? 'Apply advance' : 'Apply to invoices'}
         </Button>
       )}
     </div>

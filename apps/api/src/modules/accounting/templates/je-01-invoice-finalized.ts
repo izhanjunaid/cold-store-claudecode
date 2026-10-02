@@ -1,13 +1,6 @@
+import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft, JournalEntryLineDraft } from './types';
-import { defaultControlAccountForPartyType, SYSTEM_ACCOUNTS, defaultRevenueAccountForCommodity } from '@coldchain/shared';
-
-type InvoiceLineInput = {
-  lineType: string;
-  description: string;
-  amountPkr: number;
-  serviceChargeRevenueCode?: string | null;
-  ratePlanRevenueCode?: string | null;
-};
+import { SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 
 type Input = {
   invoiceId: string;
@@ -15,125 +8,73 @@ type Input = {
   invoiceDate: Date;
   totalPkr: number;
   gstAmountPkr: number;
-  discountAmountPkr?: number;
+  discountAmountPkr: number;
   bookType: 'PACCI' | 'KATCHI';
-  billingParty: { id: string; partyType: string; name: string };
-  lot: { id: string; lotNumber: string; commodityName: string };
-  lines: InvoiceLineInput[];
+  billingParty: ReceivableParty;
+  lot: { id: string; lotNumber: string };
+  /** Every line, with the revenue account it posts to (revenueAccountForLine). All positive. */
+  lines: { revenueAccountCode: string; amountPkr: number }[];
 };
 
 /**
  * JE-01: Invoice Finalized.
  *
- *   DR  AR (1110/1120/1130/1150)        total_pkr
- *   DR  4910      Discounts Allowed      discount_amount_pkr (if any) — contra-revenue,
- *                                        revenue stays gross
- *     CR  4010-4050 Storage Revenue       storage portion (by commodity)
- *     CR  4110-4150 Service Revenue       services (by service charge revenue_account_code)
- *     CR  2020      GST Payable           gst_amount_pkr (if any)
- *     DR  2010      Advance Receipts      advance_applied (if any) — moves liability to revenue offset
+ *   DR  party control account (AR)   total_pkr
+ *   DR  4910 Discounts Allowed       discount_amount_pkr (if any) — contra-revenue, so revenue stays gross
+ *     CR  revenue, per line's account  sub_total
+ *     CR  2020 GST Payable             gst_amount_pkr (if any)
  *
- * Note on ADVANCE_APPLIED line items: The line credits AR (reduces total receivable),
- * which means we need to pull DR amount out of AR. In practice, advance_applied lines
- * appear as negative-amount "ADVANCE_APPLIED" lines in invoice_line_items. We re-route
- * them to: DR 2010 Advance Receipts, CR 1110-1150 AR (reducing the AR debit).
- * For simplicity we still post one big AR debit equal to (total - advance_applied)
- * and emit a separate DR 2010 / CR (offset) line that nets to zero on AR.
- *
- * The cleanest representation is:
- *   - AR debit = total_pkr (gross)
- *   - For each ADVANCE_APPLIED line: DR 2010, CR <AR account> (reducing net AR)
- * That keeps the entry balanced and the GL transparent.
+ * Reductions go through the discount, never a negative line: a negative line
+ * used to be skipped here while still lowering the AR debit, so the entry could
+ * not balance (docs/25 R-07). Advances are applied by JE-04 against the invoice,
+ * not netted into it (R-25).
  */
 export function buildJE01InvoiceFinalized(input: Input): JournalEntryDraft {
-  const arAccount = defaultControlAccountForPartyType(input.billingParty.partyType);
-  const lines: JournalEntryLineDraft[] = [];
-
-  // Sum revenue by account
+  const party = input.billingParty.id;
+  const lot = input.lot.id;
   const revenueByAccount = new Map<string, number>();
-  let advanceAppliedTotal = 0;
-
   for (const line of input.lines) {
-    if (line.lineType === 'ADVANCE_APPLIED') {
-      advanceAppliedTotal += Math.abs(Number(line.amountPkr));
-      continue;
-    }
-    let revenueCode: string;
-    if (line.lineType === 'STORAGE') {
-      revenueCode = line.ratePlanRevenueCode ?? defaultRevenueAccountForCommodity(input.lot.commodityName);
-    } else if (line.lineType === 'SERVICE') {
-      revenueCode = line.serviceChargeRevenueCode ?? '4150';
-    } else {
-      // ADJUSTMENT — book to misc service revenue 4150 (positive) or contra (negative)
-      revenueCode = '4150';
-    }
-    const prev = revenueByAccount.get(revenueCode) ?? 0;
-    revenueByAccount.set(revenueCode, prev + Number(line.amountPkr));
+    if (!(line.amountPkr > 0)) throw new Error('An invoice line must be positive; reductions are a discount');
+    revenueByAccount.set(line.revenueAccountCode, (revenueByAccount.get(line.revenueAccountCode) ?? 0) + line.amountPkr);
   }
 
-  // The AR debit equals total_pkr (gross of any advance applied).
-  // The advance application consumes the liability.
-  // total_pkr in our schema is already net of advance_applied (subTotal - advance + GST).
-  // Reconcile: net AR debit = total_pkr. Gross revenue = sum revenueByAccount + gst.
-  //   net_ar = sum_rev + gst - advance_applied_total
-  // ⇒ AR debit = net_ar = total_pkr
-  //   advance_applied increases liability discharge (DR 2010).
-  // Balance check:
-  //   DR AR (total_pkr) + DR 2010 (advance) = CR revenue (sum) + CR GST (gst)
-  //   total_pkr + advance = sum_rev + gst
-  //   (sum_rev + gst - advance) + advance = sum_rev + gst  ✓
-
-  lines.push({
-    accountCode: arAccount,
-    debitAmount: round2(input.totalPkr),
-    creditAmount: 0,
-    partyId: input.billingParty.id,
-    lotId: input.lot.id,
-    description: `Invoice ${input.invoiceNumber} — ${input.billingParty.name}`,
-  });
-
-  if (advanceAppliedTotal > 0) {
-    lines.push({
-      accountCode: '2010',
-      debitAmount: round2(advanceAppliedTotal),
+  const lines: JournalEntryLineDraft[] = [
+    {
+      accountCode: input.billingParty.controlAccountCode,
+      debitAmount: round2(input.totalPkr),
       creditAmount: 0,
-      partyId: input.billingParty.id,
-      lotId: input.lot.id,
-      description: `Advance applied to invoice ${input.invoiceNumber}`,
-    });
-  }
-
-  const discount = input.discountAmountPkr ?? 0;
-  if (discount > 0) {
+      partyId: party,
+      lotId: lot,
+      description: `Invoice ${input.invoiceNumber} — ${input.billingParty.name}`,
+    },
+  ];
+  if (input.discountAmountPkr > 0) {
     lines.push({
       accountCode: SYSTEM_ACCOUNTS.DISCOUNTS_ALLOWED,
-      debitAmount: round2(discount),
+      debitAmount: round2(input.discountAmountPkr),
       creditAmount: 0,
-      partyId: input.billingParty.id,
-      lotId: input.lot.id,
+      partyId: party,
+      lotId: lot,
       description: `Discount allowed — invoice ${input.invoiceNumber}`,
     });
   }
-
-  for (const [code, amount] of revenueByAccount.entries()) {
-    if (amount <= 0) continue;
+  for (const [code, amount] of revenueByAccount) {
     lines.push({
       accountCode: code,
       debitAmount: 0,
       creditAmount: round2(amount),
-      partyId: input.billingParty.id,
-      lotId: input.lot.id,
-      description: `Revenue (${code}) — invoice ${input.invoiceNumber}`,
+      partyId: party,
+      lotId: lot,
+      description: `Revenue — invoice ${input.invoiceNumber}`,
     });
   }
-
   if (input.gstAmountPkr > 0) {
     lines.push({
       accountCode: SYSTEM_ACCOUNTS.GST_OUTPUT,
       debitAmount: 0,
       creditAmount: round2(input.gstAmountPkr),
-      partyId: input.billingParty.id,
-      lotId: input.lot.id,
+      partyId: party,
+      lotId: lot,
       description: `GST output tax — invoice ${input.invoiceNumber}`,
     });
   }
@@ -147,8 +88,4 @@ export function buildJE01InvoiceFinalized(input: Input): JournalEntryDraft {
     description: `Invoice ${input.invoiceNumber} finalized — ${input.billingParty.name} (Lot ${input.lot.lotNumber})`,
     lines,
   };
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

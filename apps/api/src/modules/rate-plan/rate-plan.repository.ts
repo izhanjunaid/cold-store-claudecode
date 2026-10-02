@@ -36,6 +36,10 @@ export class RatePlanRepository {
     });
   }
 
+  async isInUse(facilityId: string, id: string): Promise<boolean> {
+    return (await this.prisma.lot.findFirst({ where: { facilityId, ratePlanId: id }, select: { id: true } })) !== null;
+  }
+
   deactivate(id: string): Promise<unknown> {
     return this.prisma.ratePlan.update({
       where: { id },

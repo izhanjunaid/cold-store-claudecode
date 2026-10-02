@@ -96,6 +96,20 @@ export class RatePlanService {
     const plan = await this.repo.findById(facilityId, id);
     if (!plan) throw Errors.VALIDATION_ERROR('Rate plan not found');
 
+    // A plan's rates price storage already rendered on every lot that uses it, so
+    // once any lot does they are frozen — a new rate is a new plan (docs/25 R-29).
+    const changesRates =
+      input.rateAmountPkr !== undefined ||
+      input.seasonStartDate !== undefined ||
+      input.seasonEndDate !== undefined ||
+      input.minBillingDays !== undefined;
+    if (changesRates && (await this.repo.isInUse(facilityId, id))) {
+      throw Errors.VALIDATION_ERROR(
+        'Lots are stored on this plan, so its rates can no longer change; create a new plan for the new rates',
+        'rate_amount_pkr',
+      );
+    }
+
     const updated = await this.repo.update(id, {
       ...(input.name !== undefined && { name: input.name }),
       ...(input.commodityId !== undefined && { commodityId: input.commodityId }),

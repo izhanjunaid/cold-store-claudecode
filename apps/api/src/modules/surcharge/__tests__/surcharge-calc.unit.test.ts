@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeSurcharge } from '../surcharge-calc';
-import { buildJE21LatePaymentSurcharge } from '../../accounting/templates/je-21-late-payment-surcharge';
+import { buildJE21SurchargeInvoice } from '../../accounting/templates/je-21-late-payment-surcharge';
 
 const rule = { enabled: true, pct_per_month: 2, grace_days: 30 };
 
@@ -64,20 +64,21 @@ describe('computeSurcharge', () => {
   });
 });
 
-describe('JE-21 late payment surcharge', () => {
-  it('debits party AR, credits 4210, balanced, ACCRUAL entry type keyed to the invoice', () => {
-    const draft = buildJE21LatePaymentSurcharge({
-      invoiceId: 'inv1',
-      invoiceNumber: 'INV-202603-0001',
-      surchargeDate: new Date('2026-06-12'),
+describe('JE-21 late payment surcharge invoice', () => {
+  it('debits party AR, credits 4210, balanced, sourced to the surcharge invoice itself', () => {
+    const draft = buildJE21SurchargeInvoice({
+      invoiceId: 'sur1',
+      invoiceNumber: 'INV-202606-0007',
+      invoiceDate: new Date('2026-06-12'),
       amountPkr: 200,
-      monthIndex: 1,
+      chargedOnInvoiceNumber: 'INV-202603-0001',
       bookType: 'PACCI',
-      billingParty: { id: 'p1', partyType: 'TRADER', name: 'Test Trader' },
+      billingParty: { id: 'p1', controlAccountCode: '1120', name: 'Test Trader' },
+      lotId: 'lot1',
     });
-    expect(draft.entryType).toBe('ACCRUAL');
-    expect(draft.sourceTable).toBe('invoice_surcharge');
-    expect(draft.sourceId).toBe('inv1');
+    expect(draft.entryType).toBe('LATE_PAYMENT_SURCHARGE');
+    expect(draft.sourceTable).toBe('invoices');
+    expect(draft.sourceId).toBe('sur1');
     const ar = draft.lines.find((l) => l.debitAmount > 0);
     const rev = draft.lines.find((l) => l.creditAmount > 0);
     expect(ar?.accountCode).toBe('1120'); // trader AR

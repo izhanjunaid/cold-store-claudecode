@@ -30,7 +30,11 @@ export default function ReceivablesAgingPage() {
   const [partyId, setPartyId] = useState('');
 
   const { data: parties = [] } = useParties();
-  const partyOptions = useMemo(() => parties.map((p) => ({ value: p.id, label: p.name })), [parties]);
+  // A supplier has no receivable: it is never billed, paid by or lent to.
+  const partyOptions = useMemo(
+    () => parties.filter((p) => p.party_type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
+    [parties],
+  );
 
   const { data, isLoading } = useQuery<ReceivablesAgingResponseType>({
     queryKey: ['receivables-aging', user?.facility_id, asOfDate, partyId],
@@ -90,7 +94,7 @@ export default function ReceivablesAgingPage() {
     <div>
       <PageHeader
         title="Receivables Aging"
-        description="Outstanding invoice balances bucketed by age"
+        description="What each party owes, as of a date — open invoices by age, less receipts not yet applied"
         actions={
           <div className="flex items-center gap-2">
             <Label htmlFor="as-of" className="text-sm text-muted-foreground">As of</Label>
@@ -126,9 +130,9 @@ export default function ReceivablesAgingPage() {
 
       {data && !data.reconciled && (
         <div className="mb-4 rounded-md border border-destructive/50 px-3 py-2 text-sm text-destructive">
-          Variance of {formatMoney(data.variance_pkr)} vs the GL AR control (1110/1120/1130/1150) —
-          gross {formatMoney(data.buckets.total_pkr)}, unapplied credits {formatMoney(data.total_unapplied_credit_pkr)},
-          GL control {formatMoney(data.gl_ar_control_total_pkr)}. Investigate before relying on these figures.
+          Variance of {formatMoney(data.variance_pkr)} against the receivable control accounts — the ledger
+          holds receivable lines that name no party (GL control {formatMoney(data.gl_ar_control_total_pkr)}).
+          Move them onto the right party before relying on these figures.
         </div>
       )}
 

@@ -1,11 +1,10 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
-import { buildJE26GstSettlement, ACCOUNT_SALES_TAX_INPUT } from './templates/je-26-gst-settlement';
+import { buildJE26GstSettlement } from './templates/je-26-gst-settlement';
 import type { JournalEntryService } from './journal-entry.service';
-import { SYSTEM_ACCOUNTS } from '@coldchain/shared';
-
-const SETTLEMENT_ACCOUNTS = ['1010', '1020', '1030'];
+import { SYSTEM_ACCOUNTS, DEFAULT_BANK_ACCOUNT_CODE, round2 } from '@coldchain/shared';
+import { assertCashEquivalent } from '../payment/cash-account';
 
 /**
  * Sales tax is a statutory liability, which only the official book carries.
@@ -94,28 +93,27 @@ export class GstSettlementService {
     const [outputInPeriod, inputInPeriod, outputToDate, inputToDate, outputEver, inputEver] =
       await Promise.all([
         this.sumSide(db, facilityId, SYSTEM_ACCOUNTS.GST_OUTPUT, inPeriod),
-        this.sumSide(db, facilityId, ACCOUNT_SALES_TAX_INPUT, inPeriod),
+        this.sumSide(db, facilityId, SYSTEM_ACCOUNTS.INPUT_SALES_TAX, inPeriod),
         this.sumSide(db, facilityId, SYSTEM_ACCOUNTS.GST_OUTPUT, toPeriodEnd),
-        this.sumSide(db, facilityId, ACCOUNT_SALES_TAX_INPUT, toPeriodEnd),
+        this.sumSide(db, facilityId, SYSTEM_ACCOUNTS.INPUT_SALES_TAX, toPeriodEnd),
         this.sumSide(db, facilityId, SYSTEM_ACCOUNTS.GST_OUTPUT),
-        this.sumSide(db, facilityId, ACCOUNT_SALES_TAX_INPUT),
+        this.sumSide(db, facilityId, SYSTEM_ACCOUNTS.INPUT_SALES_TAX),
       ]);
 
-    const round = (n: number) => Math.round(n * 100) / 100;
     // 2020 accrues on the credit side and is settled on the debit side; 1260
     // is the mirror image.
-    const outstanding = round(outputToDate.credit - outputEver.debit);
-    const availableInput = round(inputToDate.debit - inputEver.credit);
+    const outstanding = round2(outputToDate.credit - outputEver.debit);
+    const availableInput = round2(inputToDate.debit - inputEver.credit);
     const applied = Math.max(Math.min(availableInput, outstanding), 0);
 
     return {
       periodEnd,
-      periodOutput: round(outputInPeriod.credit - outputInPeriod.debit),
-      periodInput: round(inputInPeriod.debit - inputInPeriod.credit),
+      periodOutput: round2(outputInPeriod.credit - outputInPeriod.debit),
+      periodInput: round2(inputInPeriod.debit - inputInPeriod.credit),
       outstanding,
       availableInput,
       applied,
-      netPayable: round(outstanding - applied),
+      netPayable: round2(outstanding - applied),
     };
   }
 
@@ -153,13 +151,8 @@ export class GstSettlementService {
       bank_account_code?: string;
     },
   ) {
-    const bankAccountCode = params.bank_account_code ?? '1020';
-    if (!SETTLEMENT_ACCOUNTS.includes(bankAccountCode)) {
-      throw Errors.VALIDATION_ERROR(
-        `Sales tax must be remitted from a cash or bank account (${SETTLEMENT_ACCOUNTS.join(', ')}).`,
-        'bank_account_code',
-      );
-    }
+    const bankAccountCode = params.bank_account_code ?? DEFAULT_BANK_ACCOUNT_CODE;
+    await assertCashEquivalent(this.prisma, facilityId, bankAccountCode, 'bank_account_code');
 
     const paymentDate = new Date(`${params.payment_date}T00:00:00.000Z`);
     const periodEnd = periodEndDate(params.period_year, params.period_month);

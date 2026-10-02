@@ -2,15 +2,14 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   RevenueAccrualPeriodQuery,
-  RunRevenueAccrualRequest,
   GstSettlementQuery,
   PostGstSettlementRequest,
-  CreateCreditNoteRequest,
+  IssueCreditNoteRequest,
+  CancelCreditNoteRequest,
   CreditNoteListQuery,
   BadDebtWriteOffRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { assertKatchiWriteAllowed } from './book-gate';
 import { JournalEntryService } from './journal-entry.service';
 import { PeriodLockService } from './period-lock.service';
 import { CreditNoteService } from './credit-note.service';
@@ -49,22 +48,8 @@ export async function receivablesAccountingRoutes(app: FastifyInstance) {
     },
   });
 
-  app.route({
-    method: 'POST',
-    url: '/v1/accounting/revenue-accrual',
-    preHandler: [app.authenticate, app.requirePermission('accounting.post_journal')],
-    schema: { body: RunRevenueAccrualRequest },
-    handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof RunRevenueAccrualRequest>;
-      const data = await revenueAccrual.run(
-        request.user!.facilityId,
-        request.user!.userId,
-        body.period_year,
-        body.period_month,
-      );
-      return sendSuccess(reply.status(201), data);
-    },
-  });
+  // The accrual itself is posted by the month lock (PeriodLockService.lock): a month
+  // cannot close without it, and it cannot be posted for a month still open.
 
 
   // ==========================================================
@@ -104,12 +89,25 @@ export async function receivablesAccountingRoutes(app: FastifyInstance) {
     method: 'POST',
     url: '/v1/credit-notes',
     preHandler: [app.authenticate, app.requirePermission('invoices.manage')],
-    schema: { body: CreateCreditNoteRequest },
+    schema: { body: IssueCreditNoteRequest },
     handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof CreateCreditNoteRequest>;
-      assertKatchiWriteAllowed(request.user!.role, body.book_type);
-      const data = await creditNote.create(request.user!.facilityId, request.user!.userId, body);
+      const body = request.body as z.infer<typeof IssueCreditNoteRequest>;
+      // The book is the invoice's; the service gates it.
+      const data = await creditNote.create(request.user!.facilityId, request.user!.userId, request.user!.role, body);
       return sendSuccess(reply.status(201), data);
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/credit-notes/:id/cancel',
+    preHandler: [app.authenticate, app.requirePermission('invoices.manage')],
+    schema: { params: IdParam, body: CancelCreditNoteRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof CancelCreditNoteRequest>;
+      const data = await creditNote.cancel(request.user!.facilityId, request.user!.userId, request.user!.role, id, body);
+      return sendSuccess(reply, data);
     },
   });
 

@@ -1,9 +1,11 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { InvoiceRepository, type InvoiceWithRelations } from './invoice.repository';
-import { buildInvoiceFromOutbound } from './invoice.builder';
 import { generateInvoiceNumber } from './invoice-number';
 import { renderInvoice } from '../pdf/pdf.service';
+import { lockRow } from '../../common/row-lock';
+import { round2, toIsoDate } from '@coldchain/shared';
+import { settlementOf, SETTLEMENT_INCLUDE } from './invoice-settlement';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import type {
   InvoiceListQueryType,
@@ -14,8 +16,11 @@ import type {
 } from '@coldchain/shared';
 import type { JournalEntryService } from '../accounting/journal-entry.service';
 import { buildJE01InvoiceFinalized } from '../accounting/templates/je-01-invoice-finalized';
+import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
+import { revenueAccountForLine, REVENUE_LINE_INCLUDE } from './revenue-account';
 
 function formatInvoice(inv: InvoiceWithRelations) {
+  const settlement = settlementOf(inv);
   return {
     id: inv.id,
     facility_id: inv.facilityId,
@@ -35,13 +40,20 @@ function formatInvoice(inv: InvoiceWithRelations) {
     gst_rate: Number(inv.gstRate),
     gst_amount_pkr: Number(inv.gstAmountPkr),
     total_pkr: Number(inv.totalPkr),
-    amount_paid_pkr: Number(inv.amountPaidPkr),
-    balance_due_pkr: Number(inv.totalPkr) - Number(inv.amountPaidPkr),
+    amount_paid_pkr: settlement.paidPkr,
+    amount_credited_pkr: settlement.creditedPkr,
+    amount_written_off_pkr: settlement.writtenOffPkr,
+    balance_due_pkr: round2(Number(inv.totalPkr) - settlement.settledPkr),
     status: inv.status,
     finalized_at: inv.finalizedAt?.toISOString() ?? null,
     finalized_by: inv.finalizedBy ?? null,
     book_type: inv.bookType,
     notes: inv.notes,
+    voided_at: inv.voidedAt?.toISOString() ?? null,
+    void_reason: inv.voidReason,
+    surcharge_of_invoice_id: inv.surchargeOfInvoiceId,
+    /** The server's own void rule: finalized, nothing settled, no standing surcharge on it. */
+    can_void: inv.status === 'FINALIZED' && settlement.settledPkr <= 0.005 && inv.surcharges.length === 0,
     created_at: inv.createdAt.toISOString(),
     line_items: inv.lineItems.map((l) => ({
       id: l.id,
@@ -66,6 +78,7 @@ async function refreshInvoice(tx: Prisma.TransactionClient, id: string) {
       lot: { select: { lotNumber: true } },
       billingParty: { select: { name: true } },
       lineItems: { orderBy: { sortOrder: 'asc' } },
+      ...SETTLEMENT_INCLUDE,
     },
   });
 }
@@ -74,12 +87,8 @@ export class InvoiceService {
   constructor(
     private prisma: PrismaClient,
     private repo: InvoiceRepository,
-    private journalEntry?: JournalEntryService,
+    private journalEntry: JournalEntryService,
   ) {}
-
-  async buildFromOutbound(tx: Prisma.TransactionClient, outboundEventId: string) {
-    return buildInvoiceFromOutbound(tx, outboundEventId);
-  }
 
   async list(facilityId: string, query: InvoiceListQueryType) {
     const { data, total } = await this.repo.list(
@@ -110,15 +119,27 @@ export class InvoiceService {
     if (!inv) throw Errors.INVOICE_NOT_FOUND();
     if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
 
+    // A service is the catalog's: its name, its price, its revenue account (R-28).
+    // Anything else is a charge — a reduction is the invoice's discount, which posts to
+    // 4910 and which GST and credit notes pro-rate (R-07).
+    let line: { description: string; quantity: number; unitPricePkr: number; serviceChargeId: string | null };
+    if (body.line_type === 'SERVICE') {
+      const charge = await this.prisma.serviceCharge.findFirst({
+        where: { id: body.service_charge_id, facilityId, isActive: true },
+      });
+      if (!charge) throw Errors.VALIDATION_ERROR('No active service charge with that id', 'service_charge_id');
+      const quantity = charge.unitType === 'FLAT' ? 1 : body.quantity;
+      line = { description: charge.name, quantity, unitPricePkr: Number(charge.unitPricePkr), serviceChargeId: charge.id };
+    } else {
+      line = { description: body.description, quantity: body.quantity, unitPricePkr: body.unit_price_pkr, serviceChargeId: null };
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const maxSort = inv.lineItems.length > 0 ? Math.max(...inv.lineItems.map((l) => l.sortOrder)) : 0;
       await this.repo.addLine(tx, invoiceId, {
         lineType: body.line_type,
-        description: body.description,
-        quantity: body.quantity,
-        unitPricePkr: body.unit_price_pkr,
-        amountPkr: body.quantity * body.unit_price_pkr,
-        serviceChargeId: body.service_charge_id ?? null,
+        ...line,
+        amountPkr: round2(line.quantity * line.unitPricePkr),
         sortOrder: maxSort + 1,
       });
       await this.repo.recomputeTotals(tx, invoiceId);
@@ -138,7 +159,20 @@ export class InvoiceService {
 
     return this.prisma.$transaction(async (tx) => {
       const data: Prisma.InvoiceUpdateInput = {};
+      if (body.gst_rate !== undefined && body.gst_rate > 0 && inv.bookType === 'KATCHI') {
+        throw Errors.VALIDATION_ERROR('An invoice on the KATCHI book carries no sales tax', 'gst_rate');
+      }
       if (body.gst_rate !== undefined) data.gstRate = body.gst_rate;
+      if (body.invoice_date !== undefined) {
+        const invoiceDate = new Date(`${body.invoice_date}T00:00:00.000Z`);
+        if (invoiceDate < inv.periodEnd) {
+          throw Errors.VALIDATION_ERROR(
+            `An invoice cannot be dated before the storage it bills ended (${toIsoDate(inv.periodEnd)})`,
+            'invoice_date',
+          );
+        }
+        data.invoiceDate = invoiceDate;
+      }
       if (body.discount !== undefined) {
         if (body.discount === null) {
           data.discountType = null;
@@ -162,7 +196,7 @@ export class InvoiceService {
 
     const line = inv.lineItems.find((l) => l.id === lineId);
     if (!line) throw Errors.INVOICE_LINE_NOT_FOUND();
-    if (line.lineType === 'STORAGE' || line.lineType === 'ADVANCE_APPLIED') {
+    if (line.lineType === 'STORAGE') {
       throw Errors.INVOICE_LINE_IMMUTABLE();
     }
 
@@ -180,83 +214,52 @@ export class InvoiceService {
     userId: string,
     body: FinalizeInvoiceRequestType,
   ) {
-    const inv = await this.repo.findById(facilityId, invoiceId);
-    if (!inv) throw Errors.INVOICE_NOT_FOUND();
-    if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
-
     return this.prisma.$transaction(async (tx) => {
+      if (!(await lockRow(tx, 'invoices', invoiceId, facilityId))) throw Errors.INVOICE_NOT_FOUND();
+      const inv = await tx.invoice.findUniqueOrThrow({
+        where: { id: invoiceId },
+        include: {
+          billingParty: { select: RECEIVABLE_PARTY_SELECT },
+          lot: { select: { id: true, lotNumber: true, commodity: { select: { revenueAccountCode: true } } } },
+          lineItems: { orderBy: { sortOrder: 'asc' }, include: REVENUE_LINE_INCLUDE },
+        },
+      });
+      if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
+      // A draft saved by an older version may still carry a negative adjustment line;
+      // a reduction is a discount now (docs/25 R-07).
+      if (inv.lineItems.some((l) => Number(l.amountPkr) <= 0)) {
+        throw Errors.VALIDATION_ERROR('Remove the negative adjustment and give the reduction as a discount', 'line_items');
+      }
       if (body.notes) {
         await tx.invoice.update({ where: { id: invoiceId }, data: { notes: body.notes } });
       }
       // Number from the invoice's own date, not the wall clock at finalize: a backdated
       // invoice belongs to its own month's sequence, matching the period it posts to.
-      // The advisory lock inside the generator is keyed on the same date, so the lock
-      // and the number always agree on which month is being extended.
       const invoiceNumber = await generateInvoiceNumber(tx, facilityId, inv.invoiceDate);
       const updated = await this.repo.finalize(tx, invoiceId, invoiceNumber, userId);
 
-      // Phase 8: post JE-01 atomically with finalize so the GL is always reconciled.
-      if (this.journalEntry) {
-        const context = await tx.invoice.findFirstOrThrow({
-          where: { id: invoiceId },
-          include: {
-            billingParty: { select: { id: true, name: true, partyType: true } },
-            lot: {
-              select: {
-                id: true,
-                lotNumber: true,
-                commodity: { select: { name: true } },
-              },
-            },
-            lineItems: {
-              orderBy: { sortOrder: 'asc' },
-              include: {
-                serviceCharge: { select: { revenueAccountCode: true } },
-                ratePlan: { select: { revenueAccountCode: true } },
-              },
-            },
-          },
-        });
-
-        const draft = buildJE01InvoiceFinalized({
-          invoiceId: context.id,
-          invoiceNumber: context.invoiceNumber ?? invoiceNumber,
-          invoiceDate: context.invoiceDate,
-          totalPkr: Number(context.totalPkr),
-          gstAmountPkr: Number(context.gstAmountPkr),
-          discountAmountPkr: Number(context.discountAmountPkr),
-          bookType: context.bookType as 'PACCI' | 'KATCHI',
-          billingParty: {
-            id: context.billingParty.id,
-            partyType: context.billingParty.partyType,
-            name: context.billingParty.name,
-          },
-          lot: {
-            id: context.lot.id,
-            lotNumber: context.lot.lotNumber,
-            commodityName: context.lot.commodity.name,
-          },
-          lines: context.lineItems.map((l) => ({
-            lineType: l.lineType,
-            description: l.description,
+      // JE-01 posts atomically with finalize, so the GL always agrees with the invoice.
+      const posted = await this.journalEntry.postInTransaction(
+        tx,
+        facilityId,
+        userId,
+        buildJE01InvoiceFinalized({
+          invoiceId: inv.id,
+          invoiceNumber,
+          invoiceDate: inv.invoiceDate,
+          totalPkr: Number(inv.totalPkr),
+          gstAmountPkr: Number(inv.gstAmountPkr),
+          discountAmountPkr: Number(inv.discountAmountPkr),
+          bookType: inv.bookType,
+          billingParty: receivableParty(inv.billingParty),
+          lot: { id: inv.lot.id, lotNumber: inv.lot.lotNumber },
+          lines: inv.lineItems.map((l) => ({
+            revenueAccountCode: revenueAccountForLine(l, inv.lot.commodity),
             amountPkr: Number(l.amountPkr),
-            serviceChargeRevenueCode: l.serviceCharge?.revenueAccountCode ?? null,
-            ratePlanRevenueCode: l.ratePlan?.revenueAccountCode ?? null,
           })),
-        });
-
-        const posted = await this.journalEntry.postInTransaction(
-          tx,
-          facilityId,
-          userId,
-          draft,
-          { postingStatus: 'POSTED' },
-        );
-        await tx.invoice.update({
-          where: { id: invoiceId },
-          data: { journalEntryId: posted.id },
-        });
-      }
+        }),
+      );
+      await tx.invoice.update({ where: { id: invoiceId }, data: { journalEntryId: posted.id } });
 
       return formatInvoice(updated);
     });
@@ -271,11 +274,7 @@ export class InvoiceService {
   async void(facilityId: string, invoiceId: string, userId: string, body: VoidInvoiceRequestType) {
     await this.prisma.$transaction(async (tx) => {
       // Row-lock the invoice so a concurrent payment can't slip in.
-      await tx.$queryRawUnsafe(
-        `SELECT id FROM invoices WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-        invoiceId,
-        facilityId,
-      );
+      if (!(await lockRow(tx, 'invoices', invoiceId, facilityId))) throw Errors.INVOICE_NOT_FOUND();
       const inv = await tx.invoice.findFirst({ where: { id: invoiceId, facilityId } });
       if (!inv) throw Errors.INVOICE_NOT_FOUND();
       if (inv.status !== 'FINALIZED') {
@@ -288,7 +287,7 @@ export class InvoiceService {
         throw Errors.INVOICE_NOT_VOIDABLE('Invoice has no journal entry to reverse');
       }
 
-      const creditNotes = await tx.creditNote.count({ where: { facilityId, originalInvoiceId: invoiceId } });
+      const creditNotes = await tx.creditNote.count({ where: { facilityId, originalInvoiceId: invoiceId, voidedAt: null } });
       if (creditNotes > 0) {
         throw Errors.INVOICE_NOT_VOIDABLE('Invoice has credit notes; use a credit note flow instead');
       }
@@ -296,26 +295,24 @@ export class InvoiceService {
       if (liveAllocations > 0) {
         throw Errors.INVOICE_NOT_VOIDABLE('Invoice has active payment allocations');
       }
-      const surcharges = await tx.journalEntry.count({
-        where: { facilityId, sourceTable: 'invoice_surcharge', sourceId: invoiceId, postingStatus: 'POSTED' },
+      // A surcharge invoice stands on this one; void it first. (A legacy JE-21 is a
+      // line of its own on the party's account and does not block — docs/25 R-08.)
+      const surcharges = await tx.invoice.count({
+        where: { facilityId, surchargeOfInvoiceId: invoiceId, status: { not: 'VOID' } },
       });
       if (surcharges > 0) {
-        throw Errors.INVOICE_NOT_VOIDABLE('Invoice has late-payment surcharges; reverse those first');
+        throw Errors.INVOICE_NOT_VOIDABLE('Invoice has late-payment surcharge invoices; void those first');
       }
 
       const voidDate = body.void_date ? new Date(body.void_date) : new Date();
-      await this.journalEntry!.reverseInTransaction(tx, facilityId, userId, inv.journalEntryId, {
+      await this.journalEntry.reverseInTransaction(tx, facilityId, userId, inv.journalEntryId, {
         reason: `void of invoice ${inv.invoiceNumber ?? invoiceId} — ${body.reason}`,
         date: voidDate,
       });
 
-      const voidTag = `[VOID ${voidDate.toISOString().slice(0, 10)}]: ${body.reason}`;
       await tx.invoice.update({
         where: { id: invoiceId },
-        data: {
-          status: 'VOID',
-          notes: inv.notes ? `${inv.notes}\n${voidTag}` : voidTag,
-        },
+        data: { status: 'VOID', voidedAt: new Date(), voidedBy: userId, voidReason: body.reason },
       });
     });
 

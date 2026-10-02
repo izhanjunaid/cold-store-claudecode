@@ -20,6 +20,7 @@ interface PartyData {
   credit_limit_pkr: number | null;
   credit_terms_days: number;
   notes: string | null;
+  can_change_type?: boolean;
 }
 
 export default function PartyEditPage() {
@@ -44,6 +45,7 @@ export default function PartyEditPage() {
       <PartyForm
         mode="edit"
         partyId={party.id}
+        canChangeType={party.can_change_type ?? true}
         initialData={{
           name: party.name,
           name_urdu: party.name_urdu || '',

@@ -1,3 +1,4 @@
+import { round2 } from '@coldchain/shared';
 export interface SurchargeRule {
   enabled: boolean;
   pct_per_month: number;
@@ -14,9 +15,6 @@ export interface SurchargeComputation {
 
 const DAY_MS = 86_400_000;
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
 
 /**
  * Deterministic surcharge computation:

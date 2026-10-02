@@ -47,7 +47,12 @@ const advancePayment = {
   book_type: 'PACCI',
   notes: null,
   created_by_name: 'Acc',
-  allocations: [],
+  is_advance: true,
+  unallocated_pkr: 50000,
+  can_allocate: true,
+  can_clear: false,
+  can_dishonour: false,
+  allocations: [] as unknown[],
 };
 
 const invoices = [
@@ -58,8 +63,10 @@ const invoices = [
 const allocatedPayment = {
   ...advancePayment,
   status: 'ALLOCATED',
+  unallocated_pkr: 0,
+  can_allocate: false,
   allocations: [
-    { id: 'a1', invoice_id: 'inv-1', invoice_number: 'INV-001', allocated_amount_pkr: 20000 },
+    { id: 'a1', target: 'INVOICE', invoice_id: 'inv-1', invoice_number: 'INV-001', loan_id: null, loan_number: null, allocated_amount_pkr: 20000 },
   ],
 };
 
@@ -71,7 +78,7 @@ function routeApiClient(payment: typeof advancePayment, after = allocatedPayment
   });
 }
 
-describe('PaymentDetailPage — Apply Advance', () => {
+describe('PaymentDetailPage — applying a receipt', () => {
   beforeEach(() => {
     push.mockReset();
     apiClient.mockReset();
@@ -79,8 +86,8 @@ describe('PaymentDetailPage — Apply Advance', () => {
     apiClientList.mockResolvedValue({ data: invoices, meta: { total: 2, page: 1, per_page: 100 } });
   });
 
-  it('does not show Apply Advance when status is not ADVANCE', async () => {
-    routeApiClient({ ...advancePayment, status: 'ALLOCATED' });
+  it('does not show Apply Advance when the server says nothing is left to apply', async () => {
+    routeApiClient({ ...advancePayment, status: 'ALLOCATED', can_allocate: false });
     render(<PaymentDetailPage />);
     await waitFor(() => expect(screen.getByText('Payment Detail')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /apply advance/i })).not.toBeInTheDocument();
@@ -115,6 +122,28 @@ describe('PaymentDetailPage — Apply Advance', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /apply advance/i })).not.toBeInTheDocument(),
     );
+  });
+
+  // docs/25 R-13: a receipt on account is applied through the same form.
+  it('offers to apply a receipt held on account', async () => {
+    routeApiClient({ ...advancePayment, status: 'RECORDED', is_advance: false });
+    render(<PaymentDetailPage />);
+    expect(await screen.findByRole('button', { name: /apply receipt/i })).toBeInTheDocument();
+  });
+
+  // docs/25 R-36: a peshgi allocation has no invoice; the page used to crash on it.
+  it('lists a peshgi allocation without crashing', async () => {
+    routeApiClient({
+      ...advancePayment,
+      status: 'ALLOCATED',
+      is_advance: false,
+      can_allocate: false,
+      allocations: [
+        { id: 'a2', target: 'LOAN', invoice_id: null, invoice_number: null, loan_id: 'loan-1', loan_number: 'L-260801-001', allocated_amount_pkr: 5000 },
+      ],
+    });
+    render(<PaymentDetailPage />);
+    expect(await screen.findByText('Peshgi L-260801-001')).toBeInTheDocument();
   });
 
   it('does not fire a second allocate call on rapid double-click', async () => {

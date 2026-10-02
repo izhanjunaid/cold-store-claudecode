@@ -13,7 +13,9 @@ export interface InvoiceRow {
   total_pkr: number;
   amount_paid_pkr: number;
   balance_due_pkr: number;
-  status: 'DRAFT' | 'FINALIZED' | 'VOID';
+  status: 'DRAFT' | 'FINALIZED' | 'VOID' | 'WRITTEN_OFF';
+  /** The server's void rule (finalized, nothing settled, no surcharge on it). */
+  can_void: boolean;
 }
 
 /**
@@ -28,6 +30,7 @@ export function invoicePaymentState(inv: Pick<InvoiceRow, 'status' | 'amount_pai
 } {
   if (inv.status === 'DRAFT') return { status: 'DRAFT' };
   if (inv.status === 'VOID') return { status: 'VOID' };
+  if (inv.status === 'WRITTEN_OFF') return { status: 'WRITTEN_OFF', tone: 'muted' };
   if (inv.balance_due_pkr <= 0.001) return { status: 'PAID' };
   if (inv.amount_paid_pkr > 0.001) return { status: 'PARTIALLY_PAID' };
   return { status: 'UNPAID', tone: 'info' };

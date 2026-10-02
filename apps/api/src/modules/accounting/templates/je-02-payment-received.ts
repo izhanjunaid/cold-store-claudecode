@@ -1,5 +1,6 @@
+import type { ReceivableParty } from '../../party/receivable-party';
 import type { JournalEntryDraft } from './types';
-import { defaultControlAccountForPartyType, assetAccountForPaymentMethod, SYSTEM_ACCOUNTS } from '@coldchain/shared';
+import { assetAccountForPaymentMethod, SYSTEM_ACCOUNTS, round2 } from '@coldchain/shared';
 
 type Input = {
   paymentId: string;
@@ -8,7 +9,7 @@ type Input = {
   paymentMethod: string;
   referenceNumber: string | null;
   bookType: 'PACCI' | 'KATCHI';
-  party: { id: string; partyType: string; name: string };
+  party: ReceivableParty;
   assetAccountCode?: string | null;
   /**
    * Tax the customer deducted at source (s.153). Zero for almost every
@@ -33,7 +34,7 @@ type Input = {
 export function buildJE02PaymentReceived(input: Input): JournalEntryDraft {
   const assetAccount =
     input.assetAccountCode ?? assetAccountForPaymentMethod(input.paymentMethod);
-  const arAccount = defaultControlAccountForPartyType(input.party.partyType);
+  const arAccount = input.party.controlAccountCode;
   const amount = round2(input.amountPkr);
   const withheld = round2(input.taxWithheldPkr ?? 0);
   const cash = round2(amount - withheld);
@@ -76,6 +77,3 @@ export function buildJE02PaymentReceived(input: Input): JournalEntryDraft {
   };
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}

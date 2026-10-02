@@ -1,11 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import { AlertTriangle } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
-import { useCan } from '@/lib/permissions';
-import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -31,17 +30,12 @@ interface AccrualRow {
   accrued_to_date_pkr: number;
 }
 
-interface RunResult {
-  accrued_entry_number: string | null;
-  reversal_entry_number: string | null;
-  total_pkr: number;
-  lot_count: number;
-}
-
 interface Preview {
   period_year: number;
   period_month: number;
   period_end: string;
+  /** Accrual applies from this date; null until the facility sets one. */
+  start_date: string | null;
   lots: AccrualRow[];
   total_pkr: number;
   unaccruable: { lot_number: string; reason: string }[];
@@ -49,7 +43,6 @@ interface Preview {
 }
 
 export default function RevenueAccrualPage() {
-  const canPost = useCan('accounting.post_journal');
   const now = new Date();
   // Default to the month just gone: this is a period-close task, and you close
   // a period after it ends.
@@ -57,7 +50,6 @@ export default function RevenueAccrualPage() {
   const [month, setMonth] = useState(now.getUTCMonth() === 0 ? 12 : now.getUTCMonth());
   const [data, setData] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,42 +71,29 @@ export default function RevenueAccrualPage() {
     void load();
   }, [load]);
 
-  const run = async () => {
-    setRunning(true);
-    try {
-      const result = (await apiClient('/v1/accounting/revenue-accrual', {
-        method: 'POST',
-        body: { period_year: year, period_month: month },
-      })) as RunResult;
-      toast.success(
-        result.accrued_entry_number
-          ? `Accrued ${formatMoney(result.total_pkr)} across ${result.lot_count} lot(s) — ${result.accrued_entry_number}`
-          : 'Nothing to accrue for this period',
-      );
-      await load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to post the accrual');
-    } finally {
-      setRunning(false);
-    }
-  };
-
   return (
     <div>
       <PageHeader
         title="Storage Revenue Accrual"
-        description="Recognise storage earned but not yet billed, so each period shows what it actually earned"
+        description="Storage earned but not yet billed — what each month's close will accrue"
       />
 
       <p className="mb-4 rounded-md bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-        Storage is billed at withdrawal, which puts a whole season&rsquo;s revenue into one month and leaves
-        every earlier period showing nothing for lots still in store. This posts what has been earned to
-        date against <strong>1250 Accrued Storage Revenue</strong>, and reverses the previous period&rsquo;s
-        accrual so only the difference lands in this period. When the invoice is finally raised it is
-        unaffected — the accrual has already been reversed out.
-        <br />
-        <strong>Run this before locking the period.</strong> A period lock closes everything at or below it,
-        and a locked period can never be accrued afterwards.
+        Storage revenue is recognised month by month as it is earned. When a month is closed on the{' '}
+        <Link href="/accounting/period-locks" className="underline">period locks</Link> page, the storage
+        earned and not yet billed is accrued, and reversed again on the first of the next month — so each
+        month keeps exactly what it earned and the invoice that eventually bills the storage carries the
+        revenue. A month with draft invoices dated in it cannot be closed until they are finalised.
+        {data && (
+          <>
+            <br />
+            {data.start_date ? (
+              <>Accrual applies from <strong>{data.start_date}</strong>; months before it close without one.</>
+            ) : (
+              <strong>No accrual start date is set yet, so months close without an accrual.</strong>
+            )}
+          </>
+        )}
       </p>
 
       <Card className="mb-4 p-3">
@@ -147,12 +126,7 @@ export default function RevenueAccrualPage() {
           </div>
           <div className="ml-auto flex items-center gap-3">
             {data?.already_run && (
-              <span className="text-xs text-muted-foreground">Already accrued for this period.</span>
-            )}
-            {canPost && (
-              <Button onClick={run} disabled={running || loading || data?.already_run}>
-                {running ? 'Posting…' : 'Post accrual'}
-              </Button>
+              <span className="text-xs text-muted-foreground">Accrued when this month was closed.</span>
             )}
           </div>
         </div>

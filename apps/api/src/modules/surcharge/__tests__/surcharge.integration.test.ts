@@ -158,7 +158,11 @@ afterAll(async () => {
 });
 
 describe('late-payment surcharge', () => {
-  it('applies one JE per chargeable month, is idempotent, and reconciles in aging', async () => {
+  // docs/25 R-08: a surcharge is its own invoice (line SURCHARGE, entry type
+  // LATE_PAYMENT_SURCHARGE, surcharge_of_invoice_id → the overdue invoice), so it is
+  // paid, credited, written off and voided like any other invoice. JE-21 posted
+  // straight to AR could be none of those.
+  it('bills the chargeable months as a surcharge invoice, is idempotent, and reconciles in aging', async () => {
     const { invoiceId, total } = await finalizedInvoice();
 
     // Invoice dated 2026-03-28; as_of 2026-07-01 → ~95 days overdue, grace 30 → 2 months.
@@ -171,30 +175,29 @@ describe('late-payment surcharge', () => {
     expect(apply.statusCode).toBe(201);
     const applied = JSON.parse(apply.body).data;
     expect(applied.months_charged).toBe(2);
-    expect(applied.surcharges).toHaveLength(2);
     const perMonth = Math.round(total * 0.02 * 100) / 100;
     expect(applied.amount_pkr).toBeCloseTo(perMonth * 2, 1);
 
-    // Two POSTED JE-21 entries keyed to the invoice, each crediting 4210.
-    const jes = await prisma.journalEntry.findMany({
-      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'invoice_surcharge', sourceId: invoiceId, postingStatus: 'POSTED' },
-      include: { lines: true },
+    const surcharge = await prisma.invoice.findFirstOrThrow({
+      where: { surchargeOfInvoiceId: invoiceId },
+      include: { lineItems: true, journalEntry: { include: { lines: true } } },
     });
-    expect(jes).toHaveLength(2);
-    for (const je of jes) {
-      expect(je.entryType).toBe('ACCRUAL');
-      expect(je.lines.find((l) => l.accountCode === '4210')).toBeTruthy();
-      expect(je.lines.find((l) => l.accountCode === '1110')?.debitAmount.toString()).toBe(String(perMonth));
-    }
+    expect(applied.surcharge_invoice_id).toBe(surcharge.id);
+    expect(surcharge.status).toBe('FINALIZED');
+    expect(surcharge.lineItems).toHaveLength(1);
+    expect(surcharge.lineItems[0]!.lineType).toBe('SURCHARGE');
+    expect(Number(surcharge.lineItems[0]!.quantity)).toBe(2);
+    expect(surcharge.journalEntry!.entryType).toBe('LATE_PAYMENT_SURCHARGE');
+    expect(Number(surcharge.journalEntry!.lines.find((l) => l.accountCode === '4210')!.creditAmount)).toBeCloseTo(perMonth * 2, 2);
+    expect(Number(surcharge.journalEntry!.lines.find((l) => l.accountCode === '1110')!.debitAmount)).toBeCloseTo(perMonth * 2, 2);
 
-    // Listing endpoint reflects the posted surcharges.
     const list = await app.inject({
       method: 'GET',
       url: `/v1/invoices/${invoiceId}/surcharges`,
       headers: authHeaders(managerToken),
     });
     expect(list.statusCode).toBe(200);
-    expect(JSON.parse(list.body).data.surcharges).toHaveLength(2);
+    expect(JSON.parse(list.body).data.surcharges).toHaveLength(1);
 
     // Re-apply inside the same block → nothing chargeable.
     const again = await app.inject({
@@ -217,7 +220,6 @@ describe('late-payment surcharge', () => {
     expect(ar.buckets.total_pkr).toBeCloseTo(total + perMonth * 2, 1);
     expect(ar.reconciled).toBe(true);
 
-    // Party statement shows the surcharge entries.
     const stmt = await app.inject({
       method: 'GET',
       url: `/v1/reports/party-statement/${partyId}`,
@@ -225,7 +227,7 @@ describe('late-payment surcharge', () => {
     });
     expect(stmt.statusCode).toBe(200);
     const entries = JSON.parse(stmt.body).data.entries as { type: string }[];
-    expect(entries.filter((e) => e.type === 'SURCHARGE')).toHaveLength(2);
+    expect(entries.filter((e) => e.type === 'SURCHARGE')).toHaveLength(1);
 
     // A further block later charges one more month.
     const later = await app.inject({
@@ -236,6 +238,42 @@ describe('late-payment surcharge', () => {
     });
     expect(later.statusCode).toBe(201);
     expect(JSON.parse(later.body).data.months_charged).toBe(1);
+  });
+
+  it('a surcharge is paid like any invoice, and voiding it frees the invoice it charged on', async () => {
+    const { invoiceId } = await finalizedInvoice('2026-03-01', '2026-03-28', '2026-03-28');
+    const apply = await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${invoiceId}/surcharges`,
+      headers: authHeaders(managerToken),
+      payload: { as_of_date: '2026-06-01' },
+    });
+    expect(apply.statusCode).toBe(201);
+    const surchargeId = JSON.parse(apply.body).data.surcharge_invoice_id as string;
+
+    // The original cannot be voided while its surcharge stands.
+    const blocked = await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${invoiceId}/void`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'wrong party' },
+    });
+    expect(blocked.statusCode).toBe(409);
+
+    const voidSurcharge = await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${surchargeId}/void`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'waived' },
+    });
+    expect(voidSurcharge.statusCode).toBe(200);
+    const voidOriginal = await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${invoiceId}/void`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'wrong party' },
+    });
+    expect(voidOriginal.statusCode).toBe(200);
   });
 
   it('rejects a surcharge when the rule is disabled', async () => {
