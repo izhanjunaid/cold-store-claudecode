@@ -29,7 +29,7 @@ const prisma = new PrismaClient();
 
 // Codes this file mints — each inside its class's range (the prefix is required,
 // docs/25 L-31) but clear of everything seeded and every other test file.
-const OWNED_CODES = ['6800', '3800', '6810', '1291', '1292', '1293', '1294', '1295', '4310', '6820', '7050', '0150'];
+const OWNED_CODES = ['6800', '3800', '6810', '1291', '1292', '1293', '1294', '1295', '4310', '6820', '7050', '0150', '6850'];
 let partnerId: string | null = null;
 
 let app: FastifyInstance;
@@ -125,6 +125,20 @@ describe('a non-equity HEADER must declare its statement section', () => {
     });
     expect(res.statusCode).toBe(201);
     expect(JSON.parse(res.body).data.statement_section).toBe('OPERATING_EXPENSE');
+  });
+
+  // The chart page offers "Non-Operating Expenses" (the database enum has it since
+  // phase 25); the shared request schema had dropped it, so the API refused it.
+  it('accepts a Non-Operating (OTHER_EXPENSE) expense header', async () => {
+    const res = await post({
+      account_code: '6850',
+      account_name: 'Non-Operating Header',
+      account_class: 'EXPENSE',
+      account_type: 'HEADER',
+      statement_section: 'OTHER_EXPENSE',
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(JSON.parse(res.body).data.statement_section).toBe('OTHER_EXPENSE');
   });
 
   it('still accepts an EQUITY header without one — equity aggregates by class, not by header', async () => {

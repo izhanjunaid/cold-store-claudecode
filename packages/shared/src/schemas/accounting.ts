@@ -674,12 +674,6 @@ export const RevenueAccrualPeriodQuery = z.object({
 });
 export type RevenueAccrualPeriodQueryType = z.infer<typeof RevenueAccrualPeriodQuery>;
 
-export const RunRevenueAccrualRequest = z.object({
-  period_year: z.number().int().min(2000).max(2100),
-  period_month: z.number().int().min(1).max(12),
-});
-export type RunRevenueAccrualRequestType = z.infer<typeof RunRevenueAccrualRequest>;
-
 // ============================================================
 // Cash / bank transfer (JE-27)
 // ============================================================
@@ -825,24 +819,6 @@ export type UnlockPeriodRequestType = z.infer<typeof UnlockPeriodRequest>;
 // ============================================================
 // Credit Notes
 // ============================================================
-
-export const CreateCreditNoteRequest = z.object({
-  original_invoice_id: z.string().uuid(),
-  credit_date: dateOnly,
-  reason: z.string().min(1),
-  line_items: z
-    .array(
-      z.object({
-        revenue_account_code: z.string().regex(/^4[0-9]+$/, 'Must be a revenue account (4XXX)'),
-        description: z.string().min(1).max(300),
-        amount_pkr: z.number().positive(),
-      }),
-    )
-    .min(1),
-  book_type: BookType.optional().default('PACCI'),
-  notes: z.string().optional(),
-});
-export type CreateCreditNoteRequestType = z.infer<typeof CreateCreditNoteRequest>;
 
 export const CreditNoteLineItemResponse = z.object({
   id: z.string().uuid(),

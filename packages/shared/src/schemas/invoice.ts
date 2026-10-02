@@ -122,8 +122,7 @@ export type InvoiceResponseType = z.infer<typeof InvoiceResponse>;
 
 // ============================================================
 // Credit notes — built from the invoice's own lines (docs/25 R-03). They live
-// here, beside the invoice they adjust; the older CreateCreditNoteRequest in
-// accounting.ts (free revenue account, request book) is no longer read.
+// here, beside the invoice they adjust.
 // ============================================================
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
