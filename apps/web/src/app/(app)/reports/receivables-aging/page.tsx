@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import type { ReceivablesAgingResponseType, ReceivablesAgingPartyRowType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
+import { hasMinRole } from '@/lib/rbac';
+import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api-client';
 import { useParties } from '@/hooks/use-reference-data';
 import { Input } from '@/components/ui/input';
@@ -28,6 +30,7 @@ export default function ReceivablesAgingPage() {
   const today = new Date().toISOString().slice(0, 10);
   const [asOfDate, setAsOfDate] = useState(today);
   const [partyId, setPartyId] = useState('');
+  const [bookType, setBookType] = useState<'PACCI' | 'KATCHI'>('PACCI');
 
   const { data: parties = [] } = useParties();
   // A supplier has no receivable: it is never billed, paid by or lent to.
@@ -37,9 +40,9 @@ export default function ReceivablesAgingPage() {
   );
 
   const { data, isLoading } = useQuery<ReceivablesAgingResponseType>({
-    queryKey: ['receivables-aging', user?.facility_id, asOfDate, partyId],
+    queryKey: ['receivables-aging', user?.facility_id, asOfDate, partyId, bookType],
     queryFn: () => {
-      const qs = new URLSearchParams({ as_of_date: asOfDate, per_page: '500' });
+      const qs = new URLSearchParams({ as_of_date: asOfDate, per_page: '500', book_type: bookType });
       if (partyId) qs.set('party_id', partyId);
       return apiClient<ReceivablesAgingResponseType>(`/v1/reports/receivables-aging?${qs.toString()}`);
     },
@@ -105,6 +108,16 @@ export default function ReceivablesAgingPage() {
               onChange={(e) => setAsOfDate(e.target.value)}
               className="h-8 w-auto tabular-nums"
             />
+            {/* The informal book is MANAGER+ (fixed seniority rule, not the matrix). */}
+            {hasMinRole(user?.role, 'MANAGER') && (
+              <div className="flex gap-1">
+                {(['PACCI', 'KATCHI'] as const).map((b) => (
+                  <Button key={b} type="button" size="sm" variant={bookType === b ? 'default' : 'outline'} onClick={() => setBookType(b)}>
+                    {b}
+                  </Button>
+                ))}
+              </div>
+            )}
           </div>
         }
       />

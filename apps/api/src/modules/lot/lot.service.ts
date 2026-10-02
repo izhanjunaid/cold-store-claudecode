@@ -2,6 +2,7 @@ import type { PrismaClient, Prisma } from '@coldchain/db';
 import { LotRepository, LOT_INCLUDE_SHAPE } from './lot.repository';
 import { applyPlacements, type PlacementInput } from './placement.service';
 import { Errors } from '../../common/errors';
+import { receivableParty } from '../party/receivable-party';
 import { roleAtLeast } from '../../plugins/auth';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { generateLotNumber } from './lot-number';
@@ -205,6 +206,8 @@ export class LotService {
     if (!owner.isActive) {
       throw Errors.VALIDATION_ERROR('Owner party is inactive', 'owner_party_id');
     }
+    // Storage is billed to the lot's parties, so they are customers (docs/25 R-01).
+    receivableParty(owner, 'owner_party_id');
 
     // 2. Billing party (defaults to owner)
     const billingPartyId = input.billingPartyId ?? input.ownerPartyId;
@@ -215,6 +218,7 @@ export class LotService {
       if (!billing || !billing.isActive) {
         throw Errors.VALIDATION_ERROR('Billing party invalid or inactive', 'billing_party_id');
       }
+      receivableParty(billing, 'billing_party_id');
     }
 
     // 3. Chamber

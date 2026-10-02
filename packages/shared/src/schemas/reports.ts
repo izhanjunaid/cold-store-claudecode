@@ -23,6 +23,7 @@ export type LotAgingReportQueryType = z.infer<typeof LotAgingReportQuery>;
 export const ReceivablesAgingReportQuery = z.object({
   as_of_date: dateOnly.optional(),
   party_id: z.string().uuid().optional(),
+  book_type: z.enum(['PACCI', 'KATCHI']).default('PACCI'),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(500).default(50),
 });
