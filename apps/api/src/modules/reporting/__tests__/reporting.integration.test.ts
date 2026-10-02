@@ -408,6 +408,17 @@ describe('GET /v1/reports/lot-aging', () => {
 // Receivables Aging
 // ============================================================
 describe('GET /v1/reports/receivables-aging', () => {
+  // The informal book was unreachable: the service read book_type, the route dropped it.
+  it('ages the KATCHI book for MANAGER+, and refuses it below', async () => {
+    const katchi = (token: string) =>
+      app.inject({ method: 'GET', url: '/v1/reports/receivables-aging?book_type=KATCHI', headers: authHeaders(token) });
+    expect((await katchi(accountantToken)).statusCode).toBe(403);
+    const res = await katchi(managerToken);
+    expect(res.statusCode).toBe(200);
+    // The PACCI fixture invoice aged 100 days is not in the informal book.
+    expect(JSON.parse(res.body).data.buckets.b_90_plus).not.toBeCloseTo(invoiceAge100Total, 1);
+  });
+
   it('ACCOUNTANT sees aged invoice in 90+ bucket', async () => {
     const res = await app.inject({
       method: 'GET',

@@ -30,7 +30,8 @@ vi.mock('@/components/accounting/statement-frame', () => ({
 
 const accrualEnabled = vi.fn(() => false);
 vi.mock('@/hooks/use-reference-data', () => ({
-  useFacility: () => ({ data: { settings: { revenue_accrual: { enabled: accrualEnabled() } } } }),
+  // Accrual is "on" for a report when its start date falls on or before the period end.
+  useFacility: () => ({ data: { settings: { revenue_accrual: { start_date: accrualEnabled() ? '2000-07-01' : null } } } }),
 }));
 vi.mock('@/components/accounting/use-statement-period', () => ({
   useStatementPeriod: () => ({

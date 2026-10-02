@@ -107,7 +107,8 @@ export default function ProfitLossPage() {
   // The basis note must describe the policy actually in force. Saying "no
   // month-end accrual is made" on a facility that runs JE-25 is a false
   // statement on the face of the statement, which is the one place it matters.
-  const accrual = facility.data?.settings?.revenue_accrual?.enabled ?? false;
+  const accrualStart = facility.data?.settings?.revenue_accrual?.start_date ?? null;
+  const accrual = accrualStart !== null && range.date_to >= accrualStart;
   const basisNote = accrual
     ? 'Storage revenue is recognized as it is earned: at each period end an accrual (JE-25) brings unbilled storage into revenue, and it is reversed when the invoice is raised, so a month shows the storage it actually provided.'
     : 'Storage revenue is recognized when invoiced (typically at withdrawal); no month-end accrual is made. During the storage season a month can show low revenue against full running costs — the revenue arrives in the months lots are dispatched.';

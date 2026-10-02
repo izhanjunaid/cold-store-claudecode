@@ -150,7 +150,11 @@ export default function LotCreatePage() {
   const hasDispute = declared > 0 && varianceKg > kgThreshold;
 
   const partyOptions = useMemo(
-    () => parties.map((p) => ({ value: p.id, label: p.name, hint: p.party_type })),
+    // A lot is stored for, and billed to, customers; the API refuses a supplier.
+    () =>
+      parties
+        .filter((p) => p.party_type !== 'SUPPLIER')
+        .map((p) => ({ value: p.id, label: p.name, hint: p.party_type })),
     [parties],
   );
 

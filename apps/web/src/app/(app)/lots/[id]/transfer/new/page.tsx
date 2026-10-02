@@ -56,7 +56,10 @@ export default function TransferNewPage() {
       setLot(lotRes);
       const partyRes = await apiClient<{ data: Party[] } | Party[]>('/v1/parties?is_active=true&per_page=100');
       const list = Array.isArray(partyRes) ? partyRes : partyRes.data;
-      setParties(list.filter((p) => p.is_active && p.id !== lotRes.owner_party_id));
+      // The new owner is billed for the storage, so suppliers are not offered (the API refuses them).
+      setParties(
+        list.filter((p) => p.is_active && p.id !== lotRes.owner_party_id && (p.party_type ?? p.type) !== 'SUPPLIER'),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {

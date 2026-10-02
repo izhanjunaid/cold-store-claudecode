@@ -9,6 +9,7 @@ import {
   TEST_FACILITY_ID,
   sentMails,
 } from '../../../test/helpers';
+import { withGuardsDisabled } from '../../../test/financial-guards';
 
 const prisma = new PrismaClient();
 let app: FastifyInstance;
@@ -323,5 +324,47 @@ describe('Phase 15 email settings', () => {
       payload: { settings: { email: { ...emailPayload, admin_email: 'not-an-email' } } },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+// docs/25 decision Q2: monthly accrual is the policy from a fiscal-year boundary,
+// applied prospectively — so the start is a fiscal-year start in an open period.
+describe('Revenue accrual start date', () => {
+  const LOCKED_YEAR = 2014;
+  const setStart = (start_date: string | null) =>
+    app.inject({
+      method: 'PATCH',
+      url: '/v1/facilities/me',
+      headers: authHeaders(ownerToken),
+      payload: { settings: { revenue_accrual: { start_date } } },
+    });
+
+  afterAll(async () => {
+    await withGuardsDisabled(prisma, async () => {
+      await prisma.periodLock.deleteMany({ where: { facilityId: TEST_FACILITY_ID, periodYear: LOCKED_YEAR } });
+    });
+  });
+
+  it('must be the first day of a fiscal year', async () => {
+    const res = await setStart('2031-08-01');
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.field).toBe('settings.revenue_accrual.start_date');
+  });
+
+  it('cannot start inside a closed period', async () => {
+    const owner = await prisma.user.findFirstOrThrow({ where: { facilityId: TEST_FACILITY_ID, role: 'OWNER' } });
+    await prisma.periodLock.create({
+      data: { facilityId: TEST_FACILITY_ID, periodYear: LOCKED_YEAR, periodMonth: 7, lockedBy: owner.id },
+    });
+    const res = await setStart(`${LOCKED_YEAR}-07-01`);
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.field).toBe('settings.revenue_accrual.start_date');
+  });
+
+  it('saves an open fiscal-year start, and can be cleared', async () => {
+    const res = await setStart('2031-07-01');
+    expect(res.statusCode, res.body).toBe(200);
+    expect(JSON.parse(res.body).data.settings.revenue_accrual.start_date).toBe('2031-07-01');
+    expect((await setStart(null)).statusCode).toBe(200);
   });
 });

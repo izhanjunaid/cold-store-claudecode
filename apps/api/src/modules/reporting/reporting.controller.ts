@@ -89,6 +89,7 @@ export async function reportingRoutes(app: FastifyInstance) {
     schema: { querystring: ReceivablesAgingReportQuery },
     handler: async (request, reply) => {
       const query = request.query as z.infer<typeof ReceivablesAgingReportQuery>;
+      resolveBookTypeForRead(request.user!.role, query.book_type);
       const result = await getReceivablesAging(
         app.prisma,
         request.user!.facilityId,

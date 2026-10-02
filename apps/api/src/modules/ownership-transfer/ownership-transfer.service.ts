@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
+import { receivableParty } from '../party/receivable-party';
 import { OwnershipTransferRepository, LOT_INCLUDE_SHAPE_TRANSFER } from './ownership-transfer.repository';
 import { mirrorTransferPlacements } from '../lot/placement.service';
 import { renderTransferAcknowledgment } from '../pdf/pdf.service';
@@ -75,6 +76,8 @@ export class OwnershipTransferService {
     if (!newOwner.isActive) {
       throw Errors.VALIDATION_ERROR('New owner is inactive', 'to_party_id');
     }
+    // The new owner is billed for the storage, so it is a customer (docs/25 R-01).
+    receivableParty(newOwner, 'to_party_id');
 
     const effectiveDate = new Date(input.effectiveDate);
 
