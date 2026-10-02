@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import {
+  SYSTEM_ACCOUNTS,
   CLASS_CODE_PREFIX,
   CLASS_SECTIONS,
   moneyEquals,
@@ -13,6 +14,16 @@ import {
 
 type Tx = Prisma.TransactionClient;
 type Row = Prisma.ChartOfAccountsGetPayload<{}>;
+
+/**
+ * Every account the engine and the statements reach by role. Some are not
+ * flagged is_system_account in the seed (3020, 1230, 1240, 2071…), so the flag
+ * alone let them be deleted or deactivated out from under the code that posts to
+ * them. They may still be renamed — the registry promises only that the code
+ * stays put.
+ */
+const REGISTRY_CODES = new Set<string>(Object.values(SYSTEM_ACCOUNTS));
+const isAnchored = (a: Row) => a.isSystemAccount || REGISTRY_CODES.has(a.accountCode);
 
 /**
  * The chart's own rules, enforced here for every caller — the Chart of Accounts
@@ -286,7 +297,7 @@ export class CoaService {
           where: { facilityId_accountCode: { facilityId, accountCode: code } },
         });
         if (!a) throw Errors.ACCOUNT_NOT_FOUND();
-        if (a.isSystemAccount) throw Errors.SYSTEM_ACCOUNT_PROTECTED();
+        if (isAnchored(a)) throw Errors.SYSTEM_ACCOUNT_PROTECTED();
 
         const postings = await tx.journalEntryLine.count({ where: { facilityId, accountCode: code } });
         if (postings > 0) {
@@ -333,6 +344,11 @@ export class CoaService {
       // System accounts anchor the posting templates and the statements: they
       // cannot be deactivated, renamed, moved between sections or re-flagged.
       if (a.isSystemAccount && (body.is_active === false || renames || moves || flagsChange)) {
+        throw Errors.SYSTEM_ACCOUNT_PROTECTED();
+      }
+      // A registry account the seed does not flag system may be renamed, but not
+      // retired or re-flagged: the engine posts to it by role.
+      if (isAnchored(a) && (body.is_active === false || flagsChange)) {
         throw Errors.SYSTEM_ACCOUNT_PROTECTED();
       }
 

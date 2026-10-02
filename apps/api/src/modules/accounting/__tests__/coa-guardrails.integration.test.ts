@@ -365,6 +365,30 @@ describe('deactivation cannot strand anything (L-34)', () => {
   });
 });
 
+describe('an account the engine posts to by role cannot be retired', () => {
+  afterAll(async () => {
+    // A red run would have deactivated it; every statement reads it by role.
+    await prisma.chartOfAccounts.updateMany({
+      where: { facilityId: TEST_FACILITY_ID, accountCode: '3020' },
+      data: { isActive: true },
+    });
+  });
+
+  it('refuses to deactivate retained earnings, though the seed does not flag it system', async () => {
+    // 3020 is a registry role (SYSTEM_ACCOUNTS.RETAINED_EARNINGS): the statements
+    // look it up, opening balances post to it. Deactivating or deleting it was
+    // allowed because only is_system_account protected an account.
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/accounting/accounts/3020',
+      headers: authHeaders(ownerToken),
+      payload: { is_active: false },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('SYSTEM_ACCOUNT_PROTECTED');
+  });
+});
+
 describe('the chart flags are the owner’s to set, until the account is used (L-34)', () => {
   const patch = (code: string, payload: Record<string, unknown>) =>
     app.inject({
