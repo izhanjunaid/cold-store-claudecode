@@ -563,17 +563,17 @@ describe('C-15 — reversing a run undoes the accrual; voiding a payment is its 
     expect(await entriesOf(run.id, 'REVERSAL')).toHaveLength(1);
   });
 
-  it('a remitted run cannot be reversed: the remittance cash left too', async () => {
+  // Runs no longer remit (deductions are paid over by period, C-10), but a run remitted
+  // by an older image carries a real JE-16B: reversing its accrual would pay the state twice.
+  it('a run remitted by an older image cannot be reversed: the remittance cash left too', async () => {
     await salaried(30000);
     const run = await draft(2028, 9);
-    expect((await finalize(run.id)).statusCode).toBe(200);
-    const remit = await app.inject({
-      method: 'POST',
-      url: `/v1/payroll-runs/${run.id}/remit`,
-      headers: authHeaders(ownerToken),
-      payload: { remittance_date: '2028-10-05', remit_employee_eobi_pkr: 375, remit_employer_eobi_pkr: 1875 },
+    const finalized = await finalize(run.id);
+    expect(finalized.statusCode).toBe(200);
+    await prisma.payrollRun.update({
+      where: { id: run.id },
+      data: { remittanceJournalEntryId: JSON.parse(finalized.body).data.payroll_journal_entry_id },
     });
-    expect(remit.statusCode, remit.body).toBe(201);
 
     const res = await reverse(run.id);
     expect(res.statusCode).toBe(409);

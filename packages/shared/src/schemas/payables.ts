@@ -152,3 +152,39 @@ export const SupplierStatementQuery = z.object({
   date_to: dateOnly.optional(),
 });
 export type SupplierStatementQueryType = z.infer<typeof SupplierStatementQuery>;
+
+// ============================================================
+// Statutory remittances (docs/25 C-10) — EOBI, s.149, s.153, s.155 by period
+// ============================================================
+
+export const CreateTaxRemittanceRequest = z.object({
+  liability_account_code: z.string().regex(/^[0-9]+$/),
+  period_year: z.number().int().min(2000).max(2100),
+  period_month: z.number().int().min(1).max(12),
+  /** When the money leaves — on or after the period end. */
+  remittance_date: dateOnly,
+  paid_from_account_code: z.string().regex(/^[0-9]+$/),
+  /** The FBR / EOBI computerised payment receipt (CPR / challan) number. */
+  challan_number: z.string().trim().max(50).nullable().optional(),
+  book_type: BookType.optional().default('PACCI'),
+  notes: z.string().max(2000).nullable().optional(),
+});
+export type CreateTaxRemittanceRequestType = z.infer<typeof CreateTaxRemittanceRequest>;
+
+export const TaxRemittanceOutstandingQuery = z.object({
+  period_year: z.coerce.number().int().min(2000).max(2100),
+  period_month: z.coerce.number().int().min(1).max(12),
+  book_type: BookType.optional(),
+});
+export type TaxRemittanceOutstandingQueryType = z.infer<typeof TaxRemittanceOutstandingQuery>;
+
+export const TaxRemittanceListQuery = z.object({
+  period_year: z.coerce.number().int().min(2000).max(2100).optional(),
+  book_type: BookType.optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  page_size: z.coerce.number().int().min(1).max(100).default(50),
+});
+export type TaxRemittanceListQueryType = z.infer<typeof TaxRemittanceListQuery>;
+
+export const TaxRemittanceAction = z.enum(['void']);
+export type TaxRemittanceActionType = z.infer<typeof TaxRemittanceAction>;

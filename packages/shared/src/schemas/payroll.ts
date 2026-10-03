@@ -192,17 +192,8 @@ export const VoidPayrollPaymentRequest = z.object({
 });
 export type VoidPayrollPaymentRequestType = z.infer<typeof VoidPayrollPaymentRequest>;
 
-export const RemitGovtRequest = z.object({
-  remittance_date: dateOnly,
-  from_asset_account_code: z.string().regex(/^[0-9]+$/).default(DEFAULT_BANK_ACCOUNT_CODE),
-  remit_employee_eobi_pkr: z.number().nonnegative(),
-  remit_employer_eobi_pkr: z.number().nonnegative(),
-  remit_income_tax_pkr: z.number().nonnegative().default(0),
-});
-export type RemitGovtRequestType = z.infer<typeof RemitGovtRequest>;
-
 /** What the server will let a run do next, by its state alone (the web adds permissions). */
-export const PayrollRunAction = z.enum(['edit_lines', 'finalize', 'pay', 'void_payment', 'reverse', 'remit']);
+export const PayrollRunAction = z.enum(['edit_lines', 'finalize', 'pay', 'void_payment', 'reverse']);
 export type PayrollRunActionType = z.infer<typeof PayrollRunAction>;
 
 export const PayrollLineItemResponse = z.object({
