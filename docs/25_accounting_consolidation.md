@@ -645,7 +645,7 @@ contractions (REVERSED enum value, `cash_flow_section`, `other_deductions_pkr`, 
 | #31 | Stream R: receivables on the party's control account, receipts, dishonour by chain, credit notes, settlement, AR read model, surcharge invoices, accrual policy, billing rules, numbering | `5994ba4` |
 | #32 | R follow-ups: accrual start date (FY boundary, open period) settable in the app; suppliers off lots and transfers; KATCHI aging | `1b0f7e7` |
 | #33 | Stream E: statements on `ledger.ts`, cash flow by the chart, owner equity documents, chart rules in the API, opening balances (AP per supplier), shell (badge, closed-through, statement kit) | `554ced2` |
-| #34 | Payroll reverse refused once a recovered advance was written off (owner decision) | pending |
+| #34 | Payroll reverse refused once a recovered advance was written off (owner decision) | `28f8054` |
 | — | Stream C-b: payables, cash transfers, statutory remittance, expense paths retired | in progress |
 
 ### Release decision (owner, 2026-10-04)
