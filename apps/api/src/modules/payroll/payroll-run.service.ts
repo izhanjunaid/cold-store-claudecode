@@ -527,6 +527,13 @@ export class PayrollRunService {
         const advance = await tx.employeeAdvance.findFirstOrThrow({
           where: { id: recovery.advanceId, facilityId },
         });
+        // Owner decision (docs/25 §10): restoring the recovery onto a written-off
+        // advance would leave a balance nothing can recover or write off again.
+        if (advance.status === 'WRITTEN_OFF') {
+          throw Errors.PAYROLL_RUN_NOT_REVERSIBLE(
+            `Advance ${advance.advanceNumber} was written off after this run recovered from it; the run cannot be reversed`,
+          );
+        }
         await assertAdvanceCanReopen(tx, facilityId, advance);
         await tx.employeeAdvance.update({
           where: { id: advance.id },
@@ -534,12 +541,8 @@ export class PayrollRunService {
             balanceOutstandingPkr: round2(
               Number(advance.balanceOutstandingPkr) + Number(recovery.amountPkr),
             ),
-            // Only a RECOVERED advance can have been closed by this run's recovery;
-            // WRITTEN_OFF is a separate decision this reversal must not undo. If the
-            // advance was later written off, the restored amount was genuinely never
-            // written off (JE-23 covered only what was outstanding then), so the GL
-            // stays correct; the status just cannot say "partly written off".
-            status: advance.status === 'RECOVERED' ? 'ACTIVE' : advance.status,
+            // ACTIVE or RECOVERED here (written-off refused above); either way it owes again.
+            status: 'ACTIVE',
           },
         });
         await tx.employeeAdvanceRecovery.update({
