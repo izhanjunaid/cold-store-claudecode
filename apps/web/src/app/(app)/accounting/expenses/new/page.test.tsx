@@ -29,16 +29,16 @@ vi.mock('sonner', () => ({
 // the class filter under test is the shipped one. Stubbing also keeps
 // useAccounts' own fetch out of the apiClient call counts asserted below.
 const ACCOUNTS = [
-  { account_code: '5010', account_name: 'Electricity — Refrigeration', account_class: 'COST_OF_SERVICE', account_type: 'DETAIL', parent_account_code: '5000', is_active: true },
-  { account_code: '6100', account_name: 'Miscellaneous', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true },
+  { account_code: '5010', account_name: 'Electricity — Refrigeration', account_class: 'COST_OF_SERVICE', account_type: 'DETAIL', parent_account_code: '5000', is_active: true, allow_manual_posting: true },
+  { account_code: '6100', account_name: 'Miscellaneous', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true, allow_manual_posting: true },
   // Added through the Chart of Accounts screen after ship — must appear here.
-  { account_code: '6160', account_name: 'Generator Fuel', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true },
+  { account_code: '6160', account_name: 'Generator Fuel', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true, allow_manual_posting: true },
   // Not an expense — must not appear.
-  { account_code: '1020', account_name: 'Bank Account — Main', account_class: 'ASSET', account_type: 'DETAIL', parent_account_code: '1000', is_active: true },
-  // Posted by the payroll run and the depreciation run respectively — a manual
-  // voucher against either would double-count.
-  { account_code: '6010', account_name: 'Salaries — Management & Office', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true },
-  { account_code: '6120', account_name: 'Depreciation — Building', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true },
+  { account_code: '1020', account_name: 'Bank Account — Main', account_class: 'ASSET', account_type: 'DETAIL', parent_account_code: '1000', is_active: true, allow_manual_posting: true },
+  // Posted by the payroll run and the depreciation run respectively — the chart
+  // marks them not manually postable, and a voucher against either would double-count.
+  { account_code: '6010', account_name: 'Salaries — Management & Office', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true, allow_manual_posting: false },
+  { account_code: '6120', account_name: 'Depreciation — Building', account_class: 'EXPENSE', account_type: 'DETAIL', parent_account_code: '6000', is_active: true, allow_manual_posting: false },
 ];
 vi.mock('@/hooks/use-reference-data', async (importActual) => ({
   ...(await importActual<typeof import('@/hooks/use-reference-data')>()),

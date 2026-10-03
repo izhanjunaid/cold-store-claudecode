@@ -8,6 +8,8 @@ import { buildJE17BPayAccruedExpense } from './templates/je-17b-pay-accrued-paym
 import { buildJE17CPettyCashReplenish } from './templates/je-17c-petty-cash-replenish';
 import { WITHHOLDING_ACCOUNTS, type WithholdingSection } from './templates/withholding';
 import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
+import { assertCashAccount } from '../accounting/cash-account';
+import { assertExpenseAccount } from '../payables/expense-account';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -35,6 +37,7 @@ export class ExpenseService {
   async create(facilityId: string, userId: string, body: any) {
     const voucherDate = new Date(body.voucher_date);
     return this.prisma.$transaction(async (tx) => {
+      await assertExpenseAccount(tx, facilityId, body.expense_account_code, 'expense_account_code');
       const voucherNumber = await generateExpenseVoucherNumber(tx, facilityId, voucherDate);
       const created = await tx.expenseVoucher.create({
         data: {
@@ -65,6 +68,9 @@ export class ExpenseService {
     if (!v) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
     if (v.status !== 'DRAFT') {
       throw Errors.EXPENSE_VOUCHER_INVALID_STATUS('Only DRAFT vouchers can be edited');
+    }
+    if (body.expense_account_code !== undefined) {
+      await assertExpenseAccount(this.prisma, facilityId, body.expense_account_code, 'expense_account_code');
     }
     const updated = await this.prisma.expenseVoucher.update({
       where: { id },
@@ -171,6 +177,7 @@ export class ExpenseService {
 
       const paymentDate = new Date(body.payment_date);
       const assetAccount = body.asset_account_code;
+      await assertCashAccount(tx, facilityId, assetAccount);
 
       const taxWithheldPkr = round2(body.tax_withheld_pkr ?? 0);
       if (taxWithheldPkr > Number(v.amountPkr) + 0.005) {

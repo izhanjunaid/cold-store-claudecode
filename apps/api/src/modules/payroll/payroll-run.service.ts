@@ -16,6 +16,7 @@ import { advisoryXactLock } from '../../common/advisory-lock';
 import { lockRow } from '../../common/row-lock';
 import { documentNumberPrefix, nextDocumentNumber } from '../../common/document-number';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
+import { assertCashAccount } from '../accounting/cash-account';
 import { accountBalances, signedBalance } from '../accounting/ledger';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { resolveFacilitySettings } from '../facility/facility.service';
@@ -391,6 +392,7 @@ export class PayrollRunService {
       if (run.status !== 'FINALIZED') {
         throw Errors.PAYROLL_RUN_INVALID_STATUS('Only FINALIZED runs can be paid');
       }
+      await assertCashAccount(tx, facilityId, body.from_asset_account_code);
 
       const posted = await this.journalEntry.postInTransaction(
         tx,

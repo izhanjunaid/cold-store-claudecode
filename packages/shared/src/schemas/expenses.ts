@@ -14,9 +14,17 @@ export const ExpenseVoucherStatus = z.enum([
 
 export const ExpensePaymentMethod = z.enum(['CASH', 'CHEQUE', 'BANK_TRANSFER']);
 
+/**
+ * The classes a cost may be booked to. The rest of the rule lives on the chart row: the
+ * account must be an active DETAIL that a person may post to (`allow_manual_posting`),
+ * which is what keeps payroll, depreciation, bad-debt and disposal accounts — each moved
+ * by its own flow — out of every expense picker and every bill (docs/25 C-05).
+ */
+export const EXPENSE_ACCOUNT_CLASSES: readonly string[] = ['EXPENSE', 'COST_OF_SERVICE'];
+
 export const CreateExpenseVoucherRequest = z.object({
   voucher_date: dateOnly,
-  expense_account_code: z.string().regex(/^[5-6][0-9]+$/),
+  expense_account_code: z.string().regex(/^[0-9]+$/),
   description: z.string().min(1).max(500),
   vendor_name: z.string().max(200).nullable().optional(),
   reference_number: z.string().max(100).nullable().optional(),
@@ -32,7 +40,7 @@ export type CreateExpenseVoucherRequestType = z.infer<typeof CreateExpenseVouche
 
 export const UpdateExpenseVoucherRequest = z.object({
   voucher_date: dateOnly.optional(),
-  expense_account_code: z.string().regex(/^[5-6][0-9]+$/).optional(),
+  expense_account_code: z.string().regex(/^[0-9]+$/).optional(),
   description: z.string().min(1).max(500).optional(),
   vendor_name: z.string().max(200).nullable().optional(),
   reference_number: z.string().max(100).nullable().optional(),

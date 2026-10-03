@@ -17,7 +17,8 @@ import { Errors } from '../../common/errors';
 import { lockRow } from '../../common/row-lock';
 import { documentNumberPrefix, nextDocumentNumber } from '../../common/document-number';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
-import { standingEntriesWhere } from '../accounting/ledger';
+import { classify, standingEntriesWhere } from '../accounting/ledger';
+import { assertCashAccount } from '../accounting/cash-account';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { FixedAssetRepository } from './fixed-asset.repository';
 import { buildJE12AssetPurchase } from './templates/je-12-asset-purchase';
@@ -64,6 +65,7 @@ export class FixedAssetService {
     const purchaseDate = new Date(body.purchase_date);
 
     return this.prisma.$transaction(async (tx) => {
+      await assertFundingAccount(tx, facilityId, paidFrom);
       const assetNumber = await nextDocumentNumber(
         tx,
         facilityId,
@@ -263,6 +265,8 @@ export class FixedAssetService {
 
       const asset = await tx.fixedAsset.findFirstOrThrow({ where: { id, facilityId } });
       const proceeds = body.disposal_proceeds_pkr;
+      const proceedsAccountCode = body.proceeds_account_code ?? DEFAULT_BANK_ACCOUNT_CODE;
+      if (proceeds > 0) await assertCashAccount(tx, facilityId, proceedsAccountCode);
       const posted = await this.journalEntry.postInTransaction(
         tx,
         facilityId,
@@ -273,7 +277,7 @@ export class FixedAssetService {
           assetName: asset.assetName,
           assetAccountCode: asset.assetAccountCode,
           accumDeprAccountCode: asset.accumDeprAccountCode,
-          proceedsAccountCode: body.proceeds_account_code ?? DEFAULT_BANK_ACCOUNT_CODE,
+          proceedsAccountCode,
           disposalDate,
           costPkr: Number(asset.purchaseCostPkr),
           accumDeprPkr: Number(asset.accumulatedDepreciationPkr),
@@ -689,6 +693,34 @@ export class FixedAssetService {
 }
 
 type Db = PrismaClient | Tx;
+
+/**
+ * What an asset purchase may be paid from (docs/25 C-06): cash, or a loan taken for it —
+ * an account under a NON_CURRENT_LIABILITY header. Read off the chart, so an owner's
+ * second bank or a new equipment loan qualifies; cheques in hand, a trade payable or a
+ * revenue account never does.
+ */
+async function assertFundingAccount(tx: Tx, facilityId: string, code: string) {
+  const account = await tx.chartOfAccounts.findUnique({
+    where: { facilityId_accountCode: { facilityId, accountCode: code } },
+  });
+  const parent = account?.parentAccountCode
+    ? await tx.chartOfAccounts.findUnique({
+        where: { facilityId_accountCode: { facilityId, accountCode: account.parentAccountCode } },
+      })
+    : null;
+  const ok =
+    account?.isActive &&
+    account.accountType === 'DETAIL' &&
+    (account.isCashEquivalent ||
+      classify(account, new Map(parent ? [[parent.accountCode, parent]] : [])).section === 'NON_CURRENT_LIABILITY');
+  if (!ok) {
+    throw Errors.VALIDATION_ERROR(
+      `${code}${account ? ` ${account.accountName}` : ''} is neither a cash or bank account nor a long-term loan; an asset cannot be paid from it`,
+      'paid_from_account_code',
+    );
+  }
+}
 
 async function standingOpeningEntry(db: Db, facilityId: string) {
   const opening = await db.journalEntry.findFirst({
