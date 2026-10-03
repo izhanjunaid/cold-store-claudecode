@@ -645,7 +645,14 @@ contractions (REVERSED enum value, `cash_flow_section`, `other_deductions_pkr`, 
 | #31 | Stream R: receivables on the party's control account, receipts, dishonour by chain, credit notes, settlement, AR read model, surcharge invoices, accrual policy, billing rules, numbering | `5994ba4` |
 | #32 | R follow-ups: accrual start date (FY boundary, open period) settable in the app; suppliers off lots and transfers; KATCHI aging | `1b0f7e7` |
 | #33 | Stream E: statements on `ledger.ts`, cash flow by the chart, owner equity documents, chart rules in the API, opening balances (AP per supplier), shell (badge, closed-through, statement kit) | `554ced2` |
+| #34 | Payroll reverse refused once a recovered advance was written off (owner decision) | pending |
 | — | Stream C-b: payables, cash transfers, statutory remittance, expense paths retired | in progress |
+
+### Release decision (owner, 2026-10-04)
+**The client box starts fresh on v0.6.0; it is not upgraded from v0.5.x.** The §8 pre-update checks and the in-app
+corrections named beside them are therefore not run for this release (the SQL stays for any future upgrade of an
+existing box). Before the reinstall, take one `backup.bat` of the current database so the old records stay retrievable.
+The expand-only rules (§2 invariant 9) still govern every release from v0.6.0 on.
 
 ### Deliberately not done (decision or follow-up needed)
 - **R-20** loan balance is still a stored counter; loan write-offs share 6080 with trade bad debts.
@@ -656,10 +663,10 @@ contractions (REVERSED enum value, `cash_flow_section`, `other_deductions_pkr`, 
   button ignores the facility rule. **R-40** not started.
 - **R-23** credit-note row lock is untested defence: the race test passes with the lock removed (`app.inject`
   serialises the two requests).
-- **Unclassified statement bucket kept** until check C10b runs on client data.
-- **Payroll reverse after a write-off** restores the recovered amount onto a WRITTEN_OFF advance (GL 1230 still ties
-  to the register, but nothing can recover or write off that balance). Needs an owner decision: refuse the reversal, or
-  reopen with a second write-off link (the schema has one `write_off_journal_entry_id`).
+- **Unclassified statement bucket kept.** With a fresh install no legacy unsectioned header exists and the chart
+  rules now require a section on every non-equity header, so the bucket can be removed with the Release 2 contractions.
+- **Payroll reverse after a write-off — decided (owner, 2026-10-04): refused** (#34). Reversing restored the recovered
+  amount onto a WRITTEN_OFF advance that nothing could recover or write off again.
 - **Seed** does not flag 3020 and some other registry accounts `is_system_account`; the chart service guards by the
   registry instead.
 - **Waiting on owner decisions**: R-14 (ownership-transfer billing intent), R-31 (provincial sales tax), R-32 (1240
