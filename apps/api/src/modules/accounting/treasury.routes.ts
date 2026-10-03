@@ -12,18 +12,23 @@ import { CashTransferService } from './cash-transfer.service';
 import { JournalEntryService } from './journal-entry.service';
 import { PeriodLockService } from './period-lock.service';
 import { WithholdingRemittanceService } from './withholding-remittance.service';
+import { payablesRoutes } from '../payables/payables.routes';
 
 const IdParam = z.object({ id: z.string().uuid() });
 
 /**
- * Money leaving or moving between the facility's own accounts: withholding tax
- * paid over and cash/bank transfers (docs/25 Stream C-b).
+ * Money leaving or moving between the facility's own accounts: supplier bills and
+ * payments, statutory remittances and cash/bank transfers (docs/25 Stream C-b).
+ * Payables live in their own module and are registered from here, so the module
+ * needs no line of its own in app.ts and the test app.
  */
 export async function treasuryRoutes(app: FastifyInstance) {
   const periodLock = new PeriodLockService(app.prisma);
   const journalEntry = new JournalEntryService(app.prisma, periodLock);
   const withholdingRemittance = new WithholdingRemittanceService(app.prisma, journalEntry);
   const cashTransfers = new CashTransferService(app.prisma, journalEntry);
+
+  await payablesRoutes(app, journalEntry);
 
   // ==========================================================
   // WITHHOLDING TAX REMITTANCE (JE-29)
