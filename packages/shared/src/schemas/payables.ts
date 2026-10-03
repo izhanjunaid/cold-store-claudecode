@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { BookType, PaymentMethod } from './enums';
-import { WithholdingSection } from './expenses';
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 
@@ -31,6 +30,10 @@ export type CashTransferActionType = z.infer<typeof CashTransferAction>;
 // ============================================================
 // Bills and supplier payments (docs/25 Q3 — full payables)
 // ============================================================
+
+/** Sections tax is withheld from a supplier under: s.153 goods/services, s.155 rent. */
+export const WithholdingSection = z.enum(['S153', 'S155']);
+export type WithholdingSectionType = z.infer<typeof WithholdingSection>;
 
 /** A cost line on a bill. The account is checked against the chart server-side (C-05). */
 export const BillLineInput = z.object({

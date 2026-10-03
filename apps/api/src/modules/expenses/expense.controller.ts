@@ -1,148 +1,79 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import {
-  CreateExpenseVoucherRequest,
-  UpdateExpenseVoucherRequest,
-  PayExpenseRequest,
-  PettyCashReplenishRequest,
-  ExpenseVoucherListQuery,
-  CancelExpenseRequest,
-} from '@coldchain/shared';
+import { CancelExpenseRequest, ConvertExpenseVoucherRequest, ExpenseVoucherListQuery } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { assertKatchiWriteAllowed } from '../accounting/book-gate';
-import { Errors } from '../../common/errors';
+import { AppError } from '../../common/errors';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 import { ExpenseService } from './expense.service';
 
 const IdParam = z.object({ id: z.string().uuid() });
 
+/**
+ * Legacy expense vouchers (docs/25 C-03): read, cancel, convert to a bill. Costs are
+ * recorded as supplier bills; creating a voucher is refused with a pointer there.
+ */
 export async function expenseRoutes(app: FastifyInstance) {
   const periodLock = new PeriodLockService(app.prisma);
   const journalEntry = new JournalEntryService(app.prisma, periodLock);
   const service = new ExpenseService(app.prisma, journalEntry);
 
-  app.route({
-    method: 'GET',
-    url: '/v1/expense-vouchers',
-    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
-    schema: { querystring: ExpenseVoucherListQuery },
-    handler: async (request, reply) => {
+  app.get(
+    '/v1/expense-vouchers',
+    { preHandler: [app.authenticate, app.requirePermission('expenses.record')], schema: { querystring: ExpenseVoucherListQuery } },
+    async (request, reply) => {
       const q = request.query as z.infer<typeof ExpenseVoucherListQuery>;
-      const data = await service.list(request.user!.facilityId, { ...q, pageSize: q.page_size });
+      const data = await service.list(request.user!.facilityId, q);
       return sendSuccess(reply, data.data, data.meta);
     },
+  );
+
+  app.post('/v1/expense-vouchers', { preHandler: [app.authenticate, app.requirePermission('expenses.record')] }, async () => {
+    throw new AppError(
+      'EXPENSE_VOUCHERS_RETIRED',
+      'Expense vouchers are retired. Record the cost as a supplier bill (Payables → Bills).',
+      410,
+    );
   });
 
-  app.route({
-    method: 'POST',
-    url: '/v1/expense-vouchers',
-    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
-    schema: { body: CreateExpenseVoucherRequest },
-    handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof CreateExpenseVoucherRequest>;
-      assertKatchiWriteAllowed(request.user!.role, body.book_type);
-      const data = await service.create(request.user!.facilityId, request.user!.userId, body);
-      return sendSuccess(reply.status(201), data);
-    },
-  });
-
-  // Petty-cash replenish must come BEFORE the :id routes so it isn't shadowed.
-  app.route({
-    method: 'POST',
-    url: '/v1/expense-vouchers/petty-cash-replenish',
-    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
-    schema: { body: PettyCashReplenishRequest },
-    handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof PettyCashReplenishRequest>;
-      assertKatchiWriteAllowed(request.user!.role, body.book_type);
-      const data = await service.pettyCashReplenish(request.user!.facilityId, request.user!.userId, body);
-      return sendSuccess(reply.status(201), data);
-    },
-  });
-
-  app.route({
-    method: 'GET',
-    url: '/v1/expense-vouchers/:id',
-    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
-    schema: { params: IdParam },
-    handler: async (request, reply) => {
+  app.get(
+    '/v1/expense-vouchers/:id',
+    { preHandler: [app.authenticate, app.requirePermission('expenses.record')], schema: { params: IdParam } },
+    async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
-      const data = await service.getById(request.user!.facilityId, id);
+      return sendSuccess(reply, await service.getById(request.user!.facilityId, id));
+    },
+  );
+
+  app.post(
+    '/v1/expense-vouchers/:id/cancel',
+    {
+      preHandler: [app.authenticate, app.requirePermission('expenses.approve')],
+      schema: { params: IdParam, body: CancelExpenseRequest },
+    },
+    async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      return sendSuccess(reply, await service.cancel(request.user!.facilityId, request.user!.role, id));
+    },
+  );
+
+  app.post(
+    '/v1/expense-vouchers/:id/convert-to-bill',
+    {
+      preHandler: [app.authenticate, app.requirePermission('expenses.approve')],
+      schema: { params: IdParam, body: ConvertExpenseVoucherRequest },
+    },
+    async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const u = request.user!;
+      const data = await service.convertToBill(
+        u.facilityId,
+        u.userId,
+        u.role,
+        id,
+        request.body as z.infer<typeof ConvertExpenseVoucherRequest>,
+      );
       return sendSuccess(reply, data);
     },
-  });
-
-  app.route({
-    method: 'PATCH',
-    url: '/v1/expense-vouchers/:id',
-    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
-    schema: { params: IdParam, body: UpdateExpenseVoucherRequest },
-    handler: async (request, reply) => {
-      const { id } = request.params as z.infer<typeof IdParam>;
-      const body = request.body as z.infer<typeof UpdateExpenseVoucherRequest>;
-      const existing = await service.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.update(request.user!.facilityId, id, body);
-      return sendSuccess(reply, data);
-    },
-  });
-
-  app.route({
-    method: 'POST',
-    url: '/v1/expense-vouchers/:id/approve',
-    preHandler: [app.authenticate, app.requirePermission('expenses.approve')],
-    schema: { params: IdParam },
-    handler: async (request, reply) => {
-      const { id } = request.params as z.infer<typeof IdParam>;
-      const existing = await service.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.approve(request.user!.facilityId, request.user!.userId, id);
-      return sendSuccess(reply, data);
-    },
-  });
-
-  app.route({
-    method: 'POST',
-    url: '/v1/expense-vouchers/:id/accrue',
-    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
-    schema: { params: IdParam },
-    handler: async (request, reply) => {
-      const { id } = request.params as z.infer<typeof IdParam>;
-      const existing = await service.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.accrue(request.user!.facilityId, request.user!.userId, id);
-      return sendSuccess(reply.status(201), data);
-    },
-  });
-
-  app.route({
-    method: 'POST',
-    url: '/v1/expense-vouchers/:id/pay',
-    preHandler: [app.authenticate, app.requirePermission('expenses.record')],
-    schema: { params: IdParam, body: PayExpenseRequest },
-    handler: async (request, reply) => {
-      const { id } = request.params as z.infer<typeof IdParam>;
-      const body = request.body as z.infer<typeof PayExpenseRequest>;
-      const existing = await service.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.pay(request.user!.facilityId, request.user!.userId, id, body);
-      return sendSuccess(reply.status(201), data);
-    },
-  });
-
-  app.route({
-    method: 'POST',
-    url: '/v1/expense-vouchers/:id/cancel',
-    preHandler: [app.authenticate, app.requirePermission('expenses.approve')],
-    schema: { params: IdParam, body: CancelExpenseRequest },
-    handler: async (request, reply) => {
-      const { id } = request.params as z.infer<typeof IdParam>;
-      const body = request.body as z.infer<typeof CancelExpenseRequest>;
-      const existing = await service.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await service.cancel(request.user!.facilityId, id, body.reason);
-      return sendSuccess(reply, data);
-    },
-  });
+  );
 }

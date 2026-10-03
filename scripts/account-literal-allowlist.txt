@@ -1,5 +1,1 @@
 # Files still holding account-code literals. Remove a line when you remove its literals.
-apps/api/src/modules/expenses/templates/je-17b-expense-accrued.ts
-apps/api/src/modules/expenses/templates/je-17b-pay-accrued-payment.ts
-apps/api/src/modules/expenses/templates/je-17c-petty-cash-replenish.ts
-apps/api/src/modules/expenses/templates/withholding.ts

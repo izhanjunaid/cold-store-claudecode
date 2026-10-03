@@ -172,6 +172,13 @@ export class BillService {
       const bill = await tx.bill.findFirstOrThrow({ where: { id, facilityId }, include: { allocations: true } });
       assertKatchiWriteAllowed(role, bill.bookType);
       if (bill.status !== 'POSTED') throw PayablesErrors.BILL_INVALID_STATUS(`A ${bill.status} bill cannot be voided`);
+      // Its entry only moved an accrued voucher's liability; reversing it would hand the
+      // liability back to a voucher that can no longer be paid (C-03).
+      if (bill.legacyExpenseVoucherId) {
+        throw PayablesErrors.BILL_INVALID_STATUS(
+          'A bill converted from an expense voucher cannot be voided; correct the supplier account with a journal entry',
+        );
+      }
       if (bill.allocations.some((a) => !a.voidedAt)) throw PayablesErrors.BILL_HAS_PAYMENTS();
       if (!bill.journalEntryId) throw new Error(`Bill ${id} has no journal entry`);
 
@@ -266,7 +273,10 @@ function allowedActions(b: Row, paid: number, open: number): BillActionType[] {
     case 'DRAFT':
       return ['edit', 'delete', 'post'];
     case 'POSTED':
-      return [...(open > MONEY_EPSILON ? (['pay'] as const) : []), ...(paid > MONEY_EPSILON ? [] : (['void'] as const))];
+      return [
+        ...(open > MONEY_EPSILON ? (['pay'] as const) : []),
+        ...(paid > MONEY_EPSILON || b.legacyExpenseVoucherId ? [] : (['void'] as const)),
+      ];
     default:
       return [];
   }

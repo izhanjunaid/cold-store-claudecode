@@ -2,9 +2,7 @@
  * docs/25 C-05 / C-06 / C-07 — "which account may this money come from / go to" is
  * read off the chart, server-side, never from a code list or a browser-only rule.
  *
- * - A cost is booked to an active DETAIL account of class EXPENSE / COST_OF_SERVICE
- *   that a person may post to (allow_manual_posting). Headers, payroll / depreciation
- *   / bad-debt accounts are refused; spoilage 6150 (which nothing posts) is allowed.
+ * - (The expense-account rule, C-05, is proven on bill lines in payables.integration.test.ts.)
  * - Money leaves from (or arrives in) an active DETAIL cash equivalent. An owner's
  *   second bank account works; cheques in hand (1025) never does.
  * - An asset may also be funded by a non-current liability (an equipment loan).
@@ -25,7 +23,6 @@ let ownerToken: string;
 let managerToken: string;
 let accountantToken: string;
 
-const voucherIds: string[] = [];
 const assetIds: string[] = [];
 const runIds: string[] = [];
 const employeeIds: string[] = [];
@@ -54,16 +51,10 @@ beforeAll(async () => {
 afterAll(async () => {
   await withGuardsDisabled(prisma, async () => {
     const sources = [
-      { sourceTable: 'expense_vouchers', sourceId: { in: voucherIds } },
       { sourceTable: 'fixed_assets', sourceId: { in: assetIds } },
       { sourceTable: 'payroll_runs', sourceId: { in: runIds } },
     ];
     const scope = { facilityId: TEST_FACILITY_ID, OR: sources };
-    await prisma.expenseVoucher.updateMany({
-      where: { id: { in: voucherIds } },
-      data: { accrualJournalEntryId: null, paymentJournalEntryId: null },
-    });
-    await prisma.expenseVoucher.deleteMany({ where: { id: { in: voucherIds } } });
     await prisma.depreciationSchedule.deleteMany({ where: { fixedAssetId: { in: assetIds } } });
     await prisma.fixedAsset.updateMany({
       where: { id: { in: assetIds } },
@@ -91,60 +82,7 @@ const post = (url: string, token: string, payload: Record<string, unknown>) =>
 
 const errorOf = (res: { body: string }) => JSON.parse(res.body).error as { code: string; message: string };
 
-describe('C-05 — the expense-account rule is the chart’s, enforced by the server', () => {
-  it('refuses a header, a payroll cost, bad debts and depreciation; accepts spoilage', async () => {
-    for (const code of ['6000', '6010', '6080', '6120', '6110']) {
-      const res = await post('/v1/expense-vouchers', accountantToken, {
-        voucher_date: '2037-01-10',
-        expense_account_code: code,
-        description: `C-05 refuse ${code}`,
-        amount_pkr: 100,
-      });
-      if (res.statusCode === 201) voucherIds.push(JSON.parse(res.body).data.id);
-      expect(res.statusCode, `account ${code}`).toBe(400);
-      expect(errorOf(res).message).toContain(code);
-    }
-
-    const ok = await post('/v1/expense-vouchers', accountantToken, {
-      voucher_date: '2037-01-10',
-      expense_account_code: '6150',
-      description: 'C-05 spoilage compensation',
-      amount_pkr: 100,
-    });
-    expect(ok.statusCode, ok.body).toBe(201);
-    voucherIds.push(JSON.parse(ok.body).data.id);
-  });
-});
-
 describe('C-06 / C-07 — money moves through cash equivalents only', () => {
-  it('an expense is never paid out of cheques in hand; an owner-added bank works', async () => {
-    const created = await post('/v1/expense-vouchers', accountantToken, {
-      voucher_date: '2037-01-12',
-      expense_account_code: '6030',
-      description: 'C-06 repairs',
-      amount_pkr: 900,
-    });
-    expect(created.statusCode, created.body).toBe(201);
-    const voucher = JSON.parse(created.body).data;
-    voucherIds.push(voucher.id);
-    expect((await post(`/v1/expense-vouchers/${voucher.id}/approve`, managerToken, {})).statusCode).toBe(200);
-
-    const bad = await post(`/v1/expense-vouchers/${voucher.id}/pay`, accountantToken, {
-      payment_date: '2037-01-13',
-      payment_method: 'CHEQUE',
-      asset_account_code: '1025',
-    });
-    expect(bad.statusCode, bad.body).toBe(422);
-    expect(errorOf(bad).code).toBe('NOT_A_CASH_ACCOUNT');
-
-    const ok = await post(`/v1/expense-vouchers/${voucher.id}/pay`, accountantToken, {
-      payment_date: '2037-01-13',
-      payment_method: 'BANK_TRANSFER',
-      asset_account_code: OWN_BANK,
-    });
-    expect(ok.statusCode, ok.body).toBe(201);
-  });
-
   it('salaries are never paid out of cheques in hand; an owner-added bank works', async () => {
     const emp = await post('/v1/employees', ownerToken, {
       name: `C06-Sal-${Date.now()}`,

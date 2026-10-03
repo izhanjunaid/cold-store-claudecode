@@ -266,8 +266,10 @@ describe('the withholding statement reads supplier payments and remittances', ()
     expect(row).toMatchObject({ rate_pct: 4 });
     expect(row.counterparty).toMatch(/^TR Supplier/);
     expect(s153.remittances.map((r: { challan_number: string }) => r.challan_number)).toContain('CPR-2039-0001');
+    // Every section closes, and its rows add up to what it says was withheld.
     for (const s of report.sections) {
       expect(s.closing_balance_pkr).toBeCloseTo(s.opening_balance_pkr + s.withheld_pkr - s.remitted_pkr, 2);
+      expect(s.rows.reduce((t: number, r: { withheld_pkr: number }) => t + r.withheld_pkr, 0)).toBeCloseTo(s.withheld_pkr, 2);
     }
   });
 });

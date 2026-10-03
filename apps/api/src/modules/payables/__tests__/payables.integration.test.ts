@@ -157,13 +157,17 @@ describe('C-01 / C-02 — a bill posts at its own date to the supplier’s accou
     expect(byAccount['2050']!.partyId).toBe(supplier);
   });
 
+  // C-05: a header, payroll, bad debts, depreciation and disposal are each moved by their
+  // own flow (or never postable); spoilage 6150, which nothing posts, is a bookable cost.
   it('refuses a line on an account a person may not book a cost to', async () => {
     const supplier = await party('AP Supplier Bad Line');
-    for (const code of ['6010', '6000', '1010']) {
+    for (const code of ['6000', '6010', '6080', '6120', '6110', '1010']) {
       const res = await draftBill(supplier, { lines: [{ expense_account_code: code, description: 'x', amount_pkr: 10 }] });
       expect(res.statusCode, code).toBe(400);
       expect(errorOf(res).message).toContain(code);
     }
+    const spoilage = await draftBill(supplier, { lines: [{ expense_account_code: '6150', description: 'claim', amount_pkr: 10 }] });
+    expect(spoilage.statusCode, spoilage.body).toBe(201);
   });
 
   it('refuses a customer as the supplier', async () => {
