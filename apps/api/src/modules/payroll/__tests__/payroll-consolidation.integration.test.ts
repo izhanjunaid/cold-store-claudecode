@@ -597,4 +597,29 @@ describe('C-15 — reversing a run undoes the accrual; voiding a payment is its 
     expect(await prisma.employeeAdvance.count({ where: { employeeId: emp.id, status: 'ACTIVE' } })).toBe(1);
     expect((await prisma.payrollRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe('FINALIZED');
   });
+
+  // Owner decision (2026-10-04): once a recovered advance has been written off, the
+  // run that recovered from it cannot be reversed — restoring the amount onto a
+  // written-off advance left a balance nothing could recover or write off.
+  it('refuses to reverse a run whose recovered advance was later written off', async () => {
+    const emp = await salaried(40000);
+    const advance = await issueAdvance(emp.id, 6000, 2000, '2031-04-10');
+    const run = await draft(2031, 5);
+    expect((await finalize(run.id)).statusCode).toBe(200);
+    const wo = await app.inject({
+      method: 'POST',
+      url: `/v1/employee-advances/${advance.id}/write-off`,
+      headers: authHeaders(ownerToken),
+      payload: { reason: 'Employee left', write_off_date: '2031-06-02' },
+    });
+    expect(wo.statusCode, wo.body).toBe(200);
+
+    const res = await reverse(run.id, { reason: 'posted in error', reversal_date: '2031-06-05' });
+    expect(res.statusCode, res.body).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('PAYROLL_RUN_NOT_REVERSIBLE');
+    const after = await prisma.employeeAdvance.findUniqueOrThrow({ where: { id: advance.id } });
+    expect(after.status).toBe('WRITTEN_OFF');
+    expect(Number(after.balanceOutstandingPkr)).toBe(0);
+    expect((await prisma.payrollRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe('FINALIZED');
+  });
 });

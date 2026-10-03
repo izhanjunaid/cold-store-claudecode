@@ -1001,7 +1001,9 @@ describe('Phase 8B — Payroll', () => {
     expect(JSON.parse(replacement.body).data.line_items[0].advance_recovery_pkr).toBe(5000);
   });
 
-  it('a WRITTEN_OFF advance is not resurrected by reversing the run that recovered part of it', async () => {
+  // Owner decision (docs/25 §10, 2026-10-04): the reversal is refused outright —
+  // allowing it left the restored amount on a written-off advance nothing could clear.
+  it('a run that recovered from an advance later written off cannot be reversed', async () => {
     await cleanup();
     const empId = await createSalaried(`Adv-WriteOffReverse-${Date.now()}`, 50000);
     const advance = await issueAdvance(empId, 8000, 3000, '2026-06-01');
@@ -1042,11 +1044,13 @@ describe('Phase 8B — Payroll', () => {
       headers: authHeaders(ownerToken),
       payload: { reason: 'Correcting after the fact' },
     });
-    expect(rev.statusCode).toBe(200);
+    expect(rev.statusCode).toBe(409);
+    expect(JSON.parse(rev.body).error.code).toBe('PAYROLL_RUN_NOT_REVERSIBLE');
 
-    // The reversal must not undo an OWNER's separate write-off decision.
+    // The OWNER's separate write-off decision stands untouched.
     const after = await prisma.employeeAdvance.findUnique({ where: { id: advance.id } });
     expect(after!.status).toBe('WRITTEN_OFF');
+    expect(Number(after!.balanceOutstandingPkr)).toBe(0);
   });
 
   // Invariant 11: whatever else changes, a run that reached FINALIZED must have a
