@@ -133,7 +133,6 @@ export default function PayrollRunDetailPage() {
   const id = params['id'] as string;
   const { user } = useAuthStore();
   const canFinalize = can(user, 'payroll.finalize');
-  const canRemit = can(user, 'payroll.remit');
   const canViewSlips = can(user, 'payroll.view');
   const canDraft = can(user, 'payroll.draft');
   const canReverse = can(user, 'payroll.reverse');
@@ -142,14 +141,11 @@ export default function PayrollRunDetailPage() {
   const [run, setRun] = useState<PayrollRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPay, setShowPay] = useState(false);
-  const [showRemit, setShowRemit] = useState(false);
   const [showReverse, setShowReverse] = useState(false);
   const [showVoidPayment, setShowVoidPayment] = useState(false);
   const [paymentDate, setPaymentDate] = useState(localIsoDate());
-  const [remitDate, setRemitDate] = useState(localIsoDate());
   const [payFrom, setPayFrom] = useState(DEFAULT_BANK_ACCOUNT_CODE);
-  const [remitFrom, setRemitFrom] = useState(DEFAULT_BANK_ACCOUNT_CODE);
-  // Salaries and statutory remittances come out of cash or a bank account — the
+  // Salaries come out of cash or a bank account — the
   // chart's own cash-equivalent flag, so an owner's second bank account appears.
   const { data: accounts = [] } = useAccounts();
   const cashAccounts = accounts.filter((a) => a.is_cash_equivalent);
@@ -252,8 +248,6 @@ export default function PayrollRunDetailPage() {
   const isDailyWage = run.payroll_type === 'DAILY_WAGES';
   // The same rule the server applies — one net and total formula (docs/25 C-23).
   const totals = payrollRunTotals(draftLines);
-  const withheldEmployeeEobi = payrollRunTotals(run.line_items).employeeEobi;
-  const withheldTax = payrollRunTotals(run.line_items).incomeTax;
 
   const lineColumns: EditableRowColumn<LineItem>[] = [
     { key: 'employee', header: 'Employee', width: '2fr', render: (row) => <span className="font-medium">{row.employee_name}</span> },
@@ -341,9 +335,6 @@ export default function PayrollRunDetailPage() {
               </Button>
             )}
             {allows('pay') && canFinalize && <Button onClick={() => setShowPay(true)} disabled={busy}>Pay salaries</Button>}
-            {allows('remit') && canRemit && (
-              <Button variant="outline" onClick={() => setShowRemit(true)} disabled={busy}>Remit EOBI / tax</Button>
-            )}
             {allows('void_payment') && canReverse && (
               <Button variant="outline" className="text-destructive" onClick={() => openReason(setShowVoidPayment)} disabled={busy}>
                 Void payment…
@@ -488,49 +479,6 @@ export default function PayrollRunDetailPage() {
               onClick={() => act('pay', { payment_date: paymentDate, from_asset_account_code: payFrom }, 'Salaries paid', () => setShowPay(false))}
             >
               Pay
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showRemit} onOpenChange={setShowRemit}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Remit EOBI / Tax</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Pays the EOBI contributions and income tax this run withheld to the government and clears the amounts owed.
-          </p>
-          <div className="space-y-1.5">
-            <Label>Remittance Date</Label>
-            <Input type="date" value={remitDate} onChange={(e) => setRemitDate(e.target.value)} className="tabular-nums" />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Remit From</Label>
-            <select value={remitFrom} onChange={(e) => setRemitFrom(e.target.value)} className={SELECT_CLASS}>
-              {cashAccounts.map((a) => (
-                <option key={a.account_code} value={a.account_code}>{a.account_name}</option>
-              ))}
-            </select>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRemit(false)}>Cancel</Button>
-            <Button
-              disabled={busy}
-              onClick={() =>
-                act(
-                  'remit',
-                  {
-                    remittance_date: remitDate,
-                    from_asset_account_code: remitFrom,
-                    remit_employee_eobi_pkr: withheldEmployeeEobi,
-                    remit_employer_eobi_pkr: run.total_employer_eobi_pkr,
-                    remit_income_tax_pkr: withheldTax,
-                  },
-                  'EOBI / tax remitted',
-                  () => setShowRemit(false),
-                )
-              }
-            >
-              Remit
             </Button>
           </DialogFooter>
         </DialogContent>
