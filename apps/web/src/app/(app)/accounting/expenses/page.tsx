@@ -1,97 +1,81 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
-import { useAuthStore } from '@/stores/auth.store';
-import { can } from '@/lib/permissions';
-import { useAccounts, isExpenseAccount } from '@/hooks/use-reference-data';
+import { FileText, HandCoins, Landmark, Plus, Timer } from 'lucide-react';
+import { useCan } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Card } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState, type DataTableColumn } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
-import { ExpenseVoucherForm } from './expense-voucher-form';
-import { ExpenseVoucherEditDialog, ExpenseVoucherPayDialog } from './expense-voucher-dialogs';
-import { ExpenseVoucherRowActions } from './expense-voucher-row-actions';
+import { formatDate, formatMoney } from '@/lib/format';
+import { ConvertVoucherDialog, cancelVoucher, type LegacyVoucher } from './convert-voucher-dialog';
 
-import { formatDate } from '@/lib/format';
-interface ExpenseVoucher {
-  id: string;
-  voucher_number: string;
-  voucher_date: string;
-  expense_account_code: string;
-  description: string;
-  vendor_name: string | null;
-  reference_number: string | null;
-  amount_pkr: number;
-  is_accrual: boolean;
-  status: 'DRAFT' | 'APPROVED' | 'ACCRUED' | 'PAID' | 'CANCELLED';
-}
+const FILTER_KEYS = ['status', 'date_from', 'date_to'] as const;
 
-const FILTER_KEYS = ['status', 'expense_account_code', 'date_from', 'date_to'] as const;
+const LINKS = [
+  { href: '/accounting/payables/bills', icon: FileText, title: 'Bills', text: 'What suppliers billed — each a cost at its own date.' },
+  { href: '/accounting/payables/payments', icon: HandCoins, title: 'Supplier payments', text: 'Paying suppliers, with the tax withheld.' },
+  { href: '/accounting/payables/aging', icon: Timer, title: 'Payables aging', text: 'What is owed to whom, and how overdue.' },
+  { href: '/accounting/payables/tax-remittances', icon: Landmark, title: 'Tax & EOBI remittances', text: 'Paying over what was collected for the state.' },
+];
 
-export default function ExpenseVouchersPage() {
+/**
+ * Costs are recorded as supplier bills (docs/25 Q3). Expense vouchers are retired: the
+ * ones a facility already has stay listed here, and what can still happen to each —
+ * cancel, or convert an accrued one to a bill — comes from the API (C-11).
+ */
+export default function ExpensesPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { user } = useAuthStore();
-  const canAccess = !user || can(user, 'expenses.record');
-  const canCreate = can(user, 'expenses.record');
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  // Row actions (Approve/Accrue/Cancel fire directly; Edit/Pay open these) —
-  // most voucher work now happens without ever leaving this list. The
-  // detail page (JE links, a bookmarkable URL) is still there as a fallback,
-  // not the primary way to act on a voucher.
-  const [editTarget, setEditTarget] = useState<ExpenseVoucher | null>(null);
-  const [payTarget, setPayTarget] = useState<ExpenseVoucher | null>(null);
-
-  const { data: accounts = [] } = useAccounts();
-  const expenseAccounts = accounts.filter(isExpenseAccount);
+  const canRecord = useCan('expenses.record');
+  const canApprove = useCan('expenses.approve');
+  const [convertTarget, setConvertTarget] = useState<LegacyVoucher | null>(null);
 
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(FILTER_KEYS);
   const params = useMemo(() => ({ page: state.page, page_size: state.perPage, ...state.filters }), [state]);
-
-  const { data, isLoading, isError } = useListQuery<ExpenseVoucher>(
+  const { data, isLoading, isError } = useListQuery<LegacyVoucher>(
     qk.accounting.list('expense-vouchers', params),
     '/v1/expense-vouchers',
     params,
-    { enabled: canAccess },
+    { enabled: canRecord },
   );
+  const refresh = () => queryClient.invalidateQueries({ queryKey: qk.accounting.all });
 
-  const refreshList = () => queryClient.invalidateQueries({ queryKey: qk.accounting.all });
-
-  // Inline (not module-level, unlike every sibling list) — the actions
-  // column needs to open this page's Edit/Pay dialogs and trigger a refetch,
-  // which only exist once the page has rendered.
-  const columns: DataTableColumn<ExpenseVoucher>[] = [
-    { id: 'voucher_number', header: 'Voucher #', enableHiding: false, cell: (v) => <span className="font-mono text-primary-700">{v.voucher_number}</span>, csv: (v) => v.voucher_number },
+  const columns: DataTableColumn<LegacyVoucher>[] = [
+    { id: 'voucher_number', header: 'Voucher #', enableHiding: false, cell: (v) => <span className="font-mono">{v.voucher_number}</span>, csv: (v) => v.voucher_number },
     { id: 'date', header: 'Date', cell: (v) => formatDate(v.voucher_date), csv: (v) => v.voucher_date },
-    { id: 'account', header: 'Account', cell: (v) => <span className="font-mono">{v.expense_account_code}</span>, csv: (v) => v.expense_account_code },
     { id: 'description', header: 'Description', cell: (v) => v.description, csv: (v) => v.description },
     { id: 'vendor', header: 'Vendor', cell: (v) => v.vendor_name ?? '—', csv: (v) => v.vendor_name ?? '' },
-    { id: 'amount', header: 'Amount', numeric: true, cell: (v) => <span className="font-medium">{v.amount_pkr.toLocaleString()}</span>, csv: (v) => v.amount_pkr },
+    { id: 'amount', header: 'Amount', numeric: true, cell: (v) => formatMoney(v.amount_pkr), csv: (v) => v.amount_pkr },
     { id: 'status', header: 'Status', cell: (v) => <StatusBadge status={v.status} />, csv: (v) => v.status },
     {
-      id: 'actions', header: '', enableHiding: false,
-      cell: (v) => (
-        <ExpenseVoucherRowActions
-          voucher={v}
-          onEdit={() => setEditTarget(v)}
-          onPay={() => setPayTarget(v)}
-          onChanged={refreshList}
-        />
-      ),
+      id: 'actions',
+      header: '',
+      enableHiding: false,
+      cell: (v) =>
+        canApprove ? (
+          <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+            {v.allowed_actions.includes('convert_to_bill') && (
+              <Button size="sm" variant="outline" onClick={() => setConvertTarget(v)}>Convert to bill</Button>
+            )}
+            {v.allowed_actions.includes('cancel') && (
+              <Button size="sm" variant="outline" onClick={() => cancelVoucher(v, refresh)}>Cancel</Button>
+            )}
+          </div>
+        ) : null,
     },
   ];
 
-  if (!canAccess) {
+  if (!canRecord) {
     return (
       <div>
-        <PageHeader title="Expense Vouchers" />
+        <PageHeader title="Expenses & Payables" />
         <p className="text-muted-foreground">You don&apos;t have permission to view expenses.</p>
       </div>
     );
@@ -100,17 +84,37 @@ export default function ExpenseVouchersPage() {
   return (
     <div>
       <PageHeader
-        title="Expense Vouchers"
-        description="Operating expenses — record, approve, accrue and pay"
+        title="Expenses & Payables"
+        description="Costs are recorded as supplier bills and paid through supplier payments"
         actions={
-          canCreate && (
-            <Button onClick={() => setDrawerOpen(true)}>
+          <Button asChild>
+            <Link href="/accounting/payables/bills/new">
               <Plus className="h-4 w-4" aria-hidden />
-              New Voucher
-            </Button>
-          )
+              New bill
+            </Link>
+          </Button>
         }
       />
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {LINKS.map((l) => (
+          <Link key={l.href} href={l.href}>
+            <Card className="h-full p-3 transition-colors hover:bg-muted/50">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <l.icon className="h-4 w-4" aria-hidden />
+                {l.title}
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{l.text}</p>
+            </Card>
+          </Link>
+        ))}
+      </div>
+
+      <h2 className="text-sm font-semibold">Expense vouchers (before payables)</h2>
+      <p className="mb-2 text-xs text-muted-foreground">
+        Vouchers are no longer created. An accrued one is converted to a bill so it can be paid; one that posted
+        nothing can be cancelled.
+      </p>
       <DataTable
         columns={columns}
         data={data?.data ?? []}
@@ -130,51 +134,21 @@ export default function ExpenseVouchersPage() {
         onResetFilters={resetFilters}
         toolbar={{
           facets: [
-            { key: 'status', label: 'Status', options: ['DRAFT', 'APPROVED', 'ACCRUED', 'PAID', 'CANCELLED'].map((v) => ({ label: v[0] + v.slice(1).toLowerCase(), value: v })) },
-            { key: 'expense_account_code', label: 'Account', options: expenseAccounts.map((a) => ({ label: `${a.account_code} — ${a.account_name}`, value: a.account_code })) },
+            {
+              key: 'status',
+              label: 'Status',
+              options: ['DRAFT', 'APPROVED', 'ACCRUED', 'PAID', 'CANCELLED', 'CONVERTED'].map((v) => ({ label: v[0] + v.slice(1).toLowerCase(), value: v })),
+            },
           ],
-          extra: (
-            <div className="flex items-center gap-2">
-              <Input type="date" aria-label="From date" value={state.filters['date_from'] ?? ''} onChange={(e) => setFilter('date_from', e.target.value)} className="h-8 w-auto tabular-nums" />
-              <span className="text-muted-foreground">–</span>
-              <Input type="date" aria-label="To date" value={state.filters['date_to'] ?? ''} onChange={(e) => setFilter('date_to', e.target.value)} className="h-8 w-auto tabular-nums" />
-            </div>
-          ),
         }}
         csvFilename="expense-vouchers"
-        emptyState={{ title: 'No vouchers yet' }}
+        emptyState={{ title: 'No expense vouchers' }}
       />
 
-      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <SheetContent size="md">
-          <SheetHeader>
-            <SheetTitle>New Expense Voucher</SheetTitle>
-          </SheetHeader>
-          <SheetBody>
-            {drawerOpen && (
-              <ExpenseVoucherForm
-                onCreated={() => {
-                  setDrawerOpen(false);
-                  refreshList();
-                }}
-                onCancel={() => setDrawerOpen(false)}
-              />
-            )}
-          </SheetBody>
-        </SheetContent>
-      </Sheet>
-
-      <ExpenseVoucherEditDialog
-        voucher={editTarget}
-        open={editTarget !== null}
-        onOpenChange={(o) => !o && setEditTarget(null)}
-        onSaved={refreshList}
-      />
-      <ExpenseVoucherPayDialog
-        voucher={payTarget}
-        open={payTarget !== null}
-        onOpenChange={(o) => !o && setPayTarget(null)}
-        onPaid={refreshList}
+      <ConvertVoucherDialog
+        voucher={convertTarget}
+        onOpenChange={(o) => !o && setConvertTarget(null)}
+        onConverted={(billId) => router.push(`/accounting/payables/bills/${billId}`)}
       />
     </div>
   );
