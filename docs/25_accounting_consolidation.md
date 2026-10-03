@@ -632,3 +632,38 @@ utilities) → four parallel streams (R revenue & receivables, C-a existing cost
 treasury, E equity/statements/chart) → integrate, remediate, release v0.6.0 → Release 2
 contractions (REVERSED enum value, `cash_flow_section`, `other_deductions_pkr`, `is_accrual`,
 `control_account_code` NOT NULL).
+
+## 10. Status (updated as each PR merges)
+
+| PR | Scope | Merged |
+|---|---|---|
+| #26 | Kernel: all schema (0027–0031), registry, chart flags, one posting/reversal path, `ledger.ts`, shared fiscal/money/chart modules, numbering and row locks, literal gate | `7d2d950` |
+| #27 | Stream C-a: payroll (locks, void payment, one JE-15 builder, settings), fixed assets (per-asset catch-up, corrections, go-live register), employee advances (6190) | `de9ab8a` |
+| #28 | C-26: void an advance, cash repayment (JE-31, 0032/0033), `assertCashAccount`, advance issue from any cash account; permission wording; dead error codes; check C21 | `20d6d7a` |
+| #29 | Release blocker: `deploy_runs` (0034), version endpoint `last_update`, Software panel | `acbcacf` |
+| #30 | Payroll reverse cannot reopen an advance while another is active | `18e0abb` |
+| #31 | Stream R: receivables on the party's control account, receipts, dishonour by chain, credit notes, settlement, AR read model, surcharge invoices, accrual policy, billing rules, numbering | `5994ba4` |
+| #32 | R follow-ups: accrual start date (FY boundary, open period) settable in the app; suppliers off lots and transfers; KATCHI aging | `1b0f7e7` |
+| #33 | Stream E: statements on `ledger.ts`, cash flow by the chart, owner equity documents, chart rules in the API, opening balances (AP per supplier), shell (badge, closed-through, statement kit) | `554ced2` |
+| — | Stream C-b: payables, cash transfers, statutory remittance, expense paths retired | in progress |
+
+### Deliberately not done (decision or follow-up needed)
+- **R-20** loan balance is still a stored counter; loan write-offs share 6080 with trade bad debts.
+- **R-33 (rest)** GST "outstanding" not yet computed per period. **R-19 (rest)** combined settlement still records
+  `DEDUCTED_FROM_PRODUCE`; no combined-settlement screen. **R-13 (rest)** withholding allowed on a fully on-account
+  receipt (rule unspecified). **R-26 (rest)** no due date from credit terms; `cheque_date` unused; revenue account not
+  editable on rate-plan/service-charge pages. **R-38** done for allocate/dishonour/clear only. **R-37 (rest)** surcharge
+  button ignores the facility rule. **R-40** not started.
+- **R-23** credit-note row lock is untested defence: the race test passes with the lock removed (`app.inject`
+  serialises the two requests).
+- **Unclassified statement bucket kept** until check C10b runs on client data.
+- **Payroll reverse after a write-off** restores the recovered amount onto a WRITTEN_OFF advance (GL 1230 still ties
+  to the register, but nothing can recover or write off that balance). Needs an owner decision: refuse the reversal, or
+  reopen with a second write-off link (the schema has one `write_off_journal_entry_id`).
+- **Seed** does not flag 3020 and some other registry accounts `is_system_account`; the chart service guards by the
+  registry instead.
+- **Waiting on owner decisions**: R-14 (ownership-transfer billing intent), R-31 (provincial sales tax), R-32 (1240
+  certificate tracking), R-41 (bad-debt allowance), C-20 (gratuity/leave/SESSI), C-35 (WDV convention), year-end profit
+  appropriation.
+- **Month close posts the accrual under `accounting.period_lock`**, not `post_journal` — kept: the entries are
+  system-built from the month's own data and a close without them would be the error.
