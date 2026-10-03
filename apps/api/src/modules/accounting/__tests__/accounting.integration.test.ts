@@ -653,10 +653,14 @@ describe('Phase 8 — Trial balance & financial statements', () => {
     expect(body.gross_profit_pkr).toBeCloseTo(body.net_revenue_pkr - body.total_cost_of_service_pkr);
     // Operating profit = gross profit − operating expenses
     expect(body.operating_profit_pkr).toBeCloseTo(body.gross_profit_pkr - body.total_operating_expense_pkr);
-    // Net profit = operating profit + other income
-    expect(body.net_profit_pkr).toBeCloseTo(body.operating_profit_pkr + body.total_other_income_pkr);
-    // EBITDA = operating profit + D&A
-    expect(body.ebitda_pkr).toBeCloseTo(body.operating_profit_pkr + body.depreciation_amortisation_pkr);
+    // Net profit = operating profit + other income − other expense
+    expect(body.net_profit_pkr).toBeCloseTo(
+      body.operating_profit_pkr + body.total_other_income_pkr - body.total_other_expense_pkr,
+    );
+    // EBITDA = operating profit + D&A + impairment (L-21)
+    expect(body.ebitda_pkr).toBeCloseTo(
+      body.operating_profit_pkr + body.depreciation_amortisation_pkr + body.impairment_pkr,
+    );
   });
 
   it('P&L net profit equals balance-sheet current-year P&L over the fiscal-year window', async () => {

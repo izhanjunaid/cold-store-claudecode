@@ -27,9 +27,10 @@ import type { FastifyInstance } from 'fastify';
 
 const prisma = new PrismaClient();
 
-// Codes this file mints, in the unassigned 8xxx range so they collide with
-// nothing seeded and nothing another test file uses.
-const OWNED_CODES = ['8110', '8120', '8130', '8140', '8150', '8160', '8170'];
+// Codes this file mints — each inside its class's range (the prefix is required,
+// docs/25 L-31) but clear of everything seeded and every other test file.
+const OWNED_CODES = ['6800', '3800', '6810', '1291', '1292', '1293', '1294', '1295', '4310', '6820', '7050', '0150', '6850'];
+let partnerId: string | null = null;
 
 let app: FastifyInstance;
 let ownerToken: string;
@@ -66,7 +67,17 @@ async function cleanup() {
       await prisma.journalEntry.deleteMany({ where: { id: { in: jeIds } } });
     });
   }
-  // Children before parents — 8130 sits under 8110.
+  await prisma.ratePlan.deleteMany({ where: { facilityId: TEST_FACILITY_ID, name: 'coa-guardrails plan' } });
+  if (partnerId) {
+    const p = await prisma.partner.findUnique({ where: { id: partnerId } });
+    if (p) {
+      await prisma.partner.delete({ where: { id: partnerId } });
+      await prisma.chartOfAccounts.deleteMany({
+        where: { facilityId: TEST_FACILITY_ID, accountCode: { in: [p.capitalAccountCode, p.drawingsAccountCode] } },
+      });
+    }
+  }
+  // Children before parents — 6810 sits under 6800.
   await prisma.chartOfAccounts.deleteMany({
     where: { facilityId: TEST_FACILITY_ID, accountCode: { in: OWNED_CODES }, accountType: 'DETAIL' },
   });
@@ -94,19 +105,19 @@ afterAll(async () => {
 describe('a non-equity HEADER must declare its statement section', () => {
   it('rejects a header with no section, and creates nothing', async () => {
     const res = await post({
-      account_code: '8110',
+      account_code: '6800',
       account_name: 'Unsectioned Header (rejected)',
       account_class: 'EXPENSE',
       account_type: 'HEADER',
     });
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
-    expect(await exists('8110')).toBe(false);
+    expect(await exists('6800')).toBe(false);
   });
 
   it('accepts the same header once the section is given', async () => {
     const res = await post({
-      account_code: '8110',
+      account_code: '6800',
       account_name: 'Sectioned Header',
       account_class: 'EXPENSE',
       account_type: 'HEADER',
@@ -116,9 +127,23 @@ describe('a non-equity HEADER must declare its statement section', () => {
     expect(JSON.parse(res.body).data.statement_section).toBe('OPERATING_EXPENSE');
   });
 
+  // The chart page offers "Non-Operating Expenses" (the database enum has it since
+  // phase 25); the shared request schema had dropped it, so the API refused it.
+  it('accepts a Non-Operating (OTHER_EXPENSE) expense header', async () => {
+    const res = await post({
+      account_code: '6850',
+      account_name: 'Non-Operating Header',
+      account_class: 'EXPENSE',
+      account_type: 'HEADER',
+      statement_section: 'OTHER_EXPENSE',
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(JSON.parse(res.body).data.statement_section).toBe('OTHER_EXPENSE');
+  });
+
   it('still accepts an EQUITY header without one — equity aggregates by class, not by header', async () => {
     const res = await post({
-      account_code: '8120',
+      account_code: '3800',
       account_name: 'Equity Grouping Header',
       account_class: 'EQUITY',
       account_type: 'HEADER',
@@ -129,11 +154,11 @@ describe('a non-equity HEADER must declare its statement section', () => {
 
   it('leaves DETAIL accounts unaffected — they inherit placement from their parent', async () => {
     const res = await post({
-      account_code: '8130',
+      account_code: '6810',
       account_name: 'Detail Under Sectioned Header',
       account_class: 'EXPENSE',
       account_type: 'DETAIL',
-      parent_account_code: '8110',
+      parent_account_code: '6800',
     });
     expect(res.statusCode).toBe(201);
   });
@@ -146,7 +171,7 @@ describe('a non-equity HEADER must declare its statement section', () => {
 describe('normal_balance derives from the account class', () => {
   it('derives DEBIT for an asset when the caller omits it', async () => {
     const res = await post({
-      account_code: '8140',
+      account_code: '1291',
       account_name: 'Derived Debit Asset',
       account_class: 'ASSET',
       account_type: 'DETAIL',
@@ -158,7 +183,7 @@ describe('normal_balance derives from the account class', () => {
 
   it('rejects an asset declared CREDIT without is_contra, and creates nothing', async () => {
     const res = await post({
-      account_code: '8150',
+      account_code: '1292',
       account_name: 'Undeclared Contra (rejected)',
       account_class: 'ASSET',
       account_type: 'DETAIL',
@@ -167,12 +192,12 @@ describe('normal_balance derives from the account class', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
-    expect(await exists('8150')).toBe(false);
+    expect(await exists('1292')).toBe(false);
   });
 
   it('accepts the same account once is_contra declares the inversion', async () => {
     const res = await post({
-      account_code: '8150',
+      account_code: '1292',
       account_name: 'Accumulated Something — contra asset',
       account_class: 'ASSET',
       account_type: 'DETAIL',
@@ -186,7 +211,7 @@ describe('normal_balance derives from the account class', () => {
 
   it('does not require is_contra when the declared balance already matches the class', async () => {
     const res = await post({
-      account_code: '8160',
+      account_code: '1293',
       account_name: 'Explicit But Matching',
       account_class: 'ASSET',
       account_type: 'DETAIL',
@@ -211,7 +236,7 @@ describe('an untouched account can be deleted outright', () => {
 
   it('deletes an account with no postings, no children and nothing configured to use it', async () => {
     const created = await post({
-      account_code: '8170',
+      account_code: '1294',
       account_name: 'Mistyped, Deleted Immediately',
       account_class: 'ASSET',
       account_type: 'DETAIL',
@@ -219,16 +244,16 @@ describe('an untouched account can be deleted outright', () => {
     });
     expect(created.statusCode).toBe(201);
 
-    expect((await del('8170')).statusCode).toBe(200);
-    expect(await exists('8170')).toBe(false);
+    expect((await del('1294')).statusCode).toBe(200);
+    expect(await exists('1294')).toBe(false);
   });
 
   it('refuses a header that still has children', async () => {
-    // 8130 sits under 8110.
-    const res = await del('8110');
+    // 6810 sits under 6800.
+    const res = await del('6800');
     expect(res.statusCode).toBe(409);
     expect(JSON.parse(res.body).error.code).toBe('ACCOUNT_IN_USE');
-    expect(await exists('8110')).toBe(true);
+    expect(await exists('6800')).toBe(true);
   });
 
   it('refuses an account carrying a journal posting — history must survive', async () => {
@@ -238,22 +263,22 @@ describe('an untouched account can be deleted outright', () => {
       headers: authHeaders(ownerToken),
       payload: {
         entry_date: new Date().toISOString().slice(0, 10),
-        description: 'coa-guardrails: pin 8140 with a posting',
+        description: 'coa-guardrails: pin 1291 with a posting',
         lines: [
-          { account_code: '8140', debit_amount: 5, credit_amount: 0 },
+          { account_code: '1291', debit_amount: 5, credit_amount: 0 },
           { account_code: '1010', debit_amount: 0, credit_amount: 5 },
         ],
       },
     });
     expect(je.statusCode).toBe(201);
 
-    const res = await del('8140');
+    const res = await del('1291');
     expect(res.statusCode).toBe(409);
     expect(JSON.parse(res.body).error.code).toBe('ACCOUNT_IN_USE');
     // Deactivation, not deletion, is the route for an account with history —
     // the message has to say so, or the operator just retries the delete.
     expect(JSON.parse(res.body).error.message).toMatch(/deactivate/i);
-    expect(await exists('8140')).toBe(true);
+    expect(await exists('1291')).toBe(true);
   });
 
   it('refuses a system account', async () => {
@@ -264,7 +289,170 @@ describe('an untouched account can be deleted outright', () => {
   });
 
   it('404s on an account that does not exist', async () => {
-    const res = await del('8999');
+    const res = await del('1299');
     expect(res.statusCode).toBe(404);
+  });
+
+  it('refuses an account a partner owns, with a clean error rather than a raw foreign-key failure', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/partners',
+      headers: authHeaders(ownerToken),
+      payload: { name: `Guardrail Owner ${Date.now()}`, admitted_on: '2026-01-01' },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    partnerId = created.json().data.id;
+    const p = await prisma.partner.findUniqueOrThrow({ where: { id: partnerId! } });
+
+    const res = await del(p.capitalAccountCode);
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('ACCOUNT_IN_USE');
+    expect(await exists(p.capitalAccountCode)).toBe(true);
+  });
+});
+
+// ============================================================
+// 4 — the chart's own rules (docs/25 L-31, L-34, L-38, L-19)
+// ============================================================
+
+describe('every code starts with its class digit (L-31)', () => {
+  it.each([
+    ['7050', 'EXPENSE', '6000'],
+    ['0150', 'ASSET', '1200'],
+  ])('rejects %s for %s — the unassigned ranges were a route into "unclassified"', async (code, cls, parent) => {
+    const res = await post({
+      account_code: code,
+      account_name: 'Off-prefix (rejected)',
+      account_class: cls,
+      account_type: 'DETAIL',
+      parent_account_code: parent,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(await exists(code)).toBe(false);
+  });
+});
+
+describe('deactivation cannot strand anything (L-34)', () => {
+  const patch = (code: string, payload: Record<string, unknown>) =>
+    app.inject({
+      method: 'PATCH',
+      url: `/v1/accounting/accounts/${code}`,
+      headers: authHeaders(ownerToken),
+      payload,
+    });
+
+  it('refuses a header whose children are still active — the balance check only ever saw the header’s 0', async () => {
+    // 6810 sits, active, under 6800.
+    const res = await patch('6800', { is_active: false });
+    expect(res.statusCode).toBe(400);
+    expect((await prisma.chartOfAccounts.findFirstOrThrow({ where: { facilityId: TEST_FACILITY_ID, accountCode: '6800' } })).isActive).toBe(true);
+  });
+
+  it('refuses an account a rate plan still posts to — the invoice would fail long after', async () => {
+    expect(
+      (await post({ account_code: '4310', account_name: 'Cold Room Hire', account_class: 'REVENUE', account_type: 'DETAIL', parent_account_code: '4100' })).statusCode,
+    ).toBe(201);
+    await prisma.ratePlan.create({
+      data: {
+        facilityId: TEST_FACILITY_ID,
+        name: 'coa-guardrails plan',
+        rateType: 'DAILY_PER_BAG',
+        rateAmountPkr: 1,
+        revenueAccountCode: '4310',
+      },
+    });
+    const res = await patch('4310', { is_active: false });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.message).toMatch(/rate plan/);
+  });
+
+  it('refuses to clear a header’s section — that is how its children would become unclassified (L-38)', async () => {
+    const res = await patch('6800', { statement_section: null });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('refuses to move a system header between sections', async () => {
+    // 4200 Other Income is a seeded header; moving it would re-cut every P&L.
+    const res = await patch('4200', { statement_section: 'REVENUE' });
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('SYSTEM_ACCOUNT_PROTECTED');
+  });
+});
+
+describe('an account the engine posts to by role cannot be retired', () => {
+  afterAll(async () => {
+    // A red run would have deactivated it; every statement reads it by role.
+    await prisma.chartOfAccounts.updateMany({
+      where: { facilityId: TEST_FACILITY_ID, accountCode: '3020' },
+      data: { isActive: true },
+    });
+  });
+
+  it('refuses to deactivate retained earnings, though the seed does not flag it system', async () => {
+    // 3020 is a registry role (SYSTEM_ACCOUNTS.RETAINED_EARNINGS): the statements
+    // look it up, opening balances post to it. Deactivating or deleting it was
+    // allowed because only is_system_account protected an account.
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/accounting/accounts/3020',
+      headers: authHeaders(ownerToken),
+      payload: { is_active: false },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('SYSTEM_ACCOUNT_PROTECTED');
+  });
+});
+
+describe('the chart flags are the owner’s to set, until the account is used (L-34)', () => {
+  const patch = (code: string, payload: Record<string, unknown>) =>
+    app.inject({
+      method: 'PATCH',
+      url: `/v1/accounting/accounts/${code}`,
+      headers: authHeaders(ownerToken),
+      payload,
+    });
+
+  it('opens a second bank account as cash from the start', async () => {
+    const res = await post({
+      account_code: '1295',
+      account_name: 'Bank Account — Second',
+      account_class: 'ASSET',
+      account_type: 'DETAIL',
+      parent_account_code: '1000',
+      is_cash_equivalent: true,
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(JSON.parse(res.body).data.is_cash_equivalent).toBe(true);
+  });
+
+  it('refuses "cash" on anything but an asset', async () => {
+    const res = await post({
+      account_code: '6820',
+      account_name: 'Not cash (rejected)',
+      account_class: 'EXPENSE',
+      account_type: 'DETAIL',
+      parent_account_code: '6000',
+      is_cash_equivalent: true,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(await exists('6820')).toBe(false);
+  });
+
+  it('refuses to change a system account’s flags — the engine relies on them', async () => {
+    const res = await patch('1010', { allow_manual_posting: false });
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error.code).toBe('SYSTEM_ACCOUNT_PROTECTED');
+  });
+
+  it('refuses to change what an account IS once it carries postings', async () => {
+    // 1291 was pinned with a posting above.
+    const res = await patch('1291', { is_cash_equivalent: true });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.message).toMatch(/posting/i);
+  });
+
+  it('no longer reports the dead cash_flow_section (L-19)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/accounting/accounts/1010', headers: authHeaders(ownerToken) });
+    expect(JSON.parse(res.body).data).not.toHaveProperty('cash_flow_section');
   });
 });

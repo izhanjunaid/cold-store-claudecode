@@ -1,9 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { CheckCircle2, Info } from 'lucide-react';
+import { localIsoDate, type OpeningBalanceStatusResponseType } from '@coldchain/shared';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -17,31 +19,12 @@ import { PageHeader } from '@/components/layout/page-header';
 import { formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
 
-interface OpeningStatus {
-  entered: boolean;
-  journal_entry_id: string | null;
-  entry_number: string | null;
-  as_of_date: string | null;
-  earliest_posting_date: string | null;
-  earliest_posting_entry_number: string | null;
-  /** Opening equity not yet attributed to an owner. 0 once it has been. */
-  unattributed_plug_pkr: number;
-}
 interface Party {
   id: string;
   name: string;
   party_type?: string;
 }
-interface Account {
-  account_code: string;
-  account_name: string;
-  account_type: string;
-  account_class: string;
-  parent_account_code: string | null;
-  normal_balance: 'DEBIT' | 'CREDIT';
-  is_active: boolean;
-}
-interface ReceivableRow {
+interface PartyRow {
   party_id: string;
   amount: string;
 }
@@ -51,110 +34,78 @@ interface OtherRow {
   credit: string;
   description: string;
 }
-interface PeriodLock {
-  period_year: number;
-  period_month: number;
-  is_locked: boolean;
-}
 
 const SELECT_CLASS =
   'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
-// Per-party receivables go through the rows above; peshgi through its module.
-// The three cash-class accounts have dedicated fields in Cash & Bank, so they
-// are excluded here too — otherwise the same balance could be entered twice.
-const BLOCKED_OTHER_CODES = new Set(['1110', '1120', '1130', '1140', '1150', '3010', '1010', '1020', '1030']);
-
-const WALLET_ACCOUNT = '1030';
+const amountOf = (s: string) => parseFloat(s) || 0;
 
 export default function OpeningBalancesPage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const canEnter = can(user, 'accounting.post_journal');
 
-  const [status, setStatus] = useState<OpeningStatus | null>(null);
+  const [status, setStatus] = useState<OpeningBalanceStatusResponseType | null>(null);
   const [parties, setParties] = useState<Party[]>([]);
-  const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  const [asOfDate, setAsOfDate] = useState(new Date().toISOString().slice(0, 10));
-  const [receivables, setReceivables] = useState<ReceivableRow[]>([]);
+  // The viewer's own "today", not the UTC date (docs/25 L-39).
+  const [asOfDate, setAsOfDate] = useState(() => localIsoDate());
+  const [receivables, setReceivables] = useState<PartyRow[]>([]);
+  const [payables, setPayables] = useState<PartyRow[]>([]);
   const [cash, setCash] = useState('');
   const [bank, setBank] = useState('');
-  // 1030 has no dedicated field in the request shape (only cash_pkr -> 1010 and
-  // bank_pkr -> 1020), so it rides in as an other_line. Giving it a labelled box
-  // here rather than leaving it buried in the "Other" dropdown, where nobody
-  // looking for their wallet balance would think to find it.
   const [wallet, setWallet] = useState('');
   const [others, setOthers] = useState<OtherRow[]>([]);
   const [lockedThrough, setLockedThrough] = useState<{ year: number; month: number } | null>(null);
 
   useEffect(() => {
     Promise.all([
-      apiClient<OpeningStatus>('/v1/accounting/opening-balances'),
+      apiClient<OpeningBalanceStatusResponseType>('/v1/accounting/opening-balances'),
       apiClientList<Party>('/v1/parties?page_size=200&is_active=true').then((r) => r.data),
-      apiClient<Account[]>('/v1/accounting/accounts?is_active=true'),
-      // Advisory only — never let it take the screen down with it.
-      apiClient<PeriodLock[]>('/v1/accounting/period-locks').catch(() => [] as PeriodLock[]),
+      // The closed-through watermark, as the API states it (docs/25 L-15).
+      apiClient<{ closed_through: { year: number; month: number } | null }>('/v1/accounting/period-locks/closed-through'),
     ])
-      .then(([st, ps, accs, locks]) => {
+      .then(([st, ps, watermark]) => {
         setStatus(st);
         setParties(ps);
-        setAccounts(accs);
-        // The watermark: the highest still-locked period closes everything at or
-        // below it, months nobody explicitly locked included.
-        const active = locks.filter((l) => l.is_locked);
-        if (active.length > 0) {
-          const top = active.reduce((a, b) =>
-            b.period_year > a.period_year ||
-            (b.period_year === a.period_year && b.period_month > a.period_month)
-              ? b
-              : a,
-          );
-          setLockedThrough({ year: top.period_year, month: top.period_month });
-        }
+        setLockedThrough(watermark.closed_through);
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
   }, []);
 
-  const partyOptions = useMemo(
-    () => parties.map((p) => ({ value: p.id, label: p.name })),
+  // Suppliers are owed money; everyone else owes it. The server checks each
+  // party's own control account either way.
+  const customerOptions = useMemo(
+    () => parties.filter((p) => p.party_type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
     [parties],
   );
-  const otherAccounts = useMemo(
-    () =>
-      accounts.filter(
-        (a) =>
-          a.account_type === 'DETAIL' &&
-          a.is_active &&
-          !BLOCKED_OTHER_CODES.has(a.account_code) &&
-          // Opening balances are a balance-sheet exercise.
-          ['ASSET', 'LIABILITY', 'EQUITY'].includes(a.account_class),
-      ),
-    [accounts],
+  const supplierOptions = useMemo(
+    () => parties.filter((p) => p.party_type === 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
+    [parties],
   );
+  // The server decides which accounts an "other" line may use, from the chart's
+  // own flags, and serves the list (docs/25 L-26).
+  const otherAccounts = status?.other_line_accounts ?? [];
+  const otherByCode = useMemo(() => new Map(otherAccounts.map((a) => [a.account_code, a])), [otherAccounts]);
 
   const totals = useMemo(() => {
-    let debit = 0;
+    let debit = amountOf(cash) + amountOf(bank) + amountOf(wallet);
     let credit = 0;
-    for (const r of receivables) debit += parseFloat(r.amount) || 0;
-    debit += parseFloat(cash) || 0;
-    debit += parseFloat(bank) || 0;
-    debit += parseFloat(wallet) || 0;
+    for (const r of receivables) debit += amountOf(r.amount);
+    for (const p of payables) credit += amountOf(p.amount);
     for (const o of others) {
-      debit += parseFloat(o.debit) || 0;
-      credit += parseFloat(o.credit) || 0;
+      debit += amountOf(o.debit);
+      credit += amountOf(o.credit);
     }
-    const plug = Math.round((debit - credit) * 100) / 100;
-    return { debit, credit, plug };
-  }, [receivables, cash, bank, wallet, others]);
+    // A preview only: the server books the difference itself.
+    return { debit, credit, difference: Math.round((debit - credit) * 100) / 100 };
+  }, [receivables, payables, cash, bank, wallet, others]);
 
-  // Opening balances are backdated by nature, and postInTransaction asserts the
-  // period lock against a closed-through watermark: once any period at or above
-  // the as-of month is actively locked, this POST is rejected until an OWNER
-  // reopens it. Say so before the form is filled in, not after.
+  // Opening balances are backdated by nature, and the period lock is asserted
+  // against a closed-through watermark. Say so before the form is filled in.
   const blockedByLock =
     lockedThrough !== null &&
     (() => {
@@ -165,46 +116,32 @@ export default function OpeningBalancesPage() {
 
   const hasAnything = totals.debit > 0 || totals.credit > 0;
 
-  // Opening balances are the position the facility started from, so a date after
-  // the first posting is impossible. Say so before the form is filled, exactly
-  // as the period lock does above — the entry is immutable once posted, so
-  // finding out afterwards costs a reversal.
+  // A date after the first posting is impossible; the entry is immutable once
+  // posted, so finding out afterwards costs a reversal.
   const blockedByActivity =
     status?.earliest_posting_date !== null &&
     status?.earliest_posting_date !== undefined &&
     status.earliest_posting_date < asOfDate;
 
-  // Fixed-asset cost accounts, derived rather than listed: DEBIT-normal detail
-  // accounts under header 1300. That excludes the CREDIT-normal accumulated
-  // depreciation contras beside them, and picks up any asset account an owner
-  // adds later.
-  const fixedAssetCostCodes = useMemo(
-    () =>
-      new Set(
-        accounts
-          .filter(
-            (a) =>
-              a.account_class === 'ASSET' &&
-              a.account_type === 'DETAIL' &&
-              a.parent_account_code === '1300' &&
-              a.normal_balance === 'DEBIT',
-          )
-          .map((a) => a.account_code),
-      ),
-    [accounts],
-  );
-  const opensFixedAssets = others.some(
-    (o) => fixedAssetCostCodes.has(o.account_code) && (parseFloat(o.debit) || 0) > 0,
-  );
+  // A fixed asset's cost (a debit-normal non-current asset) opened here is a
+  // balance only: the register needs it too, without posting it a second time.
+  const opensFixedAssets = others.some((o) => {
+    const a = otherByCode.get(o.account_code);
+    return a?.statement_section === 'NON_CURRENT_ASSET' && a.normal_balance === 'DEBIT' && amountOf(o.debit) > 0;
+  });
 
-  const receivableColumns: EditableRowColumn<ReceivableRow>[] = [
+  const partyColumns = (
+    rows: PartyRow[],
+    options: { value: string; label: string }[],
+    amountHeader: string,
+  ): EditableRowColumn<PartyRow>[] => [
     {
       key: 'party',
       header: 'Party',
       width: '2fr',
       render: (row, update) => (
         <Combobox
-          options={partyOptions.filter((o) => o.value === row.party_id || !receivables.some((r) => r.party_id === o.value))}
+          options={options.filter((o) => o.value === row.party_id || !rows.some((r) => r.party_id === o.value))}
           value={row.party_id}
           onChange={(v) => update({ party_id: v })}
           placeholder="Select party…"
@@ -214,7 +151,7 @@ export default function OpeningBalancesPage() {
     },
     {
       key: 'amount',
-      header: 'Amount owed (Rs)',
+      header: amountHeader,
       width: '160px',
       align: 'right',
       render: (row, update) => (
@@ -267,6 +204,9 @@ export default function OpeningBalancesPage() {
     },
   ];
 
+  const partyBody = (rows: PartyRow[]) =>
+    rows.filter((r) => r.party_id && amountOf(r.amount) > 0).map((r) => ({ party_id: r.party_id, amount_pkr: amountOf(r.amount) }));
+
   const submit = async () => {
     setSubmitting(true);
     try {
@@ -276,29 +216,19 @@ export default function OpeningBalancesPage() {
           method: 'POST',
           body: {
             as_of_date: asOfDate,
-            party_receivables: receivables
-              .filter((r) => r.party_id && (parseFloat(r.amount) || 0) > 0)
-              .map((r) => ({ party_id: r.party_id, amount_pkr: parseFloat(r.amount) })),
-            cash_pkr: parseFloat(cash) || 0,
-            bank_pkr: parseFloat(bank) || 0,
-            other_lines: [
-              ...((parseFloat(wallet) || 0) > 0
-                ? [{
-                    account_code: WALLET_ACCOUNT,
-                    debit_pkr: parseFloat(wallet),
-                    credit_pkr: 0,
-                    description: 'Opening mobile wallet balance',
-                  }]
-                : []),
-              ...others
-                .filter((o) => o.account_code && ((parseFloat(o.debit) || 0) > 0 || (parseFloat(o.credit) || 0) > 0))
-                .map((o) => ({
-                  account_code: o.account_code,
-                  debit_pkr: parseFloat(o.debit) || 0,
-                  credit_pkr: parseFloat(o.credit) || 0,
-                  description: o.description.trim() || undefined,
-                })),
-            ],
+            party_receivables: partyBody(receivables),
+            party_payables: partyBody(payables),
+            cash_pkr: amountOf(cash),
+            bank_pkr: amountOf(bank),
+            wallet_pkr: amountOf(wallet),
+            other_lines: others
+              .filter((o) => o.account_code && (amountOf(o.debit) > 0 || amountOf(o.credit) > 0))
+              .map((o) => ({
+                account_code: o.account_code,
+                debit_pkr: amountOf(o.debit),
+                credit_pkr: amountOf(o.credit),
+                description: o.description.trim() || undefined,
+              })),
           },
         },
       );
@@ -337,20 +267,20 @@ export default function OpeningBalancesPage() {
                   . If they were entered incorrectly, open that entry and reverse it — this screen
                   then unlocks for a fresh entry.
                 </p>
-                {/* The entry is done, so the guidance on the form can no longer
-                    help. This is the only place the residual gets surfaced to
-                    someone who already entered their balances — and it is the
-                    figure that reads on the balance sheet as a partner's
-                    capital while belonging to nobody. */}
+                {/* The residual reads on the balance sheet as equity while
+                    belonging to nobody; this is where someone who already
+                    entered their balances is told. */}
                 {status.unattributed_plug_pkr !== 0 && (
                   <p className="rounded-md bg-amber-50 px-3 py-2 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
                     <span className="font-semibold tabular-nums">
                       {formatMoney(Math.abs(status.unattributed_plug_pkr))}
                     </span>{' '}
-                    of opening equity is still sitting in Opening Balance Equity (3010), which
-                    belongs to no owner. Post a journal entry moving it to the owners&apos; capital
-                    accounts under 3100 in whatever split they agree, and to Retained Earnings
-                    (3020) for profits earned before the cutover.
+                    of opening equity is still in Opening Balance Equity, which belongs to no owner.
+                    Attribute it to each owner on the{' '}
+                    <Link className="underline" href="/accounting/partners">
+                      Owners
+                    </Link>{' '}
+                    page, in whatever split they agree.
                   </p>
                 )}
               </div>
@@ -372,11 +302,11 @@ export default function OpeningBalancesPage() {
       <div className="mb-4 flex items-start gap-2 rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
         <p>
-          Enter what each party owes you, your cash and bank balances, and any other assets or
-          liabilities as of the day before you started using ColdChain. Add an{' '}
-          <strong>other line</strong> for each owner&apos;s capital account, and put profits earned
-          before the cutover to Retained Earnings (3020). Anything left over lands in Opening
-          Balance Equity (3010), which belongs to no owner — so aim to leave nothing there.
+          Enter what each party owes you, what you owe each supplier, your cash, bank and wallet
+          balances, and any other assets or liabilities as of the day before you started using
+          ColdChain. Add an <strong>other line</strong> for each owner&apos;s capital account, and
+          put profits earned before the cutover to Retained Earnings. Anything left over lands in
+          Opening Balance Equity, which belongs to no owner — so aim to leave nothing there.
           Outstanding peshgi is not entered here — issue it through the Loans module so recovery
           tracking works.
         </p>
@@ -406,8 +336,12 @@ export default function OpeningBalancesPage() {
 
       {opensFixedAssets && (
         <p className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-          Assets entered here get a ledger balance but no entry in the Fixed Asset register, so
-          they will not depreciate. Add each one under Fixed Assets as well.
+          Assets you already owned are recorded here as balances only. Then add each one under{' '}
+          <Link className="underline" href="/accounting/fixed-assets/opening">
+            Fixed Assets → Assets owned at go-live
+          </Link>{' '}
+          with its depreciation to date — that adds it to the register without posting it again,
+          and the screen shows any difference.
         </p>
       )}
 
@@ -419,33 +353,44 @@ export default function OpeningBalancesPage() {
               <Input type="date" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} className="tabular-nums" />
             </div>
             <div className="space-y-1">
-              <Label>Cash on hand (1010), Rs</Label>
+              <Label>Cash on hand, Rs</Label>
               <Input type="number" min="0" value={cash} onChange={(e) => setCash(e.target.value)} className="text-right tabular-nums" />
             </div>
             <div className="space-y-1">
-              <Label>Bank balance (1020), Rs</Label>
+              <Label>Main bank account, Rs</Label>
               <Input type="number" min="0" value={bank} onChange={(e) => setBank(e.target.value)} className="text-right tabular-nums" />
             </div>
             <div className="space-y-1">
-              <Label>Mobile wallet (1030), Rs</Label>
+              <Label>Mobile wallet, Rs</Label>
               <Input type="number" min="0" value={wallet} onChange={(e) => setWallet(e.target.value)} className="text-right tabular-nums" />
             </div>
           </CardContent>
         </Card>
 
         <div className="space-y-1.5">
-          <h2 className="text-sm font-semibold">Party Receivables</h2>
+          <h2 className="text-sm font-semibold">Owed to you — party receivables</h2>
           <EditableRows
             rows={receivables}
             onChange={setReceivables}
-            columns={receivableColumns}
+            columns={partyColumns(receivables, customerOptions, 'Amount owed (Rs)')}
             newRow={() => ({ party_id: '', amount: '' })}
             addLabel="Add party"
           />
         </div>
 
         <div className="space-y-1.5">
-          <h2 className="text-sm font-semibold">Other Assets &amp; Liabilities (optional)</h2>
+          <h2 className="text-sm font-semibold">You owe — supplier payables</h2>
+          <EditableRows
+            rows={payables}
+            onChange={setPayables}
+            columns={partyColumns(payables, supplierOptions, 'Amount you owe (Rs)')}
+            newRow={() => ({ party_id: '', amount: '' })}
+            addLabel="Add supplier"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <h2 className="text-sm font-semibold">Other Assets, Liabilities &amp; Equity (optional)</h2>
           <EditableRows
             rows={others}
             onChange={setOthers}
@@ -454,7 +399,7 @@ export default function OpeningBalancesPage() {
             addLabel="Add line"
             footer={
               <p className="text-2xs text-muted-foreground">
-                Assets you own go in Debit; amounts you owe go in Credit.
+                Assets you own go in Debit; amounts you owe, and owners&apos; capital, go in Credit.
               </p>
             }
           />
@@ -469,10 +414,10 @@ export default function OpeningBalancesPage() {
               {' · '}
               Total credits <span className="font-semibold tabular-nums">{formatMoney(totals.credit)}</span>
             </span>
-            {hasAnything && totals.plug !== 0 && (
+            {hasAnything && totals.difference !== 0 && (
               <span className="ml-3 text-amber-700 dark:text-amber-400">
-                Unattributed {totals.plug > 0 ? 'credit' : 'debit'}{' '}
-                <span className="font-semibold tabular-nums">{formatMoney(Math.abs(totals.plug))}</span>
+                Not yet attributed to an owner{' '}
+                <span className="font-semibold tabular-nums">{formatMoney(Math.abs(totals.difference))}</span>
               </span>
             )}
           </div>

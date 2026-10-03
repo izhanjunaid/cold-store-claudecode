@@ -49,6 +49,10 @@ vi.mock('@/components/accounting/use-statement-period', () => ({
 
 import ProfitLossPage from './page';
 
+const STRAY = { account_code: '7010', account_name: 'Interest Expense (custom)' };
+
+// An expense account under no sectioned header: the API shows its amount in
+// operating expenses (where its class belongs) and names it in unclassified_lines.
 const BASE_PL = {
   date_from: '2026-01-01',
   date_to: '2026-06-30',
@@ -61,71 +65,61 @@ const BASE_PL = {
   total_cost_of_service_pkr: 0,
   gross_profit_pkr: 0,
   gross_profit_pct: 0,
-  operating_expense_lines: [],
-  total_operating_expense_pkr: 0,
-  operating_profit_pkr: 0,
+  operating_expense_lines: [{ ...STRAY, amount_pkr: 500 }],
+  total_operating_expense_pkr: 500,
+  operating_profit_pkr: -500,
   operating_profit_pct: 0,
   other_income_lines: [],
   total_other_income_pkr: 0,
   other_expense_lines: [],
   total_other_expense_pkr: 0,
   depreciation_amortisation_pkr: 0,
-  ebitda_pkr: 0,
+  impairment_pkr: 0,
+  ebitda_pkr: -500,
   ebitda_pct: 0,
   net_profit_pkr: -500,
   net_profit_pct: 0,
-  unclassified_lines: [
-    { account_code: '7010', account_name: 'Interest Expense (custom)', amount_pkr: -500 },
-  ],
-  total_unclassified_pkr: -500,
+  unclassified_lines: [{ ...STRAY, amount_pkr: -500 }],
   has_unclassified: true,
-  opening_equity_pkr: 2000,
-  capital_introduced_pkr: 0,
-  drawings_pkr: 300,
-  closing_equity_pkr: 1200,
-  is_fiscal_year_to_date: true,
-  combined_statement_permitted: true,
 };
 
-describe('ProfitLossPage — unclassified accounts surface on the statement (F-6b)', () => {
+describe('ProfitLossPage — unclassified accounts (F-6b)', () => {
   beforeEach(() => {
     apiClient.mockReset();
     apiClient.mockResolvedValue(BASE_PL);
   });
 
-  it('renders the unclassified section with its lines and subtotal', async () => {
+  it('shows the amount once, in its class’s section, and names the account in a note', async () => {
     render(<ProfitLossPage />);
-    await waitFor(() => expect(screen.getAllByText(/Unclassified/).length).toBeGreaterThan(0));
-    expect(screen.getByText(/Interest Expense \(custom\)/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/under no standard header/)).toBeTruthy());
+    // The row itself appears once — in operating expenses — not again in a
+    // separate unclassified section that looked double-counted (L-38).
+    expect(screen.getAllByText('Interest Expense (custom)')).toHaveLength(1);
+    expect(screen.queryByText(/Total Unclassified/)).toBeNull();
   });
 
-  it('hides the section when everything is classified', async () => {
-    apiClient.mockResolvedValue({ ...BASE_PL, unclassified_lines: [], total_unclassified_pkr: 0, has_unclassified: false, net_profit_pkr: 0 });
+  it('says nothing when everything is classified', async () => {
+    apiClient.mockResolvedValue({ ...BASE_PL, unclassified_lines: [], has_unclassified: false });
     render(<ProfitLossPage />);
-    await waitFor(() => expect(screen.getByText(/Net Profit/)).toBeTruthy());
-    expect(screen.queryByText(/Unclassified/)).toBeNull();
+    await waitFor(() => expect(screen.getByText(/Net Loss/)).toBeTruthy());
+    expect(screen.queryByText(/under no standard header/)).toBeNull();
   });
 });
 
-describe('ProfitLossPage — statement of income and retained earnings', () => {
+describe('ProfitLossPage — one equity roll-forward (L-24)', () => {
   beforeEach(() => {
     apiClient.mockReset();
     apiClient.mockResolvedValue(BASE_PL);
     accrualEnabled.mockReturnValue(false);
   });
 
-  it('shows opening equity, the result, drawings and closing equity', async () => {
-    render(<ProfitLossPage />);
-    await waitFor(() => expect(screen.getByText(/Owner's equity, opening/)).toBeTruthy());
-    expect(screen.getByText(/Less: owners' drawings/)).toBeTruthy();
-    expect(screen.getByText(/Owner's equity, closing/)).toBeTruthy();
-  });
-
-  it('hides the rows when the range is not fiscal-year-to-date — equity carries FY profit, not the range profit', async () => {
-    apiClient.mockResolvedValue({ ...BASE_PL, is_fiscal_year_to_date: false });
+  it('carries no equity block of its own and links to Changes in Equity for the same period', async () => {
     render(<ProfitLossPage />);
     await waitFor(() => expect(screen.getByText(/Net Loss/)).toBeTruthy());
     expect(screen.queryByText(/Owner's equity, opening/)).toBeNull();
+    const link = screen.getByRole('link', { name: /Changes in Equity/ });
+    expect(link.getAttribute('href')).toContain('date_from=2026-01-01');
+    expect(link.getAttribute('href')).toContain('date_to=2026-06-30');
   });
 });
 
@@ -146,42 +140,5 @@ describe('ProfitLossPage — the basis note states the policy actually in force'
     render(<ProfitLossPage />);
     await waitFor(() => expect(screen.getByText(/recognized as it is earned/)).toBeTruthy());
     expect(screen.queryByText(/no month-end accrual is made/)).toBeNull();
-  });
-});
-
-describe('ProfitLossPage — IFRS for SMEs 6.4 gates the combined statement', () => {
-  beforeEach(() => {
-    apiClient.mockReset();
-    apiClient.mockResolvedValue(BASE_PL);
-    accrualEnabled.mockReturnValue(false);
-  });
-
-  it('withdraws the equity block once an owner has put capital in', async () => {
-    // 6.4 permits combining the statements only where equity moved through
-    // profit, distributions, error corrections and policy changes. Capital
-    // introduced is none of those, so the block must go — and say where to look.
-    apiClient.mockResolvedValue({
-      ...BASE_PL,
-      capital_introduced_pkr: 500,
-      combined_statement_permitted: false,
-    });
-    render(<ProfitLossPage />);
-    await waitFor(() => expect(screen.getByText(/Net Loss/)).toBeTruthy());
-    expect(screen.queryByText(/Owner's equity, opening/)).toBeNull();
-    expect(screen.getByText(/not shown here/)).toBeTruthy();
-    expect(screen.getByRole('link', { name: /Changes in Equity/ })).toBeTruthy();
-  });
-
-  it('keeps the block when no capital was introduced', async () => {
-    render(<ProfitLossPage />);
-    await waitFor(() => expect(screen.getByText(/Owner's equity, opening/)).toBeTruthy());
-    expect(screen.queryByText(/not shown here/)).toBeNull();
-  });
-
-  it("labels drawings for more than one owner", async () => {
-    // The row used to be tied to account 3015; with two owners it is a total
-    // across every drawings account, so it must not name one of them.
-    render(<ProfitLossPage />);
-    await waitFor(() => expect(screen.getByText(/owners' drawings/)).toBeTruthy());
   });
 });

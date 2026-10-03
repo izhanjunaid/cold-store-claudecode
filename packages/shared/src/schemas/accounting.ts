@@ -2,7 +2,6 @@ import { z } from 'zod';
 import {
   AccountClass,
   AccountType,
-  CashFlowSection,
   NormalBalance,
   StatementSection,
   JournalEntryType,
@@ -27,7 +26,6 @@ export const ChartOfAccountsResponse = z.object({
   parent_account_code: z.string().nullable(),
   normal_balance: NormalBalance,
   statement_section: StatementSection.nullable(),
-  cash_flow_section: CashFlowSection.nullable(),
   is_system_account: z.boolean(),
   is_active: z.boolean(),
   // What every "paid from" picker offers and the cash-flow statement counts.
@@ -80,6 +78,11 @@ export const CreateAccountRequest = z
     is_contra: z.boolean().optional(),
     // HEADER only — which statement section its children roll up into.
     statement_section: StatementSection.optional(),
+    // The properties an owner-created account can share with a system one
+    // (docs/25 §2 invariant 2). Frozen once the account carries a posting.
+    is_cash_equivalent: z.boolean().optional(),
+    allow_manual_posting: z.boolean().optional(),
+    requires_party: z.boolean().optional(),
   })
   .superRefine((v, ctx) => {
     // A header with no section appears in no section's list, so every detail
@@ -115,12 +118,17 @@ export type CreateAccountRequestType = z.infer<typeof CreateAccountRequest>;
 export const UpdateAccountRequest = z.object({
   account_name: z.string().min(1).max(200).optional(),
   is_active: z.boolean().optional(),
-  // A header's section is presentation, not structure — it stays editable
-  // even once the header has DETAIL children with postings (unlike code,
-  // class, type, parent and normal_balance, which guard_chart_of_accounts
-  // locks the moment the account carries activity). null clears it back to
-  // unclassified.
+  // A header's section is presentation, not structure — it stays editable on
+  // an owner-created header even once its children carry postings (unlike
+  // code, class, type, parent and normal_balance, which guard_chart_of_accounts
+  // locks). It may not be cleared on a non-equity header: that is how its
+  // children would become unclassified (docs/25 L-38).
   statement_section: StatementSection.nullable().optional(),
+  // Editable on owner-created accounts only; is_cash_equivalent and
+  // requires_party freeze once the account carries a posting.
+  is_cash_equivalent: z.boolean().optional(),
+  allow_manual_posting: z.boolean().optional(),
+  requires_party: z.boolean().optional(),
 });
 export type UpdateAccountRequestType = z.infer<typeof UpdateAccountRequest>;
 
@@ -236,8 +244,22 @@ export const EnterOpeningBalancesRequest = z.object({
     )
     .optional()
     .default([]),
+  // What the facility owed each supplier at the cutover — credited to that
+  // supplier's own control account, the mirror of party_receivables.
+  party_payables: z
+    .array(
+      z.object({
+        party_id: z.string().uuid(),
+        amount_pkr: z.number().positive(),
+      }),
+    )
+    .optional()
+    .default([]),
   cash_pkr: z.number().min(0).optional().default(0),
   bank_pkr: z.number().min(0).optional().default(0),
+  wallet_pkr: z.number().min(0).optional().default(0),
+  // Any other balance-sheet account — only those in the status endpoint's
+  // other_line_accounts, which the server derives from the chart's flags.
   other_lines: z
     .array(
       z.object({
@@ -265,6 +287,21 @@ export const OpeningBalanceStatusResponse = z.object({
   // Opening equity still sitting in the plug (3010 Opening Balance Equity),
   // which belongs to no owner by definition. 0 is the healthy answer.
   unattributed_plug_pkr: z.number(),
+  // The accounts an "other" line may use, read from the chart's flags (docs/25
+  // L-26): active balance-sheet details that have no field of their own, need
+  // no party, and are not moved only by their own documents. The screen offers
+  // exactly these; the server refuses anything else.
+  other_line_accounts: z.array(
+    z.object({
+      account_code: z.string(),
+      account_name: z.string(),
+      account_class: AccountClass,
+      normal_balance: NormalBalance,
+      // Where it sits on the balance sheet (ledger.classify), so the screen can
+      // tell a fixed-asset cost line without a list of codes.
+      statement_section: z.string(),
+    }),
+  ),
 });
 export type OpeningBalanceStatusResponseType = z.infer<typeof OpeningBalanceStatusResponse>;
 
@@ -368,7 +405,6 @@ export const TrialBalanceResponse = z.object({
   // The same rows grouped by statement section, so a subtotal here can be
   // traced onto the face of the P&L or balance sheet.
   section_groups: z.array(TrialBalanceSectionGroup),
-  rows: z.array(TrialBalanceRow),
   total_opening_debit_pkr: z.number(),
   total_opening_credit_pkr: z.number(),
   total_movement_debit_pkr: z.number(),
@@ -405,6 +441,27 @@ export const StatementGroup = z.object({
 });
 export type StatementGroupType = z.infer<typeof StatementGroup>;
 
+/**
+ * What an equity account is, read from the partners table and the account
+ * registry — never inferred from its normal balance (docs/25 L-22).
+ */
+export const EquityRole = z.enum([
+  'PARTNER_CAPITAL',
+  'PARTNER_DRAWINGS',
+  'OPENING_BALANCE_EQUITY',
+  'RETAINED_EARNINGS',
+  'CURRENT_YEAR_RESULT',
+  'OTHER',
+]);
+export type EquityRoleType = z.infer<typeof EquityRole>;
+
+export const EquityLine = StatementLine.extend({
+  role: EquityRole,
+  partner_id: z.string().uuid().nullable(),
+  partner_name: z.string().nullable(),
+});
+export type EquityLineType = z.infer<typeof EquityLine>;
+
 export const ProfitLossResponse = z.object({
   date_from: z.string(),
   date_to: z.string(),
@@ -432,38 +489,24 @@ export const ProfitLossResponse = z.object({
   other_expense_lines: z.array(StatementLine),
   total_other_expense_pkr: z.number(),
 
+  // Accounts in DEPRECIATION_EXPENSE_ACCOUNTS — by role, never "whatever an asset names".
   depreciation_amortisation_pkr: z.number(),
+  // 6160, a non-cash write-down: added back to EBITDA on a row of its own.
+  impairment_pkr: z.number(),
   ebitda_pkr: z.number(),
   ebitda_pct: z.number().nullable(),
 
+  // resultFor() — the one definition of the result the balance sheet and the
+  // statement of changes in equity use too. The owners' equity roll-forward is
+  // the statement of changes in equity's job, not this one's (docs/25 L-24).
   net_profit_pkr: z.number(),
   net_profit_pct: z.number().nullable(),
 
-  // Statement of income and retained earnings (IFRS for SMEs §3.18 style):
-  // opening equity + profit − drawings = closing equity. Ties to the balance
-  // sheet's total_equity_pkr at date_to, but only when the range starts on the
-  // fiscal-year start — equity carries FY-to-date profit, not range profit.
-  opening_equity_pkr: z.number(),
-  capital_introduced_pkr: z.number(),
-  drawings_pkr: z.number(),
-  closing_equity_pkr: z.number(),
-  is_fiscal_year_to_date: z.boolean(),
-  // False once an owner has put capital in during the period: IFRS for SMEs 6.4
-  // then no longer permits the combined statement, and the statement of changes
-  // in equity is the one to read.
-  combined_statement_permitted: z.boolean(),
-
-  // Activity in accounts the header rollups could not place (F-6b);
-  // amounts are signed as their contribution to net profit.
+  // P&L accounts under no sectioned header (F-6b), signed as their contribution
+  // to the result. Their amounts are already in the section their class belongs
+  // to above; this only names them.
   unclassified_lines: z.array(StatementLine),
-  total_unclassified_pkr: z.number(),
   has_unclassified: z.boolean(),
-
-  // Back-compat flat fields
-  revenue_lines: z.array(StatementLine),
-  total_revenue_pkr: z.number(),
-  expense_lines: z.array(StatementLine),
-  total_expense_pkr: z.number(),
 });
 export type ProfitLossResponseType = z.infer<typeof ProfitLossResponse>;
 
@@ -476,6 +519,9 @@ export type ProfitLossQueryType = z.infer<typeof ProfitLossQuery>;
 
 export const BalanceSheetResponse = z.object({
   as_of_date: z.string(),
+  // Accounts the chart flags is_cash_equivalent — not the Cash & Bank header,
+  // which also holds uncleared cheques. The cash-flow statement closes on it.
+  cash_and_cash_equivalents_pkr: z.number(),
 
   current_asset_groups: z.array(StatementGroup),
   total_current_assets_pkr: z.number(),
@@ -489,7 +535,7 @@ export const BalanceSheetResponse = z.object({
   total_non_current_liabilities_pkr: z.number(),
   total_liabilities_pkr: z.number(),
 
-  equity_lines: z.array(StatementLine),
+  equity_lines: z.array(EquityLine),
   // Retained earnings = posted 3020 + accumulated prior fiscal-year results;
   // current_year_pl covers only the fiscal year containing as_of_date (virtual
   // closing). fiscal_year_start is that FY's first day (ISO date).
@@ -510,10 +556,6 @@ export const BalanceSheetResponse = z.object({
   has_unclassified: z.boolean(),
 
   is_balanced: z.boolean(),
-
-  // Back-compat flat fields
-  asset_lines: z.array(StatementLine),
-  liability_lines: z.array(StatementLine),
 });
 export type BalanceSheetResponseType = z.infer<typeof BalanceSheetResponse>;
 
@@ -548,10 +590,20 @@ export type ChangesInEquityQueryType = z.infer<typeof ChangesInEquityQuery>;
 export const EquityColumn = z.object({
   account_code: z.string(),
   account_name: z.string(),
+  role: EquityRole,
+  partner_id: z.string().uuid().nullable(),
+  partner_name: z.string().nullable(),
   opening_pkr: z.number(),
+  // Owner-equity documents on a partner's own capital / drawings account.
   capital_introduced_pkr: z.number(),
   drawings_pkr: z.number(),
+  // Everything else: opening balances, attributing the plug, corrections.
+  other_movements_pkr: z.number(),
+  // Only on the current-year column.
   result_pkr: z.number(),
+  // A finished fiscal year's result moving into retained earnings when the
+  // range crosses a year end. Nets to zero across the two columns.
+  transfer_pkr: z.number(),
   closing_pkr: z.number(),
 });
 
@@ -562,6 +614,7 @@ export const ChangesInEquityResponse = z.object({
   total_opening_pkr: z.number(),
   total_capital_introduced_pkr: z.number(),
   total_drawings_pkr: z.number(),
+  total_other_movements_pkr: z.number(),
   total_result_pkr: z.number(),
   total_closing_pkr: z.number(),
   // Closing across the columns equals total_equity_pkr on the balance sheet at
@@ -621,12 +674,6 @@ export const RevenueAccrualPeriodQuery = z.object({
 });
 export type RevenueAccrualPeriodQueryType = z.infer<typeof RevenueAccrualPeriodQuery>;
 
-export const RunRevenueAccrualRequest = z.object({
-  period_year: z.number().int().min(2000).max(2100),
-  period_month: z.number().int().min(1).max(12),
-});
-export type RunRevenueAccrualRequestType = z.infer<typeof RunRevenueAccrualRequest>;
-
 // ============================================================
 // Cash / bank transfer (JE-27)
 // ============================================================
@@ -657,17 +704,52 @@ export const OwnerEquityDirection = z.enum(['CAPITAL_IN', 'DRAWING']);
  * taxable income as well as profit.
  */
 export const CreateOwnerEquityRequest = z.object({
+  /**
+   * Whose money it is. The equity account is derived from the partner and the
+   * direction — capital for CAPITAL_IN, drawings for DRAWING — never chosen
+   * separately (docs/25 L-23).
+   */
+  partner_id: z.string().uuid(),
   movement_date: dateOnly,
   direction: OwnerEquityDirection,
-  /** The owner's own capital or drawings account. */
-  equity_account_code: z.string().regex(/^[0-9]+$/),
-  /** Cash or bank — where the money actually moves. */
+  /** Where the money actually moves: any account the chart flags as cash. */
   cash_account_code: z.string().regex(/^[0-9]+$/),
   amount_pkr: z.number().positive(),
   note: z.string().max(300).optional(),
   book_type: BookType.optional().default('PACCI'),
 });
 export type CreateOwnerEquityRequestType = z.infer<typeof CreateOwnerEquityRequest>;
+
+export const OwnerEquityListQuery = z.object({
+  partner_id: z.string().uuid().optional(),
+});
+export type OwnerEquityListQueryType = z.infer<typeof OwnerEquityListQuery>;
+
+/** A movement is corrected by voiding it: its entry is reversed, never edited. */
+export const VoidOwnerEquityRequest = z.object({
+  reason: z.string().min(1).max(400),
+  // Defaults to today; may not be before the movement.
+  date: dateOnly.optional(),
+});
+export type VoidOwnerEquityRequestType = z.infer<typeof VoidOwnerEquityRequest>;
+
+export const OwnerEquityMovementResponse = z.object({
+  id: z.string().uuid(),
+  partner_id: z.string().uuid(),
+  partner_name: z.string(),
+  direction: OwnerEquityDirection,
+  movement_date: z.string(),
+  amount_pkr: z.number(),
+  cash_account_code: z.string(),
+  equity_account_code: z.string(),
+  note: z.string().nullable(),
+  book_type: BookType,
+  journal_entry_id: z.string().uuid().nullable(),
+  entry_number: z.string().nullable(),
+  voided_at: z.string().nullable(),
+  void_reason: z.string().nullable(),
+});
+export type OwnerEquityMovementResponseType = z.infer<typeof OwnerEquityMovementResponse>;
 
 // ============================================================
 // Withholding tax remittance (JE-29)
@@ -737,24 +819,6 @@ export type UnlockPeriodRequestType = z.infer<typeof UnlockPeriodRequest>;
 // ============================================================
 // Credit Notes
 // ============================================================
-
-export const CreateCreditNoteRequest = z.object({
-  original_invoice_id: z.string().uuid(),
-  credit_date: dateOnly,
-  reason: z.string().min(1),
-  line_items: z
-    .array(
-      z.object({
-        revenue_account_code: z.string().regex(/^4[0-9]+$/, 'Must be a revenue account (4XXX)'),
-        description: z.string().min(1).max(300),
-        amount_pkr: z.number().positive(),
-      }),
-    )
-    .min(1),
-  book_type: BookType.optional().default('PACCI'),
-  notes: z.string().optional(),
-});
-export type CreateCreditNoteRequestType = z.infer<typeof CreateCreditNoteRequest>;
 
 export const CreditNoteLineItemResponse = z.object({
   id: z.string().uuid(),

@@ -118,6 +118,7 @@ export const StatementSection = z.enum([
   'OTHER_INCOME',
   'COST_OF_SERVICE',
   'OPERATING_EXPENSE',
+  'OTHER_EXPENSE',
 ]);
 export type StatementSection = z.infer<typeof StatementSection>;
 

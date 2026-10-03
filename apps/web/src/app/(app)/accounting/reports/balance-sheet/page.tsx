@@ -236,9 +236,12 @@ export default function BalanceSheetPage() {
               // the face of the statement rather than leaving a reader to know.
               <p className="mt-3 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
                 Of the equity above, Rs {fmtAcct(Math.abs(data.unattributed_opening_equity_pkr))} sits in
-                Opening Balance Equity (3010) and has not been attributed to any owner. Post a journal
-                entry moving it to the owners’ capital accounts under 3100, and to Retained Earnings
-                for results earned before the cutover.
+                Opening Balance Equity and has not been attributed to any owner. Attribute it to each
+                owner on the{' '}
+                <a className="underline" href="/accounting/partners">
+                  Owners
+                </a>{' '}
+                page.
               </p>
             )}
 

@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../test/helpers';
+import { withGuardsDisabled } from '../../test/financial-guards';
 import { PrismaClient } from '@coldchain/db';
 import type { FastifyInstance } from 'fastify';
 
@@ -167,6 +168,15 @@ describe('adopting accounts an owner already has', () => {
     expect(JSON.parse(res.body).error.message).toContain(`${MARK} Existing`);
   });
 
+  it('refuses to adopt the opening-balance plug as anybody’s capital (L-32)', async () => {
+    const res = await createPartner(ownerToken, {
+      name: `${MARK} PlugAdopter`,
+      admitted_on: '2026-01-01',
+      capital_account_code: '3010',
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('refuses an account on the wrong side — the normal balance IS the role', async () => {
     const drawings = await prisma.chartOfAccounts.findFirstOrThrow({
       where: { facilityId: TEST_FACILITY_ID, accountName: `${MARK} Existing — Drawings` },
@@ -265,5 +275,151 @@ describe('the profit-sharing ratio', () => {
       },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+// ============================================================
+// docs/25 L-25 — the record is complete, audited and honoured
+// ============================================================
+
+describe('an owner’s CNIC is recorded (payroll refuses to employ an owner by it)', () => {
+  it('takes a CNIC on create and on update, and lists it', async () => {
+    const res = await createPartner(ownerToken, { name: `${MARK} Cnic`, admitted_on: '2026-01-01', cnic: '35202-7654321-9' });
+    expect(res.statusCode, res.body).toBe(201);
+    const id = JSON.parse(res.body).data.id;
+
+    const listed = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/v1/partners', headers: authHeaders(ownerToken) })).body,
+    ).data.find((p: { id: string }) => p.id === id);
+    expect(listed.cnic).toBe('35202-7654321-9');
+
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: `/v1/partners/${id}`,
+      headers: authHeaders(ownerToken),
+      payload: { cnic: '3520276543218' },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect((await prisma.partner.findUniqueOrThrow({ where: { id } })).cnic).toBe('3520276543218');
+  });
+
+  it('refuses something that is not a CNIC', async () => {
+    const res = await createPartner(ownerToken, { name: `${MARK} BadCnic`, admitted_on: '2026-01-01', cnic: '12-34' });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('a retired owner stops sharing the day after they retire', () => {
+  const entryIds: string[] = [];
+  afterAll(async () => {
+    await withGuardsDisabled(prisma, async () => {
+      await prisma.journalEntryLine.deleteMany({ where: { journalEntryId: { in: entryIds } } });
+      await prisma.journalEntry.deleteMany({ where: { id: { in: entryIds } } });
+    });
+  });
+
+  it('splits the result before retirement and gives the rest to whoever remains', async () => {
+    const mk = async (name: string) =>
+      JSON.parse((await createPartner(ownerToken, { name: `${MARK} ${name}`, admitted_on: '2047-01-01' })).body).data.id as string;
+    const stays = await mk('Stays');
+    const leaves = await mk('Leaves');
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url: '/v1/partners/profit-shares',
+          headers: authHeaders(ownerToken),
+          payload: { effective_from: '2047-01-01', shares: [{ partner_id: stays, weight: 1 }, { partner_id: leaves, weight: 1 }] },
+        })
+      ).statusCode,
+    ).toBe(200);
+    // Retired on the 15th: that is their last day in.
+    expect(
+      (
+        await app.inject({
+          method: 'PATCH',
+          url: `/v1/partners/${leaves}`,
+          headers: authHeaders(ownerToken),
+          payload: { retired_on: '2047-01-15' },
+        })
+      ).statusCode,
+    ).toBe(200);
+
+    for (const date of ['2047-01-10', '2047-01-20']) {
+      const je = await app.inject({
+        method: 'POST',
+        url: '/v1/accounting/journal-entries',
+        headers: authHeaders(ownerToken),
+        payload: {
+          entry_date: date,
+          description: 'partner retirement allocation',
+          lines: [
+            { account_code: '1010', debit_amount: 100, credit_amount: 0 },
+            { account_code: '4150', debit_amount: 0, credit_amount: 100 },
+          ],
+        },
+      });
+      expect(je.statusCode, je.body).toBe(201);
+      entryIds.push(JSON.parse(je.body).data.id);
+    }
+
+    const soce = JSON.parse(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/v1/accounting/changes-in-equity?date_from=2047-01-01&date_to=2047-01-31',
+          headers: authHeaders(ownerToken),
+        })
+      ).body,
+    ).data;
+    const share = (id: string) =>
+      soce.result_allocation.by_partner.find((p: { partner_id: string }) => p.partner_id === id)?.amount_pkr;
+    expect(share(stays)).toBe(150);
+    expect(share(leaves)).toBe(50);
+  });
+});
+
+describe('a ratio or a retirement cannot restate a closed period', () => {
+  afterAll(async () => {
+    await withGuardsDisabled(prisma, async () => {
+      await prisma.periodLock.deleteMany({ where: { facilityId: TEST_FACILITY_ID, periodYear: 2049 } });
+    });
+  });
+
+  it('refuses a ratio or a retirement dated inside a locked period', async () => {
+    const partner = await prisma.partner.findFirstOrThrow({ where: { facilityId: TEST_FACILITY_ID, name: `${MARK} Stays` } });
+    const lock = await app.inject({
+      method: 'POST',
+      url: '/v1/accounting/period-locks',
+      headers: authHeaders(ownerToken),
+      payload: { period_year: 2049, period_month: 3, reason: 'partner test' },
+    });
+    expect(lock.statusCode, lock.body).toBe(201);
+    try {
+      const shares = await app.inject({
+        method: 'PUT',
+        url: '/v1/partners/profit-shares',
+        headers: authHeaders(ownerToken),
+        payload: { effective_from: '2049-01-01', shares: [{ partner_id: partner.id, weight: 1 }] },
+      });
+      expect(shares.statusCode).toBe(409);
+      expect(JSON.parse(shares.body).error.code).toBe('PERIOD_LOCKED');
+
+      const retire = await app.inject({
+        method: 'PATCH',
+        url: `/v1/partners/${partner.id}`,
+        headers: authHeaders(ownerToken),
+        payload: { retired_on: '2049-02-01' },
+      });
+      expect(retire.statusCode).toBe(409);
+    } finally {
+      // Reopen so nothing after this file is closed by the watermark.
+      await app.inject({
+        method: 'POST',
+        url: '/v1/accounting/period-locks/2049/3/unlock',
+        headers: authHeaders(ownerToken),
+        payload: { reason: 'partner test done' },
+      });
+    }
   });
 });

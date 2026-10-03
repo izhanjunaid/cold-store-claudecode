@@ -21,10 +21,23 @@ import {
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
-import { suggestNextCode, codeBlockFor } from '@coldchain/shared';
+import {
+  ACCOUNT_CLASSES,
+  CLASS_CODE_PREFIX,
+  CLASS_LABEL,
+  CLASS_SECTIONS,
+  SECTION_LABEL,
+  codeBlockFor,
+  localIsoDate,
+  normalBalanceForClass,
+  suggestNextCode,
+  type AccountClassName,
+} from '@coldchain/shared';
 import { fmtAcct } from '@/lib/accounting-format';
 import { formatDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/stores/auth.store';
+import { hasMinRole } from '@/lib/rbac';
 
 import { DataTableSkeleton } from '@/components/data-table';
 interface Account {
@@ -38,6 +51,9 @@ interface Account {
   statement_section: string | null;
   is_system_account: boolean;
   is_active: boolean;
+  is_cash_equivalent?: boolean;
+  requires_party?: boolean;
+  allow_manual_posting?: boolean;
 }
 interface TbRow {
   account_code: string;
@@ -54,68 +70,29 @@ const CLASS_TONE: Record<string, 'info' | 'warning' | 'success' | 'danger' | 'ne
   EXPENSE: 'danger',
 };
 
-const ACCOUNT_CLASSES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'COST_OF_SERVICE', 'EXPENSE'] as const;
-
-// One label set for both the filter and the dialog — they used to disagree
-// ("Cost of Service" vs "COST OF SERVICE") because each hand-wrote its own.
-const CLASS_LABEL: Record<string, string> = {
-  ASSET: 'Assets',
-  LIABILITY: 'Liabilities',
-  EQUITY: 'Equity',
-  REVENUE: 'Revenue',
-  COST_OF_SERVICE: 'Cost of Service',
-  EXPENSE: 'Expenses',
-};
-
-// Debit-normal classes; the rest default to credit. Overridable in the form
-// for contra accounts (e.g. accumulated depreciation is ASSET / CREDIT).
-const DEBIT_NORMAL = new Set(['ASSET', 'EXPENSE', 'COST_OF_SERVICE']);
-
-// Mirrors CLASS_CODE_PREFIX in coa.service.ts. Leading digits 0/7/8/9 stay
-// legal — owners open custom heads there and the statements surface them in the
-// unclassified bucket (F-6b).
-const CLASS_LEAD_DIGIT: Record<string, string> = {
-  ASSET: '1', LIABILITY: '2', EQUITY: '3', REVENUE: '4', COST_OF_SERVICE: '5', EXPENSE: '6',
-};
-const ASSIGNED_LEAD_DIGITS = new Set(Object.values(CLASS_LEAD_DIGIT));
-
-// Mirrors CLASS_SECTIONS in coa.service.ts. EQUITY has no entry on purpose —
-// equity aggregates by class, not by header (phase/19), so the section field
-// doesn't apply to an EQUITY header at all.
-const CLASS_SECTIONS: Record<string, string[]> = {
-  ASSET: ['CURRENT_ASSET', 'NON_CURRENT_ASSET'],
-  LIABILITY: ['CURRENT_LIABILITY', 'NON_CURRENT_LIABILITY'],
-  REVENUE: ['REVENUE', 'CONTRA_REVENUE', 'OTHER_INCOME'],
-  COST_OF_SERVICE: ['COST_OF_SERVICE'],
-  EXPENSE: ['OPERATING_EXPENSE', 'OTHER_EXPENSE'],
-};
-
-const SECTION_LABEL: Record<string, string> = {
-  CURRENT_ASSET: 'Current Assets',
-  NON_CURRENT_ASSET: 'Non-current Assets',
-  CURRENT_LIABILITY: 'Current Liabilities',
-  NON_CURRENT_LIABILITY: 'Non-current Liabilities',
-  REVENUE: 'Revenue',
-  CONTRA_REVENUE: 'Contra Revenue',
-  OTHER_INCOME: 'Other Income',
-  COST_OF_SERVICE: 'Cost of Service',
-  OPERATING_EXPENSE: 'Operating Expenses',
-  OTHER_EXPENSE: 'Non-Operating Expenses',
-};
+// Class labels, code prefixes, sections and normal balances come from
+// @coldchain/shared chart.ts — the same rules the API enforces. This page kept
+// its own copies and they had drifted ("Operating Expenses" vs "Expenses";
+// 0/7/8/9 codes still allowed here after the API refused them) (docs/25 L-33).
+const cls = (c: string) => c as AccountClassName;
 
 const SELECT_CLASS =
   'flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 // Opens on the class the table is filtered to — adding an expense account from
 // the Expenses view should not start you on Assets.
-const emptyDraft = (cls = 'ASSET') => ({
+const emptyDraft = (accountClass = 'ASSET') => ({
   code: '',
   name: '',
-  cls,
+  cls: accountClass,
   type: 'DETAIL' as 'HEADER' | 'DETAIL',
   parent: '',
   section: '',
-  normal: (DEBIT_NORMAL.has(cls) ? 'DEBIT' : 'CREDIT') as 'DEBIT' | 'CREDIT',
+  normal: normalBalanceForClass(cls(accountClass)),
+  // The chart flags (docs/25 §2 invariant 2): settable now, frozen once used.
+  cash: false,
+  party: false,
+  manualAllowed: true,
 });
 
 export default function ChartOfAccountsPage() {
@@ -137,29 +114,37 @@ export default function ChartOfAccountsPage() {
   const [renaming, setRenaming] = useState<Account | null>(null);
   const [newName, setNewName] = useState('');
 
-  // Cumulative closing balance as of today — omitting date_from means TB
-  // treats every posting up to date_to as "opening", i.e. the full-history
-  // balance, not just this year's movement. TB defaults to the PACCI book,
-  // so the column header names the book rather than leaving it implied.
-  const [tbAsOf] = useState(() => new Date().toISOString().slice(0, 10));
+  // Cumulative closing balance as of the viewer's today — omitting date_from
+  // means the trial balance treats every posting up to date_to as opening, i.e.
+  // the full-history balance. The book is chosen here, not assumed: the KATCHI
+  // book is offered to MANAGER+ as everywhere else (docs/25 L-40).
+  const { user } = useAuthStore();
+  const canSeeKatchi = hasMinRole(user?.role, 'MANAGER');
+  const [book, setBook] = useState<'PACCI' | 'KATCHI'>('PACCI');
+  const [tbAsOf] = useState(() => localIsoDate());
   const [balances, setBalances] = useState<Map<string, TbRow>>(new Map());
 
   useEffect(() => {
-    apiClient<{ rows: TbRow[] }>(`/v1/accounting/trial-balance?date_to=${tbAsOf}`)
-      .then((tb) => setBalances(new Map((tb?.rows ?? []).map((r) => [r.account_code, r]))))
+    apiClient<{ groups: { rows: TbRow[] }[] }>(`/v1/accounting/trial-balance?date_to=${tbAsOf}&book_type=${book}`)
+      .then((tb) => setBalances(new Map(tb.groups.flatMap((g) => g.rows).map((r) => [r.account_code, r]))))
       .catch(() => setBalances(new Map()));
-  }, [tbAsOf]);
+  }, [tbAsOf, book]);
 
   // Signed on the account's own normal side, so a normal-debit account with a
-  // debit balance reads as a positive figure (matching every other statement
-  // in this module) rather than the raw debit-minus-credit difference. An
-  // account absent from the trial balance (no postings, or a HEADER, which
-  // never posts directly) defaults to 0 — rendered identically to an
-  // explicit zero balance via fmtAcct's em-dash convention.
+  // debit balance reads as a positive figure, as on every statement. A header
+  // never posts, so its figure is the sum of its children on the header's own
+  // side — Fixed Assets nets accumulated depreciation off cost, as the balance
+  // sheet does. An account with no postings is 0 (fmtAcct's em-dash).
+  const netDebit = (code: string): number => {
+    const r = balances.get(code);
+    return r ? r.debit_balance_pkr - r.credit_balance_pkr : 0;
+  };
   const balanceFor = (a: Account): number => {
-    const r = balances.get(a.account_code);
-    if (!r) return 0;
-    return a.normal_balance === 'DEBIT' ? r.debit_balance_pkr - r.credit_balance_pkr : r.credit_balance_pkr - r.debit_balance_pkr;
+    const debit =
+      a.account_type === 'HEADER'
+        ? allAccounts.filter((c) => c.parent_account_code === a.account_code).reduce((t, c) => t + netDebit(c.account_code), 0)
+        : netDebit(a.account_code);
+    return Math.round((a.normal_balance === 'DEBIT' ? debit : -debit) * 100) / 100;
   };
 
   const fetchAccounts = useCallback(async () => {
@@ -210,7 +195,7 @@ export default function ChartOfAccountsPage() {
   // orphan its own children (phase/24).
   const parentRequired =
     draft.type === 'DETAIL' && (draft.cls !== 'EQUITY' || headerOptions.length > 0);
-  const sectionOptions = CLASS_SECTIONS[draft.cls] ?? [];
+  const sectionOptions = CLASS_SECTIONS[cls(draft.cls)];
   // A header must declare its section, or every detail account beneath it
   // lands in the statements' unclassified bucket. Where the class allows
   // exactly one section (cost of service), there is nothing to ask.
@@ -219,8 +204,11 @@ export default function ChartOfAccountsPage() {
     draft.section || (sectionOptions.length === 1 ? sectionOptions[0] : '');
   // The class's normal balance; anything else is a contra account, which the
   // API requires the caller to declare rather than infer.
-  const classNormal = DEBIT_NORMAL.has(draft.cls) ? 'DEBIT' : 'CREDIT';
+  const classNormal = normalBalanceForClass(cls(draft.cls));
   const isContra = draft.normal !== classNormal;
+  // Which flags this account can carry — the API's rules (coa.service).
+  const canBeCash = draft.type === 'DETAIL' && draft.cls === 'ASSET';
+  const canRequireParty = draft.type === 'DETAIL' && (draft.cls === 'ASSET' || draft.cls === 'LIABILITY');
 
   // Prefill only — never auto-assign. A code is permanent once the account has
   // postings (guard_chart_of_accounts + the JE-line FK's ON UPDATE RESTRICT),
@@ -241,10 +229,11 @@ export default function ChartOfAccountsPage() {
     if (allAccounts.some((a) => a.account_code === draft.code)) {
       return `${draft.code} is already in use.`;
     }
-    const expected = CLASS_LEAD_DIGIT[draft.cls];
-    const lead = draft.code.charAt(0);
-    if (expected && lead !== expected && ASSIGNED_LEAD_DIGITS.has(lead)) {
-      return `Codes starting with ${lead} belong to another class; ${CLASS_LABEL[draft.cls]} use ${expected}.`;
+    // Required, not advisory (docs/25 L-31): the unassigned 0/7/8/9 ranges
+    // were a route into the statements' "unclassified" bucket.
+    const expected = CLASS_CODE_PREFIX[cls(draft.cls)];
+    if (!draft.code.startsWith(expected)) {
+      return `${CLASS_LABEL[cls(draft.cls)]} codes start with ${expected}.`;
     }
     return null;
   })();
@@ -276,6 +265,9 @@ export default function ChartOfAccountsPage() {
           ...(draft.type === 'HEADER' && effectiveSection
             ? { statement_section: effectiveSection }
             : {}),
+          ...(canBeCash && draft.cash ? { is_cash_equivalent: true } : {}),
+          ...(canRequireParty && draft.party ? { requires_party: true } : {}),
+          ...(draft.type === 'DETAIL' && !draft.manualAllowed ? { allow_manual_posting: false } : {}),
         },
       });
       toast.success(`Account ${draft.code} — ${draft.name} created`);
@@ -370,6 +362,15 @@ export default function ChartOfAccountsPage() {
                 <option key={c} value={c}>{CLASS_LABEL[c]}</option>
               ))}
             </select>
+            <select
+              value={book}
+              onChange={(e) => setBook(e.target.value as 'PACCI' | 'KATCHI')}
+              className={SELECT_CLASS}
+              aria-label="Book"
+            >
+              <option value="PACCI">PACCI (Official)</option>
+              {canSeeKatchi && <option value="KATCHI">KATCHI (Internal)</option>}
+            </select>
             <span className="whitespace-nowrap text-sm text-muted-foreground">{visibleAccounts.length} accounts</span>
             {canManage && (
               <Button size="sm" onClick={() => { setDraft(emptyDraft(classFilter || 'ASSET')); setShowAdd(true); }}>
@@ -400,7 +401,7 @@ export default function ChartOfAccountsPage() {
               <TableHead className="h-8">Type</TableHead>
               <TableHead className="h-8">Normal</TableHead>
               <TableHead className="h-8 text-right" title={`Cumulative closing balance as at ${formatDate(tbAsOf)}`}>
-                Balance (PACCI)
+                Balance ({book})
               </TableHead>
               <TableHead className="h-8">Status</TableHead>
               {canManage && <TableHead className="h-8 w-44 text-right">Actions</TableHead>}
@@ -500,7 +501,9 @@ export default function ChartOfAccountsPage() {
                     parent: '',
                     code: '',
                     section: '',
-                    normal: DEBIT_NORMAL.has(e.target.value) ? 'DEBIT' : 'CREDIT',
+                    normal: normalBalanceForClass(cls(e.target.value)),
+                    cash: false,
+                    party: false,
                   }))
                 }
                 className={SELECT_CLASS}
@@ -554,7 +557,7 @@ export default function ChartOfAccountsPage() {
                 </select>
                 {parentRequired && headerOptions.length === 0 && (
                   <p className="text-xs text-destructive">
-                    No header accounts exist for {CLASS_LABEL[draft.cls] ?? draft.cls}.
+                    No header accounts exist for {CLASS_LABEL[cls(draft.cls)]}.
                   </p>
                 )}
               </div>
@@ -634,6 +637,29 @@ export default function ChartOfAccountsPage() {
                   depreciation is an asset with a credit balance.
                 </p>
               </div>
+              {draft.type === 'DETAIL' && (
+                <div className="mt-3 space-y-1.5 text-sm">
+                  {canBeCash && (
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={draft.cash} onChange={(e) => setDraft((d) => ({ ...d, cash: e.target.checked, party: e.target.checked ? false : d.party }))} />
+                      Cash, bank or wallet — offered wherever money is paid or received, and counted as cash on the statements
+                    </label>
+                  )}
+                  {canRequireParty && (
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={draft.party} onChange={(e) => setDraft((d) => ({ ...d, party: e.target.checked, cash: e.target.checked ? false : d.cash }))} />
+                      Every line must name a party (a receivable or payable control account)
+                    </label>
+                  )}
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={!draft.manualAllowed} onChange={(e) => setDraft((d) => ({ ...d, manualAllowed: !e.target.checked }))} />
+                    Only its own documents may post to it — no manual journal entries
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Whether an account is cash, or needs a party, is fixed once it has postings.
+                  </p>
+                </div>
+              )}
             </details>
           </div>
           <DialogFooter>

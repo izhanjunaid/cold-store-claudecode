@@ -46,18 +46,13 @@ interface PL {
   other_expense_lines: Line[];
   total_other_expense_pkr: number;
   depreciation_amortisation_pkr: number;
+  impairment_pkr: number;
   ebitda_pkr: number;
   ebitda_pct: number | null;
   net_profit_pkr: number;
   net_profit_pct: number | null;
-  opening_equity_pkr: number;
-  capital_introduced_pkr: number;
-  drawings_pkr: number;
-  closing_equity_pkr: number;
-  is_fiscal_year_to_date: boolean;
-  combined_statement_permitted: boolean;
+  /** Names only: their amounts are already inside the section their class belongs to. */
   unclassified_lines: Line[];
-  total_unclassified_pkr: number;
   has_unclassified: boolean;
 }
 
@@ -71,7 +66,6 @@ function lineMap(pl: PL | null): Map<string, number> {
     ...pl.operating_expense_lines,
     ...pl.other_income_lines,
     ...pl.other_expense_lines,
-    ...pl.unclassified_lines,
   ]) {
     m.set(l.account_code, l.amount_pkr);
   }
@@ -126,7 +120,6 @@ export default function ProfitLossPage() {
     for (const l of data.operating_expense_lines) rows.push({ section: 'Operating Expenses', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     for (const l of data.other_income_lines) rows.push({ section: 'Other Income', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     for (const l of data.other_expense_lines) rows.push({ section: 'Other Expense', code: l.account_code, account: l.account_name, amount: -l.amount_pkr });
-    for (const l of data.unclassified_lines) rows.push({ section: 'Unclassified', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     const csv = buildCsv(rows, [
       { header: 'Section', value: (r) => r.section },
       { header: 'Code', value: (r) => r.code },
@@ -215,56 +208,30 @@ export default function ProfitLossPage() {
                 </>
               )}
 
-              {data.has_unclassified && (
-                <>
-                  <SpacerRow />
-                  <SectionHeading>Unclassified — not under a standard header</SectionHeading>
-                  {data.unclassified_lines.map((l) => (
-                    <StatementRow key={l.account_code} depth={1} code={l.account_code} label={l.account_name} amount={l.amount_pkr} prior={pl(l.account_code)} href={glHref(l.account_code)} />
-                  ))}
-                  <StatementRow depth={1} emphasis="subtotal" label="Total Unclassified" amount={data.total_unclassified_pkr} prior={cmp?.total_unclassified_pkr} />
-                </>
-              )}
-
               <StatementRow emphasis="grand" label={data.net_profit_pkr >= 0 ? 'Net Profit' : 'Net Loss'} amount={data.net_profit_pkr} prior={cmp?.net_profit_pkr} />
-
-              {data.is_fiscal_year_to_date && data.combined_statement_permitted && (
-                <>
-                  <SpacerRow />
-                  <SectionHeading>Owner&apos;s Equity — fiscal year to date</SectionHeading>
-                  <StatementRow depth={1} label="Owner's equity, opening" amount={data.opening_equity_pkr} prior={cmp?.opening_equity_pkr} />
-                  <StatementRow depth={1} label={data.net_profit_pkr >= 0 ? 'Add: profit for the period' : 'Less: loss for the period'} amount={data.net_profit_pkr} prior={cmp?.net_profit_pkr} />
-                  <StatementRow depth={1} label="Less: owners' drawings" amount={-data.drawings_pkr} prior={cmp ? -cmp.drawings_pkr : undefined} />
-                  <StatementRow emphasis="total" label="Owner's equity, closing" amount={data.closing_equity_pkr} prior={cmp?.closing_equity_pkr} />
-                </>
-              )}
             </StatementTable>
 
-            {data.is_fiscal_year_to_date && data.combined_statement_permitted && (
-              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                Closing equity ties to Total Equity on the balance sheet at the period end. These rows
-                are fiscal-year-to-date: equity carries the year&apos;s profit, not this range&apos;s, so
-                they appear only for a range starting on the fiscal-year start.
-              </p>
-            )}
-
-            {!data.combined_statement_permitted && (
-              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                An owner put capital in during this period, so the equity summary is not shown here.
-                It may be combined with the income statement only when equity moved through profit,
-                drawings and corrections alone (IFRS for SMEs 6.4). See{' '}
-                <a className="underline" href="/accounting/reports/changes-in-equity">
-                  Changes in Equity
-                </a>
-                , which shows each owner separately.
-              </p>
-            )}
+            {/* One equity roll-forward, not two (docs/25 L-24): what the owners put
+                in, took out and are left with lives on its own statement. */}
+            <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+              What each owner put in, took out, and the result carried into equity:{' '}
+              <a
+                className="underline"
+                href={`/accounting/reports/changes-in-equity?date_from=${range.date_from}&date_to=${range.date_to}${bookType ? `&book_type=${bookType}` : ''}`}
+              >
+                Changes in Equity
+              </a>{' '}
+              for the same period.
+            </p>
 
             {data.has_unclassified && (
               <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                Unclassified amounts are included in net profit, shown as their contribution to it.
-                Move these accounts under a standard header (Chart of Accounts) to place them in a
-                named section.
+                {data.unclassified_lines.map((l) => `${l.account_code} ${l.account_name}`).join(', ')}{' '}
+                {data.unclassified_lines.length === 1 ? 'sits' : 'sit'} under no standard header, so{' '}
+                {data.unclassified_lines.length === 1 ? 'it is' : 'they are'} shown in the section of
+                {data.unclassified_lines.length === 1 ? ' its' : ' their'} class above. Move{' '}
+                {data.unclassified_lines.length === 1 ? 'it' : 'them'} under a standard header (Chart of
+                Accounts) to place {data.unclassified_lines.length === 1 ? 'it' : 'them'} deliberately.
               </p>
             )}
           </StatementFrame>

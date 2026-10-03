@@ -72,7 +72,7 @@ async function cleanup() {
     await prisma.journalEntry.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.periodLock.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.chartOfAccounts.deleteMany({
-      where: { facilityId: TEST_FACILITY_ID, accountCode: '9901' },
+      where: { facilityId: TEST_FACILITY_ID, accountCode: '6901' },
     });
     await prisma.chartOfAccounts.updateMany({
       where: { facilityId: TEST_FACILITY_ID, accountCode: '1010' },
@@ -322,7 +322,7 @@ describe('chart_of_accounts structural fields lock once the account has postings
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: {
-        account_code: '9901',
+        account_code: '6901',
         account_name: 'Guards Test Account',
         account_class: 'EXPENSE',
         account_type: 'DETAIL',
@@ -333,7 +333,7 @@ describe('chart_of_accounts structural fields lock once the account has postings
     expect(res.statusCode).toBe(201);
     const count = await prisma.$executeRawUnsafe(
       `UPDATE chart_of_accounts SET parent_account_code = '5000'
-       WHERE facility_id = $1::uuid AND account_code = '9901'`,
+       WHERE facility_id = $1::uuid AND account_code = '6901'`,
       TEST_FACILITY_ID,
     );
     expect(count).toBe(1);

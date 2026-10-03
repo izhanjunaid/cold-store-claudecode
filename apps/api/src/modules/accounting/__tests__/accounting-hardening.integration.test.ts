@@ -176,7 +176,7 @@ async function cleanup() {
     await prisma.chartOfAccounts.deleteMany({
       where: {
         facilityId: TEST_FACILITY_ID,
-        accountCode: { in: ['1999', '4995', '7000', '7010', '7020', '7030', '7040', '7041', '7900', '7910', '9902', '9903', '9904', '9905', '9906', '9907', '9908', '3910', '3920'] },
+        accountCode: { in: ['1999', '4995', '6700', '6710', '4700', '4710', '6740', '6741', '6790', '6791', '6792', '1900', '1910', '6795', '6796', '1907', '1908', '3910', '3920'] },
       },
     });
     await prisma.chartOfAccounts.updateMany({
@@ -1064,7 +1064,7 @@ describe('account creation validates the parent (F-6a)', () => {
       method: 'POST',
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
-      payload: { ...base, account_code: '9902', parent_account_code: '8888' },
+      payload: { ...base, account_code: '6792', parent_account_code: '6888' },
     });
     expect(res.statusCode).toBe(422);
   });
@@ -1074,7 +1074,7 @@ describe('account creation validates the parent (F-6a)', () => {
       method: 'POST',
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
-      payload: { ...base, account_code: '9902', parent_account_code: '6010' },
+      payload: { ...base, account_code: '6792', parent_account_code: '6010' },
     });
     expect(res.statusCode).toBe(422);
   });
@@ -1084,7 +1084,7 @@ describe('account creation validates the parent (F-6a)', () => {
       method: 'POST',
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
-      payload: { ...base, account_code: '9902', parent_account_code: '4000' },
+      payload: { ...base, account_code: '6792', parent_account_code: '4000' },
     });
     expect(res.statusCode).toBe(422);
   });
@@ -1094,7 +1094,7 @@ describe('account creation validates the parent (F-6a)', () => {
       method: 'POST',
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
-      payload: { ...base, account_code: '9902', parent_account_code: '6000' },
+      payload: { ...base, account_code: '6792', parent_account_code: '6000' },
     });
     expect(res.statusCode).toBe(201);
   });
@@ -1104,14 +1104,14 @@ describe('account creation validates the parent (F-6a)', () => {
       method: 'POST',
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
-      payload: { ...base, account_code: '9905' },
+      payload: { ...base, account_code: '6795' },
     });
     expect(res.statusCode).toBe(422);
     expect(JSON.parse(res.body).error.code).toBe('INVALID_PARENT_ACCOUNT');
   });
 
   it('rejects a HEADER given a parent — buildGroups is one level deep, a nested header would orphan its own children (phase/24)', async () => {
-    // 9902 is already claimed by 'accepts a HEADER parent of the same class'
+    // 6792 is already claimed by 'accepts a HEADER parent of the same class'
     // above — use an unused code so this asserts the nested-header rejection,
     // not an incidental duplicate-code collision.
     const res = await app.inject({
@@ -1119,7 +1119,7 @@ describe('account creation validates the parent (F-6a)', () => {
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: {
-        account_code: '9906',
+        account_code: '6796',
         account_name: 'Nested Header (rejected)',
         account_class: 'EXPENSE',
         account_type: 'HEADER',
@@ -1135,7 +1135,12 @@ describe('account creation validates the parent (F-6a)', () => {
     expect(JSON.parse(res.body).error.code).toBe('INVALID_PARENT_ACCOUNT');
   });
 
-  it('accepts a parentless EQUITY DETAIL account — equity sits at the root by design', async () => {
+  it('rejects a parentless EQUITY DETAIL account once the facility has equity headers (docs/25 L-34)', async () => {
+    // The web always required a parent here while the server accepted none — a
+    // rule only the browser enforced. With 3100/3200 seeded, an owner's account
+    // adrift of both headers is exactly what the Owners page exists to prevent.
+    // (Where a facility has no equity header at all, a root account stays legal
+    // rather than leaving no way to create one.)
     const res = await app.inject({
       method: 'POST',
       url: '/v1/accounting/accounts',
@@ -1151,7 +1156,8 @@ describe('account creation validates the parent (F-6a)', () => {
         is_contra: true,
       },
     });
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error.code).toBe('INVALID_PARENT_ACCOUNT');
   });
 });
 
@@ -1169,7 +1175,7 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
     await prisma.chartOfAccounts.create({
       data: {
         facilityId: TEST_FACILITY_ID,
-        accountCode: '7000',
+        accountCode: '6700',
         accountName: 'Financing Costs (custom)',
         accountClass: 'EXPENSE',
         accountType: 'HEADER',
@@ -1182,11 +1188,11 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: {
-        account_code: '7010',
+        account_code: '6710',
         account_name: 'Interest Expense (custom)',
         account_class: 'EXPENSE',
         account_type: 'DETAIL',
-        parent_account_code: '7000',
+        parent_account_code: '6700',
         normal_balance: 'DEBIT',
       },
     });
@@ -1201,7 +1207,7 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
         description: 'unclassified expense test',
         posting_status: 'POSTED',
         lines: [
-          { account_code: '7010', debit_amount: 500, credit_amount: 0 },
+          { account_code: '6710', debit_amount: 500, credit_amount: 0 },
           { account_code: '1010', debit_amount: 0, credit_amount: 500 },
         ],
       },
@@ -1218,7 +1224,7 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
 
     expect(pl.has_unclassified).toBe(true);
     const stray = (pl.unclassified_lines as { account_code: string; amount_pkr: number }[]).find(
-      (l) => l.account_code === '7010',
+      (l) => l.account_code === '6710',
     );
     expect(stray).toBeTruthy();
     // Signed as contribution to net profit: an expense reduces it.
@@ -1247,7 +1253,7 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
     await prisma.chartOfAccounts.create({
       data: {
         facilityId: TEST_FACILITY_ID,
-        accountCode: '9903',
+        accountCode: '1900',
         accountName: 'Custom Asset Header',
         accountClass: 'ASSET',
         accountType: 'HEADER',
@@ -1260,11 +1266,11 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: {
-        account_code: '9904',
+        account_code: '1910',
         account_name: 'Custom Asset (stray)',
         account_class: 'ASSET',
         account_type: 'DETAIL',
-        parent_account_code: '9903',
+        parent_account_code: '1900',
         normal_balance: 'DEBIT',
       },
     });
@@ -1279,7 +1285,7 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
         description: 'unclassified asset test',
         posting_status: 'POSTED',
         lines: [
-          { account_code: '9904', debit_amount: 300, credit_amount: 0 },
+          { account_code: '1910', debit_amount: 300, credit_amount: 0 },
           { account_code: '1010', debit_amount: 0, credit_amount: 300 },
         ],
       },
@@ -1296,7 +1302,7 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
 
     expect(bs.has_unclassified).toBe(true);
     const stray = (bs.unclassified_asset_lines as { account_code: string; amount_pkr: number }[]).find(
-      (l) => l.account_code === '9904',
+      (l) => l.account_code === '1910',
     );
     expect(stray).toBeTruthy();
     expect(stray!.amount_pkr).toBe(300);
@@ -1315,7 +1321,7 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
     await prisma.chartOfAccounts.create({
       data: {
         facilityId: TEST_FACILITY_ID,
-        accountCode: '7020',
+        accountCode: '4700',
         accountName: 'Ancillary Revenue (custom)',
         accountClass: 'REVENUE',
         accountType: 'HEADER',
@@ -1328,11 +1334,11 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: {
-        account_code: '7030',
+        account_code: '4710',
         account_name: 'Weighbridge Fee Income (custom)',
         account_class: 'REVENUE',
         account_type: 'DETAIL',
-        parent_account_code: '7020',
+        parent_account_code: '4700',
         normal_balance: 'CREDIT',
       },
     });
@@ -1348,7 +1354,7 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
         posting_status: 'POSTED',
         lines: [
           { account_code: '1010', debit_amount: 800, credit_amount: 0 },
-          { account_code: '7030', debit_amount: 0, credit_amount: 800 },
+          { account_code: '4710', debit_amount: 0, credit_amount: 800 },
         ],
       },
     });
@@ -1364,7 +1370,7 @@ describe('statements surface activity in unclassified accounts (F-6b)', () => {
 
     expect(pl.has_unclassified).toBe(true);
     const stray = (pl.unclassified_lines as { account_code: string; amount_pkr: number }[]).find(
-      (l) => l.account_code === '7030',
+      (l) => l.account_code === '4710',
     );
     expect(stray).toBeTruthy();
     expect(stray!.amount_pkr).toBe(800); // credit-normal revenue: positive contribution
@@ -1390,7 +1396,7 @@ describe('statement_section validation', () => {
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: {
-        account_code: '7041',
+        account_code: '6741',
         account_name: 'Rejected — section on a detail account',
         account_class: 'EXPENSE',
         account_type: 'DETAIL',
@@ -1409,7 +1415,7 @@ describe('statement_section validation', () => {
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: {
-        account_code: '7040',
+        account_code: '6740',
         account_name: 'Rejected — wrong section for class',
         account_class: 'EXPENSE',
         account_type: 'HEADER',
@@ -1439,31 +1445,17 @@ describe('statement_section validation', () => {
     expect(JSON.parse(res.body).error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('a seeded header\'s section stays editable even though its structural fields are locked once posted', async () => {
-    // 6000 has posted DETAIL children (every EXPENSE test above posts through
-    // it), so guard_chart_of_accounts would reject a change to its code,
-    // class, type, parent, or normal_balance. statement_section is outside
-    // that guarded set on purpose (migration 0015). Prove it by actually
-    // changing the value — setting it to what it already is (the migration's
-    // own backfill) would pass even if the column were locked. Restore it
-    // afterward: 6000 backs statements every other test in this suite reads.
+  it('a seeded header\'s section is fixed — it anchors every statement (docs/25 L-34)', async () => {
+    // The API used to let a system header's section be edited while the UI
+    // hid the control; clearing it sent every child to "unclassified".
     const clear = await app.inject({
       method: 'PATCH',
       url: '/v1/accounting/accounts/6000',
       headers: authHeaders(ownerToken),
       payload: { statement_section: null },
     });
-    expect(clear.statusCode).toBe(200);
-    expect(JSON.parse(clear.body).data.statement_section).toBeNull();
-
-    const restore = await app.inject({
-      method: 'PATCH',
-      url: '/v1/accounting/accounts/6000',
-      headers: authHeaders(ownerToken),
-      payload: { statement_section: 'OPERATING_EXPENSE' },
-    });
-    expect(restore.statusCode).toBe(200);
-    expect(JSON.parse(restore.body).data.statement_section).toBe('OPERATING_EXPENSE');
+    expect(clear.statusCode).toBe(409);
+    expect(JSON.parse(clear.body).error.code).toBe('SYSTEM_ACCOUNT_PROTECTED');
   });
 });
 
@@ -1474,7 +1466,7 @@ describe('a custom header with a section lands in the right statement section, n
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: {
-        account_code: '9907',
+        account_code: '1907',
         account_name: 'Prepaid Insurance (custom, sectioned)',
         account_class: 'ASSET',
         account_type: 'HEADER',
@@ -1490,11 +1482,11 @@ describe('a custom header with a section lands in the right statement section, n
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: {
-        account_code: '9908',
+        account_code: '1908',
         account_name: 'Prepaid Insurance — Warehouse',
         account_class: 'ASSET',
         account_type: 'DETAIL',
-        parent_account_code: '9907',
+        parent_account_code: '1907',
         normal_balance: 'DEBIT',
       },
     });
@@ -1513,7 +1505,7 @@ describe('a custom header with a section lands in the right statement section, n
         // asset reclassification, correctly asset-neutral) and prove nothing
         // about total_current_assets_pkr actually moving.
         lines: [
-          { account_code: '9908', debit_amount: 900, credit_amount: 0 },
+          { account_code: '1908', debit_amount: 900, credit_amount: 0 },
           { account_code: '3010', debit_amount: 0, credit_amount: 900 },
         ],
       },
@@ -1531,17 +1523,34 @@ describe('a custom header with a section lands in the right statement section, n
     // Placed in the real section — NOT in unclassified, unlike an account
     // under a header with no section (the F-6b tests above).
     const group = (bs.current_asset_groups as { code: string; lines: { account_code: string; amount_pkr: number }[] }[])
-      .find((g) => g.code === '9907');
+      .find((g) => g.code === '1907');
     expect(group).toBeTruthy();
-    const line = group!.lines.find((l) => l.account_code === '9908');
+    const line = group!.lines.find((l) => l.account_code === '1908');
     expect(line).toBeTruthy();
     expect(line!.amount_pkr).toBe(900);
     expect(
-      (bs.unclassified_asset_lines as { account_code: string }[]).some((l) => l.account_code === '9908'),
+      (bs.unclassified_asset_lines as { account_code: string }[]).some((l) => l.account_code === '1908'),
     ).toBe(false);
 
     expect(bs.total_current_assets_pkr).toBeGreaterThanOrEqual(900);
     expect(bs.is_balanced).toBe(true);
+  });
+
+  it('an owner-created header\'s section stays editable after its child has posted', async () => {
+    // guard_chart_of_accounts locks code, class, type, parent and normal
+    // balance once posted; statement_section is presentation and stays outside
+    // that set (migration 0015). Prove it by changing the value and back.
+    const patch = (section: string) =>
+      app.inject({
+        method: 'PATCH',
+        url: '/v1/accounting/accounts/1907',
+        headers: authHeaders(ownerToken),
+        payload: { statement_section: section },
+      });
+    const moved = await patch('NON_CURRENT_ASSET');
+    expect(moved.statusCode).toBe(200);
+    expect(JSON.parse(moved.body).data.statement_section).toBe('NON_CURRENT_ASSET');
+    expect((await patch('CURRENT_ASSET')).statusCode).toBe(200);
   });
 });
 
@@ -1681,7 +1690,7 @@ describe('deactivation requires a zero ledger balance (phase/19)', () => {
     await prisma.chartOfAccounts.create({
       data: {
         facilityId: TEST_FACILITY_ID,
-        accountCode: '7900',
+        accountCode: '6790',
         accountName: 'Deactivation Test Header',
         accountClass: 'EXPENSE',
         accountType: 'HEADER',
@@ -1694,11 +1703,11 @@ describe('deactivation requires a zero ledger balance (phase/19)', () => {
       url: '/v1/accounting/accounts',
       headers: authHeaders(ownerToken),
       payload: {
-        account_code: '7910',
+        account_code: '6791',
         account_name: 'Deactivation Test Detail',
         account_class: 'EXPENSE',
         account_type: 'DETAIL',
-        parent_account_code: '7900',
+        parent_account_code: '6790',
         normal_balance: 'DEBIT',
       },
     });
@@ -1713,7 +1722,7 @@ describe('deactivation requires a zero ledger balance (phase/19)', () => {
         description: 'deactivation balance test',
         posting_status: 'POSTED',
         lines: [
-          { account_code: '7910', debit_amount: 120, credit_amount: 0 },
+          { account_code: '6791', debit_amount: 120, credit_amount: 0 },
           { account_code: '1010', debit_amount: 0, credit_amount: 120 },
         ],
       },
@@ -1722,7 +1731,7 @@ describe('deactivation requires a zero ledger balance (phase/19)', () => {
 
     const blocked = await app.inject({
       method: 'PATCH',
-      url: '/v1/accounting/accounts/7910',
+      url: '/v1/accounting/accounts/6791',
       headers: authHeaders(ownerToken),
       payload: { is_active: false },
     });
@@ -1739,7 +1748,7 @@ describe('deactivation requires a zero ledger balance (phase/19)', () => {
         posting_status: 'POSTED',
         lines: [
           { account_code: '1010', debit_amount: 120, credit_amount: 0 },
-          { account_code: '7910', debit_amount: 0, credit_amount: 120 },
+          { account_code: '6791', debit_amount: 0, credit_amount: 120 },
         ],
       },
     });
@@ -1747,7 +1756,7 @@ describe('deactivation requires a zero ledger balance (phase/19)', () => {
 
     const allowed = await app.inject({
       method: 'PATCH',
-      url: '/v1/accounting/accounts/7910',
+      url: '/v1/accounting/accounts/6791',
       headers: authHeaders(ownerToken),
       payload: { is_active: false },
     });

@@ -1,26 +1,36 @@
-import type { PrismaClient, Prisma } from '@coldchain/db';
-import type {
-  ProfitLossQueryType,
-  BalanceSheetQueryType,
-  ChangesInEquityQueryType,
+import type { PrismaClient } from '@coldchain/db';
+import {
+  DEPRECIATION_EXPENSE_ACCOUNTS,
+  SYSTEM_ACCOUNTS,
+  dayBefore,
+  fiscalYearStart,
+  fromIsoDate,
+  moneyEquals,
+  round2,
+  sumMoney,
+  toIsoDate,
+  type BalanceSheetQueryType,
+  type ChangesInEquityQueryType,
+  type ProfitLossQueryType,
 } from '@coldchain/shared';
 import { resolveFacilitySettings } from '../facility/facility.service';
-import { fiscalYearStart } from './fiscal-year';
-import {
-  isDrawingsAccount,
-  isCapitalAccount,
-  unattributedPlug,
-  EQUITY_PLUG_ACCOUNT,
-  DERIVED_EQUITY_ACCOUNTS,
-} from './equity-accounts';
+import { accountBalances, classify, postedLinesWhere, type ClassifiableAccount, type Sums } from './ledger';
+import { equityRoles, OWNER_MOVEMENT_SOURCES, type EquityAccountRole } from './equity-accounts';
 import { sliceByRatio, divideByWeight, type RatioWindow } from './equity-allocation';
 
-/** Accounts the statements compute rather than read — never rendered as their own line. */
-const DERIVED = new Set<string>(DERIVED_EQUITY_ACCOUNTS);
+/**
+ * The trial balance's siblings: profit or loss, the balance sheet and the
+ * statement of changes in equity, all read through the ledger kernel (docs/25
+ * L-16). Balances come from `accountBalances`, sections from `classify`, the
+ * result from `resultFor` — one of each, where there used to be a hand-built
+ * aggregation per statement, three section lookups and two definitions of profit
+ * that drifted by a paisa (L-17, L-18).
+ */
 
-type Sums = { debit: number; credit: number };
+type Book = 'PACCI' | 'KATCHI';
 type SumMap = Map<string, Sums>;
-type Account = { accountCode: string; accountName: string; accountClass: string; accountType: string; parentAccountCode: string | null; normalBalance: 'DEBIT' | 'CREDIT'; statementSection: string | null };
+
+type ChartAccount = ClassifiableAccount & { accountName: string; normalBalance: 'DEBIT' | 'CREDIT' };
 
 interface StatementLine {
   account_code: string;
@@ -33,210 +43,271 @@ interface StatementGroup {
   lines: StatementLine[];
   subtotal_pkr: number;
 }
+type EquityLine = StatementLine & EquityAccountRole;
 
-// The depreciation and amortisation accounts the seed ships, used for the
-// EBITDA add-back. Owner-created depreciation accounts are picked up at
-// runtime from the fixed-asset register — see daCodesFor().
-const SEEDED_DA_CODES = ['5040', '6120', '6130', '6140'];
+const PL_CLASSES = new Set(['REVENUE', 'COST_OF_SERVICE', 'EXPENSE']);
+const CREDIT_CLASSES = new Set(['LIABILITY', 'EQUITY', 'REVENUE']);
+const CREDIT_SECTIONS = new Set(['REVENUE', 'OTHER_INCOME', 'CURRENT_LIABILITY', 'NON_CURRENT_LIABILITY', 'EQUITY']);
+const RE = SYSTEM_ACCOUNTS.RETAINED_EARNINGS;
+const CYR = SYSTEM_ACCOUNTS.CURRENT_YEAR_RESULT;
 
-/** P&L-class net result over one window: revenue − cost of service − expense. */
-function plNetOver(accounts: Account[], window: SumMap): number {
+/**
+ * The result over a window: credits less debits across every P&L-class detail
+ * account. The ONE definition — the P&L's bottom line, the balance sheet's
+ * current-year and prior-year result, the changes-in-equity result and every
+ * partner's share all come from here.
+ */
+export function resultFor(chart: ChartAccount[], sums: SumMap): number {
   let net = 0;
-  for (const a of accounts) {
-    if (a.accountType !== 'DETAIL') continue;
-    const s = window.get(a.accountCode);
-    if (!s) continue;
-    if (a.accountClass === 'REVENUE') net += s.credit - s.debit;
-    else if (a.accountClass === 'COST_OF_SERVICE') net -= s.debit - s.credit;
-    else if (a.accountClass === 'EXPENSE') net -= s.debit - s.credit;
+  for (const a of chart) {
+    if (a.accountType !== 'DETAIL' || !PL_CLASSES.has(a.accountClass)) continue;
+    const s = sums.get(a.accountCode);
+    if (s) net += s.credit - s.debit;
   }
-  return net;
+  return round2(net);
+}
+
+const creditBalance = (sums: SumMap, code: string) => {
+  const s = sums.get(code);
+  return s ? round2(s.credit - s.debit) : 0;
+};
+
+/** One chart, classified once, for every statement a request builds. */
+class ClassifiedChart {
+  readonly byCode: Map<string, ChartAccount>;
+  private readonly sectionOf: Map<string, string>;
+
+  constructor(readonly accounts: ChartAccount[]) {
+    this.byCode = new Map(accounts.map((a) => [a.accountCode, a]));
+    this.sectionOf = new Map(accounts.map((a) => [a.accountCode, classify(a, this.byCode).section]));
+  }
+
+  section(code: string): string {
+    return this.sectionOf.get(code)!;
+  }
+
+  /** Detail accounts in one statement section, by code. */
+  details(section: string, cls?: string): ChartAccount[] {
+    return this.accounts.filter(
+      (a) => a.accountType === 'DETAIL' && this.section(a.accountCode) === section && (!cls || a.accountClass === cls),
+    );
+  }
+
+  /**
+   * An account's amount as its section presents it: credit-side sections show
+   * credits less debits, debit-side sections the reverse — so a contra account
+   * (accumulated depreciation, discounts allowed) is negative within its section.
+   * An unclassified account takes its class's side.
+   */
+  amount(a: ChartAccount, sums: SumMap): number {
+    const s = sums.get(a.accountCode);
+    if (!s) return 0;
+    const section = this.section(a.accountCode);
+    const creditSide = section === 'UNCLASSIFIED' ? CREDIT_CLASSES.has(a.accountClass) : CREDIT_SECTIONS.has(section);
+    return round2(creditSide ? s.credit - s.debit : s.debit - s.credit);
+  }
+
+  lines(accounts: ChartAccount[], sums: SumMap): StatementLine[] {
+    return accounts
+      .map((a) => ({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: this.amount(a, sums) }))
+      .filter((l) => l.amount_pkr !== 0);
+  }
+
+  /** A section's lines grouped under their header, headers in code order. */
+  groups(section: string, sums: SumMap): StatementGroup[] {
+    const byHeader = new Map<string, ChartAccount[]>();
+    for (const a of this.details(section)) {
+      const list = byHeader.get(a.parentAccountCode!) ?? [];
+      list.push(a);
+      byHeader.set(a.parentAccountCode!, list);
+    }
+    return [...byHeader.keys()]
+      .sort()
+      .map((code) => {
+        const lines = this.lines(byHeader.get(code)!, sums);
+        return { code, name: this.byCode.get(code)!.accountName, lines, subtotal_pkr: sumLines(lines) };
+      })
+      .filter((g) => g.lines.length > 0);
+  }
+}
+
+function sumLines(lines: StatementLine[]): number {
+  return sumMoney(lines.map((l) => l.amount_pkr));
+}
+function sumGroups(groups: StatementGroup[]): number {
+  return sumMoney(groups.map((g) => g.subtotal_pkr));
 }
 
 /**
- * Equity as the balance sheet presents it, at one date.
+ * Equity at one date, with retained earnings and the current-year result
+ * computed rather than posted (virtual closing).
  *
- * Pure: it takes the two windows the caller already fetched (all-time up to
- * the date, and the fiscal year containing it) rather than querying again.
- * Extracted so the statement of income and retained earnings on the P&L and
- * the balance sheet's equity section are the same definition — two
- * implementations of "what is the owner's equity" would eventually disagree,
- * and the one an accountant noticed would be the wrong one.
+ * `all` is every posting up to the date; `fy` the fiscal-year window whose result
+ * counts as "current year". Anything posted to the two derived accounts is kept:
+ * 3020 from opening balances, 3030 from before the engine refused it — a posted
+ * 3030 balance is result closed out by hand, so it belongs to the year it was
+ * posted in (docs/25 L-02).
  */
-function equitySnapshot(accounts: Account[], sums: SumMap, fySums: SumMap) {
-  const crAmt = (s: Sums) => s.credit - s.debit;
-
-  // Every equity DETAIL account: the plug, and each owner's capital and
-  // drawings. 3020 is folded into retained earnings below; 3030 is never posted.
-  const equity_lines = accounts
-    .filter(
-      (a) =>
-        a.accountClass === 'EQUITY' &&
-        a.accountType === 'DETAIL' &&
-        !DERIVED.has(a.accountCode),
-    )
-    .map((a) => line(a, sums, crAmt))
+function equityPosition(
+  chart: ClassifiedChart,
+  roleOf: (code: string) => EquityAccountRole,
+  all: SumMap,
+  fy: SumMap,
+) {
+  const equity_lines: EquityLine[] = chart.accounts
+    .filter((a) => a.accountClass === 'EQUITY' && a.accountType === 'DETAIL' && a.accountCode !== RE && a.accountCode !== CYR)
+    .map((a) => ({
+      account_code: a.accountCode,
+      account_name: a.accountName,
+      amount_pkr: creditBalance(all, a.accountCode),
+      ...roleOf(a.accountCode),
+    }))
     .filter((l) => l.amount_pkr !== 0);
 
-  const current_year_pl_pkr = round2(plNetOver(accounts, fySums));
-  const prior_years_pl_pkr = round2(plNetOver(accounts, sums) - plNetOver(accounts, fySums));
-  const posted3020 = sums.get('3020');
-  const retained_earnings_pkr = round2((posted3020 ? crAmt(posted3020) : 0) + prior_years_pl_pkr);
+  const current_year_pl_pkr = round2(resultFor(chart.accounts, fy) + creditBalance(fy, CYR));
+  const prior_years_pl_pkr = round2(
+    resultFor(chart.accounts, all) - resultFor(chart.accounts, fy) + creditBalance(all, CYR) - creditBalance(fy, CYR),
+  );
+  const retained_earnings_pkr = round2(creditBalance(all, RE) + prior_years_pl_pkr);
   const total_equity_pkr = round2(sumLines(equity_lines) + retained_earnings_pkr + current_year_pl_pkr);
 
-  return { equity_lines, current_year_pl_pkr, prior_years_pl_pkr, retained_earnings_pkr, total_equity_pkr };
+  return {
+    equity_lines,
+    current_year_pl_pkr,
+    prior_years_pl_pkr,
+    retained_earnings_pkr,
+    total_equity_pkr,
+    // Part of the equity above, singled out: the plug belongs to no owner, so
+    // anything left in it is opening equity nobody has attributed yet.
+    unattributed_opening_equity_pkr: creditBalance(all, SYSTEM_ACCOUNTS.OPENING_BALANCE_EQUITY),
+  };
 }
 
 export class FinancialStatementsService {
   constructor(private prisma: PrismaClient) {}
+
+  private async chart(facilityId: string): Promise<ClassifiedChart> {
+    const rows = await this.prisma.chartOfAccounts.findMany({
+      where: { facilityId },
+      orderBy: { accountCode: 'asc' },
+      select: {
+        accountCode: true,
+        accountName: true,
+        accountClass: true,
+        accountType: true,
+        parentAccountCode: true,
+        normalBalance: true,
+        statementSection: true,
+        isCashEquivalent: true,
+      },
+    });
+    return new ClassifiedChart(rows);
+  }
+
+  private async fyStartMonth(facilityId: string): Promise<number> {
+    const facility = await this.prisma.facility.findUniqueOrThrow({
+      where: { id: facilityId },
+      select: { settings: true },
+    });
+    return resolveFacilitySettings(facility.settings).fiscal_year_start_month;
+  }
+
+  private async roles(facilityId: string) {
+    return equityRoles(
+      await this.prisma.partner.findMany({
+        where: { facilityId },
+        select: { id: true, name: true, capitalAccountCode: true, drawingsAccountCode: true },
+      }),
+    );
+  }
 
   /**
    * Profit & Loss over [date_from, date_to], presented IFRS-style:
    *   Operating revenue (by stream) − Contra revenue = Net revenue
    *   − Cost of service = Gross profit
    *   − Operating expenses = Operating profit (EBIT)
-   *   + Other income = Net profit
-   *   EBITDA = Operating profit + depreciation/amortisation
+   *   + Other income − Other expense = Net profit
+   *   EBITDA = Operating profit + depreciation/amortisation + impairment
    *
-   * Every stage folds in unclassified accounts of the matching class (F-6b) —
-   * accountClass maps 1:1 onto a P&L subtotal, so there is no judgement call
-   * in placing them, unlike the balance sheet's current/non-current split.
+   * An account under no sectioned header is shown inside the section its class
+   * belongs to (revenue, cost of service, operating expenses), so every visible
+   * subtotal is the sum of the lines above it; `unclassified_lines` only names
+   * them (F-6b). The owners' equity movements are the statement of changes in
+   * equity's job, not this one's (docs/25 L-24).
    */
-  async getProfitLoss(facilityId: string, query: ProfitLossQueryType) {
-    const lines = await this.fetchLines(facilityId, query.date_from, query.date_to, query.book_type);
-    const accounts = await this.loadAccounts(facilityId);
-    const sums = aggregate(lines);
+  async getProfitLoss(facilityId: string, query: ProfitLossQueryType & { book_type: Book }) {
+    const [chart, sums] = await Promise.all([
+      this.chart(facilityId),
+      accountBalances(this.prisma, {
+        facilityId,
+        book: query.book_type,
+        from: fromIsoDate(query.date_from),
+        to: fromIsoDate(query.date_to),
+      }),
+    ]);
 
-    const credit = (s: Sums) => s.credit - s.debit;
-    const debit = (s: Sums) => s.debit - s.credit;
+    const unclassifiedRevenue = chart.lines(chart.details('UNCLASSIFIED', 'REVENUE'), sums);
+    const revenue_groups = [
+      ...chart.groups('REVENUE', sums),
+      ...(unclassifiedRevenue.length > 0
+        ? [{ code: 'UNCLASSIFIED', name: 'Unclassified Revenue', lines: unclassifiedRevenue, subtotal_pkr: sumLines(unclassifiedRevenue) }]
+        : []),
+    ];
+    const contra_revenue_lines = chart.lines(chart.details('CONTRA_REVENUE'), sums);
+    const cost_of_service_lines = chart.lines(
+      [...chart.details('COST_OF_SERVICE'), ...chart.details('UNCLASSIFIED', 'COST_OF_SERVICE')],
+      sums,
+    );
+    const operating_expense_lines = chart.lines(
+      [...chart.details('OPERATING_EXPENSE'), ...chart.details('UNCLASSIFIED', 'EXPENSE')],
+      sums,
+    );
+    const other_income_lines = chart.lines(chart.details('OTHER_INCOME'), sums);
+    const other_expense_lines = chart.lines(chart.details('OTHER_EXPENSE'), sums);
 
-    // Section membership is data-driven (phase/24): headers 4000/4100 are the
-    // seeded REVENUE section, but any header an owner tags REVENUE joins them.
-    const revenue_groups = buildGroups(accounts, sums, sectionHeaders(accounts, 'REVENUE'), credit);
-
-    // Contra revenue — presented as a deduction
-    const contra_revenue_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'CONTRA_REVENUE'), debit);
+    const total_operating_revenue_pkr = sumGroups(revenue_groups);
     const total_contra_revenue_pkr = sumLines(contra_revenue_lines);
-
-    // Cost of service
-    const cost_of_service_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'COST_OF_SERVICE'), debit);
-
-    // Operating expenses
-    const operating_expense_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'OPERATING_EXPENSE'), debit);
-
-    // Other income, below the line
-    const other_income_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'OTHER_INCOME'), credit);
-    const total_other_income_pkr = sumLines(other_income_lines);
-
-    // Other (non-operating) expense, below the line — symmetric with other
-    // income above. Without this, a loss (6110) had nowhere to go but
-    // OPERATING_EXPENSE while the matching gain (4230) already sat in
-    // OTHER_INCOME: the same kind of event landed on opposite sides of
-    // operating profit (phase/25).
-    const other_expense_lines = buildLines(accounts, sums, sectionHeaders(accounts, 'OTHER_EXPENSE'), debit);
-    const total_other_expense_pkr = sumLines(other_expense_lines);
-
-    // Completeness (F-6b): any P&L-class DETAIL account with activity that the
-    // hardcoded header rollups above did not place would otherwise silently
-    // drop out of every subtotal (while remaining in the trial balance).
-    // Unlike the balance sheet's current/non-current split, there is no
-    // judgement call here — accountClass maps 1:1 onto a P&L subtotal, so an
-    // unclassified account is folded straight into the total its class
-    // belongs to, not just tacked onto the bottom line. Pre-phase-24 this
-    // only reached net_profit_pkr, which left operating_profit_pkr,
-    // ebitda_pkr and every margin percentage wrong under a reachable
-    // condition — net_profit_pkr was the one figure that was already right.
-    const placed = new Set<string>();
-    for (const g of revenue_groups) for (const l of g.lines) placed.add(l.account_code);
-    for (const l of contra_revenue_lines) placed.add(l.account_code);
-    for (const l of cost_of_service_lines) placed.add(l.account_code);
-    for (const l of operating_expense_lines) placed.add(l.account_code);
-    for (const l of other_income_lines) placed.add(l.account_code);
-    for (const l of other_expense_lines) placed.add(l.account_code);
-
-    const unclassified_lines: StatementLine[] = [];
-    let unclassifiedRevenuePkr = 0; // additional revenue
-    let unclassifiedCostOfServicePkr = 0; // additional cost (positive magnitude)
-    let unclassifiedExpensePkr = 0; // additional expense (positive magnitude)
-    for (const a of accounts) {
-      if (a.accountType !== 'DETAIL' || placed.has(a.accountCode)) continue;
-      if (a.accountClass !== 'REVENUE' && a.accountClass !== 'COST_OF_SERVICE' && a.accountClass !== 'EXPENSE') continue;
-      const s = sums.get(a.accountCode);
-      if (!s) continue;
-      if (a.accountClass === 'REVENUE') {
-        const amt = round2(credit(s));
-        if (amt === 0) continue;
-        unclassified_lines.push({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: amt });
-        unclassifiedRevenuePkr += amt;
-      } else {
-        const magnitude = round2(debit(s));
-        if (magnitude === 0) continue;
-        // Signed as its contribution to net profit — a cost/expense reduces it.
-        unclassified_lines.push({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: -magnitude });
-        if (a.accountClass === 'COST_OF_SERVICE') unclassifiedCostOfServicePkr += magnitude;
-        else unclassifiedExpensePkr += magnitude;
-      }
-    }
-    const total_unclassified_pkr = round2(unclassified_lines.reduce((s, l) => s + l.amount_pkr, 0));
-
-    // Every subtotal below now includes its unclassified share, so the chain
-    // of identities (net_revenue = revenue − contra, gross = net_revenue −
-    // COGS, operating = gross − opex, net = operating + other income) holds
-    // exactly whether or not any account is unclassified.
-    const total_operating_revenue_pkr = round2(sumGroups(revenue_groups) + unclassifiedRevenuePkr);
     const net_revenue_pkr = round2(total_operating_revenue_pkr - total_contra_revenue_pkr);
-
-    const total_cost_of_service_pkr = round2(sumLines(cost_of_service_lines) + unclassifiedCostOfServicePkr);
+    const total_cost_of_service_pkr = sumLines(cost_of_service_lines);
     const gross_profit_pkr = round2(net_revenue_pkr - total_cost_of_service_pkr);
-
-    const total_operating_expense_pkr = round2(sumLines(operating_expense_lines) + unclassifiedExpensePkr);
+    const total_operating_expense_pkr = sumLines(operating_expense_lines);
     const operating_profit_pkr = round2(gross_profit_pkr - total_operating_expense_pkr);
+    const total_other_income_pkr = sumLines(other_income_lines);
+    const total_other_expense_pkr = sumLines(other_expense_lines);
+    const net_profit_pkr = resultFor(chart.accounts, sums);
 
-    const net_profit_pkr = round2(operating_profit_pkr + total_other_income_pkr - total_other_expense_pkr);
-
-    // Depreciation & amortisation add-back for EBITDA. The seeded four are not
-    // the whole story: an owner who opens their own depreciation account and
-    // points a fixed asset at it would otherwise have it silently left out of
-    // the add-back, understating EBITDA with nothing to indicate why. Take the
-    // seeded set plus whatever the asset register actually depreciates into.
-    const daCodes = await this.daCodesFor(facilityId);
-    let da = 0;
-    for (const a of accounts) {
-      if (daCodes.has(a.accountCode)) {
-        const s = sums.get(a.accountCode);
-        if (s) da += debit(s);
-      }
-    }
-    const depreciation_amortisation_pkr = round2(da);
-    const ebitda_pkr = round2(operating_profit_pkr + depreciation_amortisation_pkr);
-
-    // Statement of income and retained earnings (IFRS for SMEs). Permitted in
-    // place of separate statements of comprehensive income and of changes in
-    // equity where the only equity movements are profit or loss,
-    // distributions, prior-period error corrections and policy changes — which
-    // for an owner-managed facility is the case. Four rows on the P&L rather
-    // than a screen nobody would open.
-    const equity = await this.equityRollforward(facilityId, query);
+    // EBITDA adds back the depreciation and amortisation accounts by role, and
+    // impairment on a row of its own. It used to add back every account any
+    // fixed asset named as its expense account — and legacy OTHER-category
+    // assets named 6100 Miscellaneous (docs/25 L-21).
+    const expenseOn = (codes: readonly string[]) =>
+      sumMoney(codes.map((code) => {
+        const s = sums.get(code);
+        return s ? s.debit - s.credit : 0;
+      }));
+    const depreciation_amortisation_pkr = expenseOn(DEPRECIATION_EXPENSE_ACCOUNTS);
+    const impairment_pkr = expenseOn([SYSTEM_ACCOUNTS.IMPAIRMENT_LOSS]);
+    const ebitda_pkr = round2(operating_profit_pkr + depreciation_amortisation_pkr + impairment_pkr);
 
     // A margin over zero or negative net revenue is undefined, not 0% —
-    // returning 0 would read as "break-even" when the period actually has no
-    // revenue base. null renders as "—" in the UI (phase/19 audit item 14).
-    const pct = (n: number): number | null =>
-      net_revenue_pkr > 0 ? round2((n / net_revenue_pkr) * 100) : null;
+    // returning 0 would read as "break-even" when the period has no revenue
+    // base. null renders as "—" (phase/19 audit item 14).
+    const pct = (n: number): number | null => (net_revenue_pkr > 0 ? round2((n / net_revenue_pkr) * 100) : null);
 
-    // Flat arrays retained for CSV / back-compat
-    const revenue_lines = [...revenue_groups.flatMap((g) => g.lines), ...other_income_lines];
+    // Signed as each account's contribution to the result: an expense is negative.
+    const unclassified_lines = chart.accounts
+      .filter((a) => a.accountType === 'DETAIL' && PL_CLASSES.has(a.accountClass) && chart.section(a.accountCode) === 'UNCLASSIFIED')
+      .map((a) => ({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: creditBalance(sums, a.accountCode) }))
+      .filter((l) => l.amount_pkr !== 0);
 
     return {
       date_from: query.date_from,
       date_to: query.date_to,
 
-      ...equity,
-
       revenue_groups,
       total_operating_revenue_pkr,
       contra_revenue_lines,
-      total_contra_revenue_pkr: round2(total_contra_revenue_pkr),
+      total_contra_revenue_pkr,
       net_revenue_pkr,
 
       cost_of_service_lines,
@@ -250,12 +321,13 @@ export class FinancialStatementsService {
       operating_profit_pct: pct(operating_profit_pkr),
 
       other_income_lines,
-      total_other_income_pkr: round2(total_other_income_pkr),
+      total_other_income_pkr,
 
       other_expense_lines,
-      total_other_expense_pkr: round2(total_other_expense_pkr),
+      total_other_expense_pkr,
 
       depreciation_amortisation_pkr,
+      impairment_pkr,
       ebitda_pkr,
       ebitda_pct: pct(ebitda_pkr),
 
@@ -263,14 +335,7 @@ export class FinancialStatementsService {
       net_profit_pct: pct(net_profit_pkr),
 
       unclassified_lines,
-      total_unclassified_pkr,
       has_unclassified: unclassified_lines.length > 0,
-
-      // Back-compat flat fields (older clients / existing tests)
-      revenue_lines,
-      total_revenue_pkr: net_revenue_pkr,
-      expense_lines: operating_expense_lines,
-      total_expense_pkr: total_operating_expense_pkr,
     };
   }
 
@@ -278,354 +343,36 @@ export class FinancialStatementsService {
    * Classified Balance Sheet as of `as_of_date`:
    *   Current Assets / Non-current Assets = Total Assets
    *   Current Liabilities / Non-current Liabilities = Total Liabilities
-   *   Equity (Capital + Retained Earnings + Current-Year P&L)
+   *   Equity (each owner's accounts + the plug + Retained Earnings + Current-Year result)
    *   Assets = Liabilities + Equity
-   */
-  /**
-   * Owner's equity at the day before date_from and at date_to, plus the
-   * drawings taken in between.
    *
-   * The closing figure ties to total_equity_pkr on the balance sheet at
-   * date_to — but only over a fiscal-year-to-date range. Equity includes the
-   * current-year result, which is bounded to the fiscal year containing the
-   * date, not to [date_from, date_to]; over, say, February to April the two
-   * legitimately differ, and chasing that difference leads someone to "fix" a
-   * correct balance sheet. is_fiscal_year_to_date says which case the reader
-   * is looking at.
+   * Virtual closing (phase/19): the current-year line covers only the fiscal year
+   * containing as_of_date; everything earlier is retained earnings. No closing
+   * entry is posted — the ledger is immutable — so the split is presented.
    */
-  private async equityRollforward(facilityId: string, query: ProfitLossQueryType) {
-    const accounts = await this.loadAccounts(facilityId);
-    const facility = await this.prisma.facility.findUniqueOrThrow({
-      where: { id: facilityId },
-      select: { settings: true },
-    });
-    const fyStartMonth = resolveFacilitySettings(facility.settings).fiscal_year_start_month;
-
-    const at = async (asOfIso: string) => {
-      const fyStart = fiscalYearStart(new Date(asOfIso), fyStartMonth);
-      const [all, fy] = await Promise.all([
-        this.fetchLines(facilityId, undefined, asOfIso, query.book_type),
-        this.fetchLines(facilityId, fyStart.toISOString().slice(0, 10), asOfIso, query.book_type),
-      ]);
-      return equitySnapshot(accounts, aggregate(all), aggregate(fy)).total_equity_pkr;
-    };
-
-    const dayBefore = new Date(new Date(`${query.date_from}T00:00:00.000Z`).getTime() - 86400000)
-      .toISOString()
-      .slice(0, 10);
-
-    const [opening_equity_pkr, closing_equity_pkr] = await Promise.all([at(dayBefore), at(query.date_to)]);
-
-    // Drawings are contra-equity, so the movement is debits less credits over
-    // the period — across EVERY debit-normal equity account, not the one code
-    // the seed happens to ship. A second owner's drawings account is created,
-    // not seeded, and hardcoding '3015' silently dropped it: the same defect
-    // as the hardcoded EBITDA add-back this file already had to correct.
-    const periodSums = aggregate(
-      await this.fetchLines(facilityId, query.date_from, query.date_to, query.book_type),
-    );
-    const drawings_pkr = round2(
-      accounts
-        .filter(isDrawingsAccount)
-        .reduce((t, a) => {
-          const m = periodSums.get(a.accountCode);
-          return m ? t + (m.debit - m.credit) : t;
-        }, 0),
-    );
-
-    // Capital introduced in the period. Without this row the block cannot foot
-    // the moment an owner puts money in: closing equity carries the
-    // contribution and nothing discloses it.
-    const capital_introduced_pkr = round2(
-      accounts
-        .filter(isCapitalAccount)
-        .reduce((t, a) => {
-          const m = periodSums.get(a.accountCode);
-          return m ? t + (m.credit - m.debit) : t;
-        }, 0),
-    );
-
-    const fyStartForTo = fiscalYearStart(new Date(query.date_to), fyStartMonth).toISOString().slice(0, 10);
-
-    return {
-      opening_equity_pkr,
-      capital_introduced_pkr,
-      drawings_pkr,
-      closing_equity_pkr,
-      is_fiscal_year_to_date: query.date_from === fyStartForTo,
-      // IFRS for SMEs 6.4 permits the combined statement of income and retained
-      // earnings ONLY where the sole equity movements are profit or loss,
-      // distributions, prior-period error corrections and policy changes.
-      // Capital introduced is not among them, so its presence disqualifies the
-      // entity from presenting it and the statement of changes in equity is
-      // required instead. This is the standard's own test, not a judgement.
-      combined_statement_permitted: capital_introduced_pkr === 0,
-    };
-  }
-
-  /**
-   * Statement of changes in equity (IFRS for SMEs 6.2/6.3).
-   *
-   * One column per category of equity — 4.13 requires an entity without share
-   * capital to show the changes in each — where a category is simply an equity
-   * account. A second owner's capital account therefore becomes a column by
-   * being created, with no code change here.
-   *
-   * Every column foots by construction: closing is opening plus the movements,
-   * and the movement rows are derived from the same period aggregate. The
-   * retained-earnings and current-year columns take their movement as closing
-   * less opening, which absorbs the fiscal-year rollover between them — the two
-   * net to the period's result even when the range crosses a year end.
-   */
-  async getChangesInEquity(facilityId: string, query: ChangesInEquityQueryType) {
-    const accounts = await this.loadAccounts(facilityId);
-    const facility = await this.prisma.facility.findUniqueOrThrow({
-      where: { id: facilityId },
-      select: { settings: true },
-    });
-    const fyStartMonth = resolveFacilitySettings(facility.settings).fiscal_year_start_month;
-
-    const snapshotAt = async (asOfIso: string) => {
-      const fyStart = fiscalYearStart(new Date(asOfIso), fyStartMonth);
-      const [all, fy] = await Promise.all([
-        this.fetchLines(facilityId, undefined, asOfIso, query.book_type),
-        this.fetchLines(facilityId, fyStart.toISOString().slice(0, 10), asOfIso, query.book_type),
-      ]);
-      const sums = aggregate(all);
-      return { snap: equitySnapshot(accounts, sums, aggregate(fy)), sums };
-    };
-
-    const dayBefore = new Date(new Date(`${query.date_from}T00:00:00.000Z`).getTime() - 86400000)
-      .toISOString()
-      .slice(0, 10);
-
-    const [open, close, periodSums] = await Promise.all([
-      snapshotAt(dayBefore),
-      snapshotAt(query.date_to),
-      this.fetchLines(facilityId, query.date_from, query.date_to, query.book_type).then(aggregate),
+  async getBalanceSheet(facilityId: string, query: BalanceSheetQueryType & { book_type: Book }) {
+    const asOf = fromIsoDate(query.as_of_date);
+    const fyStart = fiscalYearStart(asOf, await this.fyStartMonth(facilityId));
+    const [chart, roleOf, sums, fySums] = await Promise.all([
+      this.chart(facilityId),
+      this.roles(facilityId),
+      accountBalances(this.prisma, { facilityId, book: query.book_type, to: asOf }),
+      accountBalances(this.prisma, { facilityId, book: query.book_type, from: fyStart, to: asOf }),
     ]);
 
-    const crAt = (sums: SumMap, code: string) => {
-      const s = sums.get(code);
-      return s ? round2(s.credit - s.debit) : 0;
-    };
+    const current_asset_groups = chart.groups('CURRENT_ASSET', sums);
+    const non_current_asset_groups = chart.groups('NON_CURRENT_ASSET', sums);
+    const current_liability_groups = chart.groups('CURRENT_LIABILITY', sums);
+    const non_current_liability_groups = chart.groups('NON_CURRENT_LIABILITY', sums);
+    const total_current_assets_pkr = sumGroups(current_asset_groups);
+    const total_non_current_assets_pkr = sumGroups(non_current_asset_groups);
+    const total_current_liabilities_pkr = sumGroups(current_liability_groups);
+    const total_non_current_liabilities_pkr = sumGroups(non_current_liability_groups);
 
-    const columns = accounts
-      .filter((a) => a.accountClass === 'EQUITY' && a.accountType === 'DETAIL')
-      .filter((a) => !DERIVED.has(a.accountCode))
-      .map((a) => {
-        const opening_pkr = crAt(open.sums, a.accountCode);
-        const movement = crAt(periodSums, a.accountCode);
-        const drawings = isDrawingsAccount(a) ? movement : 0;
-        const introduced = isDrawingsAccount(a) ? 0 : movement;
-        return {
-          account_code: a.accountCode,
-          account_name: a.accountName,
-          opening_pkr,
-          capital_introduced_pkr: introduced,
-          drawings_pkr: drawings,
-          result_pkr: 0,
-          closing_pkr: round2(opening_pkr + movement),
-        };
-      })
-      // An account that never moved and carries nothing is noise on the face of
-      // a statement; one that moved to zero is not, and stays.
-      .filter((c) => c.opening_pkr !== 0 || c.closing_pkr !== 0 || c.capital_introduced_pkr !== 0 || c.drawings_pkr !== 0);
-
-    const derived = (
-      code: string,
-      name: string,
-      openingValue: number,
-      closingValue: number,
-    ) => ({
-      account_code: code,
-      account_name: name,
-      opening_pkr: round2(openingValue),
-      capital_introduced_pkr: 0,
-      drawings_pkr: 0,
-      result_pkr: round2(closingValue - openingValue),
-      closing_pkr: round2(closingValue),
-    });
-
-    columns.push(
-      derived('3020', 'Retained Earnings', open.snap.retained_earnings_pkr, close.snap.retained_earnings_pkr),
-      derived('3030', 'Result for the Period', open.snap.current_year_pl_pkr, close.snap.current_year_pl_pkr),
-    );
-
-    const sum = (pick: (c: (typeof columns)[number]) => number) =>
-      round2(columns.reduce((t, c) => t + pick(c), 0));
-
-    const total_closing_pkr = sum((c) => c.closing_pkr);
-    const result_allocation = await this.allocateResult(facilityId, query, accounts);
-
-    return {
-      date_from: query.date_from,
-      date_to: query.date_to,
-      columns,
-      total_opening_pkr: sum((c) => c.opening_pkr),
-      total_capital_introduced_pkr: sum((c) => c.capital_introduced_pkr),
-      total_drawings_pkr: sum((c) => c.drawings_pkr),
-      total_result_pkr: sum((c) => c.result_pkr),
-      total_closing_pkr,
-      is_reconciled: Math.abs(total_closing_pkr - close.snap.total_equity_pkr) < 0.005,
-      result_allocation,
-      // True while any part of the period's result belongs to nobody in
-      // particular — no ratio agreed at all, or one that starts mid-period.
-      result_is_unallocated:
-        result_allocation === null || result_allocation.unallocated_pkr !== 0,
-    };
-  }
-
-  /**
-   * Each owner's share of the period's result, or null where no ratio has ever
-   * been agreed.
-   *
-   * Disclosed beside the columns rather than folded into them — see
-   * equity-allocation.ts for why. Nothing here posts, and nothing here changes
-   * total equity: it says whose the result is, it does not move it.
-   */
-  private async allocateResult(
-    facilityId: string,
-    query: ChangesInEquityQueryType,
-    accounts: Account[],
-  ) {
-    const rows = await this.prisma.partnerProfitShare.findMany({
-      where: { facilityId },
-      orderBy: { effectiveFrom: 'asc' },
-      include: { partner: { select: { id: true, name: true, capitalAccountCode: true } } },
-    });
-    if (rows.length === 0) return null;
-
-    const byDate = new Map<string, RatioWindow>();
-    for (const r of rows) {
-      const key = r.effectiveFrom.toISOString().slice(0, 10);
-      const window = byDate.get(key) ?? { effective_from: key, shares: [] };
-      window.shares.push({
-        partner_id: r.partner.id,
-        partner_name: r.partner.name,
-        capital_account_code: r.partner.capitalAccountCode,
-        weight: Number(r.weight),
-      });
-      byDate.set(key, window);
-    }
-
-    const slices = sliceByRatio(query.date_from, query.date_to, [...byDate.values()]);
-    const totals = new Map<string, { name: string; code: string; amount: number }>();
-    let unallocated = 0;
-    const windows: { from: string; to: string; result_pkr: number; ratio_from: string | null }[] = [];
-
-    for (const slice of slices) {
-      // The result earned inside this slice alone. Ratio changes are rare, so
-      // this is a handful of queries at most.
-      const lines = await this.fetchLines(facilityId, slice.from, slice.to, query.book_type);
-      const result = round2(plNetOver(accounts, aggregate(lines)));
-      windows.push({
-        from: slice.from,
-        to: slice.to,
-        result_pkr: result,
-        ratio_from: slice.ratio?.effective_from ?? null,
-      });
-
-      if (!slice.ratio) {
-        unallocated = round2(unallocated + result);
-        continue;
-      }
-      for (const part of divideByWeight(result, slice.ratio.shares)) {
-        const share = slice.ratio.shares.find((x) => x.partner_id === part.partner_id)!;
-        const running = totals.get(part.partner_id) ?? {
-          name: share.partner_name,
-          code: share.capital_account_code,
-          amount: 0,
-        };
-        running.amount = round2(running.amount + part.amount_pkr);
-        totals.set(part.partner_id, running);
-      }
-    }
-
-    return {
-      by_partner: [...totals.entries()].map(([partner_id, v]) => ({
-        partner_id,
-        partner_name: v.name,
-        capital_account_code: v.code,
-        amount_pkr: v.amount,
-      })),
-      unallocated_pkr: unallocated,
-      windows,
-    };
-  }
-
-  /**
-   * Accounts that carry depreciation or amortisation for this facility: the
-   * seeded four, plus every account the fixed-asset register is configured to
-   * depreciate into.
-   */
-  private async daCodesFor(facilityId: string): Promise<Set<string>> {
-    const configured = await this.prisma.fixedAsset.findMany({
-      where: { facilityId },
-      select: { deprExpenseAccountCode: true },
-      distinct: ['deprExpenseAccountCode'],
-    });
-    return new Set([...SEEDED_DA_CODES, ...configured.map((a) => a.deprExpenseAccountCode)]);
-  }
-
-  async getBalanceSheet(facilityId: string, query: BalanceSheetQueryType) {
-    const lines = await this.fetchLines(facilityId, undefined, query.as_of_date, query.book_type);
-    const accounts = await this.loadAccounts(facilityId);
-    const sums = aggregate(lines);
-
-    // Virtual closing (phase/19 audit): the "Current Year Profit/(Loss)" line
-    // must cover only the fiscal year containing as_of_date. Everything earlier
-    // is prior-period result and belongs in retained earnings — no closing JE
-    // is posted (that would violate the ledger-immutability guards), so we
-    // present it. `sums` above spans all postings up to as_of (used for
-    // all-time P&L); a second window gives the current-FY slice.
-    const facility = await this.prisma.facility.findUniqueOrThrow({
-      where: { id: facilityId },
-      select: { settings: true },
-    });
-    const fyStartMonth = resolveFacilitySettings(facility.settings).fiscal_year_start_month;
-    const fyStart = fiscalYearStart(new Date(query.as_of_date), fyStartMonth);
-    const fyStartIso = fyStart.toISOString().slice(0, 10);
-    const fyLines = await this.fetchLines(facilityId, fyStartIso, query.as_of_date, query.book_type);
-    const fySums = aggregate(fyLines);
-
-    const assetAmt = (s: Sums) => s.debit - s.credit; // contra (accum deprec) naturally negative → net book value
-    const crAmt = (s: Sums) => s.credit - s.debit;
-
-    // Assets — section membership is data-driven (phase/24); any header an
-    // owner tags CURRENT_ASSET (etc.) joins the seeded 1000/1100/1200 set.
-    const current_asset_groups = buildGroups(accounts, sums, sectionHeaders(accounts, 'CURRENT_ASSET'), assetAmt);
-    const total_current_assets_pkr = round2(sumGroups(current_asset_groups));
-    const non_current_asset_groups = buildGroups(accounts, sums, sectionHeaders(accounts, 'NON_CURRENT_ASSET'), assetAmt);
-    const total_non_current_assets_pkr = round2(sumGroups(non_current_asset_groups));
-
-    // Liabilities
-    const current_liability_groups = buildGroups(accounts, sums, sectionHeaders(accounts, 'CURRENT_LIABILITY'), crAmt);
-    const total_current_liabilities_pkr = round2(sumGroups(current_liability_groups));
-    const non_current_liability_groups = buildGroups(accounts, sums, sectionHeaders(accounts, 'NON_CURRENT_LIABILITY'), crAmt);
-    const total_non_current_liabilities_pkr = round2(sumGroups(non_current_liability_groups));
-
-    // Completeness (F-6b): asset/liability DETAIL accounts the hardcoded
-    // header rollups did not place. The equity side already aggregates by
-    // class, so surfacing these keeps the sheet complete AND balanced.
-    const placedBs = new Set<string>();
-    for (const g of [...current_asset_groups, ...non_current_asset_groups]) for (const l of g.lines) placedBs.add(l.account_code);
-    for (const g of [...current_liability_groups, ...non_current_liability_groups]) for (const l of g.lines) placedBs.add(l.account_code);
-
-    const unclassified_asset_lines: StatementLine[] = [];
-    const unclassified_liability_lines: StatementLine[] = [];
-    for (const a of accounts) {
-      if (a.accountType !== 'DETAIL' || placedBs.has(a.accountCode)) continue;
-      const s = sums.get(a.accountCode);
-      if (!s) continue;
-      if (a.accountClass === 'ASSET') {
-        const amt = round2(assetAmt(s));
-        if (amt !== 0) unclassified_asset_lines.push({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: amt });
-      } else if (a.accountClass === 'LIABILITY') {
-        const amt = round2(crAmt(s));
-        if (amt !== 0) unclassified_liability_lines.push({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: amt });
-      }
-    }
+    // Balances under no sectioned header (F-6b): outside the current/non-current
+    // split, inside the totals, so the sheet stays complete and balanced.
+    const unclassified_asset_lines = chart.lines(chart.details('UNCLASSIFIED', 'ASSET'), sums);
+    const unclassified_liability_lines = chart.lines(chart.details('UNCLASSIFIED', 'LIABILITY'), sums);
 
     const total_assets_pkr = round2(
       total_current_assets_pkr + total_non_current_assets_pkr + sumLines(unclassified_asset_lines),
@@ -634,18 +381,19 @@ export class FinancialStatementsService {
       total_current_liabilities_pkr + total_non_current_liabilities_pkr + sumLines(unclassified_liability_lines),
     );
 
-    // Current-year P&L covers only the fiscal year containing as_of_date;
-    // everything earlier is prior-period result and belongs in retained
-    // earnings. Retained earnings merges the posted 3020 balance (today only
-    // touched by opening balances) with that accumulated prior-year result,
-    // keeping the identity exact:
-    //   retained + current = posted-3020 + all-time-P&L
-    const { equity_lines, current_year_pl_pkr, prior_years_pl_pkr, retained_earnings_pkr, total_equity_pkr } =
-      equitySnapshot(accounts, sums, fySums);
-    const total_liabilities_and_equity_pkr = round2(total_liabilities_pkr + total_equity_pkr);
+    const equity = equityPosition(chart, roleOf, sums, fySums);
+    const total_liabilities_and_equity_pkr = round2(total_liabilities_pkr + equity.total_equity_pkr);
+
+    // Cash and cash equivalents (IFRS for SMEs 7.2): what the chart flags as
+    // cash, not the Cash & Bank header — which also holds 1025 Cheques in Hand,
+    // money that can still bounce. The cash-flow statement closes on this.
+    const cash_and_cash_equivalents_pkr = sumMoney(
+      chart.accounts.filter((a) => a.isCashEquivalent).map((a) => chart.amount(a, sums)),
+    );
 
     return {
       as_of_date: query.as_of_date,
+      cash_and_cash_equivalents_pkr,
 
       current_asset_groups,
       total_current_assets_pkr,
@@ -659,134 +407,221 @@ export class FinancialStatementsService {
       total_non_current_liabilities_pkr,
       total_liabilities_pkr,
 
-      equity_lines,
-      retained_earnings_pkr,
-      prior_years_pl_pkr,
-      current_year_pl_pkr,
-      fiscal_year_start: fyStartIso,
-      total_equity_pkr,
-      // The plug renders above as an ordinary equity line, and nothing up there
-      // distinguishes it from an owner's own capital. Singling it out is the
-      // point: a balance here is opening equity nobody has attributed yet.
-      unattributed_opening_equity_pkr: unattributedPlug(
-        (() => {
-          const s = sums.get(EQUITY_PLUG_ACCOUNT);
-          return s ? s.credit - s.debit : 0;
-        })(),
-      ),
+      ...equity,
+      fiscal_year_start: toIsoDate(fyStart),
       total_liabilities_and_equity_pkr,
 
       unclassified_asset_lines,
       unclassified_liability_lines,
       has_unclassified: unclassified_asset_lines.length > 0 || unclassified_liability_lines.length > 0,
 
-      is_balanced: Math.abs(total_assets_pkr - total_liabilities_and_equity_pkr) < 0.01,
-
-      // Back-compat flat fields
-      asset_lines: [...current_asset_groups, ...non_current_asset_groups].flatMap((g) => g.lines),
-      liability_lines: [...current_liability_groups, ...non_current_liability_groups].flatMap((g) => g.lines),
+      is_balanced: moneyEquals(total_assets_pkr, total_liabilities_and_equity_pkr),
     };
   }
 
-  private async loadAccounts(facilityId: string): Promise<Account[]> {
-    return this.prisma.chartOfAccounts.findMany({
-      where: { facilityId },
-      orderBy: { accountCode: 'asc' },
-      select: { accountCode: true, accountName: true, accountClass: true, accountType: true, parentAccountCode: true, normalBalance: true, statementSection: true },
-    }) as unknown as Promise<Account[]>;
-  }
+  /**
+   * Statement of changes in equity (IFRS for SMEs 6.2/6.3) — the one equity
+   * roll-forward (docs/25 L-24).
+   *
+   * One column per category of equity, as 4.13 requires of an entity without
+   * share capital: each partner's capital and drawings accounts (named by the
+   * partners table, never inferred), the opening-balance plug, any other equity
+   * account, retained earnings and the current-year result.
+   *
+   * Rows: opening · capital introduced · drawings · other movements · result ·
+   * transfer · closing. Capital introduced and drawings are owner-equity
+   * documents on a partner's own accounts; an opening balance, attributing the
+   * plug or a manual correction is an "other movement". The result lands only on
+   * the current-year column, and when the range crosses a fiscal-year end the
+   * finished year's result moves to retained earnings on the transfer row, which
+   * nets to zero across the two. Opening equity is split as at the START of
+   * date_from, so a range starting on the fiscal-year start opens with last
+   * year's result already in retained earnings.
+   */
+  async getChangesInEquity(facilityId: string, query: ChangesInEquityQueryType & { book_type: Book }) {
+    const book = query.book_type;
+    const from = fromIsoDate(query.date_from);
+    const to = fromIsoDate(query.date_to);
+    const openingDate = fromIsoDate(dayBefore(query.date_from));
+    const fyMonth = await this.fyStartMonth(facilityId);
 
-  private async fetchLines(facilityId: string, dateFrom: string | undefined, dateTo: string | undefined, bookType?: string) {
-    const dateClause: Prisma.JournalEntryWhereInput['entryDate'] | undefined =
-      dateFrom || dateTo
-        ? {
-            ...(dateFrom ? { gte: new Date(dateFrom) } : {}),
-            ...(dateTo ? { lte: new Date(dateTo) } : {}),
-          }
-        : undefined;
-
-    return this.prisma.journalEntryLine.findMany({
-      where: {
-        facilityId,
-        journalEntry: {
-          facilityId,
-          postingStatus: 'POSTED',
-          ...(bookType ? { bookType: bookType as Prisma.JournalEntryWhereInput['bookType'] } : {}),
-          ...(dateClause ? { entryDate: dateClause } : {}),
+    const ownerWhere = postedLinesWhere({ facilityId, book, from, to });
+    const [chart, roleOf, openAll, openFy, closeAll, closeFy, period, ownerRows, bs] = await Promise.all([
+      this.chart(facilityId),
+      this.roles(facilityId),
+      accountBalances(this.prisma, { facilityId, book, to: openingDate }),
+      accountBalances(this.prisma, { facilityId, book, from: fiscalYearStart(from, fyMonth), to: openingDate }),
+      accountBalances(this.prisma, { facilityId, book, to }),
+      accountBalances(this.prisma, { facilityId, book, from: fiscalYearStart(to, fyMonth), to }),
+      accountBalances(this.prisma, { facilityId, book, from, to }),
+      this.prisma.journalEntryLine.groupBy({
+        by: ['accountCode'],
+        where: {
+          ...ownerWhere,
+          journalEntry: { ...(ownerWhere.journalEntry as object), sourceTable: { in: OWNER_MOVEMENT_SOURCES } },
         },
+        _sum: { debitAmount: true, creditAmount: true },
+      }),
+      this.getBalanceSheet(facilityId, { as_of_date: query.date_to, book_type: book }),
+    ]);
+    const ownerMoved = new Map(
+      ownerRows.map((r) => [r.accountCode, round2(Number(r._sum.creditAmount ?? 0) - Number(r._sum.debitAmount ?? 0))]),
+    );
+
+    const open = equityPosition(chart, roleOf, openAll, openFy);
+    const close = equityPosition(chart, roleOf, closeAll, closeFy);
+
+    const columns = chart.accounts
+      .filter((a) => a.accountClass === 'EQUITY' && a.accountType === 'DETAIL' && a.accountCode !== RE && a.accountCode !== CYR)
+      .map((a) => {
+        const role = roleOf(a.accountCode);
+        const movement = creditBalance(period, a.accountCode);
+        const owner = role.role === 'PARTNER_CAPITAL' || role.role === 'PARTNER_DRAWINGS' ? (ownerMoved.get(a.accountCode) ?? 0) : 0;
+        const opening_pkr = creditBalance(openAll, a.accountCode);
+        return {
+          account_code: a.accountCode,
+          account_name: a.accountName,
+          ...role,
+          opening_pkr,
+          capital_introduced_pkr: role.role === 'PARTNER_CAPITAL' ? owner : 0,
+          drawings_pkr: role.role === 'PARTNER_DRAWINGS' ? owner : 0,
+          other_movements_pkr: round2(movement - owner),
+          result_pkr: 0,
+          transfer_pkr: 0,
+          closing_pkr: round2(opening_pkr + movement),
+        };
+      })
+      // An account that never moved and carries nothing is noise on the face of
+      // a statement; one that moved to zero is not, and stays.
+      .filter((c) => c.opening_pkr !== 0 || c.closing_pkr !== 0 || c.capital_introduced_pkr !== 0 || c.drawings_pkr !== 0 || c.other_movements_pkr !== 0);
+
+    // The two computed columns. Their transfers are each other's negative by
+    // construction: RE + current year = posted 3020 + posted 3030 + all-time result.
+    const periodResult = resultFor(chart.accounts, period);
+    const cyOther = creditBalance(period, CYR);
+    const cyTransfer = round2(close.current_year_pl_pkr - open.current_year_pl_pkr - periodResult - cyOther);
+    const derived = (code: string, role: EquityAccountRole, opening: number, other: number, result: number, transfer: number, closing: number) => ({
+      account_code: code,
+      account_name: chart.byCode.get(code)!.accountName,
+      ...role,
+      opening_pkr: opening,
+      capital_introduced_pkr: 0,
+      drawings_pkr: 0,
+      other_movements_pkr: other,
+      result_pkr: result,
+      transfer_pkr: transfer,
+      closing_pkr: closing,
+    });
+    const allColumns = [
+      ...columns,
+      derived(RE, roleOf(RE), open.retained_earnings_pkr, creditBalance(period, RE), 0, round2(-cyTransfer), close.retained_earnings_pkr),
+      derived(CYR, roleOf(CYR), open.current_year_pl_pkr, cyOther, periodResult, cyTransfer, close.current_year_pl_pkr),
+    ];
+
+    const sum = (pick: (c: (typeof allColumns)[number]) => number) => sumMoney(allColumns.map(pick));
+    const total_closing_pkr = sum((c) => c.closing_pkr);
+
+    return {
+      date_from: query.date_from,
+      date_to: query.date_to,
+      columns: allColumns,
+      total_opening_pkr: sum((c) => c.opening_pkr),
+      total_capital_introduced_pkr: sum((c) => c.capital_introduced_pkr),
+      total_drawings_pkr: sum((c) => c.drawings_pkr),
+      total_other_movements_pkr: sum((c) => c.other_movements_pkr),
+      total_result_pkr: sum((c) => c.result_pkr),
+      total_closing_pkr,
+      // Closing equity here and on the balance sheet at date_to are computed by
+      // separate requests over separate windows; they must agree.
+      is_reconciled: moneyEquals(total_closing_pkr, bs.total_equity_pkr),
+      ...(await this.allocateResult(facilityId, query, chart)),
+    };
+  }
+
+  /**
+   * Each owner's share of the period's result, or null where no ratio has ever
+   * been agreed.
+   *
+   * Disclosed beside the columns rather than folded into them — see
+   * equity-allocation.ts for why. Nothing here posts, and nothing here changes
+   * total equity: it says whose the result is, it does not move it.
+   */
+  private async allocateResult(
+    facilityId: string,
+    query: ChangesInEquityQueryType & { book_type: Book },
+    chart: ClassifiedChart,
+  ) {
+    const rows = await this.prisma.partnerProfitShare.findMany({
+      where: { facilityId },
+      orderBy: { effectiveFrom: 'asc' },
+      include: { partner: { select: { id: true, name: true, capitalAccountCode: true } } },
+    });
+    if (rows.length === 0) return { result_allocation: null, result_is_unallocated: true };
+
+    const byDate = new Map<string, RatioWindow>();
+    for (const r of rows) {
+      const key = toIsoDate(r.effectiveFrom);
+      const window = byDate.get(key) ?? { effective_from: key, shares: [] };
+      window.shares.push({
+        partner_id: r.partner.id,
+        partner_name: r.partner.name,
+        capital_account_code: r.partner.capitalAccountCode,
+        weight: Number(r.weight),
+      });
+      byDate.set(key, window);
+    }
+
+    const retirements = (
+      await this.prisma.partner.findMany({
+        where: { facilityId, retiredOn: { not: null } },
+        select: { id: true, retiredOn: true },
+      })
+    ).map((p) => ({ partner_id: p.id, retired_on: toIsoDate(p.retiredOn!) }));
+    const slices = sliceByRatio(query.date_from, query.date_to, [...byDate.values()], retirements);
+    const totals = new Map<string, { name: string; code: string; amount: number }>();
+    let unallocated = 0;
+    const windows: { from: string; to: string; result_pkr: number; ratio_from: string | null }[] = [];
+
+    for (const slice of slices) {
+      // The result earned inside this slice alone. Ratio changes are rare, so
+      // this is a handful of queries at most.
+      const result = resultFor(
+        chart.accounts,
+        await accountBalances(this.prisma, {
+          facilityId,
+          book: query.book_type,
+          from: fromIsoDate(slice.from),
+          to: fromIsoDate(slice.to),
+        }),
+      );
+      windows.push({ from: slice.from, to: slice.to, result_pkr: result, ratio_from: slice.ratio?.effective_from ?? null });
+
+      if (!slice.ratio) {
+        unallocated = round2(unallocated + result);
+        continue;
+      }
+      for (const part of divideByWeight(result, slice.ratio.shares)) {
+        const share = slice.ratio.shares.find((x) => x.partner_id === part.partner_id)!;
+        const running = totals.get(part.partner_id) ?? { name: share.partner_name, code: share.capital_account_code, amount: 0 };
+        running.amount = round2(running.amount + part.amount_pkr);
+        totals.set(part.partner_id, running);
+      }
+    }
+
+    return {
+      result_allocation: {
+        by_partner: [...totals.entries()].map(([partner_id, v]) => ({
+          partner_id,
+          partner_name: v.name,
+          capital_account_code: v.code,
+          amount_pkr: v.amount,
+        })),
+        unallocated_pkr: unallocated,
+        windows,
       },
-      select: { accountCode: true, debitAmount: true, creditAmount: true },
-    });
+      // True while any part of the period's result belongs to nobody in
+      // particular — a ratio that starts mid-period.
+      result_is_unallocated: unallocated !== 0,
+    };
   }
-}
-
-function aggregate(lines: { accountCode: string; debitAmount: unknown; creditAmount: unknown }[]): SumMap {
-  const m: SumMap = new Map();
-  for (const l of lines) {
-    const cur = m.get(l.accountCode) ?? { debit: 0, credit: 0 };
-    cur.debit += Number(l.debitAmount);
-    cur.credit += Number(l.creditAmount);
-    m.set(l.accountCode, cur);
-  }
-  return m;
-}
-
-/** One statement line for a detail account, amount via `amt`. */
-function line(a: Account, sums: SumMap, amt: (s: Sums) => number): StatementLine {
-  const s = sums.get(a.accountCode);
-  return { account_code: a.accountCode, account_name: a.accountName, amount_pkr: round2(s ? amt(s) : 0) };
-}
-
-/**
- * Header codes carrying a given statement_section (phase/24), ascending by
- * account code — the same order the nine hardcoded arrays this replaced were
- * written in, so group order in every response is unchanged. A header with no
- * section (the default for anything an owner creates through the API today)
- * is simply absent from every section's list, same as before this column
- * existed — its children fall into the unclassified bucket (F-6b).
- */
-function sectionHeaders(accounts: Account[], section: string): string[] {
-  return accounts
-    .filter((a) => a.accountType === 'HEADER' && a.statementSection === section)
-    .map((a) => a.accountCode)
-    .sort();
-}
-
-/** Detail lines under one or more header codes (flattened, non-zero only). */
-function buildLines(accounts: Account[], sums: SumMap, headerCodes: string[], amt: (s: Sums) => number): StatementLine[] {
-  const headers = new Set(headerCodes);
-  return accounts
-    .filter((a) => a.accountType === 'DETAIL' && a.parentAccountCode !== null && headers.has(a.parentAccountCode))
-    .map((a) => line(a, sums, amt))
-    .filter((l) => l.amount_pkr !== 0);
-}
-
-/** Nested groups (one per header code) with subtotals. */
-function buildGroups(accounts: Account[], sums: SumMap, headerCodes: string[], amt: (s: Sums) => number): StatementGroup[] {
-  const groups: StatementGroup[] = [];
-  for (const code of headerCodes) {
-    const header = accounts.find((a) => a.accountCode === code);
-    const lines = accounts
-      .filter((a) => a.accountType === 'DETAIL' && a.parentAccountCode === code)
-      .map((a) => line(a, sums, amt))
-      .filter((l) => l.amount_pkr !== 0);
-    if (lines.length === 0) continue;
-    groups.push({
-      code,
-      name: header?.accountName ?? code,
-      lines,
-      subtotal_pkr: round2(sumLines(lines)),
-    });
-  }
-  return groups;
-}
-
-function sumLines(lines: StatementLine[]): number {
-  return round2(lines.reduce((s, l) => s + l.amount_pkr, 0));
-}
-function sumGroups(groups: StatementGroup[]): number {
-  return round2(groups.reduce((s, g) => s + g.subtotal_pkr, 0));
-}
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

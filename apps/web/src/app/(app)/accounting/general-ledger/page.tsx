@@ -1,5 +1,7 @@
 'use client';
 
+import { localIsoDate } from '@coldchain/shared';
+
 import { useEffect, useState } from 'react';
 import { Printer, Download } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
@@ -113,7 +115,7 @@ export default function GeneralLedgerPage() {
     downloadCsv(`general-ledger-${accountCode}`, csv);
   }
 
-  const periodLabel = describePeriod({ date_from: dateFrom || undefined, date_to: dateTo || new Date().toISOString().slice(0, 10) }, 'period');
+  const periodLabel = describePeriod({ date_from: dateFrom || undefined, date_to: dateTo || localIsoDate() }, 'period');
 
   return (
     <div>

@@ -22,6 +22,7 @@ const PARTNERS = [
   {
     id: 'p-junaid',
     name: 'Junaid',
+    cnic: null,
     capital_account_code: '3110',
     capital_account_name: 'Junaid — Capital',
     drawings_account_code: '3210',
@@ -32,6 +33,7 @@ const PARTNERS = [
   {
     id: 'p-umair',
     name: 'Umair',
+    cnic: null,
     capital_account_code: '3120',
     capital_account_name: 'Umair — Capital',
     drawings_account_code: '3220',
@@ -41,11 +43,19 @@ const PARTNERS = [
   },
 ];
 
-function mount(partners = PARTNERS, windows: unknown[] = []) {
+const EQUITY_ACCOUNTS = [
+  { account_code: '3010', account_name: 'Opening Balance Equity', account_type: 'DETAIL', normal_balance: 'CREDIT' },
+  { account_code: '3015', account_name: 'Owner Drawings (legacy)', account_type: 'DETAIL', normal_balance: 'DEBIT' },
+  { account_code: '3110', account_name: 'Junaid — Capital', account_type: 'DETAIL', normal_balance: 'CREDIT' },
+];
+
+function mount(partners = PARTNERS, windows: unknown[] = [], unattributed = 0) {
   apiClient.mockReset();
   apiClient.mockImplementation((url: string) => {
     if (url === '/v1/partners') return Promise.resolve(partners);
     if (url === '/v1/partners/profit-shares') return Promise.resolve(windows);
+    if (String(url).startsWith('/v1/accounting/accounts')) return Promise.resolve(EQUITY_ACCOUNTS);
+    if (url === '/v1/accounting/opening-balances') return Promise.resolve({ unattributed_plug_pkr: unattributed });
     return Promise.resolve({});
   });
   return render(<PartnersPage />);
@@ -59,18 +69,18 @@ describe('PartnersPage — an owner is a record, with both their accounts', () =
 
   it('shows each owner with the two accounts that are theirs', async () => {
     mount();
-    await waitFor(() => expect(screen.getByText('3110')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('3110').length).toBeGreaterThan(0));
     // Both sides, together — the pairing nothing used to record.
     expect(screen.getAllByText('Junaid').length).toBeGreaterThan(0);
-    expect(screen.getByText('3210')).toBeTruthy();
+    expect(screen.getAllByText('3210').length).toBeGreaterThan(0);
   });
 
   it('promises both accounts when adding, so no code has to be invented', async () => {
     mount();
-    await waitFor(() => expect(screen.getByText('3110')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('3110').length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole('button', { name: /add owner/i }));
-    await waitFor(() => expect(screen.getByText(/Two accounts are opened for them/)).toBeTruthy());
-    expect(screen.getByText(/You never have to choose a code/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/capital and drawings accounts are opened for them/)).toBeTruthy());
+    expect(screen.getByText(/you never have to choose one/)).toBeTruthy();
   });
 
   it('names the empty state after the defect it prevents', async () => {
@@ -83,7 +93,7 @@ describe('PartnersPage — an owner is a record, with both their accounts', () =
   // the owners have to choose it.
   it('offers equal shares rather than assuming them', async () => {
     mount();
-    await waitFor(() => expect(screen.getByText('3110')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('3110').length).toBeGreaterThan(0));
     expect(screen.getByText(/gives partners equal shares unless they agree otherwise/)).toBeTruthy();
 
     const weightFor = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
@@ -96,7 +106,7 @@ describe('PartnersPage — an owner is a record, with both their accounts', () =
 
   it('sends weights and the date the ratio takes effect', async () => {
     mount();
-    await waitFor(() => expect(screen.getByText('3110')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('3110').length).toBeGreaterThan(0));
     fireEvent.change(screen.getByLabelText('Junaid'), { target: { value: '3' } });
     fireEvent.change(screen.getByLabelText('Umair'), { target: { value: '1' } });
     fireEvent.change(screen.getByLabelText(/effective from/i), { target: { value: '2026-07-01' } });
@@ -129,10 +139,50 @@ describe('PartnersPage — an owner is a record, with both their accounts', () =
     await waitFor(() => expect(screen.getByText(/Junaid 75% · Umair 25%/)).toBeTruthy());
   });
 
+  it('offers unclaimed accounts for adoption, but never the opening-balance plug', async () => {
+    mount();
+    await waitFor(() => expect(screen.getAllByText('3110').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('button', { name: /add owner/i }));
+    await waitFor(() => expect(screen.getByLabelText(/existing drawings account/i)).toBeTruthy());
+    expect(screen.getByRole('option', { name: /3015 — Owner Drawings/ })).toBeTruthy();
+    // Junaid's own capital is claimed; the plug belongs to nobody.
+    expect(screen.queryByRole('option', { name: /3110 — Junaid/ })).toBeNull();
+    expect(screen.queryByRole('option', { name: /Opening Balance Equity/ })).toBeNull();
+  });
+
+  it('records a CNIC and a retirement through Edit', async () => {
+    mount();
+    await waitFor(() => expect(screen.getAllByText('3110').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]!);
+    fireEvent.change(await screen.findByLabelText('CNIC'), { target: { value: '35202-1234567-1' } });
+    fireEvent.change(screen.getByLabelText(/retired on/i), { target: { value: '2026-06-30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(apiClient).toHaveBeenCalledWith('/v1/partners/p-junaid', {
+        method: 'PATCH',
+        body: { name: 'Junaid', cnic: '35202-1234567-1', retired_on: '2026-06-30' },
+      }),
+    );
+  });
+
+  it('attributes unattributed opening equity to an owner in one step (L-32)', async () => {
+    mount(PARTNERS, [], 370000);
+    await waitFor(() => expect(screen.getByText(/belongs to\s+no owner yet/)).toBeTruthy());
+    fireEvent.click(screen.getAllByRole('button', { name: /attribute opening equity/i })[0]!);
+    fireEvent.change(await screen.findByLabelText(/amount/i), { target: { value: '185000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Attribute' }));
+    await waitFor(() =>
+      expect(apiClient).toHaveBeenCalledWith(
+        '/v1/partners/p-junaid/attribute-opening-equity',
+        expect.objectContaining({ method: 'POST', body: expect.objectContaining({ amount_pkr: 185000 }) }),
+      ),
+    );
+  });
+
   it('hides the controls from someone without the permission', async () => {
     role = 'ACCOUNTANT';
     mount();
-    await waitFor(() => expect(screen.getByText('3110')).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText('3110').length).toBeGreaterThan(0));
     expect(screen.queryByRole('button', { name: /add owner/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /save ratio/i })).toBeNull();
   });

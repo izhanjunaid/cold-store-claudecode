@@ -16,6 +16,8 @@
  * another, which is precisely the disagreement `equitySnapshot` exists to stop.
  */
 
+import { addDays, dayBefore } from '@coldchain/shared';
+
 export type PartnerShare = {
   partner_id: string;
   partner_name: string;
@@ -37,18 +39,20 @@ export type Slice = {
   ratio: RatioWindow | null;
 };
 
-const dayBefore = (iso: string): string =>
-  new Date(new Date(`${iso}T00:00:00.000Z`).getTime() - 86400000).toISOString().slice(0, 10);
+/** A partner's last day in: they share up to and including it, and not after (docs/25 L-25). */
+export type Retirement = { partner_id: string; retired_on: string };
 
 /**
- * Cut [from, to] at every ratio change inside it.
+ * Cut [from, to] at every ratio change inside it, and at the day after every
+ * retirement.
  *
  * This is the whole reason a ratio carries a date rather than being a single
  * current value: the year a partner is admitted has to split at the old ratio up
  * to the admission date and the new one after it, and doing that by hand is the
- * part people get wrong.
+ * part people get wrong. A retirement is the same kind of change — the ratio in
+ * force simply loses that partner, and the rest share by their own weights.
  */
-export function sliceByRatio(from: string, to: string, ratios: RatioWindow[]): Slice[] {
+export function sliceByRatio(from: string, to: string, ratios: RatioWindow[], retirements: Retirement[] = []): Slice[] {
   if (to < from) return [];
 
   const sorted = [...ratios].sort((a, b) => a.effective_from.localeCompare(b.effective_from));
@@ -56,20 +60,39 @@ export function sliceByRatio(from: string, to: string, ratios: RatioWindow[]): S
   const opening = sorted.filter((r) => r.effective_from <= from).pop() ?? null;
   const changes = sorted.filter((r) => r.effective_from > from && r.effective_from <= to);
 
-  const slices: Slice[] = [];
+  const ratioSlices: Slice[] = [];
   let cursor = from;
   let current = opening;
 
   for (const change of changes) {
     if (change.effective_from > cursor) {
-      slices.push({ from: cursor, to: dayBefore(change.effective_from), ratio: current });
+      ratioSlices.push({ from: cursor, to: dayBefore(change.effective_from), ratio: current });
     }
     cursor = change.effective_from;
     current = change;
   }
-  slices.push({ from: cursor, to, ratio: current });
+  ratioSlices.push({ from: cursor, to, ratio: current });
 
-  return slices.filter((s) => s.to >= s.from);
+  const retiredBy = (date: string) => new Set(retirements.filter((r) => r.retired_on < date).map((r) => r.partner_id));
+  const slices: Slice[] = [];
+  for (const slice of ratioSlices.filter((s) => s.to >= s.from)) {
+    // Further cuts inside this slice: the first day each partner is out.
+    const cuts = [...new Set(retirements.map((r) => addDays(r.retired_on, 1)))]
+      .filter((d) => d > slice.from && d <= slice.to)
+      .sort();
+    let start = slice.from;
+    for (const end of [...cuts.map(dayBefore), slice.to]) {
+      const out = retiredBy(start);
+      const shares = slice.ratio?.shares.filter((s) => !out.has(s.partner_id)) ?? [];
+      slices.push({
+        from: start,
+        to: end,
+        ratio: slice.ratio && shares.length > 0 ? { effective_from: slice.ratio.effective_from, shares } : null,
+      });
+      start = addDays(end, 1);
+    }
+  }
+  return slices;
 }
 
 /**

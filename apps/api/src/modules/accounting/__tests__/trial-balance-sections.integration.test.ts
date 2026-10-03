@@ -109,7 +109,7 @@ describe('the trial balance can be read by section as well as by class', () => {
 
   it('puts detail accounts under their parent header\'s section', async () => {
     const tb = await trialBalance();
-    const rows: { account_code: string; statement_section: string }[] = tb.rows;
+    const rows: { account_code: string; statement_section: string }[] = tb.groups.flatMap((g: Group) => g.rows);
     // 1010 Cash on Hand sits under 1000 Cash & Bank, a CURRENT_ASSET header.
     const cash = rows.find((r) => r.account_code === '1010');
     if (cash) expect(cash.statement_section).toBe('CURRENT_ASSET');

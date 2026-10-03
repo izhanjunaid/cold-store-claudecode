@@ -23,29 +23,17 @@ const acct = (
   account_name: string,
   account_class: string,
   normal_balance: 'DEBIT' | 'CREDIT',
-  parent_account_code: string | null,
-) => ({
-  account_code,
-  account_name,
-  account_class,
-  account_type: 'DETAIL' as const,
-  parent_account_code,
-  normal_balance,
-  is_active: true,
-});
+  statement_section: string,
+) => ({ account_code, account_name, account_class, normal_balance, statement_section });
 
-// A chart with no owner accounts yet: the plug, the two derived accounts, cash,
-// and the fixed-asset pair.
-const SOLE_OWNER_CHART = [
-  acct('1010', 'Cash on Hand', 'ASSET', 'DEBIT', '1000'),
-  acct('1310', 'Cold Storage Plant & Equipment', 'ASSET', 'DEBIT', '1300'),
-  acct('1311', 'Accum. Depreciation — Plant & Equipment', 'ASSET', 'CREDIT', '1300'),
-  acct('3010', 'Opening Balance Equity', 'EQUITY', 'CREDIT', null),
-  acct('3020', 'Retained Earnings', 'EQUITY', 'CREDIT', null),
-  acct('3030', 'Current Year Profit / (Loss)', 'EQUITY', 'CREDIT', null),
+// What the server offers for an "other" line, read from the chart's flags: no
+// cash fields, no plug, no party control accounts.
+const OTHER_LINE_ACCOUNTS = [
+  acct('1310', 'Cold Storage Plant & Equipment', 'ASSET', 'DEBIT', 'NON_CURRENT_ASSET'),
+  acct('1311', 'Accum. Depreciation — Plant & Equipment', 'ASSET', 'CREDIT', 'NON_CURRENT_ASSET'),
+  acct('1220', 'Prepaid Electricity (Security Deposit)', 'ASSET', 'DEBIT', 'CURRENT_ASSET'),
+  acct('3020', 'Retained Earnings', 'EQUITY', 'CREDIT', 'EQUITY'),
 ];
-
-const PARTNER_CHART = [...SOLE_OWNER_CHART, acct('3110', 'Junaid — Capital', 'EQUITY', 'CREDIT', '3100')];
 
 const BASE_STATUS = {
   entered: false,
@@ -55,16 +43,16 @@ const BASE_STATUS = {
   earliest_posting_date: null,
   earliest_posting_entry_number: null,
   unattributed_plug_pkr: 0,
+  other_line_accounts: OTHER_LINE_ACCOUNTS,
 };
 
-function mount(status: Record<string, unknown>, chart = SOLE_OWNER_CHART) {
+function mount(status: Record<string, unknown>) {
   apiClient.mockReset();
   apiClientList.mockReset();
   apiClientList.mockResolvedValue({ data: [] });
   apiClient.mockImplementation((url: string) => {
     if (url === '/v1/accounting/opening-balances') return Promise.resolve({ ...BASE_STATUS, ...status });
-    if (String(url).startsWith('/v1/accounting/accounts')) return Promise.resolve(chart);
-    if (String(url).startsWith('/v1/accounting/period-locks')) return Promise.resolve([]);
+    if (String(url).startsWith('/v1/accounting/period-locks/closed-through')) return Promise.resolve({ closed_through: null });
     return Promise.resolve(null);
   });
   return render(<OpeningBalancesPage />);
@@ -99,12 +87,17 @@ describe('OpeningBalancesPage — where equity is meant to go', () => {
     await waitFor(() => expect(screen.getByText(/each owner/i)).toBeTruthy());
     // IFRS for SMEs 35.10 — transition adjustments belong in retained earnings,
     // not inside a capital account.
-    expect(screen.getByText(/Retained Earnings \(3020\)/)).toBeTruthy();
+    expect(screen.getByText(/Retained Earnings/)).toBeTruthy();
   });
 
-  it('says the same on a facility that already has partner accounts', async () => {
-    mount({}, PARTNER_CHART);
+  it('offers exactly the accounts the server serves — no cash, plug or control accounts of its own', async () => {
+    mount({});
     await waitFor(() => expect(screen.getByText(/each owner/i)).toBeTruthy());
+    fireEvent.click(await screen.findByRole('button', { name: /add line/i }));
+    const options = Array.from(document.querySelectorAll('option'))
+      .map((o) => o.getAttribute('value'))
+      .filter(Boolean);
+    expect(options).toEqual(['1310', '1311', '1220', '3020']);
   });
 });
 
@@ -120,7 +113,6 @@ describe('OpeningBalancesPage — a residual already posted', () => {
         journal_entry_id: '11111111-1111-1111-1111-111111111111',
         unattributed_plug_pkr: 370000,
       },
-      PARTNER_CHART,
     );
     await waitFor(() => expect(screen.getByText(/belongs\s+to no owner/)).toBeTruthy());
     expect(screen.getByText(/370,000/)).toBeTruthy();
@@ -135,7 +127,6 @@ describe('OpeningBalancesPage — a residual already posted', () => {
         journal_entry_id: '11111111-1111-1111-1111-111111111111',
         unattributed_plug_pkr: 0,
       },
-      PARTNER_CHART,
     );
     await waitFor(() => expect(screen.getByText(/Opening balances were entered/)).toBeTruthy());
     expect(screen.queryByText(/belongs\s+to no owner/)).toBeNull();
@@ -166,11 +157,11 @@ describe('OpeningBalancesPage — fixed assets opened without a register entry',
     fireEvent.change(numbers[numbers.length - 2] as HTMLElement, { target: { value: debit } });
   };
 
-  it('warns when a cost account is opened directly', async () => {
+  it('points a fixed-asset cost line at the go-live register import', async () => {
     mount({});
     await waitFor(() => expect(screen.getByText(/Enter what each party owes you/)).toBeTruthy());
     await addOtherLine('1310', '200000');
-    await waitFor(() => expect(screen.getByText(/will not depreciate/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Assets owned at go-live/)).toBeTruthy());
   });
 
   // The contra beside it is CREDIT-normal, so the rule that finds cost accounts
@@ -179,13 +170,13 @@ describe('OpeningBalancesPage — fixed assets opened without a register entry',
     mount({});
     await waitFor(() => expect(screen.getByText(/Enter what each party owes you/)).toBeTruthy());
     await addOtherLine('1311', '50000');
-    expect(screen.queryByText(/will not depreciate/)).toBeNull();
+    expect(screen.queryByText(/Assets owned at go-live/)).toBeNull();
   });
 
-  it('does not warn for an ordinary asset outside the fixed-asset block', async () => {
+  it('does not warn for a current asset', async () => {
     mount({});
     await waitFor(() => expect(screen.getByText(/Enter what each party owes you/)).toBeTruthy());
-    await addOtherLine('1010', '12000');
-    expect(screen.queryByText(/will not depreciate/)).toBeNull();
+    await addOtherLine('1220', '12000');
+    expect(screen.queryByText(/Assets owned at go-live/)).toBeNull();
   });
 });
