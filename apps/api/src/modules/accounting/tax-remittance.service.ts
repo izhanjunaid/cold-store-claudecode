@@ -15,7 +15,7 @@ import { advisoryXactLock } from '../../common/advisory-lock';
 import { lockRow } from '../../common/row-lock';
 import { assertKatchiWriteAllowed } from './book-gate';
 import { assertCashAccount } from './cash-account';
-import { postedLinesWhere } from './ledger';
+import { postedLinesWhere, standingEntriesWhere } from './ledger';
 import { postedEntryNumber, type JournalEntryService } from './journal-entry.service';
 import { buildJE34TaxRemittance } from './templates/je-34-tax-remittance';
 
@@ -51,9 +51,9 @@ const NOTHING_OUTSTANDING = (name: string, periodEnd: string) =>
 const periodEndOf = (year: number, month: number) => monthEnd(year, month);
 
 /**
- * What is still owed on each statutory account for a period: everything that created
- * or corrected the liability up to the period end, less every remittance whenever it
- * was made. The asymmetric windows are deliberate (the GST settlement uses the same):
+ * What is still owed on each statutory account for a period: every standing entry that
+ * created or corrected the liability up to the period end (a voided one drops out with
+ * its mirror, whenever the void was dated), less every remittance whenever it was made. The asymmetric windows are deliberate (the GST settlement uses the same):
  * tax withheld in March is paid over in April, so a remittance dated after the period
  * still clears it — and so the same period cannot be paid twice. A voided remittance
  * nets to zero (its reversal is a remittance line too), so voiding owes it again.
@@ -69,7 +69,13 @@ export async function outstandingByAccount(
     db.journalEntryLine.groupBy({
       by: ['accountCode'],
       where: {
-        AND: [postedLinesWhere({ facilityId, book, to: periodEnd }), { journalEntry: { NOT: REMITTANCE_ENTRIES } }],
+        AND: [
+          postedLinesWhere({ facilityId, book, to: periodEnd }),
+          // Only entries that still stand: a deduction voided after the period (its
+          // mirror dated later) must drop out with its original, or it is paid over.
+          { journalEntry: standingEntriesWhere(facilityId) },
+          { journalEntry: { NOT: REMITTANCE_ENTRIES } },
+        ],
         accountCode: { in: [...accounts] },
       },
       _sum: { debitAmount: true, creditAmount: true },

@@ -213,6 +213,37 @@ describe('C-10 — a statutory remittance is a document, by period, from the led
   });
 });
 
+describe('C-10 — a deduction voided after its period is not paid over', () => {
+  // The usual way an error is caught: a June payment's withholding is voided in July,
+  // so its reversal is dated after the period end. June's remittance must not pay it.
+  it('a voided supplier payment leaves nothing owed for its period, whenever the void is dated', async () => {
+    const before = await outstanding('2071', 2039, 6);
+    const party = await call('POST', '/v1/parties', ownerToken, {
+      name: `TR Void Supplier ${Date.now()}`,
+      party_type: 'SUPPLIER',
+      phone_primary: `0394${String(Date.now()).slice(-7)}`,
+    });
+    partyIds.push(dataOf(party).id);
+    const pay = await call('POST', '/v1/supplier-payments', accountantToken, {
+      supplier_party_id: dataOf(party).id,
+      payment_date: '2039-06-15',
+      payment_method: 'BANK_TRANSFER',
+      gross_amount_pkr: 10000,
+      withholding_section: 'S153',
+      withholding_rate_pct: 4,
+    });
+    expect(pay.statusCode, pay.body).toBe(201);
+    expect(await outstanding('2071', 2039, 6)).toBe(before + 400);
+
+    const voided = await call('POST', `/v1/supplier-payments/${dataOf(pay).id}/void`, managerToken, {
+      reason: 'paid the wrong supplier',
+      void_date: '2039-07-03',
+    });
+    expect(voided.statusCode, voided.body).toBe(200);
+    expect(await outstanding('2071', 2039, 6)).toBe(before);
+  });
+});
+
 describe('C-10 — payroll deductions are remitted the same way; a run no longer remits itself', () => {
   it('EOBI from a finalised run is outstanding on 2060/2061 and remitted by period; the run offers no remit', async () => {
     const emp = await call('POST', '/v1/employees', ownerToken, {
