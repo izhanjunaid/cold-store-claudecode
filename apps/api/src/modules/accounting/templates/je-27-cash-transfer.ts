@@ -1,60 +1,52 @@
 import type { JournalEntryDraft } from './types';
 
-/** Cash and cash equivalents. A transfer may only move money between these. */
-export const CASH_TRANSFER_ACCOUNTS = ['1010', '1020', '1030'] as const;
-
 type Input = {
+  transferId: string;
   transferDate: Date;
   amountPkr: number;
-  fromAccountCode: string;
-  toAccountCode: string;
+  from: { code: string; name: string };
+  to: { code: string; name: string };
   bookType: 'PACCI' | 'KATCHI';
-  /** A transfer has no source document, so the acting user stands in. */
-  userId: string;
   note?: string | null;
 };
 
 /**
- * JE-27: Transfer between the facility's own cash and bank accounts.
+ * JE-27: Transfer between two of the facility's own cash equivalents.
  *
- *   DR  destination (1010/1020/1030)   amount
- *     CR  source      (1010/1020/1030)   amount
+ *   DR  destination   amount
+ *     CR  source        amount
  *
- * Depositing the day's cash takings into the bank is a daily operation in a
- * mandi cold store and had no first-class path (backlog P1-10): 1010 grew
- * forever and 1020 never showed a deposit. Only the reverse direction existed,
- * as JE-17C petty-cash replenishment inside the expenses module — which stays
- * where it is, since it carries its own semantics and its own tests. This is
- * the general operation and the only one with a screen, so there is one place
- * to record a transfer rather than two that overlap.
+ * Both accounts are validated against the chart's `is_cash_equivalent` flag by the
+ * service, so an owner's second bank account works and cheques in hand never do.
+ * The entry is sourced to its `cash_transfers` row (docs/25 C-44) — the document is
+ * what lists it and what voids it.
  *
- * The cash flow statement deliberately excludes these: money moving between
- * your own pockets is not a flow. That exclusion only works if the transfer is
- * recordable in the first place.
+ * The cash flow statement excludes these: money moving between your own pockets is
+ * not a flow.
  */
 export function buildJE27CashTransfer(input: Input): JournalEntryDraft {
   const amount = Math.round(input.amountPkr * 100) / 100;
   const note = input.note?.trim();
 
   return {
-    entryType: 'ADJUSTMENT',
+    entryType: 'CASH_TRANSFER',
     bookType: input.bookType,
-    sourceTable: 'cash_transfer',
-    sourceId: input.userId,
+    sourceTable: 'cash_transfers',
+    sourceId: input.transferId,
     entryDate: input.transferDate,
-    description: `Transfer ${input.fromAccountCode} → ${input.toAccountCode} Rs. ${amount.toLocaleString()}${note ? ` — ${note}` : ''}`,
+    description: `Transfer ${input.from.name} → ${input.to.name}${note ? ` — ${note}` : ''}`,
     lines: [
       {
-        accountCode: input.toAccountCode,
+        accountCode: input.to.code,
         debitAmount: amount,
         creditAmount: 0,
-        description: note ?? `Transfer in from ${input.fromAccountCode}`,
+        description: note ?? `Transfer in from ${input.from.name}`,
       },
       {
-        accountCode: input.fromAccountCode,
+        accountCode: input.from.code,
         debitAmount: 0,
         creditAmount: amount,
-        description: note ?? `Transfer out to ${input.toAccountCode}`,
+        description: note ?? `Transfer out to ${input.to.name}`,
       },
     ],
   };

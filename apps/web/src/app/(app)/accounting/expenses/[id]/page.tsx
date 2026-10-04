@@ -1,145 +1,101 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { useRouter, useParams } from 'next/navigation';
-import { toast } from 'sonner';
+import { useState } from 'react';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
-import { useAuthStore } from '@/stores/auth.store';
-import { can } from '@/lib/permissions';
+import { useCan } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet';
 import { PageHeader } from '@/components/layout/page-header';
-import { useConfirm } from '@/components/form';
-import { JournalEntryPeek } from '@/components/accounting/journal-entry-peek';
-import { ExpenseVoucherEditDialog, ExpenseVoucherPayDialog } from '../expense-voucher-dialogs';
-
 import { formatDate, formatMoney } from '@/lib/format';
-import { PageSkeleton } from '@/components/page-skeleton';
+import { ConvertVoucherDialog, cancelVoucher, type LegacyVoucher } from '../convert-voucher-dialog';
 
-interface ExpenseVoucher {
-  id: string;
-  voucher_number: string;
-  voucher_date: string;
-  payment_date: string | null;
-  expense_account_code: string;
-  description: string;
-  vendor_name: string | null;
-  reference_number: string | null;
-  amount_pkr: number;
-  payment_method: string | null;
-  is_accrual: boolean;
-  status: 'DRAFT' | 'APPROVED' | 'ACCRUED' | 'PAID' | 'CANCELLED';
-  accrual_journal_entry_id: string | null;
-  payment_journal_entry_id: string | null;
-}
-
+/** A voucher from before payables (docs/25 C-03): read-only, with what the API still allows. */
 export default function ExpenseVoucherDetailPage() {
+  const id = useParams()['id'] as string;
   const router = useRouter();
-  const params = useParams();
-  const id = params['id'] as string;
-  const { user } = useAuthStore();
-  const confirm = useConfirm();
-  const isManager = can(user, 'expenses.approve');
-  const isAccountant = can(user, 'expenses.record');
-  const canPeekJe = can(user, 'accounting.view');
+  const canApprove = useCan('expenses.approve');
+  const canPeekJe = useCan('accounting.view');
+  const [converting, setConverting] = useState(false);
 
-  const [v, setV] = useState<ExpenseVoucher | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [showPay, setShowPay] = useState(false);
-  const [showEdit, setShowEdit] = useState(false);
-  const [peekEntryId, setPeekEntryId] = useState<string | null>(null);
+  const { data: v, refetch } = useQuery({
+    queryKey: ['accounting', 'expense-voucher', id],
+    queryFn: () => apiClient<LegacyVoucher>(`/v1/expense-vouchers/${id}`),
+  });
+  if (!v) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
-  const fetchV = useCallback(async () => {
-    setLoading(true);
-    try {
-      setV(await apiClient<ExpenseVoucher>(`/v1/expense-vouchers/${id}`));
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
-  useEffect(() => {
-    fetchV();
-  }, [fetchV]);
-
-  async function action(path: string, body?: unknown, successMsg?: string) {
-    try {
-      await apiClient(`/v1/expense-vouchers/${id}/${path}`, { method: 'POST', body: body ?? {} });
-      if (successMsg) toast.success(successMsg);
-      fetchV();
-      return true;
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Action failed');
-      return false;
-    }
-  }
-
-  async function cancel() {
-    if (await confirm({
-      title: 'Cancel this voucher?',
-      description: 'The voucher is closed and cannot be approved or paid afterwards. No ledger entry is affected — accrued or paid vouchers cannot be cancelled.',
-      confirmText: 'Cancel Voucher',
-      destructive: true,
-    })) {
-      action('cancel', { reason: 'Cancelled from UI' }, 'Voucher cancelled');
-    }
-  }
-
-  if (loading) return <PageSkeleton />;
-  if (!v) return <p className="text-destructive">Voucher not found</p>;
+  const entry = (label: string, entryId: string | null) =>
+    entryId && (
+      <div>
+        <div className="text-xs text-muted-foreground">{label}</div>
+        {canPeekJe ? (
+          <Link className="text-primary-700 hover:underline" href={`/accounting/journal-entries/${entryId}`}>
+            View entry
+          </Link>
+        ) : (
+          '—'
+        )}
+      </div>
+    );
 
   return (
     <div>
       <PageHeader
-        title={v.description}
-        crumb={v.voucher_number}
-        description={`${formatDate(v.voucher_date)} · Account ${v.expense_account_code}${v.vendor_name ? ` · ${v.vendor_name}` : ''}${v.reference_number ? ` · Ref ${v.reference_number}` : ''}`}
+        title={v.voucher_number}
+        description={v.description}
         actions={
-          <>
-            {isAccountant && v.status === 'DRAFT' && <Button variant="outline" onClick={() => setShowEdit(true)}>Edit</Button>}
-            {isManager && v.status === 'DRAFT' && <Button onClick={() => action('approve', {}, 'Approved')}>Approve</Button>}
-            {isAccountant && v.status === 'APPROVED' && v.is_accrual && <Button onClick={() => action('accrue', {}, 'Accrued')}>Accrue (JE-17B)</Button>}
-            {isAccountant && (v.status === 'APPROVED' || v.status === 'ACCRUED') && (
-              <Button onClick={() => setShowPay(true)}>Pay ({v.status === 'ACCRUED' ? 'JE-17B-PAY' : 'JE-17A'})</Button>
-            )}
-            {isManager && (v.status === 'DRAFT' || v.status === 'APPROVED') && (
-              <Button variant="outline" className="text-destructive" onClick={cancel}>Cancel</Button>
-            )}
-          </>
+          canApprove && (
+            <div className="flex gap-2">
+              {v.allowed_actions.includes('convert_to_bill') && <Button onClick={() => setConverting(true)}>Convert to bill</Button>}
+              {v.allowed_actions.includes('cancel') && (
+                <Button variant="outline" onClick={() => cancelVoucher(v, () => void refetch())}>Cancel voucher</Button>
+              )}
+            </div>
+          )
         }
       />
-
       <Card>
-        <CardContent className="p-4">
-          <div className="mb-4 flex items-center gap-2">
-            <span className="font-mono text-sm text-muted-foreground">{v.voucher_number}</span>
+        <CardContent className="grid gap-4 pt-4 text-sm sm:grid-cols-4">
+          <div>
+            <div className="text-xs text-muted-foreground">Status</div>
             <StatusBadge status={v.status} />
           </div>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Amount</div><div className="text-lg font-semibold tabular-nums">{formatMoney(v.amount_pkr)}</div></div>
-            {v.payment_date && <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Paid On</div><div>{formatDate(v.payment_date)} ({v.payment_method})</div></div>}
-            <div><div className="text-xs uppercase tracking-wide text-muted-foreground">Type</div><div>{v.is_accrual ? 'Accrual' : 'Direct'}</div></div>
+          <div>
+            <div className="text-xs text-muted-foreground">Date</div>
+            {formatDate(v.voucher_date)}
           </div>
-          <div className="mt-4 space-y-1 text-sm text-muted-foreground">
-            {v.accrual_journal_entry_id && <div>Accrual JE-17B: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => (canPeekJe ? setPeekEntryId(v.accrual_journal_entry_id) : router.push(`/accounting/journal-entries/${v.accrual_journal_entry_id}`))}>{v.accrual_journal_entry_id.slice(0, 8)}…</Button></div>}
-            {v.payment_journal_entry_id && <div>Payment JE: <Button variant="link" className="h-auto p-0 font-mono" onClick={() => (canPeekJe ? setPeekEntryId(v.payment_journal_entry_id) : router.push(`/accounting/journal-entries/${v.payment_journal_entry_id}`))}>{v.payment_journal_entry_id.slice(0, 8)}…</Button></div>}
+          <div>
+            <div className="text-xs text-muted-foreground">Amount</div>
+            <span className="tabular-nums">{formatMoney(v.amount_pkr)}</span>
           </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Vendor</div>
+            {v.vendor_name ?? '—'}
+          </div>
+          {entry('Accrual entry', v.accrual_journal_entry_id)}
+          {entry('Payment entry', v.payment_journal_entry_id)}
+          {v.bill_id && (
+            <div>
+              <div className="text-xs text-muted-foreground">Converted to</div>
+              <Link className="text-primary-700 hover:underline" href={`/accounting/payables/bills/${v.bill_id}`}>
+                Bill
+              </Link>
+            </div>
+          )}
         </CardContent>
       </Card>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Expense vouchers are retired; costs are recorded as supplier bills.
+      </p>
 
-      <ExpenseVoucherPayDialog voucher={v} open={showPay} onOpenChange={setShowPay} onPaid={fetchV} />
-      <ExpenseVoucherEditDialog voucher={v} open={showEdit} onOpenChange={setShowEdit} onSaved={fetchV} />
-
-      <Sheet open={peekEntryId !== null} onOpenChange={(o) => !o && setPeekEntryId(null)}>
-        <SheetContent size="lg">
-          <SheetHeader>
-            <SheetTitle>Journal Entry</SheetTitle>
-          </SheetHeader>
-          <SheetBody>{peekEntryId && <JournalEntryPeek entryId={peekEntryId} />}</SheetBody>
-        </SheetContent>
-      </Sheet>
+      <ConvertVoucherDialog
+        voucher={converting ? v : null}
+        onOpenChange={setConverting}
+        onConverted={(billId) => router.push(`/accounting/payables/bills/${billId}`)}
+      />
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import {
-  DEFAULT_BANK_ACCOUNT_CODE,
   MONEY_EPSILON,
   SYSTEM_ACCOUNTS,
   payrollLineNet,
@@ -16,13 +15,13 @@ import { advisoryXactLock } from '../../common/advisory-lock';
 import { lockRow } from '../../common/row-lock';
 import { documentNumberPrefix, nextDocumentNumber } from '../../common/document-number';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
+import { assertCashAccount } from '../accounting/cash-account';
 import { accountBalances, signedBalance } from '../accounting/ledger';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { assertAdvanceCanReopen } from '../employee-advances/employee-advance.service';
 import { buildJE15Payroll } from './templates/je-15-payroll';
 import { buildJE16SalaryPayment } from './templates/je-16-salary-payment';
-import { buildJE16BGovtRemittance } from './templates/je-16b-govt-remittance';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type Tx = Prisma.TransactionClient;
@@ -391,6 +390,7 @@ export class PayrollRunService {
       if (run.status !== 'FINALIZED') {
         throw Errors.PAYROLL_RUN_INVALID_STATUS('Only FINALIZED runs can be paid');
       }
+      await assertCashAccount(tx, facilityId, body.from_asset_account_code);
 
       const posted = await this.journalEntry.postInTransaction(
         tx,
@@ -411,67 +411,6 @@ export class PayrollRunService {
       await tx.payrollRun.update({
         where: { id: runId },
         data: { status: 'PAID', paymentJournalEntryId: posted.id, paidAt: new Date() },
-      });
-
-      return this.getByIdInternal(facilityId, runId, tx);
-    });
-  }
-
-  async remit(facilityId: string, userId: string, runId: string, body: any) {
-    return this.prisma.$transaction(async (tx) => {
-      await lockRow(tx, 'payroll_runs', runId, facilityId);
-
-      const run = await tx.payrollRun.findFirst({ where: { facilityId, id: runId } });
-      if (!run) throw Errors.PAYROLL_RUN_NOT_FOUND();
-      if (run.status === 'DRAFT') {
-        throw Errors.PAYROLL_RUN_INVALID_STATUS('Cannot remit for a DRAFT run');
-      }
-      // The pointer column is @unique, but the code used to overwrite it — so a second
-      // remit posted a second JE-16B and silently orphaned the first entry's link.
-      if (run.remittanceJournalEntryId) {
-        throw Errors.PAYROLL_ALREADY_REMITTED();
-      }
-
-      // Remitted amounts came straight from the request body with nothing tying them to
-      // what the run actually withheld, so any figure could be paid to the government and
-      // posted against the liability accounts. Bound each leg by the run's own totals.
-      const empEobi = Number(body.remit_employee_eobi_pkr);
-      const emperEobi = Number(body.remit_employer_eobi_pkr);
-      const tax = Number(body.remit_income_tax_pkr ?? 0);
-
-      const lineTotals = await tx.payrollLineItem.aggregate({
-        where: { payrollRunId: runId },
-        _sum: { eobiEmployeePkr: true, incomeTaxPkr: true },
-      });
-      const withheldEmpEobi = Number(lineTotals._sum.eobiEmployeePkr ?? 0);
-      const withheldTax = Number(lineTotals._sum.incomeTaxPkr ?? 0);
-      const withheldEmperEobi = Number(run.totalEmployerEobiPkr);
-
-      const over = (paid: number, withheld: number) => paid > withheld + 0.005;
-      if (over(empEobi, withheldEmpEobi) || over(emperEobi, withheldEmperEobi) || over(tax, withheldTax)) {
-        throw Errors.PAYROLL_REMITTANCE_EXCEEDS_LIABILITY(
-          `Remittance exceeds what this run withheld (employee EOBI ${withheldEmpEobi}, employer EOBI ${withheldEmperEobi}, income tax ${withheldTax})`,
-        );
-      }
-
-      const draft = buildJE16BGovtRemittance({
-        payrollRunId: run.id,
-        runNumber: run.runNumber,
-        entryDate: new Date(body.remittance_date),
-        employeeEobiPkr: body.remit_employee_eobi_pkr,
-        employerEobiPkr: body.remit_employer_eobi_pkr,
-        incomeTaxPkr: body.remit_income_tax_pkr ?? 0,
-        fromAssetAccountCode: body.from_asset_account_code ?? DEFAULT_BANK_ACCOUNT_CODE,
-        bookType: run.bookType,
-      });
-
-      const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
-        postingStatus: 'POSTED',
-      });
-
-      await tx.payrollRun.update({
-        where: { id: runId },
-        data: { remittanceJournalEntryId: posted.id },
       });
 
       return this.getByIdInternal(facilityId, runId, tx);
@@ -711,15 +650,15 @@ async function salariesPayableTieOut(db: Db, facilityId: string, book: 'PACCI' |
   };
 }
 
-function allowedActions(r: { status: string; remittanceJournalEntryId: string | null }): PayrollRunActionType[] {
-  const canRemit = !r.remittanceJournalEntryId;
+function allowedActions(r: { status: string }): PayrollRunActionType[] {
+  // Deductions are paid over by period, for every run at once (tax remittances, C-10).
   switch (r.status) {
     case 'DRAFT':
       return ['edit_lines', 'finalize'];
     case 'FINALIZED':
-      return canRemit ? ['pay', 'reverse', 'remit'] : ['pay'];
+      return ['pay', 'reverse'];
     case 'PAID':
-      return canRemit ? ['void_payment', 'remit'] : ['void_payment'];
+      return ['void_payment'];
     default:
       return [];
   }

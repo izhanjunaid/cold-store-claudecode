@@ -90,12 +90,12 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
   { key: 'employees.terminate', group: 'Payroll & HR', label: 'Terminate employees', description: 'Mark an employee as terminated.', defaultMinRole: 'OWNER' },
   { key: 'payroll.draft', group: 'Payroll & HR', label: 'Draft payroll', description: 'Create payroll run drafts and edit their lines.', defaultMinRole: 'ACCOUNTANT' },
   { key: 'payroll.finalize', group: 'Payroll & HR', label: 'Finalize & pay payroll', description: 'Finalize and pay payroll runs.', defaultMinRole: 'MANAGER' },
-  { key: 'payroll.remit', group: 'Payroll & HR', label: 'Remit deductions', description: 'Remit payroll deductions to authorities.', defaultMinRole: 'OWNER' },
+  { key: 'payroll.remit', group: 'Payroll & HR', label: 'Remit tax and EOBI', description: 'Pay withheld income tax, sales tax and EOBI over to the authorities for a period, or void a remittance recorded in error.', defaultMinRole: 'OWNER' },
   { key: 'payroll.reverse', group: 'Payroll & HR', label: 'Reverse payroll', description: 'Void a salary payment, or reverse a finalized run that has not been paid (each reverses its journal entry).', defaultMinRole: 'OWNER' },
 
   // Expenses
-  { key: 'expenses.record', group: 'Expenses', label: 'Record expenses', description: 'View and record expense vouchers, petty-cash, accrue and pay.', defaultMinRole: 'ACCOUNTANT' },
-  { key: 'expenses.approve', group: 'Expenses', label: 'Approve expenses', description: 'Approve or cancel expense vouchers.', defaultMinRole: 'MANAGER' },
+  { key: 'expenses.record', group: 'Expenses', label: 'Record bills and supplier payments', description: 'View and draft supplier bills, record and allocate supplier payments, and view older expense vouchers.', defaultMinRole: 'ACCOUNTANT' },
+  { key: 'expenses.approve', group: 'Expenses', label: 'Post and void bills', description: 'Post a drafted bill to the books, void a bill or supplier payment, and convert or cancel an older expense voucher.', defaultMinRole: 'MANAGER' },
 
   // Loans (Peshgi)
   { key: 'loans.view', group: 'Loans (Peshgi)', label: 'View loans', description: 'View loans and print acknowledgments.', defaultMinRole: 'ACCOUNTANT' },

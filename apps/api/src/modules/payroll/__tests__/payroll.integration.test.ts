@@ -300,31 +300,6 @@ describe('Phase 8B — Payroll', () => {
     expect(je?.lines.find((l) => l.accountCode === '1020')?.creditAmount.toString()).toBe('79250');
   });
 
-  it('remit posts JE-16B clearing EOBI liabilities', async () => {
-    const list = await app.inject({
-      method: 'GET',
-      url: '/v1/payroll-runs?status=PAID',
-      headers: authHeaders(accountantToken),
-    });
-    const runId = JSON.parse(list.body).data[0].id;
-
-    const rem = await app.inject({
-      method: 'POST',
-      url: `/v1/payroll-runs/${runId}/remit`,
-      headers: authHeaders(ownerToken),
-      payload: {
-        remittance_date: '2026-05-15',
-        from_asset_account_code: '1020',
-        remit_employee_eobi_pkr: 750,
-        remit_employer_eobi_pkr: 3750,
-        remit_income_tax_pkr: 0,
-      },
-    });
-    expect(rem.statusCode).toBe(201);
-    const run = JSON.parse(rem.body).data;
-    expect(run.remittance_journal_entry_id).toBeTruthy();
-  });
-
   it('finalize DAILY_WAGES run posts JE-15B with 5030 / 5035', async () => {
     await cleanup();
     await createDailyWage(`Loader-${Date.now()}`, 1000);
@@ -549,68 +524,6 @@ describe('Phase 8B — Payroll', () => {
     expect(Number(je.lines.find((l) => l.accountCode === '2030')!.creditAmount)).toBe(50000 - 375);
     const line = await prisma.payrollLineItem.findUniqueOrThrow({ where: { id: run.line_items[0].id } });
     expect(Number(line.netPayPkr)).toBe(50000 - 375);
-  });
-
-  // C2. remit overwrote remittance_journal_entry_id instead of rejecting, so a second
-  // call posted a second JE-16B and orphaned the first link.
-  it('rejects a second remittance instead of posting a duplicate JE-16B', async () => {
-    await cleanup();
-    await createSalaried(`Mgr-Rem-${Date.now()}`, 40000);
-
-    const create = await app.inject({
-      method: 'POST',
-      url: '/v1/payroll-runs',
-      headers: authHeaders(accountantToken),
-      payload: {
-        payroll_type: 'MONTHLY_SALARY',
-        period_year: 2026,
-        period_month: 10,
-        period_from: '2026-10-01',
-        period_to: '2026-10-31',
-      },
-    });
-    const run = JSON.parse(create.body).data;
-
-    await app.inject({
-      method: 'POST',
-      url: `/v1/payroll-runs/${run.id}/finalize`,
-      headers: authHeaders(managerToken),
-      payload: {},
-    });
-
-    const remitPayload = {
-      remittance_date: '2026-11-05',
-      remit_employee_eobi_pkr: 375,
-      remit_employer_eobi_pkr: 1875,
-      remit_income_tax_pkr: 0,
-    };
-
-    const first = await app.inject({
-      method: 'POST',
-      url: `/v1/payroll-runs/${run.id}/remit`,
-      headers: authHeaders(ownerToken),
-      payload: remitPayload,
-    });
-    expect(first.statusCode).toBe(201);
-
-    const second = await app.inject({
-      method: 'POST',
-      url: `/v1/payroll-runs/${run.id}/remit`,
-      headers: authHeaders(ownerToken),
-      payload: remitPayload,
-    });
-    expect(second.statusCode).toBe(409);
-    expect(JSON.parse(second.body).error.code).toBe('PAYROLL_ALREADY_REMITTED');
-
-    const remittances = await prisma.journalEntry.findMany({
-      where: {
-        facilityId: TEST_FACILITY_ID,
-        sourceTable: 'payroll_runs',
-        sourceId: run.id,
-        entryType: 'GOVT_REMITTANCE',
-      },
-    });
-    expect(remittances).toHaveLength(1);
   });
 
   // C3. The duplicate-period check ran outside the transaction that wrote the row, and

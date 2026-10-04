@@ -41,8 +41,8 @@ export const Errors = {
     new AppError('PERIOD_LOCKED', 'Accounting period is closed; cannot post entries', 409),
   ACCOUNT_NOT_FOUND: () =>
     new AppError('ACCOUNT_NOT_FOUND', 'Account code does not exist in CoA', 404),
-  NOT_A_CASH_ACCOUNT: (code: string) =>
-    new AppError('NOT_A_CASH_ACCOUNT', `Account ${code} is not an active cash or bank account`, 422),
+  NOT_A_CASH_ACCOUNT: (account: string, field?: string) =>
+    new AppError('NOT_A_CASH_ACCOUNT', `${account} is not an active cash, bank or wallet account`, 422, field),
   ACCOUNT_IN_USE: (detail: string) =>
     new AppError('ACCOUNT_IN_USE', `Account cannot be deleted: ${detail}`, 409),
   SYSTEM_ACCOUNT_PROTECTED: () =>
@@ -168,13 +168,9 @@ export const Errors = {
     new AppError('PAYROLL_LINE_NOT_FOUND', 'Payroll line item does not exist', 404),
   PAYROLL_RUN_DUPLICATE_PERIOD: () =>
     new AppError('PAYROLL_RUN_DUPLICATE_PERIOD', 'A payroll run already exists for this period and type', 409),
-  PAYROLL_ALREADY_REMITTED: () =>
-    new AppError('PAYROLL_ALREADY_REMITTED', 'This payroll run has already been remitted', 409),
   PAYROLL_RUN_NOT_REVERSIBLE: (msg: string) =>
     new AppError('PAYROLL_RUN_NOT_REVERSIBLE', msg, 409),
   ASSET_NOT_REVERSIBLE: (msg: string) => new AppError('ASSET_NOT_REVERSIBLE', msg, 409),
-  PAYROLL_REMITTANCE_EXCEEDS_LIABILITY: (msg: string) =>
-    new AppError('PAYROLL_REMITTANCE_EXCEEDS_LIABILITY', msg, 422),
   EXPENSE_VOUCHER_NOT_FOUND: () =>
     new AppError('EXPENSE_VOUCHER_NOT_FOUND', 'Expense voucher does not exist', 404),
   EXPENSE_VOUCHER_INVALID_STATUS: (msg: string) =>

@@ -1,292 +1,183 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
+import {
+  toIsoDate,
+  type ConvertExpenseVoucherRequestType,
+  type ExpenseVoucherActionType,
+  type ExpenseVoucherListQueryType,
+} from '@coldchain/shared';
 import { Errors } from '../../common/errors';
-import { JournalEntryService } from '../accounting/journal-entry.service';
-import { generateExpenseVoucherNumber } from './expense-number';
-import { buildJE17AExpensePaid } from './templates/je-17a-expense-paid';
-import { buildJE17BExpenseAccrued } from './templates/je-17b-expense-accrued';
-import { buildJE17BPayAccruedExpense } from './templates/je-17b-pay-accrued-payment';
-import { buildJE17CPettyCashReplenish } from './templates/je-17c-petty-cash-replenish';
-import { WITHHOLDING_ACCOUNTS, type WithholdingSection } from './templates/withholding';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '@coldchain/shared';
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
+import { lockRow } from '../../common/row-lock';
+import { documentNumberPrefix, nextDocumentNumber } from '../../common/document-number';
+import { assertKatchiWriteAllowed } from '../accounting/book-gate';
+import type { JournalEntryService } from '../accounting/journal-entry.service';
+import { payableSupplier } from '../payables/supplier';
+import { buildJE35VoucherConversion } from '../payables/templates/je-35-voucher-conversion';
 
 type Tx = Prisma.TransactionClient;
 
-/**
- * Row-lock a voucher for the rest of the transaction, so a status check and the JE post
- * that follows it cannot interleave with a concurrent caller. Mirrors the guard already
- * used on invoices (`invoice.service.ts`), payments and loans.
- */
-async function lockVoucher(tx: Tx, facilityId: string, id: string): Promise<void> {
-  await tx.$queryRawUnsafe(
-    `SELECT id FROM expense_vouchers WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-    id,
-    facilityId,
-  );
-}
+const include = { convertedToBill: { select: { id: true } } } satisfies Prisma.ExpenseVoucherInclude;
+type Row = Prisma.ExpenseVoucherGetPayload<{ include: typeof include }>;
 
+/**
+ * Expense vouchers, retired (docs/25 C-03 / C-08 / C-04). The three ways a voucher used
+ * to book a cost — paid at once (JE-17A), accrued then paid (JE-17B), petty cash
+ * (JE-17C) — are gone; costs are supplier bills. What a box already holds stays
+ * readable, a voucher that posted nothing can be cancelled, and an accrued one is
+ * converted to a bill.
+ */
 export class ExpenseService {
   constructor(
     private prisma: PrismaClient,
-    private journalEntry: JournalEntryService,
+    private journal: JournalEntryService,
   ) {}
 
-  async create(facilityId: string, userId: string, body: any) {
-    const voucherDate = new Date(body.voucher_date);
+  async cancel(facilityId: string, role: string, id: string) {
     return this.prisma.$transaction(async (tx) => {
-      const voucherNumber = await generateExpenseVoucherNumber(tx, facilityId, voucherDate);
-      const created = await tx.expenseVoucher.create({
+      const v = await lock(tx, facilityId, id);
+      assertKatchiWriteAllowed(role, v.bookType);
+      if (v.status !== 'DRAFT' && v.status !== 'APPROVED') {
+        throw Errors.EXPENSE_VOUCHER_INVALID_STATUS(`Cannot cancel a voucher in status ${v.status}`);
+      }
+      const updated = await tx.expenseVoucher.update({ where: { id }, data: { status: 'CANCELLED' }, include });
+      return formatVoucher(updated);
+    });
+  }
+
+  /**
+   * Turn an accrued voucher into a posted bill of the chosen supplier (JE-35): the bill
+   * carries the voucher's cost line, dated when the cost was incurred, and the entry
+   * moves the liability from 2040 onto the supplier's account on the conversion date.
+   * The voucher's own accrual stands — the cost is not booked a second time, so the
+   * expense-account rule is not re-run on a line nothing posts to.
+   */
+  async convertToBill(
+    facilityId: string,
+    userId: string,
+    role: string,
+    id: string,
+    body: ConvertExpenseVoucherRequestType,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const v = await lock(tx, facilityId, id);
+      assertKatchiWriteAllowed(role, v.bookType);
+      if (v.status !== 'ACCRUED') {
+        throw Errors.EXPENSE_VOUCHER_INVALID_STATUS('Only an ACCRUED voucher is converted to a bill');
+      }
+      const supplier = await payableSupplier(tx, facilityId, body.supplier_party_id);
+      const conversionDate = new Date(`${body.conversion_date ?? toIsoDate(new Date())}T00:00:00.000Z`);
+      if (conversionDate < v.voucherDate) {
+        throw Errors.VALIDATION_ERROR('A voucher cannot be converted before its own date', 'conversion_date');
+      }
+
+      const billNumber = await nextDocumentNumber(
+        tx,
+        facilityId,
+        'bills',
+        documentNumberPrefix('BILL', v.voucherDate, 'monthly'),
+        4,
+      );
+      const amount = Number(v.amountPkr);
+      const bill = await tx.bill.create({
         data: {
           facilityId,
-          voucherNumber,
-          voucherDate,
-          expenseAccountCode: body.expense_account_code,
-          description: body.description,
-          vendorName: body.vendor_name ?? null,
-          referenceNumber: body.reference_number ?? null,
-          amountPkr: body.amount_pkr,
-          paymentMethod: body.payment_method ?? null,
-          assetAccountCode: body.asset_account_code ?? null,
-          isAccrual: body.is_accrual ?? false,
-          receiptUrl: body.receipt_url ?? null,
-          bookType: body.book_type ?? 'PACCI',
-          notes: body.notes ?? null,
-          status: 'DRAFT',
+          billNumber,
+          supplierPartyId: supplier.id,
+          billDate: v.voucherDate,
+          dueDate: body.due_date ? new Date(`${body.due_date}T00:00:00.000Z`) : null,
+          supplierReference: v.referenceNumber,
+          description: v.description,
+          subtotalPkr: amount,
+          inputTaxPkr: 0,
+          totalPkr: amount,
+          status: 'POSTED',
+          bookType: v.bookType,
+          legacyExpenseVoucherId: v.id,
           createdBy: userId,
+          lines: {
+            create: [
+              {
+                facilityId,
+                lineNumber: 1,
+                expenseAccountCode: v.expenseAccountCode,
+                description: v.description.slice(0, 300),
+                amountPkr: amount,
+              },
+            ],
+          },
         },
       });
-      return formatVoucher(created);
-    });
-  }
-
-  async update(facilityId: string, id: string, body: any) {
-    const v = await this.prisma.expenseVoucher.findFirst({ where: { facilityId, id } });
-    if (!v) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
-    if (v.status !== 'DRAFT') {
-      throw Errors.EXPENSE_VOUCHER_INVALID_STATUS('Only DRAFT vouchers can be edited');
-    }
-    const updated = await this.prisma.expenseVoucher.update({
-      where: { id },
-      data: {
-        ...(body.voucher_date !== undefined ? { voucherDate: new Date(body.voucher_date) } : {}),
-        ...(body.expense_account_code !== undefined
-          ? { expenseAccountCode: body.expense_account_code }
-          : {}),
-        ...(body.description !== undefined ? { description: body.description } : {}),
-        ...(body.vendor_name !== undefined ? { vendorName: body.vendor_name } : {}),
-        ...(body.reference_number !== undefined ? { referenceNumber: body.reference_number } : {}),
-        ...(body.amount_pkr !== undefined ? { amountPkr: body.amount_pkr } : {}),
-        ...(body.payment_method !== undefined ? { paymentMethod: body.payment_method } : {}),
-        ...(body.asset_account_code !== undefined ? { assetAccountCode: body.asset_account_code } : {}),
-        ...(body.receipt_url !== undefined ? { receiptUrl: body.receipt_url } : {}),
-        ...(body.notes !== undefined ? { notes: body.notes } : {}),
-      },
-    });
-    return formatVoucher(updated);
-  }
-
-  async approve(facilityId: string, userId: string, id: string) {
-    const v = await this.prisma.expenseVoucher.findFirst({ where: { facilityId, id } });
-    if (!v) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
-    if (v.status !== 'DRAFT') {
-      throw Errors.EXPENSE_VOUCHER_INVALID_STATUS(`Cannot approve voucher in status ${v.status}`);
-    }
-    if (v.createdBy === userId) {
-      throw Errors.EXPENSE_VOUCHER_SELF_APPROVAL();
-    }
-    const updated = await this.prisma.expenseVoucher.update({
-      where: { id },
-      data: { status: 'APPROVED', approvedBy: userId, approvedAt: new Date() },
-    });
-    return formatVoucher(updated);
-  }
-
-  async cancel(facilityId: string, id: string, reason?: string) {
-    const v = await this.prisma.expenseVoucher.findFirst({ where: { facilityId, id } });
-    if (!v) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
-    if (v.status === 'PAID' || v.status === 'ACCRUED') {
-      throw Errors.EXPENSE_VOUCHER_INVALID_STATUS(`Cannot cancel voucher in status ${v.status}`);
-    }
-    const today = new Date().toISOString().slice(0, 10);
-    const updated = await this.prisma.expenseVoucher.update({
-      where: { id },
-      data: {
-        status: 'CANCELLED',
-        ...(reason
-          ? {
-              notes: v.notes
-                ? `${v.notes}\n[CANCELLED ${today}]: ${reason}`
-                : `[CANCELLED ${today}]: ${reason}`,
-            }
-          : {}),
-      },
-    });
-    return formatVoucher(updated);
-  }
-
-  async accrue(facilityId: string, userId: string, id: string) {
-    return this.prisma.$transaction(async (tx) => {
-      // Row-lock before reading the status: without it two concurrent calls both see
-      // APPROVED and both post, and nothing downstream stops them —
-      // (source_table, source_id) on journal_entries is an index, not a unique key.
-      await lockVoucher(tx, facilityId, id);
-
-      const v = await tx.expenseVoucher.findFirst({ where: { facilityId, id } });
-      if (!v) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
-      if (v.status !== 'APPROVED') {
-        throw Errors.EXPENSE_VOUCHER_INVALID_STATUS('Voucher must be APPROVED to accrue');
-      }
-
-      const draft = buildJE17BExpenseAccrued({
-        voucherId: v.id,
-        voucherNumber: v.voucherNumber,
-        entryDate: v.voucherDate,
-        expenseAccountCode: v.expenseAccountCode,
-        amountPkr: Number(v.amountPkr),
-        bookType: v.bookType,
-      });
-      const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
-        postingStatus: 'POSTED',
-      });
-
-      const updated = await tx.expenseVoucher.update({
-        where: { id },
-        data: { status: 'ACCRUED', accrualJournalEntryId: posted.id, isAccrual: true },
-      });
-      return formatVoucher(updated);
-    });
-  }
-
-  async pay(facilityId: string, userId: string, id: string, body: any) {
-    return this.prisma.$transaction(async (tx) => {
-      // See accrue(): the lock must precede the status read, or concurrent pays double-post.
-      await lockVoucher(tx, facilityId, id);
-
-      const v = await tx.expenseVoucher.findFirst({ where: { facilityId, id } });
-      if (!v) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
-      if (v.status !== 'APPROVED' && v.status !== 'ACCRUED') {
-        throw Errors.EXPENSE_VOUCHER_INVALID_STATUS('Voucher must be APPROVED or ACCRUED to pay');
-      }
-
-      const paymentDate = new Date(body.payment_date);
-      const assetAccount = body.asset_account_code;
-
-      const taxWithheldPkr = round2(body.tax_withheld_pkr ?? 0);
-      if (taxWithheldPkr > Number(v.amountPkr) + 0.005) {
-        throw Errors.VALIDATION_ERROR(
-          'The tax withheld cannot exceed the voucher amount.',
-          'tax_withheld_pkr',
-        );
-      }
-      const withholdingAccountCode =
-        taxWithheldPkr > 0
-          ? WITHHOLDING_ACCOUNTS[body.withholding_section as WithholdingSection]
-          : undefined;
-
-      let draft;
-      if (v.status === 'ACCRUED') {
-        // JE-17B-PAY: clear liability
-        draft = buildJE17BPayAccruedExpense({
-          voucherId: v.id,
-          voucherNumber: v.voucherNumber,
-          entryDate: paymentDate,
-          assetAccountCode: assetAccount,
-          amountPkr: Number(v.amountPkr),
-          taxWithheldPkr,
-          withholdingAccountCode,
-          bookType: v.bookType,
-        });
-      } else {
-        // JE-17A: direct expense + payment
-        draft = buildJE17AExpensePaid({
-          voucherId: v.id,
-          voucherNumber: v.voucherNumber,
-          entryDate: paymentDate,
-          expenseAccountCode: v.expenseAccountCode,
-          assetAccountCode: assetAccount,
-          amountPkr: Number(v.amountPkr),
-          taxWithheldPkr,
-          withholdingAccountCode,
-          bookType: v.bookType,
-        });
-      }
-
-      const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
-        postingStatus: 'POSTED',
-      });
-
-      const updated = await tx.expenseVoucher.update({
-        where: { id },
-        data: {
-          status: 'PAID',
-          paymentDate,
-          paymentMethod: body.payment_method,
-          assetAccountCode: assetAccount,
-          paymentJournalEntryId: posted.id,
-        },
-      });
-      return formatVoucher(updated);
-    });
-  }
-
-  async pettyCashReplenish(facilityId: string, userId: string, body: any) {
-    return this.prisma.$transaction(async (tx) => {
-      const draft = buildJE17CPettyCashReplenish({
-        entryDate: new Date(body.replenishment_date),
-        amountPkr: body.amount_pkr,
-        sourceBankAccountCode: body.source_bank_account_code ?? DEFAULT_BANK_ACCOUNT_CODE,
-        bookType: body.book_type ?? 'PACCI',
+      const posted = await this.journal.postInTransaction(
+        tx,
+        facilityId,
         userId,
-      });
-      const posted = await this.journalEntry.postInTransaction(tx, facilityId, userId, draft, {
-        postingStatus: 'POSTED',
-      });
-      return {
-        journal_entry_id: posted.id,
-        amount_pkr: body.amount_pkr,
-        replenishment_date: body.replenishment_date,
-      };
+        buildJE35VoucherConversion({
+          billId: bill.id,
+          billNumber,
+          voucherNumber: v.voucherNumber,
+          conversionDate,
+          supplier,
+          amountPkr: amount,
+          bookType: v.bookType,
+        }),
+      );
+      await tx.bill.update({ where: { id: bill.id }, data: { journalEntryId: posted.id } });
+      const updated = await tx.expenseVoucher.update({ where: { id }, data: { status: 'CONVERTED' }, include });
+      return formatVoucher(updated);
     });
   }
 
   async getById(facilityId: string, id: string) {
-    const v = await this.prisma.expenseVoucher.findFirst({ where: { facilityId, id } });
+    const v = await this.prisma.expenseVoucher.findFirst({ where: { facilityId, id }, include });
     if (!v) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
     return formatVoucher(v);
   }
 
-  async list(facilityId: string, query: any) {
-    const where: Prisma.ExpenseVoucherWhereInput = { facilityId };
-    if (query.status) where.status = query.status;
-    if (query.expense_account_code) where.expenseAccountCode = query.expense_account_code;
-    if (query.date_from || query.date_to) {
-      where.voucherDate = {};
-      if (query.date_from) (where.voucherDate as any).gte = new Date(query.date_from);
-      if (query.date_to) (where.voucherDate as any).lte = new Date(query.date_to);
-    }
+  async list(facilityId: string, query: ExpenseVoucherListQueryType) {
+    const where: Prisma.ExpenseVoucherWhereInput = {
+      facilityId,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.expense_account_code ? { expenseAccountCode: query.expense_account_code } : {}),
+      ...(query.date_from || query.date_to
+        ? {
+            voucherDate: {
+              ...(query.date_from ? { gte: new Date(query.date_from) } : {}),
+              ...(query.date_to ? { lte: new Date(query.date_to) } : {}),
+            },
+          }
+        : {}),
+    };
     const [data, total] = await Promise.all([
       this.prisma.expenseVoucher.findMany({
         where,
+        include,
         orderBy: [{ voucherDate: 'desc' }, { createdAt: 'desc' }],
-        skip: (query.page - 1) * query.pageSize,
-        take: query.pageSize,
+        skip: (query.page - 1) * query.page_size,
+        take: query.page_size,
       }),
       this.prisma.expenseVoucher.count({ where }),
     ]);
-    return {
-      data: data.map(formatVoucher),
-      meta: { total, page: query.page, per_page: query.pageSize },
-    };
+    return { data: data.map(formatVoucher), meta: { total, page: query.page, per_page: query.page_size } };
   }
 }
 
-function formatVoucher(v: any) {
+async function lock(tx: Tx, facilityId: string, id: string) {
+  if (!(await lockRow(tx, 'expense_vouchers', id, facilityId))) throw Errors.EXPENSE_VOUCHER_NOT_FOUND();
+  return tx.expenseVoucher.findFirstOrThrow({ where: { facilityId, id } });
+}
+
+/** What may still happen to a voucher (docs/25 C-11): the web reads this, never its own rule. */
+function allowedActions(status: string): ExpenseVoucherActionType[] {
+  if (status === 'DRAFT' || status === 'APPROVED') return ['cancel'];
+  if (status === 'ACCRUED') return ['convert_to_bill'];
+  return [];
+}
+
+function formatVoucher(v: Row) {
   return {
     id: v.id,
     voucher_number: v.voucherNumber,
-    voucher_date: v.voucherDate.toISOString().slice(0, 10),
-    payment_date: v.paymentDate ? v.paymentDate.toISOString().slice(0, 10) : null,
+    voucher_date: toIsoDate(v.voucherDate),
+    payment_date: v.paymentDate ? toIsoDate(v.paymentDate) : null,
     expense_account_code: v.expenseAccountCode,
     description: v.description,
     vendor_name: v.vendorName,
@@ -299,10 +190,12 @@ function formatVoucher(v: any) {
     book_type: v.bookType,
     accrual_journal_entry_id: v.accrualJournalEntryId,
     payment_journal_entry_id: v.paymentJournalEntryId,
+    bill_id: v.convertedToBill?.id ?? null,
     receipt_url: v.receiptUrl,
     approved_by: v.approvedBy,
     approved_at: v.approvedAt?.toISOString() ?? null,
     notes: v.notes,
+    allowed_actions: allowedActions(v.status),
     created_at: v.createdAt.toISOString(),
   };
 }

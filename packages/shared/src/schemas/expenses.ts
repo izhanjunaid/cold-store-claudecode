@@ -1,86 +1,38 @@
 import { z } from 'zod';
-import { DEFAULT_BANK_ACCOUNT_CODE } from '../accounting-accounts';
 import { BookType } from './enums';
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 
-export const ExpenseVoucherStatus = z.enum([
-  'DRAFT',
-  'APPROVED',
-  'ACCRUED',
-  'PAID',
-  'CANCELLED',
-]);
+/**
+ * Expense vouchers are retired (docs/25 C-03): costs are supplier bills. Existing
+ * vouchers stay readable; a draft or approved one can only be cancelled and an
+ * accrued one is converted to a bill.
+ */
+export const ExpenseVoucherStatus = z.enum(['DRAFT', 'APPROVED', 'ACCRUED', 'PAID', 'CANCELLED', 'CONVERTED']);
 
 export const ExpensePaymentMethod = z.enum(['CASH', 'CHEQUE', 'BANK_TRANSFER']);
 
-export const CreateExpenseVoucherRequest = z.object({
-  voucher_date: dateOnly,
-  expense_account_code: z.string().regex(/^[5-6][0-9]+$/),
-  description: z.string().min(1).max(500),
-  vendor_name: z.string().max(200).nullable().optional(),
-  reference_number: z.string().max(100).nullable().optional(),
-  amount_pkr: z.number().positive(),
-  is_accrual: z.boolean().optional(),
-  payment_method: ExpensePaymentMethod.optional(),
-  asset_account_code: z.string().regex(/^[0-9]+$/).optional(),
-  receipt_url: z.string().max(500).nullable().optional(),
-  book_type: BookType.optional(),
-  notes: z.string().optional(),
-});
-export type CreateExpenseVoucherRequestType = z.infer<typeof CreateExpenseVoucherRequest>;
+/**
+ * The classes a cost may be booked to. The rest of the rule lives on the chart row: the
+ * account must be an active DETAIL that a person may post to (`allow_manual_posting`),
+ * which is what keeps payroll, depreciation, bad-debt and disposal accounts — each moved
+ * by its own flow — out of every expense picker and every bill (docs/25 C-05).
+ */
+export const EXPENSE_ACCOUNT_CLASSES: readonly string[] = ['EXPENSE', 'COST_OF_SERVICE'];
 
-export const UpdateExpenseVoucherRequest = z.object({
-  voucher_date: dateOnly.optional(),
-  expense_account_code: z.string().regex(/^[5-6][0-9]+$/).optional(),
-  description: z.string().min(1).max(500).optional(),
-  vendor_name: z.string().max(200).nullable().optional(),
-  reference_number: z.string().max(100).nullable().optional(),
-  amount_pkr: z.number().positive().optional(),
-  payment_method: ExpensePaymentMethod.optional(),
-  asset_account_code: z.string().regex(/^[0-9]+$/).optional(),
-  receipt_url: z.string().max(500).nullable().optional(),
-  notes: z.string().optional(),
-});
-export type UpdateExpenseVoucherRequestType = z.infer<typeof UpdateExpenseVoucherRequest>;
-
-export const ApproveExpenseRequest = z.object({}).optional();
 export const CancelExpenseRequest = z.object({ reason: z.string().optional() });
 
-export const AccrueExpenseRequest = z.object({}).optional();
-
-export const WithholdingSection = z.enum(['S153', 'S155']);
-export type WithholdingSectionType = z.infer<typeof WithholdingSection>;
-
-export const PayExpenseRequest = z
-  .object({
-    payment_date: dateOnly,
-    payment_method: ExpensePaymentMethod,
-    asset_account_code: z.string().regex(/^[0-9]+$/),
-    // Tax deducted at source from this payment. The expense stays gross —
-    // withholding splits how the cost is settled, it does not reduce it.
-    tax_withheld_pkr: z.number().nonnegative().optional(),
-    withholding_section: WithholdingSection.optional(),
-  })
-  .superRefine((v, ctx) => {
-    if ((v.tax_withheld_pkr ?? 0) > 0 && !v.withholding_section) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['withholding_section'],
-        message:
-          'Say which section the tax was deducted under — s.153 and s.155 are reported separately on the s.165 statement.',
-      });
-    }
-  });
-export type PayExpenseRequestType = z.infer<typeof PayExpenseRequest>;
-
-export const PettyCashReplenishRequest = z.object({
-  replenishment_date: dateOnly,
-  amount_pkr: z.number().positive(),
-  source_bank_account_code: z.string().regex(/^[0-9]+$/).default(DEFAULT_BANK_ACCOUNT_CODE),
-  book_type: BookType.optional(),
+/** Move an accrued voucher's liability onto a supplier's account as a bill. */
+export const ConvertExpenseVoucherRequest = z.object({
+  supplier_party_id: z.string().uuid(),
+  /** When the liability moves — defaults to today; not before the voucher's own date. */
+  conversion_date: dateOnly.optional(),
+  due_date: dateOnly.nullable().optional(),
 });
-export type PettyCashReplenishRequestType = z.infer<typeof PettyCashReplenishRequest>;
+export type ConvertExpenseVoucherRequestType = z.infer<typeof ConvertExpenseVoucherRequest>;
+
+export const ExpenseVoucherAction = z.enum(['cancel', 'convert_to_bill']);
+export type ExpenseVoucherActionType = z.infer<typeof ExpenseVoucherAction>;
 
 export const ExpenseVoucherListQuery = z.object({
   status: ExpenseVoucherStatus.optional(),
@@ -109,10 +61,13 @@ export const ExpenseVoucherResponse = z.object({
   book_type: BookType,
   accrual_journal_entry_id: z.string().uuid().nullable(),
   payment_journal_entry_id: z.string().uuid().nullable(),
+  /** The bill an accrued voucher was converted to. */
+  bill_id: z.string().uuid().nullable(),
   receipt_url: z.string().nullable(),
   approved_by: z.string().uuid().nullable(),
   approved_at: z.string().nullable(),
   notes: z.string().nullable(),
+  allowed_actions: z.array(ExpenseVoucherAction),
   created_at: z.string(),
 });
 export type ExpenseVoucherResponseType = z.infer<typeof ExpenseVoucherResponse>;

@@ -751,29 +751,37 @@ describe('KATCHI source-document gates (F-9)', () => {
     expect(asOperator.statusCode).toBe(403);
   });
 
-  it('ACCOUNTANT cannot update a KATCHI expense voucher', async () => {
-    const create = await app.inject({
+  // Expense vouchers are retired (docs/25 C-03); a cost in the informal book is a KATCHI bill.
+  it('ACCOUNTANT cannot update a KATCHI bill', async () => {
+    const supplier = await app.inject({
       method: 'POST',
-      url: '/v1/expense-vouchers',
+      url: '/v1/parties',
       headers: authHeaders(ownerToken),
-      payload: {
-        voucher_date: '2026-05-05',
-        expense_account_code: '6110',
-        description: 'KATCHI gate test voucher',
-        amount_pkr: 500,
-        book_type: 'KATCHI',
-      },
+      payload: { name: `KATCHI gate supplier ${Date.now()}`, party_type: 'SUPPLIER', phone_primary: '03009998801' },
     });
-    expect(create.statusCode).toBe(201);
-    const voucherId = JSON.parse(create.body).data.id as string;
+    expect(supplier.statusCode, supplier.body).toBe(201);
+    const supplierId = JSON.parse(supplier.body).data.id as string;
+    const bill = {
+      supplier_party_id: supplierId,
+      bill_date: '2026-05-05',
+      description: 'KATCHI gate test bill',
+      lines: [{ expense_account_code: '6030', description: 'repairs', amount_pkr: 500 }],
+      book_type: 'KATCHI',
+    };
+    const create = await app.inject({ method: 'POST', url: '/v1/bills', headers: authHeaders(ownerToken), payload: bill });
+    expect(create.statusCode, create.body).toBe(201);
+    const billId = JSON.parse(create.body).data.id as string;
 
     const asAccountant = await app.inject({
       method: 'PATCH',
-      url: `/v1/expense-vouchers/${voucherId}`,
+      url: `/v1/bills/${billId}`,
       headers: authHeaders(accountantToken),
-      payload: { description: 'attempted edit' },
+      payload: { ...bill, description: 'attempted edit' },
     });
     expect(asAccountant.statusCode).toBe(403);
+
+    await prisma.bill.delete({ where: { id: billId } });
+    await prisma.party.delete({ where: { id: supplierId } });
   });
 
   it('MANAGER cannot record a repayment on a KATCHI loan', async () => {
@@ -1873,6 +1881,10 @@ describe('every JE sourceId resolves to a live row in its sourceTable (invariant
     payments: async (id) => (await prisma.payment.count({ where: { id } })) > 0,
     journal_entries: async (id) => (await prisma.journalEntry.count({ where: { id } })) > 0,
     credit_notes: async (id) => (await prisma.creditNote.count({ where: { id } })) > 0,
+    bills: async (id) => (await prisma.bill.count({ where: { id } })) > 0,
+    supplier_payments: async (id) => (await prisma.supplierPayment.count({ where: { id } })) > 0,
+    tax_remittances: async (id) => (await prisma.taxRemittance.count({ where: { id } })) > 0,
+    cash_transfers: async (id) => (await prisma.cashTransfer.count({ where: { id } })) > 0,
   };
 
   // P3-3 (docs/20_audit_backlog.md): je-21-late-payment-surcharge.ts and its

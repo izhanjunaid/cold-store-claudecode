@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { EXPENSE_ACCOUNT_CLASSES } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import type { NumberLocale } from '@/lib/format';
@@ -167,28 +168,17 @@ export function useAccounts() {
   });
 }
 
-/** Cash & bank accounts — the children of header 1000. Money is paid out of these. */
-export const isCashOrBank = (a: AccountRef) => a.parent_account_code === '1000';
+/** Accounts money is paid from or into — the chart's cash-equivalent flag, so an owner's second bank shows up and cheques in hand never do. */
+export const isCashOrBank = (a: AccountRef) => a.is_cash_equivalent;
 
 /**
- * Cost accounts that already have a dedicated posting flow. A manual expense
- * voucher against one of these double-counts against the automated entry:
- * payroll posts 5030/5035/6010/6015, the depreciation run posts
- * 5040/6120/6130/6140, asset disposal posts 6110, JE-08 posts 6080, and
- * spoilage posts 6150.
- *
- * This is the part of the old hardcoded list worth keeping — it encodes which
- * accounts a human may book to, not what the chart contains. Everything else,
- * including accounts added after ship, comes from the chart itself.
+ * Accounts a cost can be booked to — the same rule the server enforces (docs/25 C-05):
+ * an expense class, and an account a person may post to. Payroll, depreciation,
+ * bad-debt and disposal accounts are moved by their own flows and carry
+ * allow_manual_posting = false, so they drop out without a list of codes.
  */
-const AUTOMATED_COST_ACCOUNTS = new Set([
-  '5030', '5035', '5040', '6010', '6015', '6080', '6110', '6120', '6130', '6140', '6150',
-]);
-
-/** Accounts a spend can be booked to — overheads (6xxx) and direct costs (5xxx). */
 export const isExpenseAccount = (a: AccountRef) =>
-  (a.account_class === 'EXPENSE' || a.account_class === 'COST_OF_SERVICE') &&
-  !AUTOMATED_COST_ACCOUNTS.has(a.account_code);
+  EXPENSE_ACCOUNT_CLASSES.includes(a.account_class) && a.allow_manual_posting;
 
 /** Facility profile + settings (thresholds, GST, backdating limits). */
 export function useFacility() {

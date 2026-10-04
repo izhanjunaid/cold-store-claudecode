@@ -4,7 +4,7 @@ import { advisoryXactLock } from '../../common/advisory-lock';
 import { buildJE26GstSettlement } from './templates/je-26-gst-settlement';
 import type { JournalEntryService } from './journal-entry.service';
 import { SYSTEM_ACCOUNTS, DEFAULT_BANK_ACCOUNT_CODE, round2 } from '@coldchain/shared';
-import { assertCashEquivalent } from '../payment/cash-account';
+import { assertCashAccount } from './cash-account';
 
 /**
  * Sales tax is a statutory liability, which only the official book carries.
@@ -152,7 +152,7 @@ export class GstSettlementService {
     },
   ) {
     const bankAccountCode = params.bank_account_code ?? DEFAULT_BANK_ACCOUNT_CODE;
-    await assertCashEquivalent(this.prisma, facilityId, bankAccountCode, 'bank_account_code');
+    await assertCashAccount(this.prisma, facilityId, bankAccountCode, 'bank_account_code');
 
     const paymentDate = new Date(`${params.payment_date}T00:00:00.000Z`);
     const periodEnd = periodEndDate(params.period_year, params.period_month);

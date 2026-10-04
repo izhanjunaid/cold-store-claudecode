@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildJE15Payroll } from '../templates/je-15-payroll';
 import { buildJE16SalaryPayment } from '../templates/je-16-salary-payment';
-import { buildJE16BGovtRemittance } from '../templates/je-16b-govt-remittance';
 
 function totals(lines: { debitAmount: number; creditAmount: number }[]) {
   return {
@@ -113,38 +112,5 @@ describe('Payroll JE templates', () => {
     expect(draft.lines.find((l) => l.accountCode === '2030')?.debitAmount).toBe(103875);
     expect(draft.lines.find((l) => l.accountCode === '1020')?.creditAmount).toBe(103875);
     expect(draft.entryType).toBe('PAYROLL_PAYMENT');
-  });
-
-  it('JE-16B balances with EOBI + tax remittance', () => {
-    const draft = buildJE16BGovtRemittance({
-      payrollRunId: 'r5',
-      runNumber: 'PAY-202604-001',
-      entryDate: new Date('2026-05-15'),
-      employeeEobiPkr: 1125,
-      employerEobiPkr: 5625,
-      incomeTaxPkr: 5000,
-      fromAssetAccountCode: '1020',
-      bookType: 'PACCI',
-    });
-    const t = totals(draft.lines);
-    expect(t.d).toBe(11750);
-    expect(t.c).toBe(11750);
-    expect(draft.entryType).toBe('GOVT_REMITTANCE');
-  });
-
-  it('JE-16B handles partial remittance (no tax line if zero)', () => {
-    const draft = buildJE16BGovtRemittance({
-      payrollRunId: 'r6',
-      runNumber: 'PAY-202604-002',
-      entryDate: new Date('2026-05-15'),
-      employeeEobiPkr: 375,
-      employerEobiPkr: 1875,
-      incomeTaxPkr: 0,
-      fromAssetAccountCode: '1020',
-      bookType: 'PACCI',
-    });
-    const t = totals(draft.lines);
-    expect(t.d).toBeCloseTo(t.c);
-    expect(draft.lines.find((l) => l.accountCode === '2070')).toBeUndefined();
   });
 });

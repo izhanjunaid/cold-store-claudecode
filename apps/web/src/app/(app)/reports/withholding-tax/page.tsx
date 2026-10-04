@@ -1,17 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { useCan } from '@/lib/permissions';
-import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 import { formatDate, formatMoney } from '@/lib/format';
-import { periodToSettle } from '@/lib/tax-period';
 
 interface Row {
   entry_date: string;
@@ -19,6 +18,8 @@ interface Row {
   counterparty: string;
   description: string;
   withheld_pkr: number;
+  rate_pct: number | null;
+  certificate_number: string | null;
 }
 
 interface Section {
@@ -46,8 +47,7 @@ const startOfYear = () => `${new Date().getUTCFullYear()}-01-01`;
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function WithholdingTaxPage() {
-  const canPost = useCan('accounting.post_journal');
-  const [remitting, setRemitting] = useState<string | null>(null);
+  const canRemit = useCan('payroll.remit');
   const [from, setFrom] = useState(startOfYear);
   const [to, setTo] = useState(today);
   const [data, setData] = useState<Report | null>(null);
@@ -70,33 +70,6 @@ export default function WithholdingTaxPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  // Pay over what is still held for the last CLOSED tax period. The amount is
-  // measured at that period end while the entry is dated today, because the tax
-  // is owed at the period end and paid over weeks later.
-  const period = periodToSettle(to);
-  const periodLabel = period.label;
-
-  const remit = async (section: string) => {
-    setRemitting(section);
-    try {
-      const result = (await apiClient('/v1/accounting/withholding-remittance', {
-        method: 'POST',
-        body: {
-          section,
-          period_year: period.year,
-          period_month: period.month,
-          payment_date: new Date().toISOString().slice(0, 10),
-        },
-      })) as { entry_number: string; amount_pkr: number };
-      toast.success(`Paid over ${formatMoney(result.amount_pkr)} for ${periodLabel} — ${result.entry_number}`);
-      await load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to record the remittance');
-    } finally {
-      setRemitting(null);
-    }
-  };
 
   return (
     <div>
@@ -156,22 +129,11 @@ export default function WithholdingTaxPage() {
                   Still to pay <span className="tabular-nums">{formatMoney(s.unremitted_pkr)}</span>
                 </span>
               )}
-              {canPost && s.section !== 'S149' && s.unremitted_pkr > 0 && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={remitting !== null}
-                  onClick={() => remit(s.section)}
-                  // Name the period on the button: "still to pay" is measured at
-                  // the report's To date, while a remittance settles one closed
-                  // period, so the two figures can legitimately differ.
-                  title={`Pay over what is outstanding for ${periodLabel}`}
-                >
-                  {remitting === s.section ? 'Recording…' : `Pay over ${periodLabel}…`}
-                </Button>
-              )}
-              {s.section === 'S149' && s.unremitted_pkr > 0 && (
-                <span className="text-muted-foreground">Paid over from the payroll run</span>
+              {canRemit && s.unremitted_pkr > 0 && (
+                // Every section — s.149 included — is paid over by period from one screen (docs/25 C-10).
+                <Link href="/accounting/payables/tax-remittances" className="text-primary underline-offset-2 hover:underline">
+                  Pay over…
+                </Link>
               )}
             </div>
           </div>
@@ -199,7 +161,11 @@ export default function WithholdingTaxPage() {
                   <TableRow key={`${r.entry_number}-${i}`}>
                     <TableCell className="whitespace-nowrap">{formatDate(r.entry_date)}</TableCell>
                     <TableCell className="font-mono text-xs">{r.entry_number}</TableCell>
-                    <TableCell>{r.counterparty}</TableCell>
+                    <TableCell>
+                      {r.counterparty}
+                      {r.rate_pct !== null && <span className="ml-1 text-xs text-muted-foreground">@ {r.rate_pct}%</span>}
+                      {r.certificate_number && <span className="ml-1 text-xs text-muted-foreground">· cert. {r.certificate_number}</span>}
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{r.description}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatMoney(r.withheld_pkr)}</TableCell>
                   </TableRow>
@@ -214,8 +180,9 @@ export default function WithholdingTaxPage() {
         <p className="mt-3 max-w-3xl text-[11px] leading-relaxed text-muted-foreground">
           Built from the general ledger — there is no separate withholding register to fall out of
           step with it. <strong>This is not a filed return.</strong> A s.165 statement needs each
-          payee&rsquo;s CNIC or NTN, which this system does not hold: expense vouchers carry a
-          free-text vendor name, and payroll withholding is against staff collectively. Take the
+          payee&rsquo;s CNIC or NTN, which this system does not hold yet: suppliers are named from
+          their payments, older expense vouchers carry a free-text vendor name, and payroll
+          withholding is against staff collectively. Take the
           figures and the supporting entries to your tax advisor rather than filing from this page.
         </p>
       )}

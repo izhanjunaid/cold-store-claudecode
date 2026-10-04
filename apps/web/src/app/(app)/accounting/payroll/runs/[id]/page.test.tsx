@@ -139,7 +139,7 @@ describe('PayrollRunDetailPage — actions come from the server', () => {
   beforeEach(() => apiClient.mockReset());
 
   it('a paid run offers Void payment, never Reverse', async () => {
-    apiClient.mockResolvedValue({ ...RUN, status: 'PAID', allowed_actions: ['void_payment', 'remit'] });
+    apiClient.mockResolvedValue({ ...RUN, status: 'PAID', allowed_actions: ['void_payment'] });
     render(<PayrollRunDetailPage />);
     await waitFor(() => expect(screen.getByText('Ahmed')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /void payment/i })).toBeInTheDocument();
@@ -148,7 +148,7 @@ describe('PayrollRunDetailPage — actions come from the server', () => {
   });
 
   it('a finalized run offers Pay and Reverse', async () => {
-    apiClient.mockResolvedValue({ ...RUN, status: 'FINALIZED', allowed_actions: ['pay', 'reverse', 'remit'] });
+    apiClient.mockResolvedValue({ ...RUN, status: 'FINALIZED', allowed_actions: ['pay', 'reverse'] });
     render(<PayrollRunDetailPage />);
     await waitFor(() => expect(screen.getByText('Ahmed')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /pay salaries/i })).toBeInTheDocument();

@@ -8,13 +8,11 @@ import {
   CreatePayrollRunRequest,
   UpdatePayrollLineRequest,
   PayPayrollRequest,
-  RemitGovtRequest,
   ReversePayrollRunRequest,
   VoidPayrollPaymentRequest,
   PayrollRunListQuery,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
-import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 import { EmployeeService } from './employee.service';
@@ -177,21 +175,6 @@ export async function payrollRoutes(app: FastifyInstance) {
       const body = request.body as z.infer<typeof PayPayrollRequest>;
       const data = await runs.pay(request.user!.facilityId, request.user!.userId, request.user!.role, id, body);
       return sendSuccess(reply, data);
-    },
-  });
-
-  app.route({
-    method: 'POST',
-    url: '/v1/payroll-runs/:id/remit',
-    preHandler: [app.authenticate, app.requirePermission('payroll.remit')],
-    schema: { params: IdParam, body: RemitGovtRequest },
-    handler: async (request, reply) => {
-      const { id } = request.params as z.infer<typeof IdParam>;
-      const body = request.body as z.infer<typeof RemitGovtRequest>;
-      const existing = await runs.getById(request.user!.facilityId, id);
-      assertKatchiWriteAllowed(request.user!.role, existing.book_type);
-      const data = await runs.remit(request.user!.facilityId, request.user!.userId, id, body);
-      return sendSuccess(reply.status(201), data);
     },
   });
 
