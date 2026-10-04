@@ -121,8 +121,8 @@ export const PALETTE_ACTIONS: NavItem[] = [
     permission: 'accounting.view',
   },
   {
-    label: 'New Expense',
-    href: '/accounting/expenses/new',
+    label: 'New Bill',
+    href: '/accounting/payables/bills/new',
     icon: PlusCircle,
     permission: 'expenses.record',
   },

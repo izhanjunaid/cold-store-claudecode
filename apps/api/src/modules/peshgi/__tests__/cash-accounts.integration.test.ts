@@ -68,7 +68,8 @@ describe('cash accounts come from the chart flag', () => {
     const bad = await fx.call('POST', '/v1/accounting/gst-settlement', fx.tokens.owner, {
       period_year: 2034, period_month: 3, payment_date: '2034-04-10', bank_account_code: '1025',
     });
-    expect(bad.status).toBe(400);
+    expect(bad.status).toBe(422);
+    expect(bad.body.error).toMatchObject({ code: 'NOT_A_CASH_ACCOUNT', field: 'bank_account_code' });
     const ok = await fx.call('POST', '/v1/accounting/gst-settlement', fx.tokens.owner, {
       period_year: 2034, period_month: 3, payment_date: '2034-04-10', bank_account_code: OWN_BANK,
     });
@@ -81,7 +82,8 @@ describe('cash accounts come from the chart flag', () => {
       party_id: partyId, issue_date: '2026-08-01', principal_pkr: 1000, payment_method: 'BANK_TRANSFER',
       source_asset_account_code: '4010',
     });
-    expect(bad.status).toBe(400);
+    expect(bad.status).toBe(422);
+    expect(bad.body.error).toMatchObject({ code: 'NOT_A_CASH_ACCOUNT', field: 'source_asset_account_code' });
 
     const loan = await fx.call('POST', '/v1/loans/issue', fx.tokens.owner, {
       party_id: partyId, issue_date: '2026-08-01', principal_pkr: 1000, payment_method: 'BANK_TRANSFER',
@@ -91,6 +93,7 @@ describe('cash accounts come from the chart flag', () => {
     const repayBad = await fx.call('POST', `/v1/loans/${loan.body.data.id}/repayments`, fx.tokens.owner, {
       repayment_date: '2026-08-05', amount_pkr: 100, payment_method: 'CASH', asset_account_code: '4010',
     });
-    expect(repayBad.status).toBe(400);
+    expect(repayBad.status).toBe(422);
+    expect(repayBad.body.error).toMatchObject({ code: 'NOT_A_CASH_ACCOUNT', field: 'asset_account_code' });
   });
 });

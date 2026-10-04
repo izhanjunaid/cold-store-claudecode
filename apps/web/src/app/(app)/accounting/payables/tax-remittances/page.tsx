@@ -3,13 +3,13 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { localIsoDate } from '@coldchain/shared';
+import { MONTH_NAMES_SHORT, localIsoDate } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useCan } from '@/lib/permissions';
 import { useAccounts, isCashOrBank } from '@/hooks/use-reference-data';
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
-import { MONTH_NAMES, periodToSettle } from '@/lib/tax-period';
+import { periodToSettle } from '@/lib/tax-period';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -77,7 +77,7 @@ export default function TaxRemittancesPage() {
     {
       id: 'period',
       header: 'Period',
-      cell: (r) => `${MONTH_NAMES[r.period_month - 1]} ${r.period_year}`,
+      cell: (r) => `${MONTH_NAMES_SHORT[r.period_month - 1]} ${r.period_year}`,
       csv: (r) => `${r.period_year}-${String(r.period_month).padStart(2, '0')}`,
     },
     { id: 'amount', header: 'Amount', numeric: true, cell: (r) => formatMoney(r.amount_pkr), csv: (r) => r.amount_pkr },
@@ -115,7 +115,7 @@ export default function TaxRemittancesPage() {
           <div className="space-y-1">
             <Label htmlFor="tr-month">Period</Label>
             <select id="tr-month" className={SELECT_CLASS} value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-              {MONTH_NAMES.map((m, i) => (
+              {MONTH_NAMES_SHORT.map((m, i) => (
                 <option key={m} value={i + 1}>{m}</option>
               ))}
             </select>
@@ -125,7 +125,7 @@ export default function TaxRemittancesPage() {
             <Input id="tr-year" type="number" className="w-24" value={year} onChange={(e) => setYear(Number(e.target.value))} />
           </div>
           <p className="text-xs text-muted-foreground">
-            Owed at the end of {MONTH_NAMES[month - 1]} {year}, less anything already paid over.
+            Owed at the end of {MONTH_NAMES_SHORT[month - 1]} {year}, less anything already paid over.
           </p>
         </div>
         <Table>
@@ -245,7 +245,7 @@ function PayOverDialog({
           <DialogTitle>Pay over {target?.account_name}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          {target && `${formatMoney(target.outstanding_pkr)} owed for ${MONTH_NAMES[month - 1]} ${year}.`} The
+          {target && `${formatMoney(target.outstanding_pkr)} owed for ${MONTH_NAMES_SHORT[month - 1]} ${year}.`} The
           payment date must fall after the period ends.
         </p>
         <div className="space-y-1.5">
