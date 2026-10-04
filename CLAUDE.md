@@ -91,6 +91,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `17_accounting_audit_phase19.md` | Second accounting audit (2026-07-24/25, phase/19) — CoA, opening balances, statements, payments/invoices/peshgi; 17 findings + fixes |
 | `18_accounting_remediation_phase20.md` | Third audit + remediation (2026-07-25, phase/20) — payroll, fixed assets, cash/cheque, tax, expenses, concurrency; the advisory-lock defect; cost-side reversal |
 | `19_employee_advances_phase21.md` | Employee advances (2026-07-26/30, phase/21) — account 1230, JE-22/23, recovery rides inside payroll JEs, one-active-advance concurrency lock, reversal must unwind recoveries |
+| `25_accounting_consolidation.md` | Final accounting audit + fix program (2026-09-24 → 10-04, v0.6.0): 136 findings, owner decisions, the invariants the code follows (registry, chart flags, one posting/reversal/ledger path), manual-posting matrix, and §10 what merged and what was deliberately left |
 
 ## Domain Terminology
 

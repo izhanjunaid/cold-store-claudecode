@@ -301,3 +301,23 @@ turbo test:coverage
 > opening-balance date ordering and the unattributed plug (7 integration + 9 web), equity account rules (8 unit),
 > the Owners screen (7 web), the 4.13 disclosure (5 web), and the account-code suggester for partner blocks (4 unit).
 > The allocation and the opening-balance date guard were both mutation-checked: removing each fails its own tests.
+
+> **Accounting consolidation (docs/25, 2026-09-24 → 10-04, v0.6.0): 219 unit + 811 integration across 71 files (api) +
+> 215 unit (web) green**, measured on the last stream rebased onto everything else (`accounting/stream-cb`; the
+> 811 = 810 plus the GST-settlement test fixed in `135e0bc`). Every finding in the register has a regression test that
+> was run **red on the old code first**. The few that could not be (L-16/L-17/L-18 statement tie-outs, R-07's rewritten
+> test, R-23's lock, the web predicates) are named in docs/25 §10 and the stream PRs. New invariant tests:
+> - GL 1230 = the employee advance register (through repay, void-repayment and void-issue).
+> - GL 2030 = net pay of finalised, unpaid runs.
+> - Per supplier: 2050 = open bills − unapplied payments + other lines.
+> - Cash flow's closing cash = the balance sheet's cash equivalents.
+> - Aging = AR GL, and the party statement = the party's AR GL.
+>
+> **Concurrency tests assert the loser**: double finalize/pay of a payroll run, two drafts over-recovering one advance,
+> reopening an advance against a new issue, concurrent bill over-allocation (`BILL_OVER_ALLOCATED`).
+>
+> **One known gap: R-23's credit-note race test passes with the row lock removed.** `app.inject` serialises the two
+> requests, so the lock is untested defence.
+>
+> **Test hygiene**: mid-test `withGuardsDisabled` calls were removed from the C-26 advance tests, and that file went
+> from ~2 min to 35 s. Same lesson as Phase 26.
