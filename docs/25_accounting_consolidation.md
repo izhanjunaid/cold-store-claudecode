@@ -646,7 +646,7 @@ contractions (REVERSED enum value, `cash_flow_section`, `other_deductions_pkr`, 
 | #32 | R follow-ups: accrual start date (FY boundary, open period) settable in the app; suppliers off lots and transfers; KATCHI aging | `1b0f7e7` |
 | #33 | Stream E: statements on `ledger.ts`, cash flow by the chart, owner equity documents, chart rules in the API, opening balances (AP per supplier), shell (badge, closed-through, statement kit) | `554ced2` |
 | #34 | Payroll reverse refused once a recovered advance was written off (owner decision) | `28f8054` |
-| #35 | Stream C-b: cash/expense accounts by chart flag, cash-transfer documents, payables (bills JE-32, supplier payments JE-33, aging, statement), one period statutory remittance (JE-34; JE-29 and JE-16B deleted), expense vouchers retired (convert to bill JE-35); one cash-account helper; literal allowlist empty | pending |
+| #35 | Stream C-b: cash/expense accounts by chart flag, cash-transfer documents, payables (bills JE-32, supplier payments JE-33, aging, statement), one period statutory remittance (JE-34; JE-29 and JE-16B deleted), expense vouchers retired (convert to bill JE-35); one cash-account helper; literal allowlist empty | `e7ed2db` |
 
 ### Release decision (owner, 2026-10-04)
 **The client box starts fresh on v0.6.0; it is not upgraded from v0.5.x.** The §8 pre-update checks and the in-app
