@@ -125,7 +125,8 @@ describe('the settlement clears output tax net of input tax', () => {
         bank_account_code: '4010',
       },
     });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error).toMatchObject({ code: 'NOT_A_CASH_ACCOUNT', field: 'bank_account_code' });
   });
 
   it('posts DR 2020 / CR 1260 / CR bank and leaves 2020 clear', async () => {
