@@ -647,6 +647,7 @@ contractions (REVERSED enum value, `cash_flow_section`, `other_deductions_pkr`, 
 | #33 | Stream E: statements on `ledger.ts`, cash flow by the chart, owner equity documents, chart rules in the API, opening balances (AP per supplier), shell (badge, closed-through, statement kit) | `554ced2` |
 | #34 | Payroll reverse refused once a recovered advance was written off (owner decision) | `28f8054` |
 | #35 | Stream C-b: cash/expense accounts by chart flag, cash-transfer documents, payables (bills JE-32, supplier payments JE-33, aging, statement), one period statutory remittance (JE-34; JE-29 and JE-16B deleted), expense vouchers retired (convert to bill JE-35); one cash-account helper; literal allowlist empty | `e7ed2db` |
+| #36 | Browser-pass fixes: a reversal with no date lands on the later of today and the original (payroll accrual dated at period end); issue-advance employee picker (page_size over the API cap, error swallowed since phase 21); party pickers asked with the wrong parameter; disabled bill/payment buttons say why | pending |
 
 ### Release decision (owner, 2026-10-04)
 **The client box starts fresh on v0.6.0; it is not upgraded from v0.5.x.** The §8 pre-update checks and the in-app
@@ -655,6 +656,10 @@ existing box). Before the reinstall, take one `backup.bat` of the current databa
 The expand-only rules (§2 invariant 9) still govern every release from v0.6.0 on.
 
 ### Deliberately not done (decision or follow-up needed)
+- **Party pickers load at most 100 active parties** (`useParties`, every picker in the app): pre-existing, found in the
+  v0.6.0 browser pass. The fix is a server-searching picker (`/v1/parties?search=`); owner to prioritise.
+- **Balance sheet** repeats "Total Current Liabilities" when a single header group sits under the section; the
+  changes-in-equity owner split is computed to the paisa but displayed in whole rupees (can look 1 PKR off).
 - **R-20** loan balance is still a stored counter; loan write-offs share 6080 with trade bad debts.
 - **R-33 (rest)** GST "outstanding" not yet computed per period. **R-19 (rest)** combined settlement still records
   `DEDUCTED_FROM_PRODUCE`; no combined-settlement screen. **R-13 (rest)** withholding allowed on a fully on-account

@@ -321,3 +321,14 @@ turbo test:coverage
 >
 > **Test hygiene**: mid-test `withGuardsDisabled` calls were removed from the C-26 advance tests, and that file went
 > from ~2 min to 35 s. Same lesson as Phase 26.
+
+> **v0.6.0 browser pass (2026-10-08, Haiku agent, PR #36).** Driving the merged build found four defects the suites
+> could not reach:
+> - A month-end payroll accrual could not be reversed mid-month, because the reversal defaulted to today.
+> - The issue-advance form had shown an empty employee picker since phase 21: it requested more than the API's page cap,
+>   and the 400 was swallowed.
+> - Two party pickers silently got 50 parties: they sent the wrong page parameter, which was ignored.
+> - Two buttons were disabled with no reason given.
+>
+> The reversal-date fix has a regression test that reproduced the exact browser error first. The rest are wiring
+> defects in pages that no test drives against the real API, which is the case for the browser pass.
