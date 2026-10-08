@@ -101,7 +101,10 @@ export class JournalEntryService {
       throw Errors.VALIDATION_ERROR('A reversal cannot itself be reversed; post the entry again instead', 'id');
     }
 
-    const date = opts.date ?? new Date(`${toIsoDate(new Date())}T00:00:00.000Z`);
+    // No date given: today, or the original's own date if that is later — an accrual
+    // dated at a period end that has not arrived yet reverses inside its own period.
+    const today = new Date(`${toIsoDate(new Date())}T00:00:00.000Z`);
+    const date = opts.date ?? (original.entryDate > today ? original.entryDate : today);
     if (toIsoDate(date) < toIsoDate(original.entryDate)) {
       throw Errors.VALIDATION_ERROR(
         `A reversal cannot be dated before the entry it reverses (${toIsoDate(original.entryDate)})`,

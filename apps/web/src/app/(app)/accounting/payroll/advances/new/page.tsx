@@ -61,9 +61,11 @@ export default function IssueEmployeeAdvancePage() {
   const [created, setCreated] = useState<AdvanceCreated | null>(null);
 
   useEffect(() => {
-    apiClientList<EmployeeOption>('/v1/employees?is_active=true&page_size=200')
+    // The API caps page_size at 100; asking for 200 was refused (400) and the picker
+    // stayed empty since phase 21, with the error swallowed. Found in the v0.6.0 browser pass.
+    apiClientList<EmployeeOption>('/v1/employees?is_active=true&page_size=100')
       .then((res) => setEmployees(res.data))
-      .catch(() => {});
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load employees'));
   }, []);
 
   if (user && !canIssue) {
