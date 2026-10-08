@@ -22,13 +22,20 @@ let managerToken: string;
 let accountantToken: string;
 
 async function cleanup() {
+  // A reversal's description names the original's number, not its description, so
+  // the tag alone misses the mirrors; they inherit the original's source (a manual
+  // entry is its own source), which is how they are found. Missing them left posted
+  // reversals behind on every run against a long-lived database.
+  const tagged = await prisma.journalEntry.findMany({
+    where: { facilityId: TEST_FACILITY_ID, description: { contains: DESCRIPTION_TAG } },
+    select: { id: true },
+  });
+  const originals = tagged.map((e) => e.id);
+  const ours = { facilityId: TEST_FACILITY_ID, OR: [{ id: { in: originals } }, { sourceTable: 'manual', sourceId: { in: originals } }] };
   await withGuardsDisabled(prisma, async () => {
-    await prisma.journalEntryLine.deleteMany({
-      where: { journalEntry: { facilityId: TEST_FACILITY_ID, description: { contains: DESCRIPTION_TAG } } },
-    });
-    await prisma.journalEntry.deleteMany({
-      where: { facilityId: TEST_FACILITY_ID, description: { contains: DESCRIPTION_TAG } },
-    });
+    await prisma.journalEntryLine.deleteMany({ where: { journalEntry: ours } });
+    await prisma.journalEntry.updateMany({ where: ours, data: { reversedById: null } });
+    await prisma.journalEntry.deleteMany({ where: ours });
     await prisma.periodLock.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   });
 }
