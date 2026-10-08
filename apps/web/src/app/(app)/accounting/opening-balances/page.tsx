@@ -63,7 +63,7 @@ export default function OpeningBalancesPage() {
   useEffect(() => {
     Promise.all([
       apiClient<OpeningBalanceStatusResponseType>('/v1/accounting/opening-balances'),
-      apiClientList<Party>('/v1/parties?page_size=200&is_active=true').then((r) => r.data),
+      apiClientList<Party>('/v1/parties?per_page=100&is_active=true').then((r) => r.data),
       // The closed-through watermark, as the API states it (docs/25 L-15).
       apiClient<{ closed_through: { year: number; month: number } | null }>('/v1/accounting/period-locks/closed-through'),
     ])

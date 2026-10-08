@@ -598,6 +598,22 @@ describe('C-15 — reversing a run undoes the accrual; voiding a payment is its 
     expect((await prisma.payrollRun.findUniqueOrThrow({ where: { id: run.id } })).status).toBe('FINALIZED');
   });
 
+  // Found in the v0.6.0 browser pass: a run's accrual is dated at the period end,
+  // so reversing it mid-month (the dialog sends no date) was refused as "dated
+  // before the entry it reverses". With no date given, a reversal lands on the
+  // later of today and the original's own date.
+  it('reverses a run dated after today when no reversal date is given', async () => {
+    await salaried(30000);
+    const run = await draft(2031, 8);
+    const finalized = JSON.parse((await finalize(run.id)).body).data;
+
+    const res = await reverse(run.id, { reason: 'posted in error' });
+    expect(res.statusCode, res.body).toBe(200);
+    const original = await prisma.journalEntry.findUniqueOrThrow({ where: { id: finalized.payroll_journal_entry_id } });
+    const mirror = await prisma.journalEntry.findUniqueOrThrow({ where: { id: original.reversedById! } });
+    expect(mirror.entryDate.toISOString().slice(0, 10)).toBe('2031-08-31');
+  });
+
   // Owner decision (2026-10-04): once a recovered advance has been written off, the
   // run that recovered from it cannot be reversed — restoring the amount onto a
   // written-off advance left a balance nothing could recover or write off.

@@ -121,7 +121,7 @@ export function PaymentForm({
   // know their party and skip a 200-row fetch.
   useEffect(() => {
     if (lockPartyId) return;
-    apiClientList<Party>('/v1/parties?page_size=200&is_active=true')
+    apiClientList<Party>('/v1/parties?per_page=100&is_active=true')
       .then((res) => setParties(res.data))
       .catch(() => {});
   }, [lockPartyId]);
