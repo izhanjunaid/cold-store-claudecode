@@ -140,7 +140,7 @@ function BillForm() {
       <Card className="max-w-4xl space-y-4 p-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="space-y-1 sm:col-span-3">
-            <Label htmlFor="bill-supplier">Supplier</Label>
+            <Label htmlFor="bill-supplier">Supplier <span className="text-destructive">*</span></Label>
             <select id="bill-supplier" className={SELECT_CLASS} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
               <option value="">Choose a supplier…</option>
               {suppliers.map((s) => (
@@ -164,7 +164,7 @@ function BillForm() {
             <Input id="bill-ref" value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} />
           </div>
           <div className="space-y-1 sm:col-span-3">
-            <Label htmlFor="bill-desc">Description</Label>
+            <Label htmlFor="bill-desc">Description <span className="text-destructive">*</span></Label>
             <Input
               id="bill-desc"
               value={description}
@@ -199,6 +199,12 @@ function BillForm() {
         <div className="flex items-center justify-between border-t pt-3">
           <span className="text-sm">
             Total <span className="font-semibold tabular-nums">{formatMoney(total)}</span>
+            {/* Save stays disabled until these are filled — say so (found in the v0.6.0 browser pass). */}
+            {!valid && (
+              <span className="ml-3 text-xs text-muted-foreground">
+                Needs a supplier, a description, and a cost account, description and amount on every line.
+              </span>
+            )}
           </span>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => router.back()}>Cancel</Button>

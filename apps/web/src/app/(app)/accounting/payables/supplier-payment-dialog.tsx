@@ -182,8 +182,11 @@ export function SupplierPaymentDialog({
           </div>
           {section && (
             <div className="space-y-1">
-              <Label htmlFor="sp-rate">Rate (%)</Label>
+              <Label htmlFor="sp-rate">Rate (%) <span className="text-destructive">*</span></Label>
               <Input id="sp-rate" type="number" min="0" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} />
+              {!(Number(rate) > 0) && (
+                <p className="text-xs text-muted-foreground">The rate this supplier is charged under this section — required.</p>
+              )}
             </div>
           )}
           {section && (
