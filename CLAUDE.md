@@ -34,6 +34,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **`next build` and `next dev` share `apps/web/.next/` — running one while the other is live corrupts the running dev server.** Both scripts point at the same output directory (`apps/web/package.json`), so a `next build` (e.g. the CLAUDE.md-mandated build gate, or a CI-style verification build) kicked off while a `next dev` session is still serving overwrites its manifests mid-flight. The dev server process stays alive and keeps answering requests, but every static chunk 404s and the page renders blank — a symptom (blank page, missing `main-app.js`/`layout.css`) that looks nothing like its cause. Fix: stop the dev server before building, or afterward `rm -rf apps/web/.next` and restart `next dev` (a plain reload is not enough). Hit live during the UI-revamp module 2 session (2026-09-02): a backgrounded verification build silently blanked a `next dev` server that had been running for hours on a non-default port.
 - **Financial guard triggers** (Prisma migration `0002_financial_audit_and_integrity_guards`) enforce ledger/JE immutability at the DB level. Integration test cleanup that deletes or updates posted financial rows must wrap with `withGuardsDisabled` or the trigger will reject it.
+- **Accounting has one of everything (docs/25 §2) — use it, never re-derive it.**
+  - **Accounts.** Code literals live only in `SYSTEM_ACCOUNTS` (`packages/shared/src/accounting-accounts.ts`) and the seed. `scripts/check-account-literals.mjs` fails CI on a literal anywhere else; its allowlist only shrinks.
+  - **Chart flags.** What an owner-created account may need is a flag on its chart row, and those flags are the rule:
+    - `is_cash_equivalent`: every "paid from" picker, `assertCashAccount`, and the cash-flow statement.
+    - `allow_manual_posting` and `requires_party`: enforced by the posting engine.
+  - **Posting and reversing.** Post only through `JournalEntryService.postInTransaction`. Reverse only through `reverseInTransaction`: the mirror inherits the original's source and is never dated before it. A cancelled document gets `voided_at`/`voided_by`/`void_reason`, never a tag in `notes`.
+  - **Reading the ledger.** Statements, aging and sub-ledger tie-outs read `apps/api/src/modules/accounting/ledger.ts` (`accountBalances`, `partyBalances`, `classify`), not their own journal-line queries.
+  - **AR control accounts.** Receivables post to the party's stamped `control_account_code`, never to an account derived from its type. The type locks once the party has postings.
+- **Releases are expand-only.** The old image keeps running against the migrated database until the swap, and after any failed update.
+  - New columns are nullable, defaulted, or filled by a trigger.
+  - Each `ALTER TYPE … ADD VALUE` sits alone in its own migration file.
+  - New constraints are added `NOT VALID`, then validated only where the existing data passes (otherwise a warning, never a failed deploy).
+  - Drops wait one release.
+  - `deploy.ts` records every run in `deploy_runs`, and Settings → Software shows a failed one. A failure after the migrations have applied leaves nothing pending, so the migration count cannot show it.
 - **Two migration-looking directories exist under `packages/db`**: `prisma/migrations/` is the real, active Prisma migration history — use it. `migrations/` contains a single legacy `0001_foundation.sql` from before Prisma Migrate was adopted; don't add new migrations there.
 - **E2E requires test-mode flags**: the API must run with `ALLOW_TEST_RESET=1` and non-production `NODE_ENV` for `POST /v1/_test/reset` to work. `pnpm e2e` sets this up automatically — no manual server launch needed.
 - **Branch model**: `main` is the trunk (see above). The current parallel lines are the UI-revamp density-pass split into six `ui-revamp/0N-*` branches — Foundation (`00`) plus five domain modules (`01` accounting core, `02` payroll/fixed-assets/expenses, `03` billing/receivables/parties/loans, `04` operations, `05` admin/settings/auth) — each its own worktree under `.claude/worktrees/`, PR'd back to `main` individually as its module finishes. Confirm the current branch (`git branch --show-current`) before starting work; several lines coexist. Two older parallel lines once tracked here (`redesign/ui-replatform`, `feat/world-class-financials`) are now fully merged into `main` — a worktree still checked out on either is stale leftover, not active work.
@@ -77,6 +91,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `17_accounting_audit_phase19.md` | Second accounting audit (2026-07-24/25, phase/19) — CoA, opening balances, statements, payments/invoices/peshgi; 17 findings + fixes |
 | `18_accounting_remediation_phase20.md` | Third audit + remediation (2026-07-25, phase/20) — payroll, fixed assets, cash/cheque, tax, expenses, concurrency; the advisory-lock defect; cost-side reversal |
 | `19_employee_advances_phase21.md` | Employee advances (2026-07-26/30, phase/21) — account 1230, JE-22/23, recovery rides inside payroll JEs, one-active-advance concurrency lock, reversal must unwind recoveries |
+| `25_accounting_consolidation.md` | Final accounting audit + fix program (2026-09-24 → 10-04, v0.6.0): 136 findings, owner decisions, the invariants the code follows (registry, chart flags, one posting/reversal/ledger path), manual-posting matrix, and §10 what merged and what was deliberately left |
 
 ## Domain Terminology
 

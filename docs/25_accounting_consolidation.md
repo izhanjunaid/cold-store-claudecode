@@ -632,3 +632,50 @@ utilities) → four parallel streams (R revenue & receivables, C-a existing cost
 treasury, E equity/statements/chart) → integrate, remediate, release v0.6.0 → Release 2
 contractions (REVERSED enum value, `cash_flow_section`, `other_deductions_pkr`, `is_accrual`,
 `control_account_code` NOT NULL).
+
+## 10. Status (updated as each PR merges)
+
+| PR | Scope | Merged |
+|---|---|---|
+| #26 | Kernel: all schema (0027–0031), registry, chart flags, one posting/reversal path, `ledger.ts`, shared fiscal/money/chart modules, numbering and row locks, literal gate | `7d2d950` |
+| #27 | Stream C-a: payroll (locks, void payment, one JE-15 builder, settings), fixed assets (per-asset catch-up, corrections, go-live register), employee advances (6190) | `de9ab8a` |
+| #28 | C-26: void an advance, cash repayment (JE-31, 0032/0033), `assertCashAccount`, advance issue from any cash account; permission wording; dead error codes; check C21 | `20d6d7a` |
+| #29 | Release blocker: `deploy_runs` (0034), version endpoint `last_update`, Software panel | `acbcacf` |
+| #30 | Payroll reverse cannot reopen an advance while another is active | `18e0abb` |
+| #31 | Stream R: receivables on the party's control account, receipts, dishonour by chain, credit notes, settlement, AR read model, surcharge invoices, accrual policy, billing rules, numbering | `5994ba4` |
+| #32 | R follow-ups: accrual start date (FY boundary, open period) settable in the app; suppliers off lots and transfers; KATCHI aging | `1b0f7e7` |
+| #33 | Stream E: statements on `ledger.ts`, cash flow by the chart, owner equity documents, chart rules in the API, opening balances (AP per supplier), shell (badge, closed-through, statement kit) | `554ced2` |
+| #34 | Payroll reverse refused once a recovered advance was written off (owner decision) | `28f8054` |
+| #35 | Stream C-b: cash/expense accounts by chart flag, cash-transfer documents, payables (bills JE-32, supplier payments JE-33, aging, statement), one period statutory remittance (JE-34; JE-29 and JE-16B deleted), expense vouchers retired (convert to bill JE-35); one cash-account helper; literal allowlist empty | `e7ed2db` |
+| #36 | Browser-pass fixes: a reversal with no date lands on the later of today and the original (payroll accrual dated at period end); issue-advance employee picker (page_size over the API cap, error swallowed since phase 21); party pickers asked with the wrong parameter; disabled bill/payment buttons say why | `d6a7687` |
+
+### Release decision (owner, 2026-10-04)
+**The client box starts fresh on v0.6.0; it is not upgraded from v0.5.x.** The §8 pre-update checks and the in-app
+corrections named beside them are therefore not run for this release (the SQL stays for any future upgrade of an
+existing box). Before the reinstall, take one `backup.bat` of the current database so the old records stay retrievable.
+The expand-only rules (§2 invariant 9) still govern every release from v0.6.0 on.
+
+### Deliberately not done (decision or follow-up needed)
+- **Party pickers load at most 100 active parties** (`useParties`, every picker in the app): pre-existing, found in the
+  v0.6.0 browser pass. The fix is a server-searching picker (`/v1/parties?search=`); owner to prioritise.
+- **Balance sheet** repeats "Total Current Liabilities" when a single header group sits under the section; the
+  changes-in-equity owner split is computed to the paisa but displayed in whole rupees (can look 1 PKR off).
+- **R-20** loan balance is still a stored counter; loan write-offs share 6080 with trade bad debts.
+- **R-33 (rest)** GST "outstanding" not yet computed per period. **R-19 (rest)** combined settlement still records
+  `DEDUCTED_FROM_PRODUCE`; no combined-settlement screen. **R-13 (rest)** withholding allowed on a fully on-account
+  receipt (rule unspecified). **R-26 (rest)** no due date from credit terms; `cheque_date` unused; revenue account not
+  editable on rate-plan/service-charge pages. **R-38** done for allocate/dishonour/clear only. **R-37 (rest)** surcharge
+  button ignores the facility rule. **R-40** not started.
+- **R-23** credit-note row lock is untested defence: the race test passes with the lock removed (`app.inject`
+  serialises the two requests).
+- **Unclassified statement bucket kept.** With a fresh install no legacy unsectioned header exists and the chart
+  rules now require a section on every non-equity header, so the bucket can be removed with the Release 2 contractions.
+- **Payroll reverse after a write-off — decided (owner, 2026-10-04): refused** (#34). Reversing restored the recovered
+  amount onto a WRITTEN_OFF advance that nothing could recover or write off again.
+- **Seed** does not flag 3020 and some other registry accounts `is_system_account`; the chart service guards by the
+  registry instead.
+- **Waiting on owner decisions**: R-14 (ownership-transfer billing intent), R-31 (provincial sales tax), R-32 (1240
+  certificate tracking), R-41 (bad-debt allowance), C-20 (gratuity/leave/SESSI), C-35 (WDV convention), year-end profit
+  appropriation.
+- **Month close posts the accrual under `accounting.period_lock`**, not `post_journal` — kept: the entries are
+  system-built from the month's own data and a close without them would be the error.
