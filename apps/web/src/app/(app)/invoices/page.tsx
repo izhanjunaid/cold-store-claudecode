@@ -7,8 +7,7 @@ import { can } from '@/lib/permissions';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
-import { useParties } from '@/hooks/use-reference-data';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { Input } from '@/components/ui/input';
 import { RecordPaymentSheet } from '@/components/billing/record-payment-sheet';
 import { VoidInvoiceDialog } from '@/components/billing/void-invoice-dialog';
@@ -37,13 +36,6 @@ export default function InvoiceListPage() {
     '/v1/invoices',
     params,
     { enabled: canAccess },
-  );
-
-  const { data: parties = [] } = useParties();
-  // A supplier has no receivable: it is never billed, paid by or lent to.
-  const partyOptions = useMemo(
-    () => parties.filter((p) => p.party_type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
-    [parties],
   );
 
   const [payTarget, setPayTarget] = useState<InvoiceRow | null>(null);
@@ -100,12 +92,13 @@ export default function InvoiceListPage() {
           ],
           extra: (
             <div className="flex items-center gap-2">
-              <Combobox
-                options={partyOptions}
+              {/* A supplier has no receivable: it is never billed, paid by or lent to. */}
+              <PartyPicker
+                kind="customer"
+                clearable
                 value={state.filters['party_id'] ?? ''}
                 onChange={(v) => setFilter('party_id', v)}
                 placeholder="All parties"
-                searchPlaceholder="Search parties…"
                 className="h-8 w-[200px]"
               />
               <Input

@@ -13,7 +13,8 @@ import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/layout/page-header';
 import { EditableRows, type EditableRowColumn } from '@/components/form';
 import { formatMoney } from '@/lib/format';
-import { SELECT_CLASS, useSuppliers, type Bill } from '../../payables-shared';
+import { SELECT_CLASS, type Bill } from '../../payables-shared';
+import { PartyPicker } from '@/components/party/party-picker';
 
 type Line = { expense_account_code: string; description: string; amount: string };
 const blankLine = (): Line => ({ expense_account_code: '', description: '', amount: '' });
@@ -25,7 +26,6 @@ const blankLine = (): Line => ({ expense_account_code: '', description: '', amou
 function BillForm() {
   const router = useRouter();
   const editId = useSearchParams().get('edit');
-  const { data: suppliers = [] } = useSuppliers();
   const { data: accounts = [] } = useAccounts();
   const expenseAccounts = accounts.filter(isExpenseAccount);
 
@@ -141,15 +141,7 @@ function BillForm() {
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="space-y-1 sm:col-span-3">
             <Label htmlFor="bill-supplier">Supplier <span className="text-destructive">*</span></Label>
-            <select id="bill-supplier" className={SELECT_CLASS} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-              <option value="">Choose a supplier…</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            {suppliers.length === 0 && (
-              <p className="text-xs text-muted-foreground">Add the supplier under Parties (type: Supplier) first.</p>
-            )}
+            <PartyPicker id="bill-supplier" kind="supplier" value={supplierId} onChange={(v) => setSupplierId(v)} placeholder="Choose a supplier…" className="h-8" />
           </div>
           <div className="space-y-1">
             <Label htmlFor="bill-date">Bill date</Label>

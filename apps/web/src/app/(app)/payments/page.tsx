@@ -10,8 +10,7 @@ import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
-import { useParties } from '@/hooks/use-reference-data';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { Input } from '@/components/ui/input';
 import { RecordPaymentSheet } from '@/components/billing/record-payment-sheet';
 import { qk } from '@/lib/query-keys';
@@ -29,12 +28,6 @@ export default function PaymentListPage() {
   const canRecord = can(user, 'payments.record');
 
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(FILTER_KEYS);
-
-  const { data: parties = [] } = useParties();
-  const partyOptions = useMemo(
-    () => parties.filter((p) => p.party_type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
-    [parties],
-  );
 
   const [recordOpen, setRecordOpen] = useState(false);
   const [clearTarget, setClearTarget] = useState<PaymentRow | null>(null);
@@ -140,12 +133,12 @@ export default function PaymentListPage() {
           ],
           extra: (
             <div className="flex items-center gap-2">
-              <Combobox
-                options={partyOptions}
+              <PartyPicker
+                kind="customer"
+                clearable
                 value={state.filters['party_id'] ?? ''}
                 onChange={(v) => setFilter('party_id', v)}
                 placeholder="All parties"
-                searchPlaceholder="Search parties…"
                 className="h-8 w-[200px]"
               />
               <Input

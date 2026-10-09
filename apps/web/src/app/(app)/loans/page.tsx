@@ -8,12 +8,11 @@ import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { PageHeader } from '@/components/layout/page-header';
 import { formatDate, formatMoney } from '@/lib/format';
 import { DataTable, useTableState, type DataTableColumn } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
-import { useParties } from '@/hooks/use-reference-data';
 import { qk } from '@/lib/query-keys';
 
 interface LoanSummary {
@@ -63,13 +62,6 @@ export default function LoansDashboardPage() {
     '/v1/loans',
     params,
     { enabled: canAccess },
-  );
-
-  const { data: parties = [] } = useParties();
-  // A supplier has no receivable: it is never billed, paid by or lent to.
-  const partyOptions = useMemo(
-    () => parties.filter((p) => p.party_type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
-    [parties],
   );
 
   if (!canAccess) {
@@ -128,12 +120,13 @@ export default function LoansDashboardPage() {
             },
           ],
           extra: (
-            <Combobox
-              options={partyOptions}
+            // A supplier has no receivable: it is never billed, paid by or lent to.
+            <PartyPicker
+              kind="customer"
+              clearable
               value={state.filters['party_id'] ?? ''}
               onChange={(v) => setFilter('party_id', v)}
               placeholder="All parties"
-              searchPlaceholder="Search parties…"
               className="h-8 w-[200px]"
             />
           ),

@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { PageHeader } from '@/components/layout/page-header';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { useLotPlacements } from '@/components/lot-location';
@@ -26,12 +26,6 @@ interface Lot {
   commodity_name: string | null;
   current_balance_bags: number;
 }
-interface Party {
-  id: string;
-  name: string;
-  party_type: string;
-  is_active: boolean;
-}
 interface BillingPartyCredit {
   credit_limit_pkr: number | null;
   over_credit_limit?: boolean;
@@ -45,7 +39,6 @@ export default function WithdrawPage() {
   const [lot, setLot] = useState<Lot | null>(null);
   const { data: location } = useLotPlacements(lotId);
   const { data: facility } = useFacility();
-  const [parties, setParties] = useState<Party[]>([]);
   const [billingCredit, setBillingCredit] = useState<BillingPartyCredit | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -64,9 +57,6 @@ export default function WithdrawPage() {
     try {
       const loadedLot = await apiClient<Lot>(`/v1/lots/${lotId}`);
       setLot(loadedLot);
-      const partyRes = await apiClient<{ data: Party[] } | Party[]>('/v1/parties?is_active=true&per_page=100');
-      const list = Array.isArray(partyRes) ? partyRes : partyRes.data;
-      setParties(list.filter((p) => p.is_active));
       if (loadedLot.billing_party_id) {
         setBillingCredit(await apiClient<BillingPartyCredit>(`/v1/parties/${loadedLot.billing_party_id}`));
       }
@@ -269,12 +259,11 @@ export default function WithdrawPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Receiving party</Label>
-              <Combobox
+              <PartyPicker
+                clearable
                 value={form.receiving_party_id}
                 onChange={(v) => setForm({ ...form, receiving_party_id: v })}
-                options={parties.map((p) => ({ value: p.id, label: p.name, hint: p.party_type }))}
                 placeholder="— Optional —"
-                searchPlaceholder="Search parties…"
                 testId="combobox-receiving_party_id"
               />
             </div>

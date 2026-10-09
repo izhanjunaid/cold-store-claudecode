@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { QueryBoolean } from './common';
 import { RateType } from './enums';
 
 export const CreateRatePlanRequest = z
@@ -43,7 +44,7 @@ export const UpdateRatePlanRequest = z.object({
 });
 
 export const RatePlanListQuery = z.object({
-  is_active: z.coerce.boolean().optional(),
+  is_active: QueryBoolean.optional(),
   commodity_id: z.string().uuid().optional(),
 });
 

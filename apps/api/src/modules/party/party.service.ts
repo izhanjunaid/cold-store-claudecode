@@ -79,12 +79,13 @@ function toResponse(party: PartyRecord, overCreditLimit?: boolean) {
 export class PartyService {
   constructor(private readonly repo: PartyRepository) {}
 
-  async list(facilityId: string, query: { type?: string; is_active?: boolean; search?: string; page: number; per_page: number }) {
+  async list(facilityId: string, query: { type?: string; is_active?: boolean; search?: string; kind?: 'customer' | 'supplier'; page: number; per_page: number }) {
     const { data, total } = await this.repo.findMany({
       facilityId,
       type: query.type,
       isActive: query.is_active,
       search: query.search,
+      kind: query.kind,
       page: query.page,
       perPage: query.per_page,
     });

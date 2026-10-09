@@ -34,6 +34,14 @@ interface ComboboxProps {
   testId?: string;
   className?: string;
   ariaInvalid?: boolean;
+  /**
+   * Search on the server instead: called as the user types, and `options` are then
+   * shown as given rather than filtered here — for lists too long to load whole.
+   */
+  onSearchChange?: (search: string) => void;
+  /** Trigger label for a value that is not among the current `options` (server search). */
+  selectedLabel?: string;
+  loading?: boolean;
 }
 
 /**
@@ -52,9 +60,13 @@ export function Combobox({
   testId,
   className,
   ariaInvalid,
+  onSearchChange,
+  selectedLabel,
+  loading,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
-  const selected = options.find((o) => o.value === value);
+  const [search, setSearch] = useState('');
+  const label = options.find((o) => o.value === value)?.label ?? (value ? selectedLabel : undefined);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -70,20 +82,31 @@ export function Combobox({
           disabled={disabled}
           className={cn(
             'h-9 w-full justify-between font-normal',
-            !selected && 'text-muted-foreground',
+            !label && 'text-muted-foreground',
             ariaInvalid && 'border-destructive',
             className,
           )}
         >
-          <span className="truncate">{selected ? selected.label : placeholder}</span>
+          <span className="truncate">{label ?? placeholder}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-        <Command>
-          <CommandInput placeholder={searchPlaceholder} />
+        <Command shouldFilter={!onSearchChange}>
+          {onSearchChange ? (
+            <CommandInput
+              placeholder={searchPlaceholder}
+              value={search}
+              onValueChange={(s) => {
+                setSearch(s);
+                onSearchChange(s);
+              }}
+            />
+          ) : (
+            <CommandInput placeholder={searchPlaceholder} />
+          )}
           <CommandList>
-            <CommandEmpty>{emptyText}</CommandEmpty>
+            <CommandEmpty>{loading ? 'Searching…' : emptyText}</CommandEmpty>
             <CommandGroup>
               {options.map((opt) => (
                 <CommandItem

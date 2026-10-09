@@ -6,24 +6,19 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { CheckCircle2, Info } from 'lucide-react';
 import { localIsoDate, type OpeningBalanceStatusResponseType } from '@coldchain/shared';
-import { apiClient, apiClientList } from '@/lib/api-client';
+import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { EditableRows, FormActions, type EditableRowColumn } from '@/components/form';
 import { PageHeader } from '@/components/layout/page-header';
 import { formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
 
-interface Party {
-  id: string;
-  name: string;
-  party_type?: string;
-}
 interface PartyRow {
   party_id: string;
   amount: string;
@@ -46,7 +41,6 @@ export default function OpeningBalancesPage() {
   const canEnter = can(user, 'accounting.post_journal');
 
   const [status, setStatus] = useState<OpeningBalanceStatusResponseType | null>(null);
-  const [parties, setParties] = useState<Party[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -63,29 +57,17 @@ export default function OpeningBalancesPage() {
   useEffect(() => {
     Promise.all([
       apiClient<OpeningBalanceStatusResponseType>('/v1/accounting/opening-balances'),
-      apiClientList<Party>('/v1/parties?per_page=100&is_active=true').then((r) => r.data),
       // The closed-through watermark, as the API states it (docs/25 L-15).
       apiClient<{ closed_through: { year: number; month: number } | null }>('/v1/accounting/period-locks/closed-through'),
     ])
-      .then(([st, ps, watermark]) => {
+      .then(([st, watermark]) => {
         setStatus(st);
-        setParties(ps);
         setLockedThrough(watermark.closed_through);
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
   }, []);
 
-  // Suppliers are owed money; everyone else owes it. The server checks each
-  // party's own control account either way.
-  const customerOptions = useMemo(
-    () => parties.filter((p) => p.party_type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
-    [parties],
-  );
-  const supplierOptions = useMemo(
-    () => parties.filter((p) => p.party_type === 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
-    [parties],
-  );
   // The server decides which accounts an "other" line may use, from the chart's
   // own flags, and serves the list (docs/25 L-26).
   const otherAccounts = status?.other_line_accounts ?? [];
@@ -130,9 +112,11 @@ export default function OpeningBalancesPage() {
     return a?.statement_section === 'NON_CURRENT_ASSET' && a.normal_balance === 'DEBIT' && amountOf(o.debit) > 0;
   });
 
+  // Suppliers are owed money; everyone else owes it. The server checks each
+  // party's own control account either way.
   const partyColumns = (
     rows: PartyRow[],
-    options: { value: string; label: string }[],
+    kind: 'customer' | 'supplier',
     amountHeader: string,
   ): EditableRowColumn<PartyRow>[] => [
     {
@@ -140,12 +124,12 @@ export default function OpeningBalancesPage() {
       header: 'Party',
       width: '2fr',
       render: (row, update) => (
-        <Combobox
-          options={options.filter((o) => o.value === row.party_id || !rows.some((r) => r.party_id === o.value))}
+        <PartyPicker
+          kind={kind}
+          exclude={rows.map((r) => r.party_id)}
           value={row.party_id}
           onChange={(v) => update({ party_id: v })}
           placeholder="Select party…"
-          searchPlaceholder="Search parties…"
         />
       ),
     },
@@ -372,7 +356,7 @@ export default function OpeningBalancesPage() {
           <EditableRows
             rows={receivables}
             onChange={setReceivables}
-            columns={partyColumns(receivables, customerOptions, 'Amount owed (Rs)')}
+            columns={partyColumns(receivables, 'customer', 'Amount owed (Rs)')}
             newRow={() => ({ party_id: '', amount: '' })}
             addLabel="Add party"
           />
@@ -383,7 +367,7 @@ export default function OpeningBalancesPage() {
           <EditableRows
             rows={payables}
             onChange={setPayables}
-            columns={partyColumns(payables, supplierOptions, 'Amount you owe (Rs)')}
+            columns={partyColumns(payables, 'supplier', 'Amount you owe (Rs)')}
             newRow={() => ({ party_id: '', amount: '' })}
             addLabel="Add supplier"
           />

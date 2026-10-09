@@ -8,13 +8,6 @@ import type { NumberLocale } from '@/lib/format';
 
 const REFERENCE_STALE_TIME = 5 * 60_000;
 
-export interface PartyRef {
-  id: string;
-  name: string;
-  name_urdu?: string | null;
-  party_type?: string;
-}
-
 export interface CommodityRef {
   id: string;
   name: string;
@@ -79,13 +72,8 @@ export interface FacilityMe {
   settings?: FacilitySettings;
 }
 
-export function useParties() {
-  return useQuery({
-    queryKey: qk.reference.parties,
-    queryFn: () => apiClient<PartyRef[]>('/v1/parties?is_active=true&per_page=100'),
-    staleTime: REFERENCE_STALE_TIME,
-  });
-}
+// Parties are not reference data: there are too many to load whole. Pickers
+// search the server — components/party/party-picker.tsx.
 
 export function useCommodities() {
   return useQuery({

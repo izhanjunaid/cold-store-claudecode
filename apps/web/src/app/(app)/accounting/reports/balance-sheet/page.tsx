@@ -101,13 +101,15 @@ export default function BalanceSheetPage() {
   const pl = (code: string) => (cmp ? priorLines.get(code) ?? 0 : undefined);
   const pg = (code: string) => (cmp ? priorGroups.get(code) ?? 0 : undefined);
 
+  // A lone group's subtotal is the section total printed one row below it, so it
+  // is shown only where a section holds more than one group.
   function renderGroups(groups: Group[]) {
     return groups.map((g) => (
       <Fragment key={g.code}>
         {g.lines.map((l) => (
           <StatementRow key={l.account_code} depth={1} code={l.account_code} label={l.account_name} amount={l.amount_pkr} prior={pl(l.account_code)} href={glHref(l.account_code)} />
         ))}
-        <StatementRow depth={1} emphasis="subtotal" label={`Total ${g.name}`} amount={g.subtotal_pkr} prior={pg(g.code)} />
+        {groups.length > 1 && <StatementRow depth={1} emphasis="subtotal" label={`Total ${g.name}`} amount={g.subtotal_pkr} prior={pg(g.code)} />}
       </Fragment>
     ));
   }

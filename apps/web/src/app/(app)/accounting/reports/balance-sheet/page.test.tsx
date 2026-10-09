@@ -96,6 +96,49 @@ describe('BalanceSheetPage — unclassified accounts surface on the statement (F
 });
 
 /**
+ * A group's subtotal sits directly above its section's total. With one group in
+ * the section — the seeded chart has a single header for current liabilities —
+ * the two are the same figure, and the statement printed "Total Current
+ * Liabilities" twice.
+ */
+describe('BalanceSheetPage — group subtotals', () => {
+  const group = (code: string, name: string, amount: number) => ({
+    code,
+    name,
+    lines: [{ account_code: `${code.slice(0, 2)}10`, account_name: `${name} line`, amount_pkr: amount }],
+    subtotal_pkr: amount,
+  });
+
+  beforeEach(() => {
+    apiClient.mockReset();
+  });
+
+  it('a section with one group prints its total once', async () => {
+    apiClient.mockResolvedValue({
+      ...BASE_BS,
+      current_liability_groups: [group('2000', 'Current Liabilities', 500)],
+      total_current_liabilities_pkr: 500,
+    });
+    render(<BalanceSheetPage />);
+    await waitFor(() => expect(screen.getByText(/Total Assets/)).toBeTruthy());
+    expect(screen.getAllByText('Total Current Liabilities')).toHaveLength(1);
+  });
+
+  it('a section with several groups keeps each group subtotal', async () => {
+    apiClient.mockResolvedValue({
+      ...BASE_BS,
+      current_asset_groups: [group('1000', 'Cash & Bank', 300), group('1100', 'Trade Receivables', 200)],
+      total_current_assets_pkr: 500,
+    });
+    render(<BalanceSheetPage />);
+    await waitFor(() => expect(screen.getByText(/Total Assets/)).toBeTruthy());
+    expect(screen.getByText('Total Cash & Bank')).toBeTruthy();
+    expect(screen.getByText('Total Trade Receivables')).toBeTruthy();
+    expect(screen.getByText('Total Current Assets')).toBeTruthy();
+  });
+});
+
+/**
  * The opening-balance plug renders as an ordinary equity row, so once the owners
  * have capital accounts of their own an unattributed residual reads on the face
  * of the statement as somebody's capital. The server decides whether the

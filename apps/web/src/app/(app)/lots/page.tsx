@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
-import { useChambers, useParties } from '@/hooks/use-reference-data';
+import { useChambers } from '@/hooks/use-reference-data';
+import { PartyPicker } from '@/components/party/party-picker';
 import { qk } from '@/lib/query-keys';
 import { lotColumns, type LotRow } from './columns';
 
@@ -18,7 +19,6 @@ export default function LotListPage() {
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters, queryParams } =
     useTableState(FILTER_KEYS);
   const { data: chambers = [] } = useChambers();
-  const { data: parties = [] } = useParties();
 
   const { data, isLoading, isError } = useListQuery<LotRow>(
     qk.lots.list(queryParams),
@@ -76,12 +76,18 @@ export default function LotListPage() {
               label: 'Room',
               options: chambers.map((c) => ({ label: c.name, value: c.id })),
             },
-            {
-              key: 'party_id',
-              label: 'Owner',
-              options: parties.map((p) => ({ label: p.name, value: p.id })),
-            },
           ],
+          // A facet holds a fixed option list; owners are searched on the server.
+          extra: (
+            <PartyPicker
+              kind="customer"
+              clearable
+              value={state.filters['party_id'] ?? ''}
+              onChange={(v) => setFilter('party_id', v)}
+              placeholder="All owners"
+              className="h-8 w-[200px]"
+            />
+          ),
         }}
         csvFilename="lots"
         emptyState={{

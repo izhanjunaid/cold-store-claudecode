@@ -9,10 +9,9 @@ import { can } from '@/lib/permissions';
 import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api-client';
-import { useParties } from '@/hooks/use-reference-data';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { PageHeader } from '@/components/layout/page-header';
 import { StatTile } from '@/components/stat-tile';
 import { DataTable, type DataTableColumn } from '@/components/data-table';
@@ -31,13 +30,6 @@ export default function ReceivablesAgingPage() {
   const [asOfDate, setAsOfDate] = useState(today);
   const [partyId, setPartyId] = useState('');
   const [bookType, setBookType] = useState<'PACCI' | 'KATCHI'>('PACCI');
-
-  const { data: parties = [] } = useParties();
-  // A supplier has no receivable: it is never billed, paid by or lent to.
-  const partyOptions = useMemo(
-    () => parties.filter((p) => p.party_type !== 'SUPPLIER').map((p) => ({ value: p.id, label: p.name })),
-    [parties],
-  );
 
   const { data, isLoading } = useQuery<ReceivablesAgingResponseType>({
     queryKey: ['receivables-aging', user?.facility_id, asOfDate, partyId, bookType],
@@ -150,14 +142,8 @@ export default function ReceivablesAgingPage() {
       )}
 
       <div className="mb-3 max-w-xs">
-        <Combobox
-          options={partyOptions}
-          value={partyId}
-          onChange={setPartyId}
-          placeholder="All parties"
-          searchPlaceholder="Search parties…"
-          className="h-8"
-        />
+        {/* A supplier has no receivable: it is never billed, paid by or lent to. */}
+        <PartyPicker kind="customer" clearable value={partyId} onChange={(v) => setPartyId(v)} placeholder="All parties" className="h-8" />
       </div>
 
       <DataTable

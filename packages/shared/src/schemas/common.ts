@@ -9,6 +9,12 @@ export const PaginationQuery = z.object({
   per_page: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+/**
+ * A true/false query parameter. Not z.coerce.boolean(): that is Boolean(value),
+ * and Boolean("false") is true — every "inactive" filter listed active rows.
+ */
+export const QueryBoolean = z.enum(['true', 'false']).transform((v) => v === 'true');
+
 export const DateRangeQuery = z.object({
   date_from: z.string().date().optional(),
   date_to: z.string().date().optional(),

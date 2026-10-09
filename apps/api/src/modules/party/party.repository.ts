@@ -1,4 +1,5 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
+import { AR_CONTROL_ACCOUNTS, SYSTEM_ACCOUNTS } from '@coldchain/shared';
 import { creditExposure } from '../invoice/receivables';
 
 export interface PartyFilters {
@@ -6,6 +7,7 @@ export interface PartyFilters {
   type?: string;
   isActive?: boolean;
   search?: string;
+  kind?: 'customer' | 'supplier';
   page: number;
   perPage: number;
 }
@@ -20,6 +22,9 @@ export class PartyRepository {
 
     if (filters.type) where.partyType = filters.type as Prisma.EnumPartyTypeFilter['equals'];
     if (filters.isActive !== undefined) where.isActive = filters.isActive;
+    // The account stamped on the party decides what it is, as receivableParty() does.
+    if (filters.kind === 'customer') where.controlAccountCode = { in: [...AR_CONTROL_ACCOUNTS] };
+    if (filters.kind === 'supplier') where.controlAccountCode = SYSTEM_ACCOUNTS.TRADE_PAYABLES;
     if (filters.search) {
       where.OR = [
         { name: { contains: filters.search, mode: 'insensitive' } },

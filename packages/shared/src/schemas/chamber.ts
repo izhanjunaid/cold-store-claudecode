@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TemperatureSource } from './enums';
-import { PaginationQuery } from './common';
+import { PaginationQuery, QueryBoolean } from './common';
 
 export const CreateChamberRequest = z.object({
   name: z.string().min(1).max(100),
@@ -14,7 +14,7 @@ export const CreateChamberRequest = z.object({
 export const UpdateChamberRequest = CreateChamberRequest.partial();
 
 export const ChamberListQuery = PaginationQuery.extend({
-  is_active: z.coerce.boolean().optional(),
+  is_active: QueryBoolean.optional(),
 });
 
 export const LogTemperatureRequest = z.object({

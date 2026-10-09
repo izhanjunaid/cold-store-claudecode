@@ -9,13 +9,13 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { PartyPicker } from '@/components/party/party-picker';
 import { formatDate, formatMoney } from '@/lib/format';
 import {
   PAYMENT_METHODS,
   SELECT_CLASS,
   WITHHOLDING_SECTIONS,
   useOpenBills,
-  useSuppliers,
   type SupplierPayment,
 } from './payables-shared';
 
@@ -40,7 +40,6 @@ export function SupplierPaymentDialog({
   billId?: string;
   onPaid: (payment: SupplierPayment) => void;
 }) {
-  const { data: suppliers = [] } = useSuppliers();
   const { data: accounts = [] } = useAccounts();
   const cashAccounts = accounts.filter(isCashOrBank);
 
@@ -130,21 +129,18 @@ export function SupplierPaymentDialog({
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1 sm:col-span-2">
             <Label htmlFor="sp-supplier">Supplier</Label>
-            <select
+            <PartyPicker
               id="sp-supplier"
-              className={SELECT_CLASS}
+              kind="supplier"
               value={supplierId}
               disabled={!!fixedSupplierId}
-              onChange={(e) => {
-                setSupplierId(e.target.value);
+              onChange={(v) => {
+                setSupplierId(v);
                 setAlloc({});
               }}
-            >
-              <option value="">Choose a supplier…</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+              placeholder="Choose a supplier…"
+              className="h-8"
+            />
           </div>
           <div className="space-y-1">
             <Label htmlFor="sp-date">Date</Label>

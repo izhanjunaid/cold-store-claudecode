@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Boxes, Users } from 'lucide-react';
 import { apiClientList } from '@/lib/api-client';
+import { useDebounced } from '@/hooks/use-debounced';
 import { useAuthStore } from '@/stores/auth.store';
 import { navItemsForUser, paletteActionsForUser } from '@/components/layout/nav-config';
 import {
@@ -46,15 +47,6 @@ const CommandPaletteContext = createContext<CommandPaletteContextValue>({ open: 
 
 export function useCommandPalette() {
   return useContext(CommandPaletteContext);
-}
-
-function useDebounced<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(t);
-  }, [value, delayMs]);
-  return debounced;
 }
 
 export function CommandPaletteProvider({ children }: { children: React.ReactNode }) {

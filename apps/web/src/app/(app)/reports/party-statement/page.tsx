@@ -1,16 +1,15 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { hasMinRole } from '@/lib/rbac';
-import { useParties } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { PageHeader } from '@/components/layout/page-header';
 
 function defaultRange() {
@@ -29,9 +28,6 @@ export default function PartyStatementPickerPage() {
   const [dateFrom, setDateFrom] = useState(range.from);
   const [dateTo, setDateTo] = useState(range.to);
   const [bookType, setBookType] = useState<'PACCI' | 'KATCHI'>('PACCI');
-
-  const { data: parties = [] } = useParties();
-  const partyOptions = useMemo(() => parties.map((p) => ({ value: p.id, label: p.name })), [parties]);
 
   if (!canView) {
     return (
@@ -57,12 +53,10 @@ export default function PartyStatementPickerPage() {
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-1">
               <Label>Party</Label>
-              <Combobox
-                options={partyOptions}
+              <PartyPicker
                 value={partyId}
-                onChange={setPartyId}
+                onChange={(v) => setPartyId(v)}
                 placeholder="Select party…"
-                searchPlaceholder="Search parties…"
                 testId="combobox-party_id"
                 className="h-8"
               />

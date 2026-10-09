@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { PartyLedgerResponseType } from '@coldchain/shared';
@@ -8,10 +8,9 @@ import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { hasMinRole } from '@/lib/rbac';
-import { useParties } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { PageHeader } from '@/components/layout/page-header';
 import { StatTile } from '@/components/stat-tile';
 import { DataTable, type DataTableColumn } from '@/components/data-table';
@@ -45,9 +44,6 @@ export default function PartyStatementDetailPage() {
   const dateTo = search.get('date_to') ?? '';
   const bookType = (search.get('book_type') as 'PACCI' | 'KATCHI') ?? 'PACCI';
   const [downloading, setDownloading] = useState(false);
-
-  const { data: parties = [] } = useParties();
-  const partyOptions = useMemo(() => parties.map((p) => ({ value: p.id, label: p.name })), [parties]);
 
   const qs = new URLSearchParams();
   if (dateFrom) qs.set('date_from', dateFrom);
@@ -116,12 +112,10 @@ export default function PartyStatementDetailPage() {
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div className="w-56 space-y-1">
           <span className="text-xs uppercase tracking-wide text-muted-foreground">Party</span>
-          <Combobox
-            options={partyOptions}
+          <PartyPicker
             value={partyId}
             onChange={(v) => v !== partyId && router.push(buildStatementUrl(v, dateFrom, dateTo, bookType))}
             placeholder="Select party…"
-            searchPlaceholder="Search parties…"
             className="h-8"
           />
         </div>
