@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { QueryBoolean } from './common';
 import { ServiceUnitType } from './enums';
 
 export const CreateServiceChargeRequest = z.object({
@@ -15,7 +16,7 @@ export const UpdateServiceChargeRequest = z.object({
 });
 
 export const ServiceChargeListQuery = z.object({
-  is_active: z.coerce.boolean().optional(),
+  is_active: QueryBoolean.optional(),
 });
 
 export const ServiceChargeResponse = z.object({

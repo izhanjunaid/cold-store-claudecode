@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatMoney } from '@/lib/format';
-import { SELECT_CLASS, useSuppliers } from '../payables/payables-shared';
+import { PartyPicker } from '@/components/party/party-picker';
 
 export interface LegacyVoucher {
   id: string;
@@ -40,7 +40,6 @@ export function ConvertVoucherDialog({
   onOpenChange: (open: boolean) => void;
   onConverted: (billId: string) => void;
 }) {
-  const { data: suppliers = [] } = useSuppliers();
   const [supplierId, setSupplierId] = useState('');
   const [date, setDate] = useState(() => localIsoDate());
   const [dueDate, setDueDate] = useState('');
@@ -76,15 +75,7 @@ export function ConvertVoucherDialog({
         </p>
         <div className="space-y-1.5">
           <Label htmlFor="cv-supplier">Supplier</Label>
-          <select id="cv-supplier" className={SELECT_CLASS} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-            <option value="">Choose a supplier…</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-          {suppliers.length === 0 && (
-            <p className="text-xs text-muted-foreground">Add the supplier under Parties (type: Supplier) first.</p>
-          )}
+          <PartyPicker id="cv-supplier" kind="supplier" value={supplierId} onChange={(v) => setSupplierId(v)} placeholder="Choose a supplier…" className="h-8" />
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">

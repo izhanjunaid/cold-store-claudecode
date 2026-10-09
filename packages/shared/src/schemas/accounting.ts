@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { QueryBoolean } from './common';
 import {
   AccountClass,
   AccountType,
@@ -134,7 +135,7 @@ export type UpdateAccountRequestType = z.infer<typeof UpdateAccountRequest>;
 
 export const ChartOfAccountsListQuery = z.object({
   account_class: AccountClass.optional(),
-  is_active: z.coerce.boolean().optional(),
+  is_active: QueryBoolean.optional(),
 });
 export type ChartOfAccountsListQueryType = z.infer<typeof ChartOfAccountsListQuery>;
 
@@ -193,7 +194,7 @@ export const JournalEntryListQuery = z.object({
   date_from: dateOnly.optional(),
   date_to: dateOnly.optional(),
   posting_status: PostingStatus.optional(),
-  reversed: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+  reversed: QueryBoolean.optional(),
   page: z.coerce.number().int().min(1).default(1),
   page_size: z.coerce.number().int().min(1).max(100).default(20),
 });

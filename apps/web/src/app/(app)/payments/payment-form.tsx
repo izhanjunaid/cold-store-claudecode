@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { Info } from 'lucide-react';
 import { FormActions, EntrySheet, EntryGroup, EntryChip, EditableRows } from '@/components/form';
 import {
@@ -23,13 +23,6 @@ import { formatMoney } from '@/lib/format';
 
 const SELECT_CLASS =
   'flex h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
-
-interface Party {
-  id: string;
-  name: string;
-  party_type?: string;
-  is_active: boolean;
-}
 
 export interface PaymentFormProps {
   /** Preselects the party but leaves the picker usable. */
@@ -86,7 +79,6 @@ export function PaymentForm({
   onCreated,
   onCancel,
 }: PaymentFormProps) {
-  const [parties, setParties] = useState<Party[]>([]);
   const [invoices, setInvoices] = useState<AllocationInvoiceOption[]>([]);
   const [error, setError] = useState('');
 
@@ -117,15 +109,6 @@ export function PaymentForm({
   // leaving a window where rapid clicks fire multiple POSTs (duplicate receipts).
   const submittingRef = useRef(false);
 
-  // The picker is the only reason to load the party list; locked callers already
-  // know their party and skip a 200-row fetch.
-  useEffect(() => {
-    if (lockPartyId) return;
-    apiClientList<Party>('/v1/parties?per_page=100&is_active=true')
-      .then((res) => setParties(res.data))
-      .catch(() => {});
-  }, [lockPartyId]);
-
   const fetchInvoices = useCallback(async (pid: string) => {
     if (!pid) {
       setInvoices([]);
@@ -144,15 +127,6 @@ export function PaymentForm({
   useEffect(() => {
     fetchInvoices(partyId);
   }, [partyId, fetchInvoices]);
-
-  // A supplier is paid, never paid by: the server refuses its receipts, so it is not offered.
-  const partyOptions = useMemo(
-    () =>
-      parties
-        .filter((p) => p.party_type !== 'SUPPLIER')
-        .map((p) => ({ value: p.id, label: p.name, hint: p.party_type })),
-    [parties],
-  );
 
   const totalAllocated = allocations.reduce(
     (s, a) => s + (parseFloat(a.allocated_amount_pkr) || 0),
@@ -248,15 +222,15 @@ export function PaymentForm({
             {lockPartyId ? (
               <p className="flex h-8 items-center text-sm font-medium">{partyName ?? '—'}</p>
             ) : (
-              <Combobox
-                options={partyOptions}
+              // A supplier is paid, never paid by: the server refuses its receipts, so it is not offered.
+              <PartyPicker
+                kind="customer"
                 value={partyId}
                 onChange={(v) => {
                   setPartyId(v);
                   setAllocations([]);
                 }}
                 placeholder="Select party…"
-                searchPlaceholder="Search parties…"
                 testId="combobox-party_id"
                 className="h-8"
               />

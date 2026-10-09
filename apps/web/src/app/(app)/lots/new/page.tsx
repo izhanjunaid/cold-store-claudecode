@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Form, FormActions, EntrySheet, EntryGroup, EntryChip } from '@/components/form';
 import { ComboboxField } from '@/components/form/combobox-field';
+import { PartyField } from '@/components/party/party-picker';
 import { SelectField } from '@/components/form/select-field';
 import { NumberField } from '@/components/form/number-field';
 import { TextField } from '@/components/form/text-field';
@@ -22,7 +23,6 @@ import { applyApiErrorToForm } from '@/lib/form-errors';
 import { formatMoney } from '@/lib/format';
 import { qk } from '@/lib/query-keys';
 import {
-  useParties,
   useCommodities,
   useVarieties,
   useChambers,
@@ -94,7 +94,6 @@ interface CreatedLot {
 export default function LotCreatePage() {
   const router = useRouter();
   const isOwner = useAuthStore((s) => s.user?.role === 'OWNER');
-  const { data: parties = [] } = useParties();
   const { data: commodities = [] } = useCommodities();
   const { data: varieties = [] } = useVarieties();
   const { data: chambers = [] } = useChambers();
@@ -148,15 +147,6 @@ export default function LotCreatePage() {
   const variancePct = declared > 0 ? (Math.abs(accepted - declared) / declared) * 100 : 0;
   const varianceKg = declared > 0 ? Math.abs(accepted - declared) : 0;
   const hasDispute = declared > 0 && varianceKg > kgThreshold;
-
-  const partyOptions = useMemo(
-    // A lot is stored for, and billed to, customers; the API refuses a supplier.
-    () =>
-      parties
-        .filter((p) => p.party_type !== 'SUPPLIER')
-        .map((p) => ({ value: p.id, label: p.name, hint: p.party_type })),
-    [parties],
-  );
 
   const filteredVarieties = useMemo(
     () => (commodityId ? varieties.filter((v) => v.commodity_id === commodityId) : varieties),
@@ -270,14 +260,14 @@ export default function LotCreatePage() {
 
           <EntrySheet key={formGeneration}>
             <EntryGroup title="Consignment" columns={6}>
-              <ComboboxField
+              {/* A lot is stored for, and billed to, customers; the API refuses a supplier. */}
+              <PartyField
                 control={control}
                 name="owner_party_id"
                 label="Owner party"
                 required
-                options={partyOptions}
+                kind="customer"
                 placeholder="Select party…"
-                searchPlaceholder="Search parties…"
                 className="xl:col-span-2"
               />
               <CheckboxField
@@ -288,14 +278,13 @@ export default function LotCreatePage() {
                 className="xl:col-span-2"
               />
               {billingOverride && (
-                <ComboboxField
+                <PartyField
                   control={control}
                   name="billing_party_id"
                   label="Billing party"
                   required
-                  options={partyOptions}
+                  kind="customer"
                   placeholder="Select billing party…"
-                  searchPlaceholder="Search parties…"
                   className="xl:col-span-2"
                 />
               )}

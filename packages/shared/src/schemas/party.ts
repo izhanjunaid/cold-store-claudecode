@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { PartyType } from './enums';
-import { PaginationQuery } from './common';
+import { PaginationQuery, QueryBoolean } from './common';
 
 export const CreatePartyRequest = z.object({
   name: z.string().min(1).max(200),
@@ -20,8 +20,10 @@ export const UpdatePartyRequest = CreatePartyRequest.partial();
 
 export const PartyListQuery = PaginationQuery.extend({
   type: PartyType.optional(),
-  is_active: z.coerce.boolean().optional(),
+  is_active: QueryBoolean.optional(),
   search: z.string().optional(),
+  /** customer: on a receivable control account (who may be billed); supplier: on Trade Payables. */
+  kind: z.enum(['customer', 'supplier']).optional(),
 });
 
 export const PartyResponse = z.object({

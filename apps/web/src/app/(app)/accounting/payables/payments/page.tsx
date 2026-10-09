@@ -17,7 +17,8 @@ import { DataTable, useTableState, type DataTableColumn } from '@/components/dat
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
 import { formatDate, formatMoney } from '@/lib/format';
-import { useOpenBills, useSuppliers, type SupplierPayment } from '../payables-shared';
+import { useOpenBills, type SupplierPayment } from '../payables-shared';
+import { PartyPicker } from '@/components/party/party-picker';
 import { SupplierPaymentDialog } from '../supplier-payment-dialog';
 import { VoidDocumentDialog } from '../void-document-dialog';
 
@@ -27,7 +28,6 @@ export default function SupplierPaymentsPage() {
   const queryClient = useQueryClient();
   const canRecord = useCan('expenses.record');
   const canApprove = useCan('expenses.approve');
-  const { data: suppliers = [] } = useSuppliers();
   const [creating, setCreating] = useState(false);
   const [voidTarget, setVoidTarget] = useState<SupplierPayment | null>(null);
   const [allocTarget, setAllocTarget] = useState<SupplierPayment | null>(null);
@@ -122,7 +122,18 @@ export default function SupplierPaymentsPage() {
         filterValues={state.filters}
         onFilterChange={setFilter}
         onResetFilters={resetFilters}
-        toolbar={{ facets: [{ key: 'supplier_party_id', label: 'Supplier', options: suppliers.map((s) => ({ label: s.name, value: s.id })) }] }}
+        toolbar={{
+          extra: (
+            <PartyPicker
+              kind="supplier"
+              clearable
+              value={state.filters['supplier_party_id'] ?? ''}
+              onChange={(v) => setFilter('supplier_party_id', v)}
+              placeholder="All suppliers"
+              className="h-8 w-[200px]"
+            />
+          ),
+        }}
         csvFilename="supplier-payments"
         emptyState={{ title: 'No supplier payments yet' }}
       />

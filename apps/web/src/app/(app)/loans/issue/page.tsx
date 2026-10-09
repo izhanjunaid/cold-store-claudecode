@@ -6,10 +6,9 @@ import { CheckCircle2 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
-import { useParties } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -31,12 +30,8 @@ export default function IssuePeshgiPage() {
   const { user } = useAuthStore();
   const isOwner = can(user, 'loans.issue');
 
-  const { data: parties = [] } = useParties();
-  const partyOptions = parties
-    .filter((p) => p.party_type !== 'SUPPLIER')
-    .map((p) => ({ value: p.id, label: p.name, hint: p.party_type }));
-
   const [partyId, setPartyId] = useState(search.get('party_id') ?? '');
+  const [partyName, setPartyName] = useState('');
   const [principal, setPrincipal] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK_TRANSFER'>('CASH');
   const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -92,7 +87,7 @@ export default function IssuePeshgiPage() {
             </div>
             <dl className="space-y-1 rounded-md border bg-muted/30 p-4 text-sm">
               <div className="flex justify-between"><dt className="text-muted-foreground">Loan No.</dt><dd className="font-mono">{created.loan_number}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted-foreground">Party</dt><dd>{created.party_name ?? partyOptions.find((p) => p.value === partyId)?.label}</dd></div>
+              <div className="flex justify-between"><dt className="text-muted-foreground">Party</dt><dd>{created.party_name ?? partyName}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Principal</dt><dd className="tabular-nums">{formatMoney(Number(created.principal_pkr))}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Journal Entry</dt><dd className="font-mono text-xs">{created.issue_journal_entry_id ?? '—'}</dd></div>
             </dl>
@@ -118,12 +113,14 @@ export default function IssuePeshgiPage() {
           <EntryGroup title="Peshgi" columns={2}>
             <div className="space-y-1 sm:col-span-2">
               <Label>Party <span className="text-destructive">*</span></Label>
-              <Combobox
-                options={partyOptions}
+              <PartyPicker
+                kind="customer"
                 value={partyId}
-                onChange={setPartyId}
+                onChange={(id, party) => {
+                  setPartyId(id);
+                  setPartyName(party?.name ?? '');
+                }}
                 placeholder="Select party…"
-                searchPlaceholder="Search parties…"
                 testId="combobox-party_id"
                 className="h-8"
               />

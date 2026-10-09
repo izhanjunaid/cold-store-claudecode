@@ -1,6 +1,5 @@
 'use client';
 
-import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -15,7 +14,7 @@ import { TextareaField } from '@/components/form/textarea-field';
 import { apiClient } from '@/lib/api-client';
 import { useApiMutation } from '@/hooks/use-api-mutation';
 import { applyApiErrorToForm } from '@/lib/form-errors';
-import { useParties } from '@/hooks/use-reference-data';
+import { PartyField } from '@/components/party/party-picker';
 import { qk } from '@/lib/query-keys';
 
 const partySchema = z.object({
@@ -68,7 +67,6 @@ interface PartyFormProps {
 
 export function PartyForm({ initialData, partyId, mode, canChangeType = true }: PartyFormProps) {
   const router = useRouter();
-  const { data: parties = [] } = useParties();
 
   const form = useForm<PartyFormValues>({
     resolver: zodResolver(partySchema),
@@ -77,20 +75,12 @@ export function PartyForm({ initialData, partyId, mode, canChangeType = true }: 
   });
   const { control, handleSubmit, setError } = form;
 
-  const arhtiOptions = useMemo(
-    () =>
-      parties
-        .filter((p) => p.party_type === 'ARHTI' && p.id !== partyId)
-        .map((p) => ({ value: p.id, label: p.name })),
-    [parties, partyId],
-  );
-
   const save = useApiMutation<{ id: string }, Record<string, unknown>>({
     mutationFn: (payload) =>
       mode === 'create'
         ? apiClient<{ id: string }>('/v1/parties', { method: 'POST', body: payload })
         : apiClient<{ id: string }>(`/v1/parties/${partyId}`, { method: 'PATCH', body: payload }),
-    invalidates: [qk.parties.all, qk.reference.parties],
+    invalidates: [qk.parties.all],
     successMessage: mode === 'create' ? 'Party created' : 'Party updated',
     silentError: true,
     onSuccess: (res) => router.push(`/parties/${mode === 'create' ? res.id : partyId}`),
@@ -141,12 +131,14 @@ export function PartyForm({ initialData, partyId, mode, canChangeType = true }: 
               options={canChangeType ? PARTY_TYPES : PARTY_TYPES.filter((t) => t.value === initialData?.party_type)}
               description={canChangeType ? undefined : 'Fixed: this party already has entries on its account'}
             />
-            <SelectField
+            <PartyField
               control={control}
               name="parent_arhti_id"
               label="Parent arhti"
+              type="ARHTI"
+              exclude={partyId ? [partyId] : undefined}
+              clearable
               placeholder="None"
-              options={arhtiOptions}
             />
           </EntryGroup>
 

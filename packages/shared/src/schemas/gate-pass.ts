@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { QueryBoolean } from './common';
 import { GatePassDirection, GatePassStatus } from './enums';
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
@@ -50,7 +51,7 @@ export const GatePassListQuery = z.object({
   vehicle_number: z.string().trim().min(1).optional(),
   date_from: dateOnly.optional(),
   date_to: dateOnly.optional(),
-  active: z.coerce.boolean().optional(),
+  active: QueryBoolean.optional(),
   page: z.coerce.number().int().min(1).default(1),
   page_size: z.coerce.number().int().min(1).max(100).default(20),
 });

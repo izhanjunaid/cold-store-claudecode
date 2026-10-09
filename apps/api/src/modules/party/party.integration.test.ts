@@ -187,6 +187,29 @@ describe('Party CRUD', () => {
     expect(body.data.is_active).toBe(false);
   });
 
+  // z.coerce.boolean() read the string "false" as true, so the Parties page's
+  // "Inactive" filter listed active parties.
+  it('GET /v1/parties?is_active=false — lists only inactive parties', async () => {
+    const list = async (active: string) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/parties?is_active=${active}&search=Updated%20Farmer%20Name&per_page=100`,
+        headers: authHeaders(ownerToken),
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return JSON.parse(res.body).data as Array<{ id: string; is_active: boolean }>;
+    };
+    const inactive = await list('false');
+    expect(inactive.map((p) => p.id)).toContain(createdPartyId);
+    expect(inactive.every((p) => !p.is_active)).toBe(true);
+    expect((await list('true')).map((p) => p.id)).not.toContain(createdPartyId);
+  });
+
+  it('GET /v1/parties — rejects a boolean that is neither true nor false', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/parties?is_active=no', headers: authHeaders(ownerToken) });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('DELETE /v1/parties/:id — OPERATOR cannot deactivate', async () => {
     const res = await app.inject({
       method: 'DELETE',
@@ -194,5 +217,48 @@ describe('Party CRUD', () => {
       headers: authHeaders(operatorToken),
     });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+// Pickers search the server instead of loading a capped list, so the server has
+// to offer exactly the parties each picker's document accepts: a customer is a
+// party on a receivable control account (receivableParty), a supplier one on
+// Trade Payables.
+describe('Party list · kind filter', () => {
+  const tag = `Kind ${Date.now() % 1_000_000}`;
+  let customerId: string;
+  let supplierId: string;
+
+  beforeAll(async () => {
+    const create = async (name: string, party_type: string, phone: string) => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/parties',
+        headers: authHeaders(ownerToken),
+        payload: { name, party_type, phone_primary: phone, credit_terms_days: 30 },
+      });
+      expect(res.statusCode, res.body).toBe(201);
+      return JSON.parse(res.body).data.id as string;
+    };
+    customerId = await create(`${tag} buyer`, 'BUYER', '03004440001');
+    supplierId = await create(`${tag} supplier`, 'SUPPLIER', '03004440002');
+  });
+
+  const ids = async (kind: string) => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/parties?kind=${kind}&search=${encodeURIComponent(tag)}`,
+      headers: authHeaders(ownerToken),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    return (JSON.parse(res.body).data as Array<{ id: string }>).map((p) => p.id);
+  };
+
+  it('kind=customer leaves suppliers out', async () => {
+    expect(await ids('customer')).toEqual([customerId]);
+  });
+
+  it('kind=supplier lists only suppliers', async () => {
+    expect(await ids('supplier')).toEqual([supplierId]);
   });
 });

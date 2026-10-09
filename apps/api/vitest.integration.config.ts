@@ -36,6 +36,11 @@ export default defineConfig({
     testTimeout: 15000,
     hookTimeout: 15000,
     fileParallelism: false,
-    env: { ...rootEnv, ...localEnv },
+    // As dotenv does, a variable already set in the shell wins over the files — so a
+    // run can be pointed at a scratch database (DATABASE_URL=…) instead of the dev
+    // one, whose data the payroll and party suites' cleanup would otherwise delete.
+    env: Object.fromEntries(
+      Object.entries({ ...rootEnv, ...localEnv }).filter(([key]) => process.env[key] === undefined),
+    ),
   },
 });

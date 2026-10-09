@@ -15,6 +15,8 @@ export const qk = {
   parties: {
     all: ['parties'] as const,
     list: (filters: ListFilters) => ['parties', 'list', filters] as const,
+    /** A picker's server search — one key per query string, shared by every picker asking it. */
+    search: (query: string) => ['parties', 'search', query] as const,
     detail: (id: string) => ['parties', 'detail', id] as const,
     ledger: (id: string) => ['parties', 'ledger', id] as const,
   },
@@ -57,7 +59,6 @@ export const qk = {
     report: (name: string, filters: ListFilters) => ['reports', name, filters] as const,
   },
   reference: {
-    parties: ['ref', 'parties'] as const,
     commodities: ['ref', 'commodities'] as const,
     varieties: ['ref', 'varieties'] as const,
     chambers: ['ref', 'chambers'] as const,

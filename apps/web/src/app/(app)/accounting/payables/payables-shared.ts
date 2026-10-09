@@ -64,20 +64,6 @@ export interface SupplierPayment {
   allowed_actions: Array<'allocate' | 'void'>;
 }
 
-export interface SupplierRef {
-  id: string;
-  name: string;
-}
-
-/** Parties whose account is a payable — the only ones a bill or payment may name. */
-export function useSuppliers() {
-  return useQuery({
-    queryKey: ['reference', 'suppliers'],
-    queryFn: () => apiClient<SupplierRef[]>('/v1/parties?type=SUPPLIER&is_active=true&per_page=100'),
-    staleTime: 60_000,
-  });
-}
-
 /** A supplier's posted bills that still have something to pay, oldest first. */
 export function useOpenBills(supplierId: string | null, book: 'PACCI' | 'KATCHI' = 'PACCI') {
   return useQuery({

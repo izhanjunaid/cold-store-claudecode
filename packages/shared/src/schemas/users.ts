@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { QueryBoolean } from './common';
 import { UserRole } from './enums';
 
 export const UserListQuery = z.object({
   role: UserRole.optional(),
-  is_active: z.coerce.boolean().optional(),
+  is_active: QueryBoolean.optional(),
   search: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
   per_page: z.coerce.number().int().min(1).max(200).default(50),

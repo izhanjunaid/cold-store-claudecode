@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Combobox } from '@/components/ui/combobox';
+import { PartyPicker } from '@/components/party/party-picker';
 import { PageHeader } from '@/components/layout/page-header';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 
@@ -22,13 +22,6 @@ interface Lot {
   commodity_name: string | null;
   current_balance_bags: number;
 }
-interface Party {
-  id: string;
-  name: string;
-  type?: string;
-  party_type?: string;
-  is_active: boolean;
-}
 
 export default function TransferNewPage() {
   const params = useParams();
@@ -36,7 +29,6 @@ export default function TransferNewPage() {
   const lotId = params['id'] as string;
 
   const [lot, setLot] = useState<Lot | null>(null);
-  const [parties, setParties] = useState<Party[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,12 +46,6 @@ export default function TransferNewPage() {
     try {
       const lotRes = await apiClient<Lot>(`/v1/lots/${lotId}`);
       setLot(lotRes);
-      const partyRes = await apiClient<{ data: Party[] } | Party[]>('/v1/parties?is_active=true&per_page=100');
-      const list = Array.isArray(partyRes) ? partyRes : partyRes.data;
-      // The new owner is billed for the storage, so suppliers are not offered (the API refuses them).
-      setParties(
-        list.filter((p) => p.is_active && p.id !== lotRes.owner_party_id && (p.party_type ?? p.type) !== 'SUPPLIER'),
-      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -70,11 +56,6 @@ export default function TransferNewPage() {
   useEffect(() => {
     load();
   }, [load]);
-
-  const partyOptions = useMemo(
-    () => parties.map((p) => ({ value: p.id, label: p.name, hint: p.party_type ?? p.type })),
-    [parties],
-  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,12 +157,13 @@ export default function TransferNewPage() {
 
             <div className="space-y-1.5">
               <Label>New owner <span className="text-destructive">*</span></Label>
-              <Combobox
-                options={partyOptions}
+              {/* The new owner is billed for the storage, so suppliers are not offered (the API refuses them). */}
+              <PartyPicker
+                kind="customer"
+                exclude={[lot.owner_party_id]}
                 value={form.to_party_id}
                 onChange={(v) => setForm({ ...form, to_party_id: v })}
                 placeholder="Select party…"
-                searchPlaceholder="Search parties…"
                 testId="combobox-to_party_id"
               />
             </div>

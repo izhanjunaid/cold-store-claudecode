@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { QueryBoolean } from './common';
 import { DEFAULT_BANK_ACCOUNT_CODE, SYSTEM_ACCOUNTS } from '../accounting-accounts';
 import { round2, sumMoney } from '../money';
 import { BookType } from './enums';
@@ -119,7 +120,7 @@ export type TerminateEmployeeRequestType = z.infer<typeof TerminateEmployeeReque
 
 export const EmployeeListQuery = z.object({
   employee_type: EmployeeType.optional(),
-  is_active: z.coerce.boolean().optional(),
+  is_active: QueryBoolean.optional(),
   page: z.coerce.number().int().min(1).default(1),
   page_size: z.coerce.number().int().min(1).max(100).default(50),
 });

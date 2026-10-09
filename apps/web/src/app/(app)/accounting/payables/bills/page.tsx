@@ -12,14 +12,14 @@ import { DataTable, useTableState, type DataTableColumn } from '@/components/dat
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
 import { formatDate, formatMoney } from '@/lib/format';
-import { useSuppliers, type Bill } from '../payables-shared';
+import { type Bill } from '../payables-shared';
+import { PartyPicker } from '@/components/party/party-picker';
 
 const FILTER_KEYS = ['status', 'supplier_party_id', 'date_from', 'date_to'] as const;
 
 export default function BillsPage() {
   const router = useRouter();
   const canRecord = useCan('expenses.record');
-  const { data: suppliers = [] } = useSuppliers();
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters } = useTableState(FILTER_KEYS);
   const params = useMemo(() => ({ page: state.page, page_size: state.perPage, ...state.filters }), [state]);
   const { data, isLoading, isError } = useListQuery<Bill>(qk.accounting.list('bills', params), '/v1/bills', params, {
@@ -96,8 +96,17 @@ export default function BillsPage() {
         toolbar={{
           facets: [
             { key: 'status', label: 'Status', options: ['DRAFT', 'POSTED', 'VOID'].map((v) => ({ label: v[0] + v.slice(1).toLowerCase(), value: v })) },
-            { key: 'supplier_party_id', label: 'Supplier', options: suppliers.map((s) => ({ label: s.name, value: s.id })) },
           ],
+          extra: (
+            <PartyPicker
+              kind="supplier"
+              clearable
+              value={state.filters['supplier_party_id'] ?? ''}
+              onChange={(v) => setFilter('supplier_party_id', v)}
+              placeholder="All suppliers"
+              className="h-8 w-[200px]"
+            />
+          ),
         }}
         csvFilename="bills"
         emptyState={{ title: 'No bills yet' }}
