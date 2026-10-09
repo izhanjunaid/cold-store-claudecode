@@ -44,7 +44,7 @@ const BASE_BS = {
   total_current_assets_pkr: 0,
   non_current_asset_groups: [],
   total_non_current_assets_pkr: 0,
-  total_assets_pkr: 800,
+  total_assets_pkr: 0,
   current_liability_groups: [],
   total_current_liabilities_pkr: 0,
   non_current_liability_groups: [],
@@ -53,47 +53,13 @@ const BASE_BS = {
   equity_lines: [],
   retained_earnings_pkr: 0,
   prior_years_pl_pkr: 0,
-  current_year_pl_pkr: 800,
+  current_year_pl_pkr: 0,
   fiscal_year_start: '2026-01-01',
-  total_equity_pkr: 800,
-  total_liabilities_and_equity_pkr: 800,
+  total_equity_pkr: 0,
+  total_liabilities_and_equity_pkr: 0,
   is_balanced: true,
-  unclassified_asset_lines: [
-    { account_code: '9904', account_name: 'Custom Asset (stray)', amount_pkr: 800 },
-  ],
-  unclassified_liability_lines: [],
-  has_unclassified: true,
   unattributed_opening_equity_pkr: 0,
 };
-
-describe('BalanceSheetPage — unclassified accounts surface on the statement (F-6b)', () => {
-  beforeEach(() => {
-    apiClient.mockReset();
-    apiClient.mockResolvedValue(BASE_BS);
-  });
-
-  it('renders unclassified asset lines inside the assets block', async () => {
-    render(<BalanceSheetPage />);
-    await waitFor(() => expect(screen.getByText(/Total Assets/)).toBeTruthy());
-    expect(screen.getAllByText(/Unclassified/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Custom Asset \(stray\)/)).toBeTruthy();
-  });
-
-  it('hides the section when everything is classified', async () => {
-    apiClient.mockResolvedValue({
-      ...BASE_BS,
-      unclassified_asset_lines: [],
-      has_unclassified: false,
-      total_assets_pkr: 0,
-      current_year_pl_pkr: 0,
-      total_equity_pkr: 0,
-      total_liabilities_and_equity_pkr: 0,
-    });
-    render(<BalanceSheetPage />);
-    await waitFor(() => expect(screen.getByText(/Total Assets/)).toBeTruthy());
-    expect(screen.queryByText(/Unclassified/)).toBeNull();
-  });
-});
 
 /**
  * A group's subtotal sits directly above its section's total. With one group in

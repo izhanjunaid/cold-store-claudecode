@@ -225,8 +225,7 @@ export class InvoiceService {
         },
       });
       if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
-      // A draft saved by an older version may still carry a negative adjustment line;
-      // a reduction is a discount now (docs/25 R-07).
+      // JE-01 posts revenue lines only; a reduction is a discount (docs/25 R-07).
       if (inv.lineItems.some((l) => Number(l.amountPkr) <= 0)) {
         throw Errors.VALIDATION_ERROR('Remove the negative adjustment and give the reduction as a discount', 'line_items');
       }
@@ -295,8 +294,7 @@ export class InvoiceService {
       if (liveAllocations > 0) {
         throw Errors.INVOICE_NOT_VOIDABLE('Invoice has active payment allocations');
       }
-      // A surcharge invoice stands on this one; void it first. (A legacy JE-21 is a
-      // line of its own on the party's account and does not block — docs/25 R-08.)
+      // A surcharge invoice stands on this one; void it first (docs/25 R-08).
       const surcharges = await tx.invoice.count({
         where: { facilityId, surchargeOfInvoiceId: invoiceId, status: { not: 'VOID' } },
       });

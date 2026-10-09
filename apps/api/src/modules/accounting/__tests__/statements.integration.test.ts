@@ -39,8 +39,8 @@ async function postManual(date: string, lines: Array<{ account_code: string; deb
   createdEntryIds.push(JSON.parse(res.body).data.id);
 }
 
-/** A posted entry the engine would refuse today — as it exists on a box from before the rules. */
-async function insertLegacy(
+/** A posted entry written straight in: a fixture for a document this file does not create. */
+async function insertPosted(
   date: string,
   lines: Array<{ accountCode: string; debit: number; credit: number }>,
   opts: { entryType?: 'ADJUSTMENT' | 'IMPAIRMENT'; sourceTable?: string; sourceId?: string } = {},
@@ -51,13 +51,13 @@ async function insertLegacy(
     data: {
       id,
       facilityId: TEST_FACILITY_ID,
-      entryNumber: `LEG-${id.slice(0, 8)}`,
+      entryNumber: `FIX-${id.slice(0, 8)}`,
       entryDate: d,
       entryType: opts.entryType ?? 'ADJUSTMENT',
       bookType: 'PACCI',
       sourceTable: opts.sourceTable ?? 'manual',
       sourceId: opts.sourceId ?? id,
-      description: 'legacy row (statements.integration)',
+      description: 'fixture (statements.integration)',
       postingStatus: 'POSTED',
       periodMonth: d.getUTCMonth() + 1,
       periodYear: d.getUTCFullYear(),
@@ -97,32 +97,6 @@ afterAll(async () => {
   });
   await prisma.$disconnect();
   await closeTestApp();
-});
-
-describe('a legacy posting to the derived equity accounts stays on the balance sheet (L-02)', () => {
-  it('3030 carried a posting before the engine refused it — the sheet still balances', async () => {
-    // The engine now refuses 3030 from every source, but boxes carry postings
-    // from before (pre-update check C10a). The statements excluded 3030 from
-    // equity entirely, so any such balance left assets without their other side.
-    const before = await get('/v1/accounting/balance-sheet?as_of_date=2037-04-30');
-    expect(before.is_balanced).toBe(true);
-
-    await insertLegacy('2037-04-05', [
-      { accountCode: '1010', debit: 700, credit: 0 },
-      { accountCode: '3030', debit: 0, credit: 700 },
-    ]);
-
-    const bs = await get('/v1/accounting/balance-sheet?as_of_date=2037-04-30');
-    expect(bs.total_assets_pkr - before.total_assets_pkr).toBeCloseTo(700, 2);
-    expect(bs.total_equity_pkr - before.total_equity_pkr).toBeCloseTo(700, 2);
-    expect(bs.is_balanced).toBe(true);
-    // Posted in the fiscal year the sheet is drawn in: it is this year's result.
-    expect(bs.current_year_pl_pkr - before.current_year_pl_pkr).toBeCloseTo(700, 2);
-
-    // A year later it has rolled into retained earnings with the rest of that year.
-    const nextYear = await get('/v1/accounting/balance-sheet?as_of_date=2038-04-30');
-    expect(nextYear.is_balanced).toBe(true);
-  });
 });
 
 describe('one equity roll-forward, with the year-end rollover as a transfer (L-24, L-17)', () => {
@@ -229,7 +203,7 @@ describe('EBITDA adds back depreciation and impairment, and nothing else (L-21)'
       { account_code: '6100', debit_amount: 1000, credit_amount: 0 },
       { account_code: '1010', debit_amount: 0, credit_amount: 1000 },
     ]);
-    await insertLegacy(
+    await insertPosted(
       '2037-02-20',
       [
         { accountCode: '6160', debit: 400, credit: 0 },

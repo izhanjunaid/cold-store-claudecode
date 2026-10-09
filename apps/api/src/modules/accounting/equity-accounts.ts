@@ -43,4 +43,4 @@ export function equityRoles(partners: PartnerAccounts[]): (code: string) => Equi
  * the plug, a manual correction — is presented as another movement, not as
  * capital introduced or drawings.
  */
-export const OWNER_MOVEMENT_SOURCES: JournalSource[] = ['owner_equity_movements', 'owner_equity'];
+export const OWNER_MOVEMENT_SOURCES: JournalSource[] = ['owner_equity_movements'];

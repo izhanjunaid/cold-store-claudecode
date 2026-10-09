@@ -394,62 +394,6 @@ export class PaymentService {
     });
   }
 
-  /**
-   * The correction for advances an older version applied without JE-04 (docs/25
-   * R-02, pre-update check C05): whatever is allocated beyond what the standing
-   * JE-04s already moved out of 2010 is moved now, sourced to the payment so a
-   * later dishonour finds it with the rest of the chain.
-   */
-  async postMissingAdvanceApplication(facilityId: string, id: string, userId: string, dateInput?: string) {
-    return this.prisma.$transaction(async (tx) => {
-      if (!(await lockRow(tx, 'payments', id, facilityId))) throw Errors.PAYMENT_NOT_FOUND();
-      const payment = await tx.payment.findFirstOrThrow({
-        where: { id, facilityId },
-        include: {
-          party: { select: RECEIVABLE_PARTY_SELECT },
-          allocations: { where: { voidedAt: null, invoiceId: { not: null } }, select: { allocatedAmountPkr: true } },
-        },
-      });
-      if (!payment.isAdvance) throw Errors.VALIDATION_ERROR('Only an advance is applied through 2010', 'id');
-      if (payment.clearanceStatus === 'BOUNCED') throw Errors.PAYMENT_ALREADY_DISHONOURED();
-
-      const allocated = payment.allocations.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0);
-      const applied = await tx.journalEntryLine.aggregate({
-        where: {
-          debitAmount: { gt: 0 },
-          journalEntry: {
-            facilityId,
-            sourceTable: 'payments',
-            sourceId: id,
-            entryType: 'ADVANCE_APPLIED',
-            postingStatus: 'POSTED',
-            reversedById: null,
-          },
-        },
-        _sum: { debitAmount: true },
-      });
-      const missing = round2(allocated - Number(applied._sum.debitAmount ?? 0));
-      if (missing <= 0.005) {
-        throw Errors.VALIDATION_ERROR('Every allocation of this advance already has its journal entry', 'id');
-      }
-
-      await this.journalEntry.postInTransaction(
-        tx,
-        facilityId,
-        userId,
-        buildJE04AdvanceApplied({
-          paymentId: id,
-          appliedTo: 'allocations recorded without their entry',
-          appliedDate: new Date(`${dateInput ?? toIsoDate(new Date())}T00:00:00.000Z`),
-          amountPkr: missing,
-          bookType: payment.bookType,
-          party: receivableParty(payment.party),
-        }),
-      );
-      return formatPayment(await this.refreshStatus(tx, id));
-    });
-  }
-
   /** Re-derive and store a payment's status from its allocations and clearance. */
   private async refreshStatus(tx: Prisma.TransactionClient, id: string): Promise<PaymentWithRelations> {
     const p = await tx.payment.findUniqueOrThrow({

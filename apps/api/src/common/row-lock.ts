@@ -14,7 +14,6 @@ export type LockableTable =
   | 'payroll_runs'
   | 'employee_advances'
   | 'fixed_assets'
-  | 'expense_vouchers'
   | 'bills'
   | 'supplier_payments'
   | 'tax_remittances'

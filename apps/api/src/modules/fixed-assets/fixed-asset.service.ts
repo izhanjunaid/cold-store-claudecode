@@ -179,8 +179,8 @@ export class FixedAssetService {
   }
 
   /**
-   * For a box that already double-booked (pre-update check C08): an asset entered
-   * through the register whose cost the opening-balance entry also carries. Reverse
+   * For an asset booked twice: entered through the register while the opening-balance
+   * entry also carries its cost (docs/25 C-30). Reverse
    * its purchase entry and keep the row as an opening asset, adding the depreciation
    * the opening entry carries for it.
    */

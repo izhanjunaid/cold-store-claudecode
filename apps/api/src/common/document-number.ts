@@ -14,7 +14,6 @@ const NUMBERED_COLUMN = {
   credit_notes: 'credit_note_number',
   invoices: 'invoice_number',
   payments: 'receipt_number',
-  expense_vouchers: 'voucher_number',
   payroll_runs: 'run_number',
   fixed_assets: 'asset_number',
   employee_advances: 'advance_number',

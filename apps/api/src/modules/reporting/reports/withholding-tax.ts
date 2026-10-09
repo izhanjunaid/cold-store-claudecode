@@ -60,9 +60,8 @@ export interface WithholdingSectionReport {
  * Tax withheld by the facility, by section — the shape a s.165 statement wants.
  *
  * Balances come from the ledger; the deductions are named from the documents that made
- * them: a supplier payment carries its supplier, rate and certificate (docs/25 C-09), a
- * payroll run is the staff collectively, and a pre-payables expense voucher only ever
- * had a free-text vendor. Remittances come from the statutory remittance documents
+ * them: a supplier payment carries its supplier, rate and certificate (docs/25 C-09), and
+ * a payroll run is the staff collectively. Remittances come from the statutory remittance documents
  * with their challan numbers (C-10).
  *
  * The official book only: nothing filed with the tax authority comes from KATCHI. The
@@ -114,24 +113,17 @@ export async function getWithholdingTax(prisma: PrismaClient, facilityId: string
   const idsFrom = (table: string) => [
     ...new Set(withholdingLines.filter((l) => l.journalEntry.sourceTable === table).map((l) => l.journalEntry.sourceId)),
   ];
-  const [payments, vouchers] = await Promise.all([
-    prisma.supplierPayment.findMany({
-      where: { facilityId, id: { in: idsFrom('supplier_payments') } },
-      select: {
-        id: true,
-        grossAmountPkr: true,
-        withholdingRatePct: true,
-        certificateNumber: true,
-        supplier: { select: { name: true } },
-      },
-    }),
-    prisma.expenseVoucher.findMany({
-      where: { facilityId, id: { in: idsFrom('expense_vouchers') } },
-      select: { id: true, vendorName: true, voucherNumber: true },
-    }),
-  ]);
+  const payments = await prisma.supplierPayment.findMany({
+    where: { facilityId, id: { in: idsFrom('supplier_payments') } },
+    select: {
+      id: true,
+      grossAmountPkr: true,
+      withholdingRatePct: true,
+      certificateNumber: true,
+      supplier: { select: { name: true } },
+    },
+  });
   const paymentById = new Map(payments.map((p) => [p.id, p]));
-  const vendorById = new Map(vouchers.map((v) => [v.id, v.vendorName ?? v.voucherNumber]));
 
   const sections: WithholdingSectionReport[] = SECTIONS.map(({ section, label, accountCode }) => {
     const opening = openingAgg.find((r) => r.accountCode === accountCode);
@@ -161,7 +153,6 @@ export async function getWithholdingTax(prisma: PrismaClient, facilityId: string
             entry_number: postedEntryNumber(l.journalEntry),
             counterparty:
               payment?.supplier.name ??
-              vendorById.get(l.journalEntry.sourceId) ??
               (l.journalEntry.sourceTable === 'payroll_runs' ? 'Employees (payroll)' : '—'),
             description: l.description ?? l.journalEntry.description,
             withheld_pkr: round2(net(l)),

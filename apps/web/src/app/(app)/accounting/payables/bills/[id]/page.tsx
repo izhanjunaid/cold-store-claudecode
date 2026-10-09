@@ -138,11 +138,6 @@ export default function BillDetailPage() {
               {bill.void_reason}
             </div>
           )}
-          {bill.legacy_expense_voucher_id && (
-            <div className="sm:col-span-4 text-xs text-muted-foreground">
-              Converted from an expense voucher: its cost was recognised when the voucher was accrued.
-            </div>
-          )}
         </CardContent>
       </Card>
 

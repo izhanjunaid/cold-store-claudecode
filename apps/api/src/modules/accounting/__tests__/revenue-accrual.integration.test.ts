@@ -17,8 +17,6 @@ import { withGuardsDisabled } from '../../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
 import type { FastifyInstance } from 'fastify';
-import { JournalEntryService } from '../journal-entry.service';
-import { PeriodLockService } from '../period-lock.service';
 
 const prisma = new PrismaClient();
 
@@ -210,36 +208,14 @@ afterAll(async () => {
 
 describe('storage revenue lands in the month it was earned', () => {
   let lotId: string;
-  let legacyId: string;
 
-  it('reverses an accrual an older version left standing before the first new one', async () => {
+  it('a month before the start date closes without an accrual', async () => {
     lotId = (await createLot(dailyPlanId, BAGS, `${YEAR}-01-01`)).id;
-    // What the pre-policy version could leave behind: an accrual nothing ever reversed.
-    const journal = new JournalEntryService(prisma, new PeriodLockService(prisma));
-    const owner = await prisma.user.findFirstOrThrow({ where: { facilityId: TEST_FACILITY_ID, role: 'OWNER' } });
-    const legacy = await journal.post(TEST_FACILITY_ID, owner.id, {
-      entryType: 'ACCRUAL',
-      bookType: 'PACCI',
-      sourceTable: 'revenue_accrual',
-      sourceId: TEST_FACILITY_ID,
-      entryDate: new Date(`${YEAR - 1}-12-31T00:00:00.000Z`),
-      description: 'legacy accrual',
-      lines: [
-        { accountCode: '1250', debitAmount: 5, creditAmount: 0 },
-        { accountCode: REVENUE_ACCOUNT, debitAmount: 0, creditAmount: 5 },
-      ],
-    });
-    legacyId = legacy.id;
-
-    // A month before the start date closes without an accrual.
     expect((await closeMonth(YEAR - 1, 12)).statusCode).toBe(201);
     expect(
       await prisma.journalEntry.count({ where: { facilityId: TEST_FACILITY_ID, sourceTable: 'revenue_accrual', entryType: 'ACCRUAL', periodYear: YEAR - 1 } }),
-    ).toBe(1); // only the legacy one
-
+    ).toBe(0);
     expect((await closeMonth(YEAR, 1)).statusCode).toBe(201);
-    const after = await prisma.journalEntry.findUniqueOrThrow({ where: { id: legacyId } });
-    expect(after.reversedById).not.toBeNull();
   });
 
   it('closing each month accrues its own share, not the whole stay at the end', async () => {
@@ -300,9 +276,7 @@ describe('storage revenue lands in the month it was earned', () => {
     // The accruals redistributed the revenue across the months; they created none.
     let total = 0;
     for (let m = 1; m <= 6; m += 1) total += await revenueIn(YEAR, m);
-    // January also carries the legacy accrual's reversal (−5): that was revenue an
-    // older version booked in the previous year and never took back.
-    expect(total).toBeCloseTo(Number(invoice.sub_total_pkr) - 5, 2);
+    expect(total).toBeCloseTo(Number(invoice.sub_total_pkr), 2);
     expect(await accruedBalanceForLot(lotId)).toBeCloseTo(0, 2);
   });
 });

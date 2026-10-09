@@ -142,7 +142,7 @@ export class JournalEntryService {
 
   /**
    * Reverse an entry a person may reverse from the journal (JOURNAL_SOURCES):
-   * manual entries, opening balances and the legacy document-less transfers. Every
+   * manual entries and opening balances. Every
    * other entry is corrected through the document that posted it.
    */
   async reverse(

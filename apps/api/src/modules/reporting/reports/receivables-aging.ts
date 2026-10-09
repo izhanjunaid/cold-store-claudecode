@@ -105,7 +105,7 @@ export async function getReceivablesAging(
     .sort((a, b) => b.net_due_pkr - a.net_due_pkr);
 
   // The tie-out reads the control accounts themselves, lines with no party included:
-  // a variance is AR the sub-ledger cannot attribute (pre-update check C02).
+  // a variance is AR the sub-ledger cannot attribute.
   const control = filters.party_id
     ? null
     : await accountBalances(prisma, { facilityId, book, to: asOfDate, accounts: [...AR_CONTROL_ACCOUNTS] });

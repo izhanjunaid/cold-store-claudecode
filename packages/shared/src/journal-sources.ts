@@ -12,27 +12,18 @@
 export const JOURNAL_SOURCES = {
   manual: { label: 'Manual journal', userReversible: true },
   opening_balances: { label: 'Opening balances', userReversible: true },
-  // Posted before cash transfers and owner movements became documents (docs/25 C-44):
-  // no document exists to void, so the journal is where they are corrected.
-  cash_transfer: { label: 'Cash transfer (legacy)', userReversible: true },
-  owner_equity: { label: 'Owner capital / drawings (legacy)', userReversible: true },
-  // Reversal mirrors posted before reverseInTransaction inherited the original's source.
-  journal_entries: { label: 'Reversal', userReversible: false },
 
   invoices: { label: 'Invoice', userReversible: false },
-  invoice_surcharge: { label: 'Late-payment surcharge (legacy)', userReversible: false },
   payments: { label: 'Receipt', userReversible: false },
   credit_notes: { label: 'Credit note', userReversible: false },
   party_loans: { label: 'Peshgi loan', userReversible: false },
   party_loan_repayments: { label: 'Peshgi repayment', userReversible: false },
   revenue_accrual: { label: 'Storage revenue accrual', userReversible: false },
   gst_settlement: { label: 'GST settlement', userReversible: false },
-  withholding_remittance: { label: 'Withholding remittance (legacy)', userReversible: false },
   payroll_runs: { label: 'Payroll run', userReversible: false },
   employee_advances: { label: 'Employee advance', userReversible: false },
   employee_advance_recoveries: { label: 'Employee advance repayment', userReversible: false },
   fixed_assets: { label: 'Fixed asset', userReversible: false },
-  expense_vouchers: { label: 'Expense voucher (legacy)', userReversible: false },
   bills: { label: 'Supplier bill', userReversible: false },
   supplier_payments: { label: 'Supplier payment', userReversible: false },
   tax_remittances: { label: 'Tax remittance', userReversible: false },

@@ -559,12 +559,17 @@ Also found: `shared/schemas/facility.ts:55` — `RevenueAccrualRule.start_date` 
 
 ## 8. Pre-update checks
 
+> **Superseded (2026-10-09).** No box is upgraded from before v0.6: the client is wiped and installed fresh on
+> v0.6.1. The script and the corrections that only an old database could need ("post missing advance application",
+> the legacy surcharge, accrual and voucher paths) were deleted in v0.6.1. The table stays as the record of what
+> the consolidation found.
+
 Run on a **restored copy of the client backup** before the box takes this release. Migration 0025
 repaired the ledger and erased the evidence in the same step; these queries exist so that does not
 happen again. Each detected case has a correction posted **through the app**, never a migration
 (CI gate: only `postInTransaction` inserts journal rows).
 
-The queries are in **`scripts/preupdate-checks-consolidation.sql`** (read-only; `psql -d <restored-db> -f …`).
+The queries were in `scripts/preupdate-checks-consolidation.sql` (deleted in v0.6.1).
 All 20 were run against the development database on 2026-09-25: every one executes, and all
 defect checks returned zero rows there (the dev facility has almost no ledger activity — this
 proves the SQL, not the client's books).
@@ -648,6 +653,10 @@ contractions (REVERSED enum value, `cash_flow_section`, `other_deductions_pkr`, 
 | #34 | Payroll reverse refused once a recovered advance was written off (owner decision) | `28f8054` |
 | #35 | Stream C-b: cash/expense accounts by chart flag, cash-transfer documents, payables (bills JE-32, supplier payments JE-33, aging, statement), one period statutory remittance (JE-34; JE-29 and JE-16B deleted), expense vouchers retired (convert to bill JE-35); one cash-account helper; literal allowlist empty | `e7ed2db` |
 | #36 | Browser-pass fixes: a reversal with no date lands on the later of today and the original (payroll accrual dated at period end); issue-advance employee picker (page_size over the API cap, error swallowed since phase 21); party pickers asked with the wrong parameter; disabled bill/payment buttons say why | `d6a7687` |
+| #37 | Release notes: CLAUDE.md gotchas, this section, docs/09 catalogue, PROGRESS/TESTING | `cfb29a0` |
+| #38 | The reversal test's cleanup also removes the mirrors (it left 4 posted reversals per run) | `2cea0a8` (tag v0.6.0) |
+| #39 | Party pickers search the server (`?kind=customer` or `supplier`, by the stamped control account); balance-sheet group subtotal printed only for a multi-group section; `?is_active=false` parsed as true in 8 list schemas | `7b43056` |
+| v0.6.1 cleanup | Everything that existed only for databases from before v0.6: expense vouchers (table, module, JE-35, screens), legacy journal sources and their readers (JE-21 surcharges, document-less transfers, old accrual reversal, missing-advance correction), the unclassified statement bucket (now impossible: chart CHECKs), and migration 0035 — the deferred contraction (REVERSED, `cash_flow_section`, `other_deductions_pkr`, `control_account_code` NOT NULL) | this release |
 
 ### Release decision (owner, 2026-10-04)
 **The client box starts fresh on v0.6.0; it is not upgraded from v0.5.x.** The §8 pre-update checks and the in-app
@@ -655,11 +664,15 @@ corrections named beside them are therefore not run for this release (the SQL st
 existing box). Before the reinstall, take one `backup.bat` of the current database so the old records stay retrievable.
 The expand-only rules (§2 invariant 9) still govern every release from v0.6.0 on.
 
+### Release decision (owner, 2026-10-09)
+No box keeps an old database: the client is wiped and installed fresh. v0.6.0 was tagged but never promoted, so
+**no facility ever ran it** — which made v0.6.1 the one release where the deferred contraction (migration 0035)
+could ship at once, together with deleting every code path that existed only for pre-v0.6 data. It is not a
+precedent: from v0.6.1 on, drops wait a release again. Promotion of v0.6.1 waits for the old database to be
+removed (`down -v`), because `install.ps1` and the nightly task both follow `:stable`.
+
 ### Deliberately not done (decision or follow-up needed)
-- **Party pickers load at most 100 active parties** (`useParties`, every picker in the app): pre-existing, found in the
-  v0.6.0 browser pass. The fix is a server-searching picker (`/v1/parties?search=`); owner to prioritise.
-- **Balance sheet** repeats "Total Current Liabilities" when a single header group sits under the section; the
-  changes-in-equity owner split is computed to the paisa but displayed in whole rupees (can look 1 PKR off).
+- **Changes in equity** owner split is computed to the paisa but displayed in whole rupees (can look 1 PKR off).
 - **R-20** loan balance is still a stored counter; loan write-offs share 6080 with trade bad debts.
 - **R-33 (rest)** GST "outstanding" not yet computed per period. **R-19 (rest)** combined settlement still records
   `DEDUCTED_FROM_PRODUCE`; no combined-settlement screen. **R-13 (rest)** withholding allowed on a fully on-account
@@ -668,8 +681,6 @@ The expand-only rules (§2 invariant 9) still govern every release from v0.6.0 o
   button ignores the facility rule. **R-40** not started.
 - **R-23** credit-note row lock is untested defence: the race test passes with the lock removed (`app.inject`
   serialises the two requests).
-- **Unclassified statement bucket kept.** With a fresh install no legacy unsectioned header exists and the chart
-  rules now require a section on every non-equity header, so the bucket can be removed with the Release 2 contractions.
 - **Payroll reverse after a write-off — decided (owner, 2026-10-04): refused** (#34). Reversing restored the recovered
   amount onto a WRITTEN_OFF advance that nothing could recover or write off again.
 - **Seed** does not flag 3020 and some other registry accounts `is_system_account`; the chart service guards by the

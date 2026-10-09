@@ -624,15 +624,11 @@ export default function InvoiceDetailPage() {
             ) : (
               <div className="space-y-1 text-sm">
                 {surcharges.map((s) => (
-                  <div key={s.invoice_id ?? s.journal_entry_id} className="flex justify-between gap-2">
+                  <div key={s.invoice_id} className="flex justify-between gap-2">
                     <span className="text-muted-foreground">
-                      {s.invoice_id ? (
-                        <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/invoices/${s.invoice_id}`)}>
-                          {s.invoice_number}
-                        </Button>
-                      ) : (
-                        s.status === 'LEGACY' && <span className="font-mono">{s.entry_date}</span>
-                      )}{' '}
+                      <Button variant="link" className="h-auto p-0 font-mono" onClick={() => router.push(`/invoices/${s.invoice_id}`)}>
+                        {s.invoice_number}
+                      </Button>{' '}
                       — {s.description}
                       {s.status === 'VOID' && ' (void)'}
                     </span>

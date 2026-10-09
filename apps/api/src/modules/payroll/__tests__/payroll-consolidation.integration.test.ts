@@ -320,7 +320,6 @@ describe('C-17 / C-24 — other deductions are gone; a negative net is refused w
     const res = await patchLine(run.id, line.id, { other_deductions_pkr: 2500 });
     expect(res.statusCode).toBe(200);
     const row = await prisma.payrollLineItem.findUniqueOrThrow({ where: { id: line.id } });
-    expect(Number(row.otherDeductionsPkr)).toBe(0);
     expect(Number(row.netPayPkr)).toBe(40000 - 375);
   });
 

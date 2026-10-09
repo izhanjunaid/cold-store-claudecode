@@ -26,13 +26,8 @@ async function cleanup() {
       where: { facilityId: TEST_FACILITY_ID, sourceTable: { in: ['opening_balances'] } },
       select: { id: true },
     });
-    const ids = openingEntries.map((e) => e.id);
-    // Their reversals reference them via sourceId.
-    const reversals = await prisma.journalEntry.findMany({
-      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'journal_entries', sourceId: { in: ids } },
-      select: { id: true },
-    });
-    const allIds = [...ids, ...reversals.map((r) => r.id)];
+    // A reversal inherits its original's source, so this finds the reversals too.
+    const allIds = openingEntries.map((e) => e.id);
     await prisma.journalEntryLine.deleteMany({ where: { journalEntryId: { in: allIds } } });
     await prisma.journalEntry.deleteMany({ where: { id: { in: allIds } } });
     if (farmerId) {

@@ -70,7 +70,7 @@ const groups: AcctGroup[] = [
   {
     label: 'Expenses',
     links: [
-      { title: 'Bills & Expenses', href: '/accounting/expenses', icon: ReceiptText, description: 'Supplier bills and payments, what is owed to suppliers, and older expense vouchers.' },
+      { title: 'Bills & Expenses', href: '/accounting/expenses', icon: ReceiptText, description: 'Supplier bills and payments, and what is owed to suppliers.' },
     ],
   },
 ];

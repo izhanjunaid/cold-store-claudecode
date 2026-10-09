@@ -18,7 +18,7 @@ interface PartyRecord {
   notes: string | null;
   createdAt: Date;
   createdBy: string;
-  controlAccountCode: string | null;
+  controlAccountCode: string;
   parentArhti?: { name: string } | null;
 }
 

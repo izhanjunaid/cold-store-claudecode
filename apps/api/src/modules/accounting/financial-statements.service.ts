@@ -46,7 +46,6 @@ interface StatementGroup {
 type EquityLine = StatementLine & EquityAccountRole;
 
 const PL_CLASSES = new Set(['REVENUE', 'COST_OF_SERVICE', 'EXPENSE']);
-const CREDIT_CLASSES = new Set(['LIABILITY', 'EQUITY', 'REVENUE']);
 const CREDIT_SECTIONS = new Set(['REVENUE', 'OTHER_INCOME', 'CURRENT_LIABILITY', 'NON_CURRENT_LIABILITY', 'EQUITY']);
 const RE = SYSTEM_ACCOUNTS.RETAINED_EARNINGS;
 const CYR = SYSTEM_ACCOUNTS.CURRENT_YEAR_RESULT;
@@ -97,14 +96,11 @@ class ClassifiedChart {
    * An account's amount as its section presents it: credit-side sections show
    * credits less debits, debit-side sections the reverse — so a contra account
    * (accumulated depreciation, discounts allowed) is negative within its section.
-   * An unclassified account takes its class's side.
    */
   amount(a: ChartAccount, sums: SumMap): number {
     const s = sums.get(a.accountCode);
     if (!s) return 0;
-    const section = this.section(a.accountCode);
-    const creditSide = section === 'UNCLASSIFIED' ? CREDIT_CLASSES.has(a.accountClass) : CREDIT_SECTIONS.has(section);
-    return round2(creditSide ? s.credit - s.debit : s.debit - s.credit);
+    return round2(CREDIT_SECTIONS.has(this.section(a.accountCode)) ? s.credit - s.debit : s.debit - s.credit);
   }
 
   lines(accounts: ChartAccount[], sums: SumMap): StatementLine[] {
@@ -229,11 +225,8 @@ export class FinancialStatementsService {
    *   + Other income − Other expense = Net profit
    *   EBITDA = Operating profit + depreciation/amortisation + impairment
    *
-   * An account under no sectioned header is shown inside the section its class
-   * belongs to (revenue, cost of service, operating expenses), so every visible
-   * subtotal is the sum of the lines above it; `unclassified_lines` only names
-   * them (F-6b). The owners' equity movements are the statement of changes in
-   * equity's job, not this one's (docs/25 L-24).
+   * The owners' equity movements are the statement of changes in equity's job,
+   * not this one's (docs/25 L-24).
    */
   async getProfitLoss(facilityId: string, query: ProfitLossQueryType & { book_type: Book }) {
     const [chart, sums] = await Promise.all([
@@ -246,22 +239,10 @@ export class FinancialStatementsService {
       }),
     ]);
 
-    const unclassifiedRevenue = chart.lines(chart.details('UNCLASSIFIED', 'REVENUE'), sums);
-    const revenue_groups = [
-      ...chart.groups('REVENUE', sums),
-      ...(unclassifiedRevenue.length > 0
-        ? [{ code: 'UNCLASSIFIED', name: 'Unclassified Revenue', lines: unclassifiedRevenue, subtotal_pkr: sumLines(unclassifiedRevenue) }]
-        : []),
-    ];
+    const revenue_groups = chart.groups('REVENUE', sums);
     const contra_revenue_lines = chart.lines(chart.details('CONTRA_REVENUE'), sums);
-    const cost_of_service_lines = chart.lines(
-      [...chart.details('COST_OF_SERVICE'), ...chart.details('UNCLASSIFIED', 'COST_OF_SERVICE')],
-      sums,
-    );
-    const operating_expense_lines = chart.lines(
-      [...chart.details('OPERATING_EXPENSE'), ...chart.details('UNCLASSIFIED', 'EXPENSE')],
-      sums,
-    );
+    const cost_of_service_lines = chart.lines(chart.details('COST_OF_SERVICE'), sums);
+    const operating_expense_lines = chart.lines(chart.details('OPERATING_EXPENSE'), sums);
     const other_income_lines = chart.lines(chart.details('OTHER_INCOME'), sums);
     const other_expense_lines = chart.lines(chart.details('OTHER_EXPENSE'), sums);
 
@@ -278,8 +259,7 @@ export class FinancialStatementsService {
 
     // EBITDA adds back the depreciation and amortisation accounts by role, and
     // impairment on a row of its own. It used to add back every account any
-    // fixed asset named as its expense account — and legacy OTHER-category
-    // assets named 6100 Miscellaneous (docs/25 L-21).
+    // fixed asset named as its expense account (docs/25 L-21).
     const expenseOn = (codes: readonly string[]) =>
       sumMoney(codes.map((code) => {
         const s = sums.get(code);
@@ -293,12 +273,6 @@ export class FinancialStatementsService {
     // returning 0 would read as "break-even" when the period has no revenue
     // base. null renders as "—" (phase/19 audit item 14).
     const pct = (n: number): number | null => (net_revenue_pkr > 0 ? round2((n / net_revenue_pkr) * 100) : null);
-
-    // Signed as each account's contribution to the result: an expense is negative.
-    const unclassified_lines = chart.accounts
-      .filter((a) => a.accountType === 'DETAIL' && PL_CLASSES.has(a.accountClass) && chart.section(a.accountCode) === 'UNCLASSIFIED')
-      .map((a) => ({ account_code: a.accountCode, account_name: a.accountName, amount_pkr: creditBalance(sums, a.accountCode) }))
-      .filter((l) => l.amount_pkr !== 0);
 
     return {
       date_from: query.date_from,
@@ -333,9 +307,6 @@ export class FinancialStatementsService {
 
       net_profit_pkr,
       net_profit_pct: pct(net_profit_pkr),
-
-      unclassified_lines,
-      has_unclassified: unclassified_lines.length > 0,
     };
   }
 
@@ -369,17 +340,8 @@ export class FinancialStatementsService {
     const total_current_liabilities_pkr = sumGroups(current_liability_groups);
     const total_non_current_liabilities_pkr = sumGroups(non_current_liability_groups);
 
-    // Balances under no sectioned header (F-6b): outside the current/non-current
-    // split, inside the totals, so the sheet stays complete and balanced.
-    const unclassified_asset_lines = chart.lines(chart.details('UNCLASSIFIED', 'ASSET'), sums);
-    const unclassified_liability_lines = chart.lines(chart.details('UNCLASSIFIED', 'LIABILITY'), sums);
-
-    const total_assets_pkr = round2(
-      total_current_assets_pkr + total_non_current_assets_pkr + sumLines(unclassified_asset_lines),
-    );
-    const total_liabilities_pkr = round2(
-      total_current_liabilities_pkr + total_non_current_liabilities_pkr + sumLines(unclassified_liability_lines),
-    );
+    const total_assets_pkr = round2(total_current_assets_pkr + total_non_current_assets_pkr);
+    const total_liabilities_pkr = round2(total_current_liabilities_pkr + total_non_current_liabilities_pkr);
 
     const equity = equityPosition(chart, roleOf, sums, fySums);
     const total_liabilities_and_equity_pkr = round2(total_liabilities_pkr + equity.total_equity_pkr);
@@ -410,10 +372,6 @@ export class FinancialStatementsService {
       ...equity,
       fiscal_year_start: toIsoDate(fyStart),
       total_liabilities_and_equity_pkr,
-
-      unclassified_asset_lines,
-      unclassified_liability_lines,
-      has_unclassified: unclassified_asset_lines.length > 0 || unclassified_liability_lines.length > 0,
 
       is_balanced: moneyEquals(total_assets_pkr, total_liabilities_and_equity_pkr),
     };

@@ -34,7 +34,7 @@ const isAnchored = (a: Row) => a.isSystemAccount || REGISTRY_CODES.has(a.account
 function validateNewAccount(body: CreateAccountRequestType): void {
   const cls = body.account_class as AccountClassName;
   // Every class's codes start with its digit. The unassigned 0/7/8/9 ranges were
-  // a route into the statements' "unclassified" bucket (docs/25 L-31).
+  // a route onto no statement at all (docs/25 L-31).
   if (!body.account_code.startsWith(CLASS_CODE_PREFIX[cls])) {
     throw Errors.VALIDATION_ERROR(
       `${body.account_class} account codes start with ${CLASS_CODE_PREFIX[cls]}; ${body.account_code} does not`,
@@ -52,8 +52,8 @@ function validateNewAccount(body: CreateAccountRequestType): void {
   if (body.account_type === 'HEADER' && body.parent_account_code) {
     throw Errors.INVALID_PARENT_ACCOUNT('Header accounts cannot have a parent — headers are always root-level');
   }
-  // A non-equity header with no section would send every child to
-  // "unclassified" (docs/25 L-38).
+  // A non-equity header with no section would leave every child on no
+  // statement (docs/25 L-38; the chart's CHECK refuses it too).
   if (body.account_type === 'HEADER' && body.account_class !== 'EQUITY' && !body.statement_section) {
     throw Errors.VALIDATION_ERROR(
       'A header account must declare the statement section its children roll up into',
@@ -356,7 +356,7 @@ export class CoaService {
         validateStatementSection(a.accountType, a.accountClass, body.statement_section);
         if (body.statement_section === null && a.accountType === 'HEADER' && a.accountClass !== 'EQUITY') {
           throw Errors.VALIDATION_ERROR(
-            'A header must keep a statement section — without one every account under it would be unclassified',
+            'A header must keep a statement section — without one no account under it would appear on the statements',
             'statement_section',
           );
         }

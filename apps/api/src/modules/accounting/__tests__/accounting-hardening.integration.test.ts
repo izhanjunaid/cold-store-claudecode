@@ -1170,230 +1170,6 @@ describe('account creation validates the parent (F-6a)', () => {
 });
 
 // ============================================================
-// F-6b — statements surface unclassified accounts
-// ============================================================
-
-describe('statements surface activity in unclassified accounts (F-6b)', () => {
-  it('P&L includes custom-header expense activity instead of silently dropping it', async () => {
-    // Legacy state, written directly. Since Phase A a header must declare its
-    // statement_section, so an unsectioned one can only exist as history — a row
-    // created before the rule. That is exactly the state this test needs, and
-    // the API can no longer produce it (nor should it). What is under test is
-    // the statements' safety net for such rows, not the create endpoint.
-    await prisma.chartOfAccounts.create({
-      data: {
-        facilityId: TEST_FACILITY_ID,
-        accountCode: '6700',
-        accountName: 'Financing Costs (custom)',
-        accountClass: 'EXPENSE',
-        accountType: 'HEADER',
-        normalBalance: 'DEBIT',
-        statementSection: null,
-      },
-    });
-    const detail = await app.inject({
-      method: 'POST',
-      url: '/v1/accounting/accounts',
-      headers: authHeaders(ownerToken),
-      payload: {
-        account_code: '6710',
-        account_name: 'Interest Expense (custom)',
-        account_class: 'EXPENSE',
-        account_type: 'DETAIL',
-        parent_account_code: '6700',
-        normal_balance: 'DEBIT',
-      },
-    });
-    expect(detail.statusCode).toBe(201);
-
-    const je = await app.inject({
-      method: 'POST',
-      url: '/v1/accounting/journal-entries',
-      headers: authHeaders(managerToken),
-      payload: {
-        entry_date: '2026-02-10',
-        description: 'unclassified expense test',
-        posting_status: 'POSTED',
-        lines: [
-          { account_code: '6710', debit_amount: 500, credit_amount: 0 },
-          { account_code: '1010', debit_amount: 0, credit_amount: 500 },
-        ],
-      },
-    });
-    expect(je.statusCode).toBe(201);
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/v1/accounting/profit-loss?date_from=2026-02-01&date_to=2026-02-28',
-      headers: authHeaders(accountantToken),
-    });
-    expect(res.statusCode).toBe(200);
-    const pl = JSON.parse(res.body).data;
-
-    expect(pl.has_unclassified).toBe(true);
-    const stray = (pl.unclassified_lines as { account_code: string; amount_pkr: number }[]).find(
-      (l) => l.account_code === '6710',
-    );
-    expect(stray).toBeTruthy();
-    // Signed as contribution to net profit: an expense reduces it.
-    expect(stray!.amount_pkr).toBe(-500);
-    expect(pl.net_profit_pkr).toBe(-500);
-
-    // phase/24: the unclassified expense must fold into operating_profit_pkr
-    // and ebitda_pkr too, not just net_profit_pkr. Pre-fix, this window had no
-    // header-placed activity, so operating_profit_pkr and ebitda_pkr would
-    // both have been 0 — correct-looking net_profit_pkr, wrong everything
-    // above it, and no test caught it because none asserted these two fields
-    // in the presence of unclassified activity.
-    expect(pl.operating_profit_pkr).toBe(-500);
-    expect(pl.ebitda_pkr).toBe(-500);
-    expect(pl.total_operating_expense_pkr).toBe(500);
-    // The chain of identities must hold exactly, not just net_profit_pkr in isolation.
-    expect(pl.net_profit_pkr).toBeCloseTo(pl.operating_profit_pkr + pl.total_other_income_pkr);
-  });
-
-  it('Balance sheet includes custom-header asset balances and still balances', async () => {
-    // Legacy state, written directly. Since Phase A a header must declare its
-    // statement_section, so an unsectioned one can only exist as history — a row
-    // created before the rule. That is exactly the state this test needs, and
-    // the API can no longer produce it (nor should it). What is under test is
-    // the statements' safety net for such rows, not the create endpoint.
-    await prisma.chartOfAccounts.create({
-      data: {
-        facilityId: TEST_FACILITY_ID,
-        accountCode: '1900',
-        accountName: 'Custom Asset Header',
-        accountClass: 'ASSET',
-        accountType: 'HEADER',
-        normalBalance: 'DEBIT',
-        statementSection: null,
-      },
-    });
-    const detail = await app.inject({
-      method: 'POST',
-      url: '/v1/accounting/accounts',
-      headers: authHeaders(ownerToken),
-      payload: {
-        account_code: '1910',
-        account_name: 'Custom Asset (stray)',
-        account_class: 'ASSET',
-        account_type: 'DETAIL',
-        parent_account_code: '1900',
-        normal_balance: 'DEBIT',
-      },
-    });
-    expect(detail.statusCode).toBe(201);
-
-    const je = await app.inject({
-      method: 'POST',
-      url: '/v1/accounting/journal-entries',
-      headers: authHeaders(managerToken),
-      payload: {
-        entry_date: '2026-02-11',
-        description: 'unclassified asset test',
-        posting_status: 'POSTED',
-        lines: [
-          { account_code: '1910', debit_amount: 300, credit_amount: 0 },
-          { account_code: '1010', debit_amount: 0, credit_amount: 300 },
-        ],
-      },
-    });
-    expect(je.statusCode).toBe(201);
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/v1/accounting/balance-sheet?as_of_date=2026-02-28',
-      headers: authHeaders(accountantToken),
-    });
-    expect(res.statusCode).toBe(200);
-    const bs = JSON.parse(res.body).data;
-
-    expect(bs.has_unclassified).toBe(true);
-    const stray = (bs.unclassified_asset_lines as { account_code: string; amount_pkr: number }[]).find(
-      (l) => l.account_code === '1910',
-    );
-    expect(stray).toBeTruthy();
-    expect(stray!.amount_pkr).toBe(300);
-    expect(bs.is_balanced).toBe(true);
-  });
-
-  // phase/24: the two expense-side tests above never exercised the REVENUE
-  // branch of the fold — a separate code path (credit-normal, added straight
-  // to total_operating_revenue_pkr rather than subtracted as a magnitude).
-  it('P&L includes custom-header revenue activity, folded into net_revenue and every subtotal above it', async () => {
-    // Legacy state, written directly. Since Phase A a header must declare its
-    // statement_section, so an unsectioned one can only exist as history — a row
-    // created before the rule. That is exactly the state this test needs, and
-    // the API can no longer produce it (nor should it). What is under test is
-    // the statements' safety net for such rows, not the create endpoint.
-    await prisma.chartOfAccounts.create({
-      data: {
-        facilityId: TEST_FACILITY_ID,
-        accountCode: '4700',
-        accountName: 'Ancillary Revenue (custom)',
-        accountClass: 'REVENUE',
-        accountType: 'HEADER',
-        normalBalance: 'CREDIT',
-        statementSection: null,
-      },
-    });
-    const detail = await app.inject({
-      method: 'POST',
-      url: '/v1/accounting/accounts',
-      headers: authHeaders(ownerToken),
-      payload: {
-        account_code: '4710',
-        account_name: 'Weighbridge Fee Income (custom)',
-        account_class: 'REVENUE',
-        account_type: 'DETAIL',
-        parent_account_code: '4700',
-        normal_balance: 'CREDIT',
-      },
-    });
-    expect(detail.statusCode).toBe(201);
-
-    const je = await app.inject({
-      method: 'POST',
-      url: '/v1/accounting/journal-entries',
-      headers: authHeaders(managerToken),
-      payload: {
-        entry_date: '2026-02-12',
-        description: 'unclassified revenue test',
-        posting_status: 'POSTED',
-        lines: [
-          { account_code: '1010', debit_amount: 800, credit_amount: 0 },
-          { account_code: '4710', debit_amount: 0, credit_amount: 800 },
-        ],
-      },
-    });
-    expect(je.statusCode).toBe(201);
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/v1/accounting/profit-loss?date_from=2026-02-12&date_to=2026-02-12',
-      headers: authHeaders(accountantToken),
-    });
-    expect(res.statusCode).toBe(200);
-    const pl = JSON.parse(res.body).data;
-
-    expect(pl.has_unclassified).toBe(true);
-    const stray = (pl.unclassified_lines as { account_code: string; amount_pkr: number }[]).find(
-      (l) => l.account_code === '4710',
-    );
-    expect(stray).toBeTruthy();
-    expect(stray!.amount_pkr).toBe(800); // credit-normal revenue: positive contribution
-
-    // Every subtotal from net_revenue upward must include it — not just net_profit.
-    expect(pl.total_operating_revenue_pkr).toBe(800);
-    expect(pl.net_revenue_pkr).toBe(800);
-    expect(pl.gross_profit_pkr).toBe(800);
-    expect(pl.operating_profit_pkr).toBe(800);
-    expect(pl.ebitda_pkr).toBe(800);
-    expect(pl.net_profit_pkr).toBe(800);
-  });
-});
-
-// ============================================================
 // statement_section — data-driven statement grouping (phase/24)
 // ============================================================
 
@@ -1467,7 +1243,7 @@ describe('statement_section validation', () => {
   });
 });
 
-describe('a custom header with a section lands in the right statement section, not unclassified', () => {
+describe('a custom header with a section lands in the right statement section', () => {
   it('balance sheet places a custom CURRENT_ASSET header and its child in current_asset_groups', async () => {
     const header = await app.inject({
       method: 'POST',
@@ -1528,17 +1304,13 @@ describe('a custom header with a section lands in the right statement section, n
     expect(res.statusCode).toBe(200);
     const bs = JSON.parse(res.body).data;
 
-    // Placed in the real section — NOT in unclassified, unlike an account
-    // under a header with no section (the F-6b tests above).
+    // Placed in the real section.
     const group = (bs.current_asset_groups as { code: string; lines: { account_code: string; amount_pkr: number }[] }[])
       .find((g) => g.code === '1907');
     expect(group).toBeTruthy();
     const line = group!.lines.find((l) => l.account_code === '1908');
     expect(line).toBeTruthy();
     expect(line!.amount_pkr).toBe(900);
-    expect(
-      (bs.unclassified_asset_lines as { account_code: string }[]).some((l) => l.account_code === '1908'),
-    ).toBe(false);
 
     expect(bs.total_current_assets_pkr).toBeGreaterThanOrEqual(900);
     expect(bs.is_balanced).toBe(true);
@@ -1634,10 +1406,6 @@ describe('other_expense_lines (phase/25) — non-operating losses stay below ope
     expect(
       (pl.operating_expense_lines as { account_code: string }[]).some((l) => l.account_code === NON_OPERATING_LOSS),
     ).toBe(false);
-    // Nor in unclassified — 6900 carries a real section.
-    expect(
-      (pl.unclassified_lines as { account_code: string }[]).some((l) => l.account_code === NON_OPERATING_LOSS),
-    ).toBe(false);
 
     // The identity must hold exactly, symmetric with other_income's + above.
     expect(pl.net_profit_pkr).toBeCloseTo(
@@ -1690,11 +1458,6 @@ describe('account codes must not collide with another class range (phase/19)', (
 
 describe('deactivation requires a zero ledger balance (phase/19)', () => {
   it('blocks deactivating an account holding a balance; allows it once zeroed', async () => {
-    // Legacy state, written directly. Since Phase A a header must declare its
-    // statement_section, so an unsectioned one can only exist as history — a row
-    // created before the rule. That is exactly the state this test needs, and
-    // the API can no longer produce it (nor should it). What is under test is
-    // the statements' safety net for such rows, not the create endpoint.
     await prisma.chartOfAccounts.create({
       data: {
         facilityId: TEST_FACILITY_ID,
@@ -1703,7 +1466,7 @@ describe('deactivation requires a zero ledger balance (phase/19)', () => {
         accountClass: 'EXPENSE',
         accountType: 'HEADER',
         normalBalance: 'DEBIT',
-        statementSection: null,
+        statementSection: 'OPERATING_EXPENSE',
       },
     });
     const detail = await app.inject({
@@ -1860,17 +1623,12 @@ describe('every JE sourceId resolves to a live row in its sourceTable (invariant
   // Document-backed sourceTable values are the real table name, matching
   // Prisma's own @@map for each model — checked against schema.prisma, not
   // assumed. Two values have no backing document at all, by design, so
-  // sourceId means something else there: 'manual' (accounting.controller.ts's
-  // manual-JE handler, and now JE-17C petty-cash-replenish — P2-2) stamps the
-  // acting user's id; 'opening_balances' (opening-balance.service.ts) stamps
-  // the facility's own id. Both predate this test.
+  // sourceId means something else there: a 'manual' entry is its own source
+  // (docs/25 L-10); 'opening_balances' (opening-balance.service.ts) stamps the
+  // facility's own id.
   const resolvableTables: Record<string, (id: string) => Promise<boolean>> = {
-    // A manual entry is its own source document (docs/25 L-10); entries posted
-    // before that carry the acting user's id instead.
-    manual: async (id) =>
-      (await prisma.journalEntry.count({ where: { id } })) > 0 || (await prisma.user.count({ where: { id } })) > 0,
+    manual: async (id) => (await prisma.journalEntry.count({ where: { id } })) > 0,
     opening_balances: async (id) => (await prisma.facility.count({ where: { id } })) > 0,
-    expense_vouchers: async (id) => (await prisma.expenseVoucher.count({ where: { id } })) > 0,
     party_loans: async (id) => (await prisma.partyLoan.count({ where: { id } })) > 0,
     party_loan_repayments: async (id) => (await prisma.partyLoanRepayment.count({ where: { id } })) > 0,
     employee_advances: async (id) => (await prisma.employeeAdvance.count({ where: { id } })) > 0,
@@ -1879,7 +1637,6 @@ describe('every JE sourceId resolves to a live row in its sourceTable (invariant
     fixed_assets: async (id) => (await prisma.fixedAsset.count({ where: { id } })) > 0,
     payroll_runs: async (id) => (await prisma.payrollRun.count({ where: { id } })) > 0,
     payments: async (id) => (await prisma.payment.count({ where: { id } })) > 0,
-    journal_entries: async (id) => (await prisma.journalEntry.count({ where: { id } })) > 0,
     credit_notes: async (id) => (await prisma.creditNote.count({ where: { id } })) > 0,
     bills: async (id) => (await prisma.bill.count({ where: { id } })) > 0,
     supplier_payments: async (id) => (await prisma.supplierPayment.count({ where: { id } })) > 0,
@@ -1887,26 +1644,18 @@ describe('every JE sourceId resolves to a live row in its sourceTable (invariant
     cash_transfers: async (id) => (await prisma.cashTransfer.count({ where: { id } })) > 0,
   };
 
-  // P3-3 (docs/20_audit_backlog.md): je-21-late-payment-surcharge.ts and its
-  // callers stamp sourceTable 'invoice_surcharge', but no invoice_surcharges
-  // table exists in schema.prisma on this branch — confirmed absent, not
-  // assumed. There is nothing to resolve against. Named here as a known gap
-  // rather than silently excluded or left to throw on a missing table/model.
-  const knownGapTables = new Set(['invoice_surcharge']);
-
   // Self-verifying (the point of this test over just checking today's known
   // values): a sourceTable this facility's journal_entries actually carries
   // but that isn't in either bucket above fails loudly, so a template added
   // in a future phase can't silently go unchecked the way JE-17C did.
-  it('every sourceTable value present is either resolvable or a documented gap', async () => {
+  it('every sourceTable value present is resolvable', async () => {
     const distinct = await prisma.journalEntry.findMany({
       where: { facilityId: TEST_FACILITY_ID },
       select: { sourceTable: true },
       distinct: ['sourceTable'],
     });
     for (const { sourceTable } of distinct) {
-      const known = sourceTable in resolvableTables || knownGapTables.has(sourceTable);
-      expect(known, `unmapped sourceTable "${sourceTable}" — add it to the invariant-17 resolver map`).toBe(true);
+      expect(sourceTable in resolvableTables, `unmapped sourceTable "${sourceTable}" — add it to the invariant-17 resolver map`).toBe(true);
     }
   });
 

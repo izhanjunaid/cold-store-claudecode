@@ -188,7 +188,7 @@ describe('ChartOfAccountsPage — owner management', () => {
 
     fireEvent.click(create);
     // Nothing is sent: the form refuses before the request, so the account
-    // cannot be created into the unclassified bucket in the first place.
+    // cannot be created off every statement in the first place.
     expect(apiClient).not.toHaveBeenCalled();
   });
 
@@ -272,7 +272,7 @@ describe('ChartOfAccountsPage — owner management', () => {
   });
 
   // The unassigned 7/8/9/0 ranges used to be allowed here — and in the API — as a
-  // route for custom heads; they landed in "unclassified" (docs/25 L-31).
+  // route for custom heads; they landed on no statement (docs/25 L-31).
   it('refuses an unassigned range too — a class prefix is required', async () => {
     render(<ChartOfAccountsPage />);
     await waitFor(() => expect(screen.getByText(/Misc Expense/)).toBeTruthy());

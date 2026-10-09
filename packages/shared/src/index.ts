@@ -14,7 +14,6 @@ export * from './schemas/payment';
 export * from './schemas/accounting';
 export * from './schemas/fixed-assets';
 export * from './schemas/payroll';
-export * from './schemas/expenses';
 export * from './schemas/payables';
 export * from './schemas/peshgi';
 export * from './schemas/employee-advances';

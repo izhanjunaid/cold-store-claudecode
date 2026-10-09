@@ -21,9 +21,9 @@ const ENTRY = {
   entry_date: '2026-03-01',
   entry_type: 'ADJUSTMENT',
   book_type: 'PACCI',
-  source_table: 'owner_equity',
+  source_table: 'opening_balances',
   source_id: 'x',
-  description: 'Owner drawing (legacy)',
+  description: 'Opening balances',
   posting_status: 'POSTED',
   reversed_by_id: null,
   reversed_by_entry_number: null,
@@ -38,9 +38,8 @@ const ENTRY = {
 
 /**
  * Whether an entry may be reversed from the journal is the API's call
- * (JOURNAL_SOURCES). The page kept its own whitelist — manual and opening
- * balances only — so legacy owner-equity and cash-transfer entries, which the
- * API reverses, had no button (docs/25 L-09, L-11).
+ * (JOURNAL_SOURCES). The page used to keep its own whitelist, which had already
+ * drifted from the API's (docs/25 L-09, L-11).
  */
 describe('JournalEntryDetailPage — reverse and status follow the API', () => {
   beforeEach(() => apiClient.mockReset());

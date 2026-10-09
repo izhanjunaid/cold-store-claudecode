@@ -27,7 +27,6 @@ import { receivablesAccountingRoutes } from '../modules/accounting/receivables.r
 import { treasuryRoutes } from '../modules/accounting/treasury.routes';
 import { fixedAssetRoutes } from '../modules/fixed-assets/fixed-asset.controller';
 import { payrollRoutes } from '../modules/payroll/payroll.controller';
-import { expenseRoutes } from '../modules/expenses/expense.controller';
 import { peshgiRoutes } from '../modules/peshgi/peshgi.controller';
 import { employeeAdvanceRoutes } from '../modules/employee-advances/employee-advance.controller';
 import { gatePassRoutes } from '../modules/gate-pass/gate-pass.controller';
@@ -92,7 +91,6 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(treasuryRoutes);
   await testApp.register(fixedAssetRoutes);
   await testApp.register(payrollRoutes);
-  await testApp.register(expenseRoutes);
   await testApp.register(peshgiRoutes);
   await testApp.register(employeeAdvanceRoutes);
   await testApp.register(gatePassRoutes);
