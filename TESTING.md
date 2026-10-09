@@ -331,7 +331,7 @@ turbo test:coverage
 > clear), and a test that the chart refuses a header without a section and a detail without a header on a direct
 > insert (migration 0035). Removed with the code they tested: the voucher suite, the F-6b unclassified tests, the
 > legacy accrual/3030/other-deductions/missing-advance cases. Integration runs now point at a scratch database with
-> a shell `DATABASE_URL` (the config lets the shell win over `.env`), never the dev one. Suite: RESULTS_PENDING.
+> a shell `DATABASE_URL` (the config lets the shell win over `.env`), never the dev one. Suite (CI): **219 unit + 804 integration across 70 files (api, 4 skipped as before) + 216 unit (web)**; the drop from 816/220 is the deleted old-data tests. `verify-migration-repair.sh` plants its sync collision as a sectioned header now, since the chart refuses a detail with no header.
 
 > **v0.6.0 browser pass (2026-10-08, Haiku agent, PR #36).** Driving the merged build found four defects the suites
 > could not reach:
