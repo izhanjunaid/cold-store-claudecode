@@ -333,6 +333,11 @@ turbo test:coverage
 > legacy accrual/3030/other-deductions/missing-advance cases. Integration runs now point at a scratch database with
 > a shell `DATABASE_URL` (the config lets the shell win over `.env`), never the dev one. Suite (CI): **219 unit + 804 integration across 70 files (api, 4 skipped as before) + 216 unit (web)**; the drop from 816/220 is the deleted old-data tests. `verify-migration-repair.sh` plants its sync collision as a sectioned header now, since the chart refuses a detail with no header.
 
+> **Re-check after v0.6.1 (2026-10-10).** Two pages asked list endpoints for parameters they do not take — a
+> dropped `owner_party_id` (a party's Active Lots tab listed every party's lots) and a refused `per_page=200`
+> (the room map looked empty). Red first: `parties/[id]/page.test.tsx` and `apiClientAll` in `api-client.test.ts`.
+> Every other page's list filters were checked against their schemas.
+
 > **v0.6.0 browser pass (2026-10-08, Haiku agent, PR #36).** Driving the merged build found four defects the suites
 > could not reach:
 > - A month-end payroll accrual could not be reversed mid-month, because the reversal defaulted to today.

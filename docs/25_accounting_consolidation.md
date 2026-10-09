@@ -636,7 +636,7 @@ See the approved plan: Kernel PR (all schema, registry, engine, ledger read path
 utilities) → four parallel streams (R revenue & receivables, C-a existing cost paths, C-b payables &
 treasury, E equity/statements/chart) → integrate, remediate, release v0.6.0 → Release 2
 contractions (REVERSED enum value, `cash_flow_section`, `other_deductions_pkr`, `is_accrual`,
-`control_account_code` NOT NULL).
+`control_account_code` NOT NULL) — **done in migration 0035 (v0.6.1)**, shipped at once because no facility ran v0.6.0.
 
 ## 10. Status (updated as each PR merges)
 
@@ -656,7 +656,8 @@ contractions (REVERSED enum value, `cash_flow_section`, `other_deductions_pkr`, 
 | #37 | Release notes: CLAUDE.md gotchas, this section, docs/09 catalogue, PROGRESS/TESTING | `cfb29a0` |
 | #38 | The reversal test's cleanup also removes the mirrors (it left 4 posted reversals per run) | `2cea0a8` (tag v0.6.0) |
 | #39 | Party pickers search the server (`?kind=customer` or `supplier`, by the stamped control account); balance-sheet group subtotal printed only for a multi-group section; `?is_active=false` parsed as true in 8 list schemas | `7b43056` |
-| v0.6.1 cleanup | Everything that existed only for databases from before v0.6: expense vouchers (table, module, JE-35, screens), legacy journal sources and their readers (JE-21 surcharges, document-less transfers, old accrual reversal, missing-advance correction), the unclassified statement bucket (now impossible: chart CHECKs), and migration 0035 — the deferred contraction (REVERSED, `cash_flow_section`, `other_deductions_pkr`, `control_account_code` NOT NULL) | this release |
+| #40 | Everything that existed only for databases from before v0.6: expense vouchers (table, module, JE-35, screens), legacy journal sources and their readers (JE-21 surcharges, document-less transfers, old accrual reversal, missing-advance correction), the unclassified statement bucket (now impossible: chart CHECKs), and migration 0035 — the deferred contraction (REVERSED, `cash_flow_section`, `other_deductions_pkr`, `control_account_code` NOT NULL) | `fa0a8bb` (tag v0.6.1, promoted 2026-10-09) |
+| next | Re-check after release: a party's Active Lots tab asked `/v1/lots` for `owner_party_id` (dropped — it listed every party's lots); the room map asked `per_page=200` (refused — the room looked empty); party tabs now say "Showing N of M" and link to the full list | pending |
 
 ### Release decision (owner, 2026-10-04)
 **The client box starts fresh on v0.6.0; it is not upgraded from v0.5.x.** The §8 pre-update checks and the in-app

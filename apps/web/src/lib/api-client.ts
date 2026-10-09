@@ -128,3 +128,17 @@ export async function apiClientList<T>(path: string, options: ApiOptions = {}): 
   const data = await apiFetch(path, options);
   return { data: data.data as T[], meta: data.meta };
 }
+
+/**
+ * Every row of a paginated list, a page at a time. `path` names its own page size
+ * (per_page or page_size, as the endpoint takes it) — a page over the API's cap of
+ * 100 is refused outright, not trimmed.
+ */
+export async function apiClientAll<T>(path: string): Promise<T[]> {
+  const rows: T[] = [];
+  for (let page = 1; ; page += 1) {
+    const res = await apiClientList<T>(`${path}${path.includes('?') ? '&' : '?'}page=${page}`);
+    rows.push(...res.data);
+    if (res.data.length === 0 || rows.length >= (res.meta?.total ?? rows.length)) return rows;
+  }
+}
