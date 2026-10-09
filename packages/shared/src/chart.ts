@@ -30,6 +30,14 @@ export const CLASS_SECTIONS: Record<AccountClassName, readonly string[]> = {
   EXPENSE: ['OPERATING_EXPENSE', 'OTHER_EXPENSE'],
 };
 
+/**
+ * The classes a cost may be booked to. The rest of the rule lives on the chart row: the
+ * account must be an active DETAIL that a person may post to (`allow_manual_posting`),
+ * which is what keeps payroll, depreciation, bad-debt and disposal accounts — each moved
+ * by its own flow — out of every expense picker and every bill (docs/25 C-05).
+ */
+export const EXPENSE_ACCOUNT_CLASSES: readonly string[] = ['EXPENSE', 'COST_OF_SERVICE'];
+
 export const CLASS_LABEL: Record<AccountClassName, string> = {
   ASSET: 'Assets',
   LIABILITY: 'Liabilities',

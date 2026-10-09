@@ -33,15 +33,11 @@ export const STATUTORY_LIABILITY_ACCOUNTS: readonly string[] = [
 
 /**
  * Lines that pay a liability over, rather than create or correct it: this document's
- * entries and their reversals, the retired JE-29 (`withholding_remittance`) and the
- * retired per-run JE-16B (GOVT_REMITTANCE).
+ * entries and their reversals (a reversal inherits its original's source).
  */
-const REMITTANCE_SOURCES = ['tax_remittances', 'withholding_remittance'];
-export const REMITTANCE_ENTRIES: Prisma.JournalEntryWhereInput = {
-  OR: [{ sourceTable: { in: REMITTANCE_SOURCES } }, { entryType: 'GOVT_REMITTANCE' }],
-};
-export const isRemittanceEntry = (e: { sourceTable: string; entryType: string }) =>
-  REMITTANCE_SOURCES.includes(e.sourceTable) || e.entryType === 'GOVT_REMITTANCE';
+const REMITTANCE_SOURCE = 'tax_remittances';
+export const REMITTANCE_ENTRIES: Prisma.JournalEntryWhereInput = { sourceTable: REMITTANCE_SOURCE };
+export const isRemittanceEntry = (e: { sourceTable: string }) => e.sourceTable === REMITTANCE_SOURCE;
 
 const NOT_FOUND = () => new AppError('TAX_REMITTANCE_NOT_FOUND', 'Remittance does not exist', 404);
 const ALREADY_VOIDED = () => new AppError('TAX_REMITTANCE_ALREADY_VOIDED', 'This remittance has already been voided', 409);

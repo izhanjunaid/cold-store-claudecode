@@ -193,16 +193,6 @@ enum StatementSection {
   OTHER_EXPENSE
 }
 
-// Where an account's cash movements land on the statement of cash flows.
-// Null is the normal state: the section is derived from statement_section +
-// account_class, and this column exists only to override the few accounts
-// where that derivation is wrong (1140 peshgi, 2120 owner loan).
-enum CashFlowSection {
-  OPERATING
-  INVESTING
-  FINANCING
-}
-
 enum EntryType {
   INVOICE
   PAYMENT
@@ -239,13 +229,10 @@ enum EntryType {
   EMPLOYEE_ADVANCE_REPAYMENT
 }
 
-// REVERSED is retired: a reversed entry stays POSTED and records reversed_by
-// (migration 0025). CHECK journal_entries_no_reversed_status (0030) forbids it;
-// the value itself is dropped in Release 2 (expand-only releases).
+// A reversed entry stays POSTED and records reversed_by (migration 0025).
 enum PostingStatus {
   AUTO_DRAFT
   POSTED
-  REVERSED
 }
 
 enum CreditNoteStatus {
@@ -301,15 +288,6 @@ enum PayrollRunStatus {
   REVERSED
 }
 
-enum ExpenseVoucherStatus {
-  DRAFT
-  APPROVED
-  ACCRUED
-  PAID
-  CANCELLED
-  CONVERTED
-}
-
 // ============================================================
 // ENUMS (Accounting consolidation — docs/25)
 // ============================================================
@@ -329,12 +307,6 @@ enum WithholdingSection {
 enum OwnerEquityDirection {
   CAPITAL_IN
   DRAWING
-}
-
-enum ExpensePaymentMethod {
-  CASH
-  CHEQUE
-  BANK_TRANSFER
 }
 
 enum PartyLoanStatus {
@@ -411,7 +383,6 @@ model Facility {
   employees        Employee[]
   employeeAdvances EmployeeAdvance[]
   payrollRuns      PayrollRun[]
-  expenseVouchers  ExpenseVoucher[]
   partyLoans       PartyLoan[]
   gatePasses       GatePass[]
 
@@ -464,8 +435,6 @@ model User {
   fixedAssetsCreated       FixedAsset[]              @relation("FixedAssetCreatedBy")
   employeesCreated         Employee[]                @relation("EmployeeCreatedBy")
   payrollRunsFinalized     PayrollRun[]              @relation("PayrollRunFinalizedBy")
-  expenseVouchersCreated   ExpenseVoucher[]          @relation("ExpenseVoucherCreatedBy")
-  expenseVouchersApproved  ExpenseVoucher[]          @relation("ExpenseVoucherApprovedBy")
   partyLoansCreated        PartyLoan[]               @relation("PartyLoanCreatedBy")
   loanRepaymentsCreated    PartyLoanRepayment[]      @relation("PartyLoanRepaymentCreatedBy")
   employeeAdvancesCreated  EmployeeAdvance[]         @relation("EmployeeAdvanceCreatedBy")
@@ -562,8 +531,7 @@ model Party {
   /// The receivable (or, for a supplier, payable) control account every one of this
   /// party's postings uses. Stamped once at creation from the party type and frozen
   /// after the first posting — the type can change, the account cannot (docs/25 R-01).
-  /// Nullable only for rows an older image inserts; a trigger fills those.
-  controlAccountCode String?  @map("control_account_code") @db.VarChar(10)
+  controlAccountCode String   @map("control_account_code") @db.VarChar(10)
   ntn                String?  @db.VarChar(20)
   /// On the FBR Active Taxpayers List — decides the s.153 withholding rate.
   isAtlFiler         Boolean  @default(false) @map("is_atl_filer")
@@ -976,9 +944,6 @@ model ChartOfAccounts {
   parentAccountCode String?           @map("parent_account_code") @db.VarChar(10)
   normalBalance     NormalBalance     @map("normal_balance")
   statementSection  StatementSection? @map("statement_section")
-  /// Deprecated (docs/25 L-19): no longer read — the cash-flow section is derived
-  /// from the header's statement section. Dropped in Release 2.
-  cashFlowSection   CashFlowSection?  @map("cash_flow_section")
   isSystemAccount   Boolean           @default(false) @map("is_system_account")
   isActive          Boolean           @default(true) @map("is_active")
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz()
@@ -1039,8 +1004,6 @@ model JournalEntry {
   payrollRunPayroll       PayrollRun?            @relation("PayrollRunPayrollJE")
   payrollRunPayment       PayrollRun?            @relation("PayrollRunPaymentJE")
   payrollRunRemittance    PayrollRun?            @relation("PayrollRunRemittanceJE")
-  expenseAccrual          ExpenseVoucher?        @relation("ExpenseVoucherAccrualJE")
-  expensePayment          ExpenseVoucher?        @relation("ExpenseVoucherPaymentJE")
   partyLoanIssue          PartyLoan?             @relation("PartyLoanIssueJE")
   partyLoanWriteOff       PartyLoan?             @relation("PartyLoanWriteOffJE")
   partyLoanRepayment      PartyLoanRepayment?    @relation("PartyLoanRepaymentJE")
@@ -1308,7 +1271,6 @@ model PayrollLineItem {
   eobiEmployeePkr    Decimal  @default(0) @map("eobi_employee_pkr") @db.Decimal(8, 2)
   eobiEmployerPkr    Decimal  @default(0) @map("eobi_employer_pkr") @db.Decimal(8, 2)
   incomeTaxPkr       Decimal  @default(0) @map("income_tax_pkr") @db.Decimal(8, 2)
-  otherDeductionsPkr Decimal  @default(0) @map("other_deductions_pkr") @db.Decimal(8, 2)
   advanceRecoveryPkr Decimal  @default(0) @map("advance_recovery_pkr") @db.Decimal(10, 2)
   netPayPkr          Decimal  @map("net_pay_pkr") @db.Decimal(10, 2)
   sortOrder          Int      @default(0) @map("sort_order")
@@ -1393,44 +1355,6 @@ model EmployeeAdvanceRecovery {
   @@index([advanceId])
   @@index([payrollRunId])
   @@map("employee_advance_recoveries")
-}
-
-model ExpenseVoucher {
-  id                    String                @id @default(uuid()) @db.Uuid
-  facilityId            String                @map("facility_id") @db.Uuid
-  voucherNumber         String                @map("voucher_number") @db.VarChar(20)
-  voucherDate           DateTime              @map("voucher_date") @db.Date
-  paymentDate           DateTime?             @map("payment_date") @db.Date
-  expenseAccountCode    String                @map("expense_account_code") @db.VarChar(10)
-  description           String                @db.VarChar(500)
-  vendorName            String?               @map("vendor_name") @db.VarChar(200)
-  referenceNumber       String?               @map("reference_number") @db.VarChar(100)
-  amountPkr             Decimal               @map("amount_pkr") @db.Decimal(12, 2)
-  paymentMethod         ExpensePaymentMethod? @map("payment_method")
-  assetAccountCode      String?               @map("asset_account_code") @db.VarChar(10)
-  isAccrual             Boolean               @default(false) @map("is_accrual")
-  status                ExpenseVoucherStatus  @default(DRAFT)
-  bookType              BookType              @default(PACCI) @map("book_type")
-  accrualJournalEntryId String?               @unique @map("accrual_journal_entry_id") @db.Uuid
-  paymentJournalEntryId String?               @unique @map("payment_journal_entry_id") @db.Uuid
-  receiptUrl            String?               @map("receipt_url") @db.VarChar(500)
-  approvedBy            String?               @map("approved_by") @db.Uuid
-  approvedAt            DateTime?             @map("approved_at") @db.Timestamptz()
-  notes                 String?               @db.Text
-  createdBy             String                @map("created_by") @db.Uuid
-  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz()
-
-  facility            Facility      @relation(fields: [facilityId], references: [id])
-  createdByUser       User          @relation("ExpenseVoucherCreatedBy", fields: [createdBy], references: [id])
-  approvedByUser      User?         @relation("ExpenseVoucherApprovedBy", fields: [approvedBy], references: [id])
-  accrualJournalEntry JournalEntry? @relation("ExpenseVoucherAccrualJE", fields: [accrualJournalEntryId], references: [id])
-  paymentJournalEntry JournalEntry? @relation("ExpenseVoucherPaymentJE", fields: [paymentJournalEntryId], references: [id])
-  convertedToBill     Bill?
-
-  @@unique([facilityId, voucherNumber])
-  @@index([facilityId, status])
-  @@index([facilityId, voucherDate])
-  @@map("expense_vouchers")
 }
 
 model PartyLoan {
@@ -1671,8 +1595,8 @@ model PartnerProfitShare {
 // ACCOUNTING CONSOLIDATION (docs/25) — migrations 0027–0030
 //
 // Composite foreign keys to chart_of_accounts on pre-existing config columns
-// (rate_plans, service_charges, payments, fixed_assets, expense_vouchers,
-// party_loans, employee_advances) exist in SQL only (0030): Prisma cannot model
+// (rate_plans, service_charges, payments, fixed_assets, party_loans,
+// employee_advances) exist in SQL only (0030): Prisma cannot model
 // an optional relation over [facilityId (required), code (optional)]. The same
 // is true of partners since 0026. User references on the tables below
 // (created_by, voided_by) are SQL foreign keys kept as plain scalars here, the
@@ -1698,8 +1622,6 @@ model Bill {
   status                 BillStatus @default(DRAFT)
   bookType               BookType   @default(PACCI) @map("book_type")
   journalEntryId         String?    @unique @map("journal_entry_id") @db.Uuid
-  /// Set when the bill was converted from a pre-payables accrued expense voucher.
-  legacyExpenseVoucherId String?    @unique @map("legacy_expense_voucher_id") @db.Uuid
   voidedAt               DateTime?  @map("voided_at") @db.Timestamptz()
   voidedBy               String?    @map("voided_by") @db.Uuid
   voidReason             String?    @map("void_reason") @db.Text
@@ -1710,7 +1632,6 @@ model Bill {
   facility             Facility                    @relation(fields: [facilityId], references: [id])
   supplier             Party                       @relation(fields: [supplierPartyId], references: [id])
   journalEntry         JournalEntry?               @relation(fields: [journalEntryId], references: [id])
-  legacyExpenseVoucher ExpenseVoucher?             @relation(fields: [legacyExpenseVoucherId], references: [id])
   lines                BillLine[]
   allocations          SupplierPaymentAllocation[]
 

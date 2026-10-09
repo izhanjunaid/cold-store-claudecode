@@ -322,6 +322,17 @@ turbo test:coverage
 > **Test hygiene**: mid-test `withGuardsDisabled` calls were removed from the C-26 advance tests, and that file went
 > from ~2 min to 35 s. Same lesson as Phase 26.
 
+> **v0.6.1 (2026-10-09): party pickers, balance-sheet subtotal, old-database cleanup.** Red first:
+> - `?is_active=false` returned active parties (`z.coerce.boolean()` reads "false" as true), and a non-boolean was not refused.
+> - `?kind=customer|supplier` was ignored.
+> - The balance sheet printed "Total Current Liabilities" twice.
+>
+> New: `party-picker.test.tsx` (server search with `kind`; a chosen party outside the results is named; exclude and
+> clear), and a test that the chart refuses a header without a section and a detail without a header on a direct
+> insert (migration 0035). Removed with the code they tested: the voucher suite, the F-6b unclassified tests, the
+> legacy accrual/3030/other-deductions/missing-advance cases. Integration runs now point at a scratch database with
+> a shell `DATABASE_URL` (the config lets the shell win over `.env`), never the dev one. Suite (CI): **219 unit + 804 integration across 70 files (api, 4 skipped as before) + 216 unit (web)**; the drop from 816/220 is the deleted old-data tests. `verify-migration-repair.sh` plants its sync collision as a sectioned header now, since the chart refuses a detail with no header.
+
 > **v0.6.0 browser pass (2026-10-08, Haiku agent, PR #36).** Driving the merged build found four defects the suites
 > could not reach:
 > - A month-end payroll accrual could not be reversed mid-month, because the reversal defaulted to today.

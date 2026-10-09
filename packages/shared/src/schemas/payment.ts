@@ -49,12 +49,6 @@ export const AllocatePaymentRequest = z.object({
 });
 export type AllocatePaymentRequestType = z.infer<typeof AllocatePaymentRequest>;
 
-export const PostMissingAdvanceApplicationRequest = z.object({
-  /** Defaults to today. */
-  entry_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-});
-export type PostMissingAdvanceApplicationRequestType = z.infer<typeof PostMissingAdvanceApplicationRequest>;
-
 // DishonourPaymentRequest
 export const DishonourPaymentRequest = z.object({
   notes: z.string().optional(),

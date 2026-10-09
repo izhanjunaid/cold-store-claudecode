@@ -86,10 +86,9 @@ export const CreateAccountRequest = z
     requires_party: z.boolean().optional(),
   })
   .superRefine((v, ctx) => {
-    // A header with no section appears in no section's list, so every detail
-    // account beneath it silently lands in the statements' unclassified
-    // bucket. Disclosing that is honest; making it unreachable is better.
-    // EQUITY is exempt — equity aggregates by class, not by header.
+    // A header with no section would leave every detail beneath it on no
+    // statement (the chart's CHECK refuses it too). EQUITY is exempt — equity
+    // aggregates by class, not by header.
     if (v.account_type === 'HEADER' && v.account_class !== 'EQUITY' && !v.statement_section) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -122,8 +121,8 @@ export const UpdateAccountRequest = z.object({
   // A header's section is presentation, not structure — it stays editable on
   // an owner-created header even once its children carry postings (unlike
   // code, class, type, parent and normal_balance, which guard_chart_of_accounts
-  // locks). It may not be cleared on a non-equity header: that is how its
-  // children would become unclassified (docs/25 L-38).
+  // locks). It may not be cleared on a non-equity header: its children would
+  // sit on no statement (docs/25 L-38).
   statement_section: StatementSection.nullable().optional(),
   // Editable on owner-created accounts only; is_cash_equivalent and
   // requires_party freeze once the account carries a posting.
@@ -355,9 +354,8 @@ export const TrialBalanceRow = z.object({
   account_code: z.string(),
   account_name: z.string(),
   account_class: AccountClass,
-  // Where this row sits on the statements. Beyond the ten StatementSection
-  // values it can be 'EQUITY' (equity is placed by class, not by header) or
-  // 'UNCLASSIFIED' (a legacy header with no section) — hence a plain string.
+  // Where this row sits on the statements: a StatementSection value, or 'EQUITY'
+  // (equity is placed by class, not by header) — hence a plain string.
   statement_section: z.string(),
   normal_balance: NormalBalance,
   opening_debit_pkr: z.number(),
@@ -502,12 +500,6 @@ export const ProfitLossResponse = z.object({
   // the statement of changes in equity's job, not this one's (docs/25 L-24).
   net_profit_pkr: z.number(),
   net_profit_pct: z.number().nullable(),
-
-  // P&L accounts under no sectioned header (F-6b), signed as their contribution
-  // to the result. Their amounts are already in the section their class belongs
-  // to above; this only names them.
-  unclassified_lines: z.array(StatementLine),
-  has_unclassified: z.boolean(),
 });
 export type ProfitLossResponseType = z.infer<typeof ProfitLossResponse>;
 
@@ -550,11 +542,6 @@ export const BalanceSheetResponse = z.object({
   // somebody's capital. 0 once opening equity is attributed in full.
   unattributed_opening_equity_pkr: z.number(),
   total_liabilities_and_equity_pkr: z.number(),
-
-  // Balances the header rollups could not place (F-6b).
-  unclassified_asset_lines: z.array(StatementLine),
-  unclassified_liability_lines: z.array(StatementLine),
-  has_unclassified: z.boolean(),
 
   is_balanced: z.boolean(),
 });

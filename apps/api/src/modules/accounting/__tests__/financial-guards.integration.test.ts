@@ -194,18 +194,16 @@ describe('posted journal entries are immutable at the DB level', () => {
     ).rejects.toThrow(/immutable/i);
   });
 
-  // 0030 retired the legacy POSTED -> REVERSED branch: a reversed entry stays
-  // POSTED in its own period and carries reversed_by (docs/25 L-11).
-  it('refuses to flip a posted entry to REVERSED', async () => {
+  // A reversed entry stays POSTED in its own period and carries reversed_by
+  // (docs/25 L-11); REVERSED is no longer a status at all (migration 0035).
+  it('refuses to un-post a posted entry, and has no REVERSED status to flip to', async () => {
     const originalId = await postManualJe('POSTED');
-    const reversingId = await postManualJe('POSTED');
     await expect(
-      prisma.$executeRawUnsafe(
-        `UPDATE journal_entries SET posting_status = 'REVERSED', reversed_by = $2::uuid WHERE id = $1::uuid`,
-        originalId,
-        reversingId,
-      ),
+      prisma.$executeRawUnsafe(`UPDATE journal_entries SET posting_status = 'AUTO_DRAFT' WHERE id = $1::uuid`, originalId),
     ).rejects.toThrow(/immutable/i);
+    await expect(
+      prisma.$executeRawUnsafe(`UPDATE journal_entries SET posting_status = 'REVERSED' WHERE id = $1::uuid`, originalId),
+    ).rejects.toThrow(/invalid input value for enum/i);
   });
 
   it('allows editing and deleting AUTO_DRAFT entries', async () => {

@@ -256,8 +256,7 @@ export async function seedChartOfAccounts(
  * code the seed claims is already occupied by an account of a different class or
  * type. The registry posts to that code by role; adopting an owner's unrelated
  * account there would post, say, supplier payables into their "Misc. income".
- * Renumber the owner's account first (scripts/preupdate-checks-consolidation.sql
- * C20 lists them).
+ * Renumber the owner's account first.
  *
  * ponytail: an owner who deleted an unused non-system account will see it return on
  * the next update. Cosmetic; the alternative — an account missing that the posting

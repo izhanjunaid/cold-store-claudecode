@@ -29,17 +29,17 @@ export const ApplySurchargeRequest = z.object({
 });
 export type ApplySurchargeRequestType = z.infer<typeof ApplySurchargeRequest>;
 
-// A surcharge charged on an invoice: a SURCHARGE invoice of its own (docs/25 R-08),
-// or — status LEGACY — a JE-21 an older version posted straight to AR, one per month.
+// A surcharge charged on an invoice: a SURCHARGE invoice of its own (docs/25 R-08).
 export const AppliedSurcharge = z.object({
-  invoice_id: z.string().uuid().nullable(),
+  invoice_id: z.string().uuid(),
+  /** Null while the surcharge invoice is a draft. */
   invoice_number: z.string().nullable(),
   journal_entry_id: z.string().uuid().nullable(),
   entry_number: z.string().nullable(),
   entry_date: z.string(),
   months: z.number(),
   amount_pkr: z.number(),
-  status: z.enum(['DRAFT', 'FINALIZED', 'VOID', 'WRITTEN_OFF', 'LEGACY']),
+  status: z.enum(['DRAFT', 'FINALIZED', 'VOID', 'WRITTEN_OFF']),
   description: z.string(),
 });
 export type AppliedSurchargeType = z.infer<typeof AppliedSurcharge>;

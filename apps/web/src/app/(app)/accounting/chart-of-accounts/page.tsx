@@ -197,7 +197,7 @@ export default function ChartOfAccountsPage() {
     draft.type === 'DETAIL' && (draft.cls !== 'EQUITY' || headerOptions.length > 0);
   const sectionOptions = CLASS_SECTIONS[cls(draft.cls)];
   // A header must declare its section, or every detail account beneath it
-  // lands in the statements' unclassified bucket. Where the class allows
+  // appears on no statement. Where the class allows
   // exactly one section (cost of service), there is nothing to ask.
   const sectionRequired = draft.type === 'HEADER' && sectionOptions.length > 0;
   const effectiveSection =
@@ -230,7 +230,7 @@ export default function ChartOfAccountsPage() {
       return `${draft.code} is already in use.`;
     }
     // Required, not advisory (docs/25 L-31): the unassigned 0/7/8/9 ranges
-    // were a route into the statements' "unclassified" bucket.
+    // were a route onto no statement at all.
     const expected = CLASS_CODE_PREFIX[cls(draft.cls)];
     if (!draft.code.startsWith(expected)) {
       return `${CLASS_LABEL[cls(draft.cls)]} codes start with ${expected}.`;
@@ -261,7 +261,7 @@ export default function ChartOfAccountsPage() {
           // rejects a mismatched normal_balance without it.
           ...(isContra ? { is_contra: true } : {}),
           // Required for a non-equity header now: an unsectioned header
-          // orphans its own children into the unclassified bucket.
+          // would leave its children on no statement.
           ...(draft.type === 'HEADER' && effectiveSection
             ? { statement_section: effectiveSection }
             : {}),

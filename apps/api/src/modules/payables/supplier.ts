@@ -29,7 +29,7 @@ export async function payableSupplier(
     select: { id: true, name: true, controlAccountCode: true },
   });
   if (!p) throw Errors.PARTY_NOT_FOUND();
-  if (!p.controlAccountCode || !AP_CONTROL_ACCOUNTS.includes(p.controlAccountCode)) {
+  if (!AP_CONTROL_ACCOUNTS.includes(p.controlAccountCode)) {
     throw Errors.VALIDATION_ERROR(`${p.name} is not a supplier — its account is not a payable`, field);
   }
   return { id: p.id, name: p.name, controlAccountCode: p.controlAccountCode };

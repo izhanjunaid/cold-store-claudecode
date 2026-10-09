@@ -172,13 +172,6 @@ export class BillService {
       const bill = await tx.bill.findFirstOrThrow({ where: { id, facilityId }, include: { allocations: true } });
       assertKatchiWriteAllowed(role, bill.bookType);
       if (bill.status !== 'POSTED') throw PayablesErrors.BILL_INVALID_STATUS(`A ${bill.status} bill cannot be voided`);
-      // Its entry only moved an accrued voucher's liability; reversing it would hand the
-      // liability back to a voucher that can no longer be paid (C-03).
-      if (bill.legacyExpenseVoucherId) {
-        throw PayablesErrors.BILL_INVALID_STATUS(
-          'A bill converted from an expense voucher cannot be voided; correct the supplier account with a journal entry',
-        );
-      }
       if (bill.allocations.some((a) => !a.voidedAt)) throw PayablesErrors.BILL_HAS_PAYMENTS();
       if (!bill.journalEntryId) throw new Error(`Bill ${id} has no journal entry`);
 
@@ -275,7 +268,7 @@ function allowedActions(b: Row, paid: number, open: number): BillActionType[] {
     case 'POSTED':
       return [
         ...(open > MONEY_EPSILON ? (['pay'] as const) : []),
-        ...(paid > MONEY_EPSILON || b.legacyExpenseVoucherId ? [] : (['void'] as const)),
+        ...(paid > MONEY_EPSILON ? [] : (['void'] as const)),
       ];
     default:
       return [];
@@ -302,7 +295,6 @@ function format(b: Row) {
     book_type: b.bookType,
     journal_entry_id: b.journalEntryId,
     entry_number: b.journalEntry ? postedEntryNumber(b.journalEntry) : null,
-    legacy_expense_voucher_id: b.legacyExpenseVoucherId,
     paid_pkr: paid,
     open_pkr: open,
     payment_status: b.status !== 'POSTED' ? null : paid < MONEY_EPSILON ? 'UNPAID' : open > MONEY_EPSILON ? 'PARTIAL' : 'PAID',

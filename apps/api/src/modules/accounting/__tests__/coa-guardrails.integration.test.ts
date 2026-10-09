@@ -6,10 +6,8 @@
  * type, parent and normal_balance the moment the account has a posting, so
  * none of these are correctable after the fact:
  *
- *   1. a non-equity HEADER must declare its statement_section, or every
- *      detail account beneath it lands in the statements' unclassified
- *      bucket — the F-6b safety net stops being a safety net and becomes the
- *      normal path
+ *   1. a non-equity HEADER must declare its statement_section, or no detail
+ *      account beneath it would appear on any statement
  *   2. normal_balance is derived from the class unless the caller explicitly
  *      declares a contra account
  *   3. an account nothing has touched can be deleted outright, instead of
@@ -366,7 +364,7 @@ describe('deactivation cannot strand anything (L-34)', () => {
     expect(JSON.parse(res.body).error.message).toMatch(/rate plan/);
   });
 
-  it('refuses to clear a header’s section — that is how its children would become unclassified (L-38)', async () => {
+  it('refuses to clear a header’s section — its children would sit on no statement (L-38)', async () => {
     const res = await patch('6800', { statement_section: null });
     expect(res.statusCode).toBe(400);
   });
@@ -376,6 +374,18 @@ describe('deactivation cannot strand anything (L-34)', () => {
     const res = await patch('4200', { statement_section: 'REVENUE' });
     expect(res.statusCode).toBe(409);
     expect(JSON.parse(res.body).error.code).toBe('SYSTEM_ACCOUNT_PROTECTED');
+  });
+
+  // The database holds the same two rules (migration 0035), so no path round
+  // the API can put an account on no statement either.
+  it('the chart itself refuses a header with no section and a detail with no header', async () => {
+    const row = { facilityId: TEST_FACILITY_ID, accountClass: 'EXPENSE' as const, normalBalance: 'DEBIT' as const };
+    await expect(
+      prisma.chartOfAccounts.create({ data: { ...row, accountCode: '6850', accountName: 'no section', accountType: 'HEADER' } }),
+    ).rejects.toThrow(/chart_of_accounts_header_has_section/);
+    await expect(
+      prisma.chartOfAccounts.create({ data: { ...row, accountCode: '6850', accountName: 'no header', accountType: 'DETAIL' } }),
+    ).rejects.toThrow(/chart_of_accounts_detail_has_parent/);
   });
 });
 

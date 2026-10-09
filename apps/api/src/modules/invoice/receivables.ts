@@ -38,7 +38,7 @@ export async function creditExposure(db: Db, facilityId: string, partyId: string
 
 export type OpenItem = {
   partyId: string;
-  /** The invoice, or null for a line that is no document's (opening balance, manual, legacy surcharge). */
+  /** The invoice, or null for a line that is no document's (opening balance, manual). */
   invoiceId: string | null;
   reference: string | null;
   date: Date;
@@ -138,7 +138,7 @@ export type StatementEntryType =
 function statementType(je: { sourceTable: string; entryType: string }): StatementEntryType {
   if (je.entryType === 'REVERSAL') return 'REVERSAL';
   if (je.sourceTable === 'opening_balances') return 'OPENING_BALANCE';
-  if (je.sourceTable === 'invoice_surcharge' || je.entryType === 'LATE_PAYMENT_SURCHARGE') return 'SURCHARGE';
+  if (je.entryType === 'LATE_PAYMENT_SURCHARGE') return 'SURCHARGE';
   if (je.entryType === 'BAD_DEBT') return 'WRITE_OFF';
   if (je.sourceTable === 'invoices') return 'INVOICE';
   if (je.sourceTable === 'credit_notes') return 'CREDIT_NOTE';

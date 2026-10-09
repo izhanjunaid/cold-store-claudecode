@@ -107,7 +107,7 @@ export const NormalBalance = z.enum(['DEBIT', 'CREDIT']);
 export type NormalBalance = z.infer<typeof NormalBalance>;
 
 // Which face-of-statement section a HEADER account's children roll up into
-// (phase/24). Null/absent = the statements' unclassified bucket (F-6b).
+// (phase/24). Required on every non-equity header (migration 0035).
 export const StatementSection = z.enum([
   'CURRENT_ASSET',
   'NON_CURRENT_ASSET',
@@ -121,11 +121,6 @@ export const StatementSection = z.enum([
   'OTHER_EXPENSE',
 ]);
 export type StatementSection = z.infer<typeof StatementSection>;
-
-// Which cash-flow activity an account's movements represent. Null/absent means
-// "derive it" — see cash-flow.service.ts. Only set where the derivation is wrong.
-export const CashFlowSection = z.enum(['OPERATING', 'INVESTING', 'FINANCING']);
-export type CashFlowSection = z.infer<typeof CashFlowSection>;
 
 export const JournalEntryType = z.enum([
   'INVOICE',

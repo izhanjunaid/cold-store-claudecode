@@ -34,10 +34,9 @@ const partners: Record<'A' | 'B', { id: string; capital: string; drawings: strin
 
 /**
  * A balanced two-line entry, posted straight in: this is fixture, not the thing
- * under test. `owner_equity` is the legacy owner-movement source — posted before
- * owner movements became documents — so it counts as capital in / drawings.
+ * under test. Sourced as an owner-equity movement, it counts as capital in / drawings.
  */
-async function post(date: string, sourceTable: 'owner_equity' | 'manual', lines: [string, number, number][]) {
+async function post(date: string, sourceTable: 'owner_equity_movements' | 'manual', lines: [string, number, number][]) {
   const d = new Date(`${date}T00:00:00.000Z`);
   const id = randomUUID();
   await prisma.journalEntry.create({
@@ -100,11 +99,11 @@ beforeAll(async () => {
 
   // Owner A puts in 500,000; Owner B puts in 300,000 — different amounts, which
   // is the whole reason they cannot share one account.
-  await post('2044-02-01', 'owner_equity', [['1010', 500000, 0], [partners.A.capital, 0, 500000]]);
-  await post('2044-02-01', 'owner_equity', [['1010', 300000, 0], [partners.B.capital, 0, 300000]]);
+  await post('2044-02-01', 'owner_equity_movements', [['1010', 500000, 0], [partners.A.capital, 0, 500000]]);
+  await post('2044-02-01', 'owner_equity_movements', [['1010', 300000, 0], [partners.B.capital, 0, 300000]]);
   // And each takes a different amount out.
-  await post('2044-06-01', 'owner_equity', [[partners.A.drawings, 40000, 0], ['1010', 0, 40000]]);
-  await post('2044-06-01', 'owner_equity', [[partners.B.drawings, 25000, 0], ['1010', 0, 25000]]);
+  await post('2044-06-01', 'owner_equity_movements', [[partners.A.drawings, 40000, 0], ['1010', 0, 40000]]);
+  await post('2044-06-01', 'owner_equity_movements', [[partners.B.drawings, 25000, 0], ['1010', 0, 25000]]);
   // Opening equity booked to the plug: belongs to nobody, and is not capital
   // anybody introduced.
   await post('2044-03-01', 'manual', [['1010', 100000, 0], ['3010', 0, 100000]]);

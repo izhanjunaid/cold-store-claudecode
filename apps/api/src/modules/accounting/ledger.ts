@@ -110,7 +110,7 @@ export type ClassifiableAccount = {
 };
 
 export type Classification = {
-  /** Face-of-statement section; EQUITY for equity; UNCLASSIFIED for a detail under no sectioned header. */
+  /** Face-of-statement section; EQUITY for equity. */
   section: string;
   /** Where the account's cash movements land on the statement of cash flows, or CASH if it is cash. */
   cashFlow: CashFlowSectionName | 'CASH';
@@ -124,15 +124,17 @@ export type Classification = {
  * coa.service refuses a HEADER under a HEADER). The cash-flow statement used to
  * read the section off the detail account itself, which is always null, so every
  * capital purchase and loan drawdown landed in Operating (L-01).
+ *
+ * Every non-equity account has a section: the chart's CHECKs (migration 0035)
+ * require one on every header and a header above every detail.
  */
 export function classify(account: ClassifiableAccount, chartByCode: Map<string, ClassifiableAccount>): Classification {
-  const section =
-    account.accountClass === 'EQUITY'
-      ? 'EQUITY'
-      : account.accountType === 'HEADER'
-        ? (account.statementSection ?? 'UNCLASSIFIED')
-        : ((account.parentAccountCode ? chartByCode.get(account.parentAccountCode)?.statementSection : null) ??
-          'UNCLASSIFIED');
+  let section = 'EQUITY';
+  if (account.accountClass !== 'EQUITY') {
+    const header = account.accountType === 'HEADER' ? account : chartByCode.get(account.parentAccountCode ?? '');
+    if (!header?.statementSection) throw new Error(`Account ${account.accountCode} sits under no sectioned header`);
+    section = header.statementSection;
+  }
 
   let cashFlow: Classification['cashFlow'];
   if (account.isCashEquivalent) cashFlow = 'CASH';

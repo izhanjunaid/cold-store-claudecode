@@ -28,7 +28,6 @@ export interface Bill {
   book_type: 'PACCI' | 'KATCHI';
   journal_entry_id: string | null;
   entry_number: string | null;
-  legacy_expense_voucher_id: string | null;
   paid_pkr: number;
   open_pkr: number;
   payment_status: 'UNPAID' | 'PARTIAL' | 'PAID' | null;

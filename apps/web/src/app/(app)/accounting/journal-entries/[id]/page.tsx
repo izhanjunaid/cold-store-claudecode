@@ -180,16 +180,6 @@ export default function JournalEntryDetailPage() {
                 </dd>
               </div>
             )}
-            {entry.entry_type === 'REVERSAL' && entry.source_table === 'journal_entries' && (
-              <div>
-                <dt className="text-muted-foreground">Reverses</dt>
-                <dd>
-                  <Button variant="link" className="h-auto p-0 font-mono text-xs" onClick={() => router.push(`/accounting/journal-entries/${entry.source_id}`)}>
-                    View original entry
-                  </Button>
-                </dd>
-              </div>
-            )}
           </dl>
         </CardContent>
       </Card>

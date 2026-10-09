@@ -215,9 +215,8 @@ interface TrialBalanceRow {
 }
 
 /**
- * The statements' sections, plus the two the trial balance adds: EQUITY (equity
- * is presented by owner and role, not by header section) and UNCLASSIFIED (a
- * detail under no sectioned header — the disclosure the statements make too).
+ * The statements' sections, plus the one the trial balance adds: EQUITY (equity
+ * is presented by owner and role, not by header section).
  */
 const SECTION_ORDER = [
   'CURRENT_ASSET',
@@ -231,11 +230,9 @@ const SECTION_ORDER = [
   'COST_OF_SERVICE',
   'OPERATING_EXPENSE',
   'OTHER_EXPENSE',
-  'UNCLASSIFIED',
 ] as const;
 
 const TB_SECTION_LABEL: Record<string, string> = {
   ...SECTION_LABEL,
   EQUITY: 'Equity',
-  UNCLASSIFIED: 'Unclassified — not under a standard header',
 };

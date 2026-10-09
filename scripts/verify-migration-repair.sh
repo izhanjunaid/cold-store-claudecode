@@ -114,8 +114,9 @@ recorded=$(psql -tAq -d "$DB" -c "SELECT count(*) FROM deploy_runs WHERE succeed
 [ "$recorded" = "2" ] || fail "expected the 2 successful runs recorded, found $recorded"
 psql -q -d "$DB" -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 INSERT INTO facilities (id, name, updated_at) VALUES ('00000000-0000-4000-8000-00000000d0e1', 'Repair check', now());
-INSERT INTO chart_of_accounts (id, facility_id, account_code, account_name, account_class, account_type, normal_balance)
-VALUES (gen_random_uuid(), '00000000-0000-4000-8000-00000000d0e1', '2050', 'Owner account on a claimed code', 'EXPENSE', 'DETAIL', 'DEBIT');
+-- A header, because the chart refuses a detail with no header (0035); it collides on class and type all the same.
+INSERT INTO chart_of_accounts (id, facility_id, account_code, account_name, account_class, account_type, normal_balance, statement_section)
+VALUES (gen_random_uuid(), '00000000-0000-4000-8000-00000000d0e1', '2050', 'Owner account on a claimed code', 'EXPENSE', 'HEADER', 'DEBIT', 'OPERATING_EXPENSE');
 SQL
 if pnpm --filter @coldchain/db run db:deploy >/dev/null 2>&1; then
   fail "db:deploy succeeded with an owner account on a code the chart needs"

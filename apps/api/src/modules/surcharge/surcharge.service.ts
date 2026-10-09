@@ -11,22 +11,19 @@ import { lockRow } from '../../common/row-lock';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { computeSurcharge } from './surcharge-calc';
 import { buildJE21SurchargeInvoice } from '../accounting/templates/je-21-late-payment-surcharge';
-import { postedEntryNumber, type JournalEntryService } from '../accounting/journal-entry.service';
+import type { JournalEntryService } from '../accounting/journal-entry.service';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 import { generateInvoiceNumber } from '../invoice/invoice-number';
 
 type Db = Prisma.TransactionClient | PrismaClient;
-
-/** Entries an older version posted straight to AR, sourced to the overdue invoice. */
-const LEGACY_SOURCE = 'invoice_surcharge';
 
 /**
  * Late-payment surcharge (docs/25 R-08). Each application bills the chargeable
  * months as a SURCHARGE invoice of its own — pointing at the overdue invoice
  * through surcharge_of_invoice_id — so it is allocated, credited, written off and
  * voided like any invoice. Months already charged = months on the overdue
- * invoice's standing surcharge invoices, plus the legacy JE-21s an older version
- * posted one per month; re-applying within the same 30-day block charges nothing.
+ * invoice's standing surcharge invoices; re-applying within the same 30-day block
+ * charges nothing.
  */
 export class SurchargeService {
   constructor(
@@ -41,28 +38,14 @@ export class SurchargeService {
 
   /** Months already charged on each overdue invoice. */
   private async monthsCharged(db: Db, facilityId: string, invoiceIds: string[]): Promise<Map<string, number>> {
-    const [legacy, lines] = await Promise.all([
-      db.journalEntry.groupBy({
-        by: ['sourceId'],
-        where: {
-          facilityId,
-          sourceTable: LEGACY_SOURCE,
-          sourceId: { in: invoiceIds },
-          postingStatus: 'POSTED',
-          reversedById: null,
-          entryType: { not: 'REVERSAL' },
-        },
-        _count: { _all: true },
-      }),
-      db.invoiceLineItem.findMany({
-        where: {
-          lineType: 'SURCHARGE',
-          invoice: { facilityId, surchargeOfInvoiceId: { in: invoiceIds }, status: { not: 'VOID' } },
-        },
-        select: { quantity: true, invoice: { select: { surchargeOfInvoiceId: true } } },
-      }),
-    ]);
-    const months = new Map<string, number>(legacy.map((l) => [l.sourceId, l._count._all]));
+    const lines = await db.invoiceLineItem.findMany({
+      where: {
+        lineType: 'SURCHARGE',
+        invoice: { facilityId, surchargeOfInvoiceId: { in: invoiceIds }, status: { not: 'VOID' } },
+      },
+      select: { quantity: true, invoice: { select: { surchargeOfInvoiceId: true } } },
+    });
+    const months = new Map<string, number>();
     for (const l of lines) {
       const of = l.invoice.surchargeOfInvoiceId!;
       months.set(of, (months.get(of) ?? 0) + Number(l.quantity));
@@ -210,48 +193,22 @@ export class SurchargeService {
   }
 
   async listByInvoice(facilityId: string, invoiceId: string): Promise<InvoiceSurchargesResponseType> {
-    const [invoices, legacy] = await Promise.all([
-      this.prisma.invoice.findMany({
-        where: { facilityId, surchargeOfInvoiceId: invoiceId },
-        orderBy: { invoiceDate: 'asc' },
-        include: { lineItems: true, journalEntry: { select: { entryNumber: true } } },
-      }),
-      this.prisma.journalEntry.findMany({
-        where: {
-          facilityId,
-          sourceTable: LEGACY_SOURCE,
-          sourceId: invoiceId,
-          postingStatus: 'POSTED',
-          entryType: { not: 'REVERSAL' },
-        },
-        orderBy: { entryDate: 'asc' },
-        include: { lines: { where: { creditAmount: { gt: 0 } }, select: { creditAmount: true } } },
-      }),
-    ]);
-    const surcharges: AppliedSurchargeType[] = [
-      ...invoices.map((s) => ({
-        invoice_id: s.id,
-        invoice_number: s.invoiceNumber,
-        journal_entry_id: s.journalEntryId,
-        entry_number: s.journalEntry?.entryNumber ?? null,
-        entry_date: toIsoDate(s.invoiceDate),
-        months: s.lineItems.reduce((n, l) => n + Number(l.quantity), 0),
-        amount_pkr: Number(s.totalPkr),
-        status: s.status,
-        description: s.lineItems[0]?.description ?? 'Late payment surcharge',
-      })),
-      ...legacy.map((e) => ({
-        invoice_id: null,
-        invoice_number: null,
-        journal_entry_id: e.id,
-        entry_number: postedEntryNumber(e),
-        entry_date: toIsoDate(e.entryDate),
-        months: 1,
-        amount_pkr: round2(e.lines.reduce((s, l) => s + Number(l.creditAmount), 0)),
-        status: 'LEGACY' as const,
-        description: e.description,
-      })),
-    ];
+    const invoices = await this.prisma.invoice.findMany({
+      where: { facilityId, surchargeOfInvoiceId: invoiceId },
+      orderBy: { invoiceDate: 'asc' },
+      include: { lineItems: true, journalEntry: { select: { entryNumber: true } } },
+    });
+    const surcharges: AppliedSurchargeType[] = invoices.map((s) => ({
+      invoice_id: s.id,
+      invoice_number: s.invoiceNumber,
+      journal_entry_id: s.journalEntryId,
+      entry_number: s.journalEntry?.entryNumber ?? null,
+      entry_date: toIsoDate(s.invoiceDate),
+      months: s.lineItems.reduce((n, l) => n + Number(l.quantity), 0),
+      amount_pkr: Number(s.totalPkr),
+      status: s.status,
+      description: s.lineItems[0]?.description ?? 'Late payment surcharge',
+    }));
     return {
       invoice_id: invoiceId,
       total_pkr: round2(surcharges.filter((s) => s.status !== 'VOID').reduce((s, r) => s + r.amount_pkr, 0)),

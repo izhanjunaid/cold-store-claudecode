@@ -478,54 +478,6 @@ describe('Phase 8B — Payroll', () => {
     expect(d).toBeCloseTo(c, 2);
   });
 
-  // C1(ii). other_deductions_pkr was subtracted from net pay but had no JE line, so the
-  // entry came up short and threw JOURNAL_UNBALANCED. The column is retired (docs/25
-  // C-17): nothing writes it, and a draft saved before still carrying a value finalizes
-  // with net pay derived from the deductions that do have a ledger home — balanced.
-  it('a legacy draft line still carrying other deductions finalizes balanced, without them', async () => {
-    await cleanup();
-    await createSalaried(`Mgr-OD-${Date.now()}`, 50000);
-
-    const create = await app.inject({
-      method: 'POST',
-      url: '/v1/payroll-runs',
-      headers: authHeaders(accountantToken),
-      payload: {
-        payroll_type: 'MONTHLY_SALARY',
-        period_year: 2026,
-        period_month: 9,
-        period_from: '2026-09-01',
-        period_to: '2026-09-30',
-      },
-    });
-    const run = JSON.parse(create.body).data;
-
-    // What an older release left behind: a deduction and a net pay that subtracted it.
-    await prisma.payrollLineItem.update({
-      where: { id: run.line_items[0].id },
-      data: { otherDeductionsPkr: 2500, netPayPkr: 50000 - 375 - 2500 },
-    });
-
-    const fin = await app.inject({
-      method: 'POST',
-      url: `/v1/payroll-runs/${run.id}/finalize`,
-      headers: authHeaders(managerToken),
-      payload: {},
-    });
-    expect(fin.statusCode).toBe(200);
-
-    const je = await prisma.journalEntry.findFirstOrThrow({
-      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payroll_runs', sourceId: run.id },
-      include: { lines: true },
-    });
-    const d = je.lines.reduce((s, l) => s + Number(l.debitAmount), 0);
-    const c = je.lines.reduce((s, l) => s + Number(l.creditAmount), 0);
-    expect(d).toBeCloseTo(c, 2);
-    expect(Number(je.lines.find((l) => l.accountCode === '2030')!.creditAmount)).toBe(50000 - 375);
-    const line = await prisma.payrollLineItem.findUniqueOrThrow({ where: { id: run.line_items[0].id } });
-    expect(Number(line.netPayPkr)).toBe(50000 - 375);
-  });
-
   // C3. The duplicate-period check ran outside the transaction that wrote the row, and
   // the table has only a non-unique index on (facility, year, month) — so two concurrent
   // creates could both pass it.

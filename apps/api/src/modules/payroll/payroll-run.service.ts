@@ -282,9 +282,7 @@ export class PayrollRunService {
         throw Errors.VALIDATION_ERROR('Cannot finalize a payroll run with no line items');
       }
 
-      // Net pay is derived, never trusted from storage: a draft saved before
-      // other_deductions_pkr was retired may still carry a net that subtracted it
-      // (docs/25 C-17). Those deductions never had a ledger home and are ignored.
+      // Net pay is derived, never trusted from storage (docs/25 C-17).
       for (const l of run.lineItems) {
         const net = payrollLineNet(amountsOf(l));
         if (net < 0) {

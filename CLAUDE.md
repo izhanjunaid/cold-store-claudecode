@@ -46,7 +46,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - New columns are nullable, defaulted, or filled by a trigger.
   - Each `ALTER TYPE … ADD VALUE` sits alone in its own migration file.
   - New constraints are added `NOT VALID`, then validated only where the existing data passes (otherwise a warning, never a failed deploy).
-  - Drops wait one release.
+  - Drops wait one release. Migration 0035 (v0.6.1) is the one exception and not a precedent: no facility ever ran v0.6.0, because the client was reinstalled fresh on v0.6.1 (docs/25 §10).
   - `deploy.ts` records every run in `deploy_runs`, and Settings → Software shows a failed one. A failure after the migrations have applied leaves nothing pending, so the migration count cannot show it.
 - **Two migration-looking directories exist under `packages/db`**: `prisma/migrations/` is the real, active Prisma migration history — use it. `migrations/` contains a single legacy `0001_foundation.sql` from before Prisma Migrate was adopted; don't add new migrations there.
 - **E2E requires test-mode flags**: the API must run with `ALLOW_TEST_RESET=1` and non-production `NODE_ENV` for `POST /v1/_test/reset` to work. `pnpm e2e` sets this up automatically — no manual server launch needed.
@@ -91,7 +91,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `17_accounting_audit_phase19.md` | Second accounting audit (2026-07-24/25, phase/19) — CoA, opening balances, statements, payments/invoices/peshgi; 17 findings + fixes |
 | `18_accounting_remediation_phase20.md` | Third audit + remediation (2026-07-25, phase/20) — payroll, fixed assets, cash/cheque, tax, expenses, concurrency; the advisory-lock defect; cost-side reversal |
 | `19_employee_advances_phase21.md` | Employee advances (2026-07-26/30, phase/21) — account 1230, JE-22/23, recovery rides inside payroll JEs, one-active-advance concurrency lock, reversal must unwind recoveries |
-| `25_accounting_consolidation.md` | Final accounting audit + fix program (2026-09-24 → 10-04, v0.6.0): 136 findings, owner decisions, the invariants the code follows (registry, chart flags, one posting/reversal/ledger path), manual-posting matrix, and §10 what merged and what was deliberately left |
+| `25_accounting_consolidation.md` | Final accounting audit + fix program (2026-09-24 → 10-09, v0.6.0/v0.6.1): 136 findings, owner decisions, the invariants the code follows (registry, chart flags, one posting/reversal/ledger path), manual-posting matrix, and §10 what merged and what was deliberately left |
 
 ## Domain Terminology
 

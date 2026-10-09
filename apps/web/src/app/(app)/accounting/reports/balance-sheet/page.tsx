@@ -46,9 +46,6 @@ interface BS {
   total_equity_pkr: number;
   total_liabilities_and_equity_pkr: number;
   is_balanced: boolean;
-  unclassified_asset_lines: Line[];
-  unclassified_liability_lines: Line[];
-  has_unclassified: boolean;
   /** Opening equity not yet attributed to an owner. 0 once it has been. */
   unattributed_opening_equity_pkr: number;
 }
@@ -67,7 +64,6 @@ function lineMap(bs: BS | null): Map<string, number> {
   const groups = [...bs.current_asset_groups, ...bs.non_current_asset_groups, ...bs.current_liability_groups, ...bs.non_current_liability_groups];
   for (const l of groups.flatMap((g) => g.lines)) m.set(l.account_code, l.amount_pkr);
   for (const l of bs.equity_lines) m.set(l.account_code, l.amount_pkr);
-  for (const l of [...bs.unclassified_asset_lines, ...bs.unclassified_liability_lines]) m.set(l.account_code, l.amount_pkr);
   return m;
 }
 
@@ -125,8 +121,6 @@ export default function BalanceSheetPage() {
     push('Non-current Assets', data.non_current_asset_groups);
     push('Current Liabilities', data.current_liability_groups);
     push('Non-current Liabilities', data.non_current_liability_groups);
-    for (const l of data.unclassified_asset_lines) rows.push({ section: 'Assets — Unclassified', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
-    for (const l of data.unclassified_liability_lines) rows.push({ section: 'Liabilities — Unclassified', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     for (const l of data.equity_lines) rows.push({ section: 'Equity', code: l.account_code, account: l.account_name, amount: l.amount_pkr });
     rows.push({ section: 'Equity', code: '', account: "Retained Earnings (incl. prior years' results)", amount: data.retained_earnings_pkr });
     rows.push({ section: 'Equity', code: '', account: `Current Year Profit / (Loss) — FY from ${data.fiscal_year_start}`, amount: data.current_year_pl_pkr });
@@ -188,14 +182,6 @@ export default function BalanceSheetPage() {
                   <StatementRow emphasis="subtotal" label="Total Non-current Assets" amount={data.total_non_current_assets_pkr} prior={cmp?.total_non_current_assets_pkr} />
                 </>
               )}
-              {data.unclassified_asset_lines.length > 0 && (
-                <>
-                  <tr><td colSpan={compare ? 4 : 2} className="pt-2 pb-0.5 pl-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Unclassified Assets — not under a standard header</td></tr>
-                  {data.unclassified_asset_lines.map((l) => (
-                    <StatementRow key={l.account_code} depth={1} code={l.account_code} label={l.account_name} amount={l.amount_pkr} prior={pl(l.account_code)} href={glHref(l.account_code)} />
-                  ))}
-                </>
-              )}
               <StatementRow emphasis="grand" label="Total Assets" amount={data.total_assets_pkr} prior={cmp?.total_assets_pkr} />
 
               <SpacerRow />
@@ -208,14 +194,6 @@ export default function BalanceSheetPage() {
                   <tr><td colSpan={compare ? 4 : 2} className="pt-2 pb-0.5 pl-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Non-current Liabilities</td></tr>
                   {renderGroups(data.non_current_liability_groups)}
                   <StatementRow emphasis="subtotal" label="Total Non-current Liabilities" amount={data.total_non_current_liabilities_pkr} prior={cmp?.total_non_current_liabilities_pkr} />
-                </>
-              )}
-              {data.unclassified_liability_lines.length > 0 && (
-                <>
-                  <tr><td colSpan={compare ? 4 : 2} className="pt-2 pb-0.5 pl-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Unclassified Liabilities — not under a standard header</td></tr>
-                  {data.unclassified_liability_lines.map((l) => (
-                    <StatementRow key={l.account_code} depth={1} code={l.account_code} label={l.account_name} amount={l.amount_pkr} prior={pl(l.account_code)} href={glHref(l.account_code)} />
-                  ))}
                 </>
               )}
               <StatementRow emphasis="total" label="Total Liabilities" amount={data.total_liabilities_pkr} prior={cmp?.total_liabilities_pkr} />
@@ -247,20 +225,6 @@ export default function BalanceSheetPage() {
               </p>
             )}
 
-            {data.has_unclassified && (
-              // Deliberately doesn't repeat the row labels above verbatim
-              // ("Total Assets" etc.) — a screen-reader or test query landing
-              // on this paragraph by that text would mean it collided with
-              // the actual total row, not just a stray coincidence.
-              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                Unclassified amounts count toward the grand totals above, but
-                <strong> not</strong> toward the current / non-current subtotals — placing an
-                account under current vs. non-current is an accounting judgement this report does
-                not guess at. A current ratio or working-capital figure read off those subtotals
-                will understate them until the account is placed. Move these accounts under a
-                standard header (Chart of Accounts) to place them in a named section.
-              </p>
-            )}
 
             <div className={cn('mt-4 flex items-center justify-center gap-1.5 text-sm font-medium', data.is_balanced ? 'text-green-600' : 'text-destructive')}>
               {data.is_balanced ? <CheckCircle2 className="h-4 w-4" /> : <TriangleAlert className="h-4 w-4" />}

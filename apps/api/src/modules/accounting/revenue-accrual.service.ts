@@ -13,7 +13,6 @@ const DAY_MS = 1000 * 60 * 60 * 24;
 
 /** UTC day boundaries, matching @db.Date truncation used everywhere else. */
 const periodEndDate = (year: number, month: number) => new Date(Date.UTC(year, month, 0));
-const periodStartDate = (year: number, month: number) => new Date(Date.UTC(year, month - 1, 1));
 const daysBetween = (from: Date, to: Date) => (to.getTime() - from.getTime()) / DAY_MS;
 const later = (a: Date, b: Date) => (a > b ? a : b);
 
@@ -43,7 +42,6 @@ export type AccrualPreview = {
 export type AccrualResult = {
   accrued_entry_number: string | null;
   reversal_entry_number: string | null;
-  legacy_reversals: number;
   total_pkr: number;
   lot_count: number;
   unaccruable: UnaccruableLot[];
@@ -213,36 +211,9 @@ export class RevenueAccrualService {
     await advisoryXactLock(tx, `${facilityId}:accrual:${year}-${month}`);
     if (await this.hasAccrualFor(tx, facilityId, year, month)) return null;
 
-    // An accrual an older version posted and never reversed would sit in 1250 next to
-    // the invoice that billed it — revenue counted twice (pre-update check C11). Reverse
-    // those before the first accrual of the new policy.
-    const legacy = await tx.journalEntry.findMany({
-      where: {
-        facilityId,
-        sourceTable: SOURCE_TABLE,
-        entryType: 'ACCRUAL',
-        postingStatus: 'POSTED',
-        reversedById: null,
-        entryDate: { lte: periodEnd },
-      },
-      select: { id: true, entryDate: true },
-    });
-    let legacyReversals = 0;
-    for (const entry of legacy) {
-      const reversedByAdjustment = await tx.journalEntry.count({
-        where: { facilityId, sourceTable: SOURCE_TABLE, entryType: 'ADJUSTMENT', postingStatus: 'POSTED', entryDate: { gt: entry.entryDate } },
-      });
-      if (reversedByAdjustment > 0) continue;
-      await this.journal.reverseInTransaction(tx, facilityId, userId, entry.id, {
-        reason: 'accrual never reversed by an earlier version',
-        date: later(periodStartDate(year, month), entry.entryDate),
-      });
-      legacyReversals += 1;
-    }
-
     const { shares, unaccruable } = await this.shares(tx, facilityId, periodEnd, start);
     if (shares.length === 0) {
-      return { accrued_entry_number: null, reversal_entry_number: null, legacy_reversals: legacyReversals, total_pkr: 0, lot_count: 0, unaccruable };
+      return { accrued_entry_number: null, reversal_entry_number: null, total_pkr: 0, lot_count: 0, unaccruable };
     }
 
     const accrual = await this.journal.postInTransaction(
@@ -270,7 +241,6 @@ export class RevenueAccrualService {
     return {
       accrued_entry_number: accrual.entryNumber,
       reversal_entry_number: reversal.entryNumber,
-      legacy_reversals: legacyReversals,
       total_pkr: round2(shares.reduce((s, r) => s + r.amountPkr, 0)),
       lot_count: shares.length,
       unaccruable,

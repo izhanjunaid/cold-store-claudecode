@@ -150,27 +150,4 @@ describe('advances and on-account receipts (R-02, R-13, R-22)', () => {
     expect(part.body.data.status).toBe('RECORDED');
     expect(part.body.data.unallocated_pkr).toBeCloseTo(a.total - 100, 2);
   });
-
-  it('posts a missing advance application for an allocation an older version left without JE-04', async () => {
-    const partyId = await fx.party('Legacy Advance Party');
-    const a = await fx.invoice(partyId, { outbound: '2026-04-14' });
-    const adv = await fx.call('POST', '/v1/payments', fx.tokens.accountant, {
-      party_id: partyId, payment_date: '2026-04-15', amount_pkr: 1000, payment_method: 'CASH', is_advance: true,
-    });
-    const payId = adv.body.data.id;
-    // What the pre-fix allocate() left behind on a second application: the allocation, no entry.
-    await prisma.paymentAllocation.create({ data: { paymentId: payId, invoiceId: a.id, allocatedAmountPkr: 250 } });
-    await prisma.invoice.update({ where: { id: a.id }, data: { amountPaidPkr: 250 } });
-
-    const fix = await fx.call('POST', `/v1/payments/${payId}/post-missing-advance-application`, fx.tokens.accountant, {});
-    expect(fix.status).toBe(201);
-    expect(await partyBalance(partyId, '2010')).toBe(-750);
-    const je04 = await prisma.journalEntry.findMany({
-      where: { facilityId: TEST_FACILITY_ID, sourceTable: 'payments', sourceId: payId, entryType: 'ADVANCE_APPLIED' },
-    });
-    expect(je04).toHaveLength(1);
-
-    const again = await fx.call('POST', `/v1/payments/${payId}/post-missing-advance-application`, fx.tokens.accountant, {});
-    expect(again.status).toBe(400);
-  });
 });

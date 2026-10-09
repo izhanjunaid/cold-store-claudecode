@@ -51,9 +51,6 @@ interface PL {
   ebitda_pct: number | null;
   net_profit_pkr: number;
   net_profit_pct: number | null;
-  /** Names only: their amounts are already inside the section their class belongs to. */
-  unclassified_lines: Line[];
-  has_unclassified: boolean;
 }
 
 function lineMap(pl: PL | null): Map<string, number> {
@@ -223,17 +220,6 @@ export default function ProfitLossPage() {
               </a>{' '}
               for the same period.
             </p>
-
-            {data.has_unclassified && (
-              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                {data.unclassified_lines.map((l) => `${l.account_code} ${l.account_name}`).join(', ')}{' '}
-                {data.unclassified_lines.length === 1 ? 'sits' : 'sit'} under no standard header, so{' '}
-                {data.unclassified_lines.length === 1 ? 'it is' : 'they are'} shown in the section of
-                {data.unclassified_lines.length === 1 ? ' its' : ' their'} class above. Move{' '}
-                {data.unclassified_lines.length === 1 ? 'it' : 'them'} under a standard header (Chart of
-                Accounts) to place {data.unclassified_lines.length === 1 ? 'it' : 'them'} deliberately.
-              </p>
-            )}
           </StatementFrame>
 
           <RatiosStrip
