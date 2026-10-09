@@ -1,5 +1,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiClient } from './api-client';
+import { apiClient, apiClientAll } from './api-client';
+
+// A list endpoint caps a page at 100; asking for more is refused outright (the room
+// map asked for 200 and showed an empty room).
+describe('apiClientAll', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('pages through the whole list, never asking for more than a page holds', async () => {
+    const all = Array.from({ length: 230 }, (_, i) => ({ id: i }));
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      const page = Number(new URL(url).searchParams.get('page'));
+      return { ok: true, json: async () => ({ success: true, data: all.slice((page - 1) * 100, page * 100), meta: { page, per_page: 100, total: 230 } }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const rows = await apiClientAll<{ id: number }>('/v1/lots?chamber_id=c1&per_page=100');
+    expect(rows).toHaveLength(230);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    for (const [url] of fetchMock.mock.calls) expect(String(url)).toContain('per_page=100&page=');
+  });
+});
 
 describe('apiClient request headers', () => {
   let fetchMock: ReturnType<typeof vi.fn>;

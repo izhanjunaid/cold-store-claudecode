@@ -98,6 +98,22 @@ interface LoanSummary {
 
 const TABS = ['Active Lots', 'Invoices', 'Payments', 'Ledger', 'Peshgi'] as const;
 
+/** Rows a tab loads; the API's page cap. Past it, the tab links to the full list. */
+const TAB_ROWS = 100;
+
+/** A tab shows the first rows only — say so, and link to the full, filtered list. */
+function MoreRows({ shown, total, href }: { shown: number; total: number; href: string }) {
+  if (total <= shown) return null;
+  return (
+    <p className="mt-2 text-xs text-muted-foreground">
+      Showing {shown} of {total}.{' '}
+      <Link className="underline" href={href}>
+        View all
+      </Link>
+    </p>
+  );
+}
+
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-4 py-1">
@@ -132,6 +148,7 @@ export default function PartyDetailPage() {
   const [loans, setLoans] = useState<LoanSummary[]>([]);
   const [loansError, setLoansError] = useState(false);
   const [tabLoaded, setTabLoaded] = useState<Record<string, boolean>>({});
+  const [totals, setTotals] = useState({ lots: 0, invoices: 0, payments: 0 });
 
   const [showPay, setShowPay] = useState(false);
   const [showIssueLoan, setShowIssueLoan] = useState(false);
@@ -173,23 +190,42 @@ export default function PartyDetailPage() {
     refreshHeaderStats();
   }, [refreshHeaderStats]);
 
+  // The lot list filters its owner as party_id and pages with per_page; invoices and
+  // payments page with page_size. A name the endpoint does not know is dropped, not
+  // refused — owner_party_id once listed every party's lots here.
+  const lotsUrl = `/v1/lots?party_id=${partyId}&status=ACTIVE&per_page=${TAB_ROWS}`;
+  const invoicesUrl = `/v1/invoices?party_id=${partyId}&page_size=${TAB_ROWS}`;
+  const paymentsUrl = `/v1/payments?party_id=${partyId}&page_size=${TAB_ROWS}`;
+  const loadInvoices = useCallback(async () => {
+    const res = await apiClientList<InvoiceSummary>(invoicesUrl);
+    setInvoices(res.data);
+    setTotals((t) => ({ ...t, invoices: res.meta?.total ?? res.data.length }));
+  }, [invoicesUrl]);
+  const loadPayments = useCallback(async () => {
+    const res = await apiClientList<PaymentSummary>(paymentsUrl);
+    setPayments(res.data);
+    setTotals((t) => ({ ...t, payments: res.meta?.total ?? res.data.length }));
+  }, [paymentsUrl]);
+
   const loadTab = useCallback(
     async (tab: string) => {
       if (tabLoaded[tab]) return;
       setTabLoaded((prev) => ({ ...prev, [tab]: true }));
       try {
         if (tab === 'Active Lots') {
-          setLots((await apiClientList<LotSummary>(`/v1/lots?owner_party_id=${partyId}&status=ACTIVE&page_size=100`)).data);
+          const res = await apiClientList<LotSummary>(lotsUrl);
+          setLots(res.data);
+          setTotals((t) => ({ ...t, lots: res.meta?.total ?? res.data.length }));
         } else if (tab === 'Invoices') {
-          setInvoices((await apiClientList<InvoiceSummary>(`/v1/invoices?party_id=${partyId}&page_size=100`)).data);
+          await loadInvoices();
         } else if (tab === 'Payments') {
-          setPayments((await apiClientList<PaymentSummary>(`/v1/payments?party_id=${partyId}&page_size=100`)).data);
+          await loadPayments();
         }
       } catch {
         /* handled */
       }
     },
-    [partyId, tabLoaded],
+    [tabLoaded, lotsUrl, loadInvoices, loadPayments],
   );
 
   useEffect(() => {
@@ -201,17 +237,17 @@ export default function PartyDetailPage() {
   // tick would still read the pre-update, already-loaded flag).
   const refreshTransactionTabs = useCallback(async () => {
     try {
-      setInvoices((await apiClientList<InvoiceSummary>(`/v1/invoices?party_id=${partyId}&page_size=100`)).data);
+      await loadInvoices();
     } catch {
       /* handled */
     }
     try {
-      setPayments((await apiClientList<PaymentSummary>(`/v1/payments?party_id=${partyId}&page_size=100`)).data);
+      await loadPayments();
     } catch {
       /* handled */
     }
     setTabLoaded((prev) => ({ ...prev, Invoices: true, Payments: true }));
-  }, [partyId]);
+  }, [loadInvoices, loadPayments]);
 
   const deactivate = useApiMutation<unknown, void>({
     mutationFn: () => apiClient(`/v1/parties/${partyId}`, { method: 'DELETE' }),
@@ -359,6 +395,7 @@ export default function PartyDetailPage() {
                   </TableBody>
                 </Table>
               )}
+              <MoreRows shown={lots.length} total={totals.lots} href={`/lots?status=ACTIVE&party_id=${partyId}`} />
             </TabsContent>
 
             <TabsContent value="Invoices" className="mt-0">
@@ -390,6 +427,7 @@ export default function PartyDetailPage() {
                   </TableBody>
                 </Table>
               )}
+              <MoreRows shown={invoices.length} total={totals.invoices} href={`/invoices?party_id=${partyId}`} />
             </TabsContent>
 
             <TabsContent value="Payments" className="mt-0">
@@ -425,6 +463,7 @@ export default function PartyDetailPage() {
                   </TableBody>
                 </Table>
               )}
+              <MoreRows shown={payments.length} total={totals.payments} href={`/payments?party_id=${partyId}`} />
             </TabsContent>
 
             <TabsContent value="Ledger" className="mt-0">

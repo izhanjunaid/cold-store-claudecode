@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, apiClientAll } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -180,12 +180,11 @@ function RoomDrillDownDialog({
     queryFn: () => apiClient<RoomDetail>(`/v1/chambers/${chamberId}`),
   });
 
-  const { data: roomLots = [], isLoading: roomLotsLoading } = useQuery({
+  // Every active lot of the room, a page of 100 at a time: per_page=200 was over the
+  // API's cap, refused, and the room looked empty.
+  const { data: roomLots = [], isLoading: roomLotsLoading, isError: roomLotsError } = useQuery({
     queryKey: qk.lots.list({ chamber_id: chamberId, status: 'ACTIVE', view: 'map' }),
-    queryFn: () =>
-      apiClient<{ data: LotSummary[] } | LotSummary[]>(`/v1/lots?chamber_id=${chamberId}&status=ACTIVE&per_page=200`).then(
-        (res) => (Array.isArray(res) ? res : res.data ?? []),
-      ),
+    queryFn: () => apiClientAll<LotSummary>(`/v1/lots?chamber_id=${chamberId}&status=ACTIVE&per_page=100`),
     enabled: rackId === null,
   });
 
@@ -261,6 +260,8 @@ function RoomDrillDownDialog({
         <div className="max-h-[45vh] overflow-y-auto">
           {isLoading ? (
             <p className="py-6 text-center text-sm text-muted-foreground">Loading lots…</p>
+          ) : !rackId && roomLotsError ? (
+            <p className="py-6 text-center text-sm text-destructive">Could not load this room&apos;s lots.</p>
           ) : rows.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               {rackId ? `Nothing is placed on ${selectedRack?.name ?? 'this rack'}.` : 'No active lots in this room.'}
