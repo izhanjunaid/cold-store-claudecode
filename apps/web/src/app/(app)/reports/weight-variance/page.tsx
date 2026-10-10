@@ -10,8 +10,8 @@ import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState, type DataTableColumn } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
 import { qk } from '@/lib/query-keys';
+import { WEIGHT_VARIANCE_ALERT_PCT } from '@/lib/format';
 
-const THRESHOLD = 2;
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
 const columns: DataTableColumn<WeightVarianceRowType>[] = [
@@ -23,14 +23,14 @@ const columns: DataTableColumn<WeightVarianceRowType>[] = [
     id: 'variance_kg',
     header: 'Variance (kg)',
     numeric: true,
-    cell: (r) => <span className={Math.abs(r.variance_pct) >= THRESHOLD ? 'font-medium text-destructive' : ''}>{num(r.variance_kg)}</span>,
+    cell: (r) => <span className={Math.abs(r.variance_pct) >= WEIGHT_VARIANCE_ALERT_PCT ? 'font-medium text-destructive' : ''}>{num(r.variance_kg)}</span>,
     csv: (r) => r.variance_kg,
   },
   {
     id: 'variance_pct',
     header: 'Variance %',
     numeric: true,
-    cell: (r) => <span className={Math.abs(r.variance_pct) >= THRESHOLD ? 'font-medium text-destructive' : ''}>{r.variance_pct.toFixed(2)}%</span>,
+    cell: (r) => <span className={Math.abs(r.variance_pct) >= WEIGHT_VARIANCE_ALERT_PCT ? 'font-medium text-destructive' : ''}>{r.variance_pct.toFixed(2)}%</span>,
     csv: (r) => r.variance_pct,
   },
   { id: 'outbounds', header: 'Outbounds', numeric: true, cell: (r) => r.finalized_outbound_count, csv: (r) => r.finalized_outbound_count },
@@ -61,14 +61,14 @@ export default function WeightVariancePage() {
     return (
       <div>
         <PageHeader title="Weight Variance" />
-        <p className="text-muted-foreground">Weight variance requires MANAGER role or higher.</p>
+        <p className="text-muted-foreground">You don&apos;t have permission to view weight variance.</p>
       </div>
     );
   }
 
   return (
     <div>
-      <PageHeader title="Weight Variance" description={`Inbound vs outbound weight per lot · flagged at ±${THRESHOLD}%`} />
+      <PageHeader title="Weight Variance" description={`Inbound vs outbound weight per lot · flagged at ±${WEIGHT_VARIANCE_ALERT_PCT}%`} />
       <DataTable
         columns={columns}
         data={data?.data ?? []}

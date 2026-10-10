@@ -5,12 +5,13 @@ import { useQuery } from '@tanstack/react-query';
 import { Map, Plus, Rows3 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
+import { useFacility } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
-import { CapacityBar, capacityPct } from '@/components/capacity-bar';
+import { CapacityBar, capacityPct, DEFAULT_CAPACITY_WARN_PCT } from '@/components/capacity-bar';
 
 interface Chamber {
   id: string;
@@ -30,6 +31,8 @@ export default function RoomListPage() {
     queryKey: qk.chambers.list({}),
     queryFn: () => apiClient<Chamber[]>('/v1/chambers'),
   });
+  const { data: facility } = useFacility();
+  const warnPct = facility?.settings?.chamber_capacity_warning_pct ?? DEFAULT_CAPACITY_WARN_PCT;
 
   return (
     <div>
@@ -58,7 +61,7 @@ export default function RoomListPage() {
         </div>
       ) : chambers.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">No rooms found</CardContent>
+          <CardContent className="py-8 text-center text-muted-foreground">No rooms found</CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -66,7 +69,7 @@ export default function RoomListPage() {
             const pct = capacityPct(chamber.current_occupancy_bags, chamber.max_capacity_bags);
             return (
               <Card key={chamber.id} className="cursor-pointer transition-shadow hover:shadow-md" onClick={() => router.push(`/chambers/${chamber.id}`)}>
-                <CardContent className="pt-6">
+                <CardContent className="p-4">
                   <div className="mb-3 flex items-start justify-between gap-2">
                     <h3 className="min-w-0 font-semibold text-foreground">{chamber.name}</h3>
                     <StatusBadge
@@ -83,7 +86,7 @@ export default function RoomListPage() {
                       </span>
                       <span className="tabular-nums">{pct}%</span>
                     </div>
-                    <CapacityBar occupied={chamber.current_occupancy_bags} capacity={chamber.max_capacity_bags} />
+                    <CapacityBar occupied={chamber.current_occupancy_bags} capacity={chamber.max_capacity_bags} warnPct={warnPct} />
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="flex items-center gap-1.5 text-muted-foreground">

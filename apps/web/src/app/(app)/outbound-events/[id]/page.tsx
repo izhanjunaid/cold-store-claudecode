@@ -13,7 +13,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 import { useLotPlacements } from '@/components/lot-location';
-import { formatDate } from '@/lib/format';
+import { formatDate, WEIGHT_VARIANCE_ALERT_PCT } from '@/lib/format';
 
 import { PageSkeleton } from '@/components/page-skeleton';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
@@ -175,7 +175,7 @@ export default function OutboundEventDetailPage() {
         </div>
       )}
 
-      <Card className="mb-5">
+      <Card className="mb-4">
         <CardHeader>
           <CardTitle className="text-sm">Dispatch Details</CardTitle>
         </CardHeader>
@@ -194,14 +194,14 @@ export default function OutboundEventDetailPage() {
         </CardContent>
       </Card>
 
-      <Card className="mb-5">
+      <Card className="mb-4">
         <CardHeader>
           <CardTitle className="text-sm">Weight</CardTitle>
         </CardHeader>
         <CardContent>
           {event.status === 'PENDING' && (
             <form onSubmit={handleRecordWeight} className="flex items-end gap-3">
-              <div className="flex-1 space-y-1.5">
+              <div className="flex-1 space-y-1">
                 <Label>Outbound Weight (kg) <span className="text-destructive">*</span></Label>
                 <Input
                   type="number"
@@ -229,7 +229,7 @@ export default function OutboundEventDetailPage() {
               {event.weight_variance_pct != null && (
                 <div>
                   <div className="text-xs uppercase tracking-wide text-muted-foreground">Variance</div>
-                  <div className={`mt-0.5 font-semibold ${Math.abs(event.weight_variance_pct) > 5 ? 'text-destructive' : 'text-foreground'}`}>
+                  <div className={`mt-0.5 font-semibold ${Math.abs(event.weight_variance_pct) >= WEIGHT_VARIANCE_ALERT_PCT ? 'text-destructive' : 'text-foreground'}`}>
                     {event.weight_variance_pct > 0 ? '+' : ''}
                     {event.weight_variance_pct.toFixed(2)}%
                   </div>
@@ -245,7 +245,7 @@ export default function OutboundEventDetailPage() {
       </Card>
 
       {isActionable && location && (location.placements.length > 0 || location.unplaced_bags > 0) && (
-        <Card className="mb-5">
+        <Card className="mb-4">
           <CardHeader>
             <CardTitle className="text-sm">Pick Location — {location.chamber_name ?? 'Room'}</CardTitle>
           </CardHeader>

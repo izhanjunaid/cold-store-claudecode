@@ -19,6 +19,13 @@
  */
 export type NumberLocale = 'en-PK' | 'en-IN';
 
+/**
+ * Alert threshold (%) for inbound-vs-outbound weight loss on a lot — shared by the per-event
+ * flag on outbound-events/[id] and the aggregate reports/weight-variance report, so a lot
+ * doesn't read "fine" on one screen and "flagged" on the other.
+ */
+export const WEIGHT_VARIANCE_ALERT_PCT = 2;
+
 let numberLocale: NumberLocale = 'en-PK';
 
 /** Called once per session from <NumberLocaleSync/>; see app/(app)/layout.tsx. */

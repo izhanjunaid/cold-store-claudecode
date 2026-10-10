@@ -7,6 +7,7 @@ import { FileText, RefreshCw, Truck } from 'lucide-react';
 import { apiClient, apiClientList, ApiError } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { hasMinRole } from '@/lib/rbac';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -45,8 +46,6 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = 
   CANCELLED: 'danger',
 };
 
-const GATE_ALLOWED_ROLES = ['OWNER', 'MANAGER', 'OPERATOR', 'SECURITY'];
-
 function relativeTime(iso: string): string {
   const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
   if (min < 1) return 'just now';
@@ -82,7 +81,7 @@ export default function GatePassConsolePage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const canManager = !!user && hasMinRole(user.role, 'MANAGER');
-  const canSecurity = GATE_ALLOWED_ROLES.includes(user?.role ?? '');
+  const canSecurity = can(user, 'gate_passes.log');
 
   const [passes, setPasses] = useState<GatePass[]>([]);
   const [recentCleared, setRecentCleared] = useState<GatePass[]>([]);
@@ -194,7 +193,7 @@ export default function GatePassConsolePage() {
     <div>
       <PageHeader title="Gate Pass Console" description="Log arriving vehicles and clear outbound dispatches." />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Log Arrival */}
         <Card>
           <CardHeader>
@@ -202,7 +201,7 @@ export default function GatePassConsolePage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={submitInward} className="space-y-4">
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Vehicle number <span className="text-destructive">*</span></Label>
                 <Input
                   type="text"
@@ -214,15 +213,15 @@ export default function GatePassConsolePage() {
                   className="h-12 font-mono text-lg"
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Driver name</Label>
                 <Input type="text" value={driver} onChange={(e) => setDriver(e.target.value)} placeholder="Ali Khan" />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Driver phone</Label>
                 <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0300-1234567" />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Bilty number</Label>
                 <Input type="text" value={bilty} onChange={(e) => setBilty(e.target.value)} placeholder="Optional transporter receipt" />
               </div>
@@ -304,7 +303,7 @@ export default function GatePassConsolePage() {
         </Card>
       </div>
 
-      <Card className="mt-6">
+      <Card className="mt-4">
         <CardHeader>
           <CardTitle className="text-base">Recently Cleared Today</CardTitle>
         </CardHeader>
@@ -342,7 +341,7 @@ export default function GatePassConsolePage() {
                 Pass {outwardModal.pass_number}
                 {outwardModal.related_dispatch_note_number ? ` • Dispatch ${outwardModal.related_dispatch_note_number}` : ''}
               </p>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Outbound event ID (optional)</Label>
                 <Input
                   value={outwardOutboundId}

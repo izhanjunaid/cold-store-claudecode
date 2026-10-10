@@ -7,10 +7,12 @@ import type { CommodityInventoryRowType } from '@coldchain/shared';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { apiClient } from '@/lib/api-client';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/layout/page-header';
+import { StatTile } from '@/components/stat-tile';
+import { formatCount } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 export default function CommodityInventoryPage() {
@@ -36,7 +38,7 @@ export default function CommodityInventoryPage() {
     return (
       <div>
         <PageHeader title="Commodity Inventory" />
-        <p className="text-muted-foreground">Commodity inventory requires MANAGER role or higher.</p>
+        <p className="text-muted-foreground">You don&apos;t have permission to view commodity inventory.</p>
       </div>
     );
   }
@@ -47,30 +49,20 @@ export default function CommodityInventoryPage() {
     <div>
       <PageHeader title="Commodity Inventory" description="Bags in storage by commodity, with per-room breakdown" />
 
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:max-w-md">
-        <Card>
-          <CardContent className="pt-5">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Active Commodities</div>
-            <div className="mt-1 text-xl font-semibold tabular-nums">{data?.length ?? 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-5">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Total Bags</div>
-            <div className="mt-1 text-xl font-semibold tabular-nums">{totalBags.toLocaleString()}</div>
-          </CardContent>
-        </Card>
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:max-w-md">
+        <StatTile size="compact" label="Active Commodities" value={formatCount(data?.length ?? 0)} />
+        <StatTile size="compact" label="Total Bags" value={formatCount(totalBags)} />
       </div>
 
       <Card>
         {isLoading ? (
-          <div className="space-y-2.5 p-6">
+          <div className="space-y-2.5 p-4">
             {Array.from({ length: 6 }, (_, i) => (
               <Skeleton key={i} className="h-4 w-full" />
             ))}
           </div>
         ) : !data || data.length === 0 ? (
-          <p className="py-10 text-center text-sm text-muted-foreground">No active inventory.</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">No active inventory.</p>
         ) : (
           <ul className="divide-y">
             {data.map((row) => {
@@ -94,7 +86,7 @@ export default function CommodityInventoryPage() {
                     <div className="bg-muted/30 px-4 py-2">
                       <Table>
                         <TableHeader>
-                          <TableRow>
+                          <TableRow className="h-8 hover:bg-transparent">
                             <TableHead>Room</TableHead>
                             <TableHead className="text-right">Bags</TableHead>
                             <TableHead className="text-right">Occupancy</TableHead>
@@ -102,10 +94,10 @@ export default function CommodityInventoryPage() {
                         </TableHeader>
                         <TableBody>
                           {row.per_chamber.map((c) => (
-                            <TableRow key={c.chamber_id}>
-                              <TableCell>{c.chamber_name}</TableCell>
-                              <TableCell className="text-right tabular-nums">{c.bags.toLocaleString()}</TableCell>
-                              <TableCell className="text-right tabular-nums">{c.occupancy_pct.toFixed(1)}%</TableCell>
+                            <TableRow key={c.chamber_id} className="h-7">
+                              <TableCell className="py-1">{c.chamber_name}</TableCell>
+                              <TableCell className="py-1 text-right tabular-nums">{c.bags.toLocaleString()}</TableCell>
+                              <TableCell className="py-1 text-right tabular-nums">{c.occupancy_pct.toFixed(1)}%</TableCell>
                             </TableRow>
                           ))}
                         </TableBody>

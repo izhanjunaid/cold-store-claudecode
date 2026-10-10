@@ -99,7 +99,7 @@ export function LotLocationCard({ lotId, canOperate }: { lotId: string; canOpera
   if (!loc) return null;
 
   return (
-    <Card className="mb-6">
+    <Card className="mb-4">
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="flex items-center gap-2 text-sm">
           <DoorOpen className="h-4 w-4 text-muted-foreground" aria-hidden />
@@ -171,7 +171,8 @@ export function LotLocationCard({ lotId, canOperate }: { lotId: string; canOpera
   );
 }
 
-function EditPlacementDialog({
+/** Exported so the /lots list row actions can open the same dialog without a page load. */
+export function EditPlacementDialog({
   loc,
   onClose,
   onSaved,
@@ -200,7 +201,7 @@ function EditPlacementDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent size="md">
         <DialogHeader>
           <DialogTitle>Edit Placement — {loc.chamber_name}</DialogTitle>
         </DialogHeader>
@@ -224,7 +225,8 @@ function EditPlacementDialog({
   );
 }
 
-function MoveLotDialog({
+/** Exported so the /lots list row actions can open the same dialog without a page load. */
+export function MoveLotDialog({
   loc,
   onClose,
   onMoved,
@@ -289,7 +291,7 @@ function MoveLotDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent size="md">
         <DialogHeader>
           <DialogTitle>Move Lot</DialogTitle>
         </DialogHeader>
@@ -311,7 +313,7 @@ function MoveLotDialog({
                   <div>
                     <label className="mb-1 block text-xs font-medium text-muted-foreground">From rack</label>
                     <select
-                      className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                      className="h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm"
                       value={fromRackId}
                       onChange={(e) => setFromRackId(e.target.value)}
                     >
@@ -326,7 +328,7 @@ function MoveLotDialog({
                   <div>
                     <label className="mb-1 block text-xs font-medium text-muted-foreground">To rack</label>
                     <select
-                      className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                      className="h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm"
                       value={toRackId}
                       onChange={(e) => setToRackId(e.target.value)}
                     >
@@ -362,7 +364,7 @@ function MoveLotDialog({
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Destination room</label>
               <select
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                className="h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm"
                 value={toChamberId}
                 onChange={(e) => {
                   setToChamberId(e.target.value);

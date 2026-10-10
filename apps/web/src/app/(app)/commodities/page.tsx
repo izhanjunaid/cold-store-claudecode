@@ -105,22 +105,22 @@ export default function CommoditiesPage() {
       />
 
       {/* Add commodity */}
-      <Card className="mb-6">
-        <CardContent className="pt-6">
+      <Card className="mb-4">
+        <CardContent className="p-4">
           <form onSubmit={addCommodity} className="grid grid-cols-1 gap-4 sm:grid-cols-4 sm:items-end">
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className="space-y-1 sm:col-span-2">
               <Label>
                 Commodity name <span className="text-destructive">*</span>
               </Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} required maxLength={100} placeholder="e.g. Potato" />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>
                 Unit <span className="text-destructive">*</span>
               </Label>
               <Input value={unit} onChange={(e) => setUnit(e.target.value)} required maxLength={20} placeholder="bags" />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Storage alert (days)</Label>
               <Input
                 type="number"
@@ -151,7 +151,7 @@ export default function CommoditiesPage() {
         </div>
       ) : commodities.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
+          <CardContent className="py-8 text-center text-muted-foreground">
             No commodities yet. Add your first one above.
           </CardContent>
         </Card>
@@ -159,7 +159,7 @@ export default function CommoditiesPage() {
         <div className="space-y-4">
           {commodities.map((c) => (
             <Card key={c.id}>
-              <CardContent className="pt-6">
+              <CardContent className="p-4">
                 <div className="mb-3 flex items-baseline justify-between gap-2">
                   <h3 className="font-semibold text-foreground">{c.name}</h3>
                   <span className="shrink-0 text-xs text-muted-foreground">

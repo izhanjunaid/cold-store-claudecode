@@ -5,14 +5,17 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeftRight, FileText, PackageMinus } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { UrduText } from '@/components/ui/urdu-text';
 import { PageHeader } from '@/components/layout/page-header';
 import { LotLocationCard, LotMovementsTimeline } from '@/components/lot-location';
+import { TransferForm } from './transfer-form';
 
 import { formatDate, formatDateTime } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -93,19 +96,23 @@ export default function LotDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const id = params['id'] as string;
-  const recentTransferId = searchParams?.get('transfer');
+  const [drawerTransferId, setDrawerTransferId] = useState<string | null>(null);
+  // Either the drawer's own completion (in-place) or the URL param the old page-navigation flow
+  // still sets — /transfer/new is a kept deep-link, so both paths must show this banner.
+  const recentTransferId = drawerTransferId ?? searchParams?.get('transfer');
 
   const [lot, setLot] = useState<Lot | null>(null);
   const [ownershipHistory, setOwnershipHistory] = useState<OwnershipEvent[]>([]);
   const [outboundEvents, setOutboundEvents] = useState<OutboundSummary[]>([]);
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState(recentTransferId ? 'ownership' : 'overview');
+  const [activeTab, setActiveTab] = useState('ownership');
   const [receiptLoading, setReceiptLoading] = useState(false);
+  const [printingTransferId, setPrintingTransferId] = useState<string | null>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
   const user = useAuthStore((s) => s.user);
-  const canTransfer = user?.role === 'OWNER' || user?.role === 'MANAGER';
-  const canWithdraw =
-    user?.role != null && ['OWNER', 'MANAGER', 'ACCOUNTANT', 'OPERATOR'].includes(user.role);
+  const canTransfer = can(user, 'lots.transfer_ownership');
+  const canWithdraw = can(user, 'outbound.record');
 
   const fetchLot = useCallback(async () => {
     setLoading(true);
@@ -153,6 +160,36 @@ export default function LotDetailPage() {
     }
   };
 
+  const handleTransferSuccess = (transferId: string) => {
+    setTransferOpen(false);
+    setDrawerTransferId(transferId);
+    setActiveTab('ownership');
+    fetchLot();
+    apiClient<OwnershipEvent[]>(`/v1/lots/${id}/ownership-history`).then(setOwnershipHistory).catch(() => {});
+  };
+
+  const printAcknowledgment = async (transferId: string) => {
+    setPrintingTransferId(transferId);
+    try {
+      const token = localStorage.getItem('access_token');
+      const facilityId = localStorage.getItem('facility_id');
+      const res = await fetch(`${API_URL}/v1/lots/${id}/transfer/${transferId}/acknowledgment`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
+        },
+      });
+      if (!res.ok) throw new Error('Failed to fetch acknowledgment');
+      const url = URL.createObjectURL(await res.blob());
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      /* handled */
+    } finally {
+      setPrintingTransferId(null);
+    }
+  };
+
   if (loading) return <PageSkeleton />;
   if (!lot)
     return (
@@ -174,7 +211,7 @@ export default function LotDetailPage() {
         actions={
           <>
             {canTransfer && canAct && (
-              <Button variant="outline" onClick={() => router.push(`/lots/${id}/transfer/new`)}>
+              <Button variant="outline" onClick={() => setTransferOpen(true)}>
                 <ArrowLeftRight className="h-4 w-4" aria-hidden />
                 Transfer Ownership
               </Button>
@@ -204,15 +241,16 @@ export default function LotDetailPage() {
           <Button
             variant="link"
             className="h-auto p-0 text-green-800"
-            onClick={() => router.push(`/lots/${id}/transfer/${recentTransferId}/acknowledgment`)}
+            onClick={() => printAcknowledgment(recentTransferId)}
+            disabled={printingTransferId === recentTransferId}
           >
-            View / Print Acknowledgment
+            {printingTransferId === recentTransferId ? 'Preparing…' : 'View / Print Acknowledgment'}
           </Button>
         </div>
       )}
 
-      <Card className="mb-6">
-        <CardContent className="pt-6">
+      <Card className="mb-4">
+        <CardContent className="p-4">
           {lot.weight_dispute_flag && (
             <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
               <p className="text-sm font-medium text-amber-800">Weight dispute flag</p>
@@ -266,6 +304,8 @@ export default function LotDetailPage() {
             />
             <Field label="Inbound Date" value={formatDate(lot.inbound_date)} />
             <Field label="Days in Storage" value={lot.days_in_storage} />
+            <Field label="Entry Date" value={formatDate(lot.entry_date)} />
+            <Field label="Created" value={formatDateTime(lot.created_at)} />
             {lot.vehicle_number && <Field label="Vehicle" value={lot.vehicle_number} />}
             {lot.marka && <Field label="Marka" value={<UrduText className="text-sm font-semibold">{lot.marka}</UrduText>} urdu />}
             {lot.quality_grade_inbound && <Field label="Quality Grade" value={`Grade ${lot.quality_grade_inbound}`} />}
@@ -287,10 +327,8 @@ export default function LotDetailPage() {
           <div className="border-b px-2">
             <TabsList className="h-auto bg-transparent p-0">
               {([
-                ['overview', 'Overview'],
                 ['ownership', 'Ownership History'],
                 ['movements', 'Movements'],
-                ['inspections', 'Inspections'],
                 ['withdrawals', 'Withdrawals'],
                 ['billing', 'Billing'],
               ] as const).map(([key, label]) => (
@@ -306,14 +344,6 @@ export default function LotDetailPage() {
           </div>
 
           <div className="p-4">
-            <TabsContent value="overview" className="mt-0">
-              <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-3">
-                <Field label="Entry Date" value={formatDate(lot.entry_date)} />
-                <Field label="Created" value={formatDateTime(lot.created_at)} />
-                <Field label="Book Type" value={lot.book_type === 'PACCI' ? 'Pacci (Official)' : 'Katchi (Informal)'} />
-              </div>
-            </TabsContent>
-
             <TabsContent value="ownership" className="mt-0">
               {lot.marka && (
                 <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
@@ -327,7 +357,7 @@ export default function LotDetailPage() {
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="h-8 hover:bg-transparent">
                       <TableHead>Event</TableHead>
                       <TableHead>From</TableHead>
                       <TableHead>To</TableHead>
@@ -340,22 +370,27 @@ export default function LotDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {ownershipHistory.map((ev) => (
-                      <TableRow key={ev.id}>
-                        <TableCell className="font-medium">{EVENT_TYPE_LABELS[ev.event_type] ?? ev.event_type}</TableCell>
-                        <TableCell className="text-muted-foreground">{ev.from_party_name ?? '—'}</TableCell>
-                        <TableCell>{ev.to_party_name ?? '—'}</TableCell>
-                        <TableCell className="text-right tabular-nums">{ev.quantity_bags.toLocaleString()}</TableCell>
-                        <TableCell className="text-right tabular-nums">{ev.transfer_price_pkr != null ? ev.transfer_price_pkr.toLocaleString() : '—'}</TableCell>
-                        <TableCell>{formatDate(ev.effective_date)}</TableCell>
-                        <TableCell className="text-muted-foreground">{ev.operator_name ?? '—'}</TableCell>
-                        <TableCell className="text-right">
+                      <TableRow key={ev.id} className="h-7">
+                        <TableCell className="py-1 font-medium">{EVENT_TYPE_LABELS[ev.event_type] ?? ev.event_type}</TableCell>
+                        <TableCell className="py-1 text-muted-foreground">{ev.from_party_name ?? '—'}</TableCell>
+                        <TableCell className="py-1">{ev.to_party_name ?? '—'}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums">{ev.quantity_bags.toLocaleString()}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums">{ev.transfer_price_pkr != null ? ev.transfer_price_pkr.toLocaleString() : '—'}</TableCell>
+                        <TableCell className="py-1">{formatDate(ev.effective_date)}</TableCell>
+                        <TableCell className="py-1 text-muted-foreground">{ev.operator_name ?? '—'}</TableCell>
+                        <TableCell className="py-1 text-right">
                           {(ev.event_type === 'TRANSFER_OUT' || ev.event_type === 'TRANSFER_IN') && (
                             <Button
                               variant="link"
+                              size="sm"
                               className="h-auto p-0 text-xs"
-                              onClick={() => router.push(`/lots/${id}/transfer/${ev.id}/acknowledgment`)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                printAcknowledgment(ev.id);
+                              }}
+                              disabled={printingTransferId === ev.id}
                             >
-                              PDF
+                              {printingTransferId === ev.id ? '…' : 'PDF'}
                             </Button>
                           )}
                         </TableCell>
@@ -370,19 +405,13 @@ export default function LotDetailPage() {
               <LotMovementsTimeline lotId={id} />
             </TabsContent>
 
-            <TabsContent value="inspections" className="mt-0">
-              <p className="py-6 text-center text-sm italic text-muted-foreground">
-                Quality inspections and spoilage records — available in Phase 6.
-              </p>
-            </TabsContent>
-
             <TabsContent value="withdrawals" className="mt-0">
               {outboundEvents.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">No withdrawals yet.</p>
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="h-8 hover:bg-transparent">
                       <TableHead>Dispatch #</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead className="text-right">Bags</TableHead>
@@ -393,14 +422,14 @@ export default function LotDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {outboundEvents.map((ev) => (
-                      <TableRow key={ev.id} className="cursor-pointer" onClick={() => router.push(`/outbound-events/${ev.id}`)}>
-                        <TableCell className="font-mono">{ev.dispatch_note_number ?? '—'}</TableCell>
-                        <TableCell>{ev.withdrawal_type}</TableCell>
-                        <TableCell className="text-right tabular-nums">{ev.quantity_withdrawn_bags.toLocaleString()}</TableCell>
-                        <TableCell><StatusBadge status={ev.status} /></TableCell>
-                        <TableCell>{formatDate(ev.outbound_date)}</TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="link" className="h-auto p-0 text-xs">View</Button>
+                      <TableRow key={ev.id} className="h-7 cursor-pointer" onClick={() => router.push(`/outbound-events/${ev.id}`)}>
+                        <TableCell className="py-1 font-mono">{ev.dispatch_note_number ?? '—'}</TableCell>
+                        <TableCell className="py-1">{ev.withdrawal_type}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums">{ev.quantity_withdrawn_bags.toLocaleString()}</TableCell>
+                        <TableCell className="py-1"><StatusBadge status={ev.status} /></TableCell>
+                        <TableCell className="py-1">{formatDate(ev.outbound_date)}</TableCell>
+                        <TableCell className="py-1 text-right">
+                          <Button variant="link" size="sm" className="h-auto p-0 text-xs">View</Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -417,7 +446,7 @@ export default function LotDetailPage() {
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="h-8 hover:bg-transparent">
                       <TableHead>Invoice #</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead className="text-right">Total</TableHead>
@@ -427,13 +456,13 @@ export default function LotDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {invoices.map((inv) => (
-                      <TableRow key={inv.id} className="cursor-pointer" onClick={() => router.push(`/invoices/${inv.id}`)}>
-                        <TableCell className="font-mono">{inv.invoice_number ?? <span className="italic text-muted-foreground">Draft</span>}</TableCell>
-                        <TableCell>{formatDate(inv.invoice_date)}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{inv.total_pkr.toLocaleString()}</TableCell>
-                        <TableCell><StatusBadge status={inv.status} /></TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="link" className="h-auto p-0 text-xs">View</Button>
+                      <TableRow key={inv.id} className="h-7 cursor-pointer" onClick={() => router.push(`/invoices/${inv.id}`)}>
+                        <TableCell className="py-1 font-mono">{inv.invoice_number ?? <span className="italic text-muted-foreground">Draft</span>}</TableCell>
+                        <TableCell className="py-1">{formatDate(inv.invoice_date)}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums font-medium">{inv.total_pkr.toLocaleString()}</TableCell>
+                        <TableCell className="py-1"><StatusBadge status={inv.status} /></TableCell>
+                        <TableCell className="py-1 text-right">
+                          <Button variant="link" size="sm" className="h-auto p-0 text-xs">View</Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -444,6 +473,24 @@ export default function LotDetailPage() {
           </div>
         </Tabs>
       </Card>
+
+      <Sheet open={transferOpen} onOpenChange={setTransferOpen}>
+        <SheetContent size="xl">
+          <SheetHeader>
+            <SheetTitle>Transfer Ownership — {lot.lot_number}</SheetTitle>
+          </SheetHeader>
+          <SheetBody>
+            {transferOpen && (
+              <TransferForm
+                lotId={id}
+                showLotSummary={false}
+                onSuccess={handleTransferSuccess}
+                onCancel={() => setTransferOpen(false)}
+              />
+            )}
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

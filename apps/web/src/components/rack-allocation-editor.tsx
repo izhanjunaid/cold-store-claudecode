@@ -1,8 +1,9 @@
 'use client';
 
-import { Plus, Trash2, Wand2 } from 'lucide-react';
+import { Wand2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { EditableRows, type EditableRowColumn } from '@/components/form';
 import { cn } from '@/lib/utils';
 import type { RackRef } from '@/hooks/use-reference-data';
 
@@ -31,87 +32,87 @@ interface RackAllocationEditorProps {
 }
 
 /**
- * Row-based rack allocation: each row picks a rack and a bag count, with a
- * live remaining counter and a one-tap fill of everything onto one rack.
+ * Row-based rack allocation: each row picks a rack and a bag count, with a live remaining
+ * counter and a one-tap fill of everything onto one rack. Built on the shared EditableRows
+ * primitive (docs/24_ui_density_spec.md §7) — the prior art it was generalized from.
  */
 export function RackAllocationEditor({ racks, rows, onChange, totalBags, disabled }: RackAllocationEditorProps) {
+  if (racks.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        This room has no racks yet — the bags will be stored unplaced.
+      </p>
+    );
+  }
+
   const placed = allocationTotal(rows);
   const remaining = totalBags - placed;
   const usedRackIds = new Set(rows.map((r) => r.rack_id).filter(Boolean));
 
-  const update = (idx: number, patch: Partial<AllocationRow>) => {
-    onChange(rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-  };
-
   const rackOccupancyHint = (rack: RackRef) =>
     `${rack.name} — ${(rack.max_capacity_bags - rack.current_occupancy_bags).toLocaleString()} free of ${rack.max_capacity_bags.toLocaleString()}`;
 
+  const overCapacityFor = (row: AllocationRow) => {
+    const rack = racks.find((r) => r.id === row.rack_id);
+    const bags = parseInt(row.bags) || 0;
+    return rack != null && bags > 0 && rack.current_occupancy_bags + bags > rack.max_capacity_bags;
+  };
+
+  const columns: EditableRowColumn<AllocationRow>[] = [
+    {
+      key: 'rack',
+      header: 'Rack',
+      width: '1fr',
+      render: (row, update) => (
+        <select
+          className="h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+          value={row.rack_id}
+          disabled={disabled}
+          onChange={(e) => update({ rack_id: e.target.value })}
+        >
+          <option value="">Select rack…</option>
+          {racks
+            .filter((r) => r.id === row.rack_id || !usedRackIds.has(r.id))
+            .map((r) => (
+              <option key={r.id} value={r.id}>
+                {rackOccupancyHint(r)}
+              </option>
+            ))}
+        </select>
+      ),
+    },
+    {
+      key: 'bags',
+      header: 'Bags',
+      width: '140px',
+      align: 'right',
+      render: (row, update) => (
+        <Input
+          type="number"
+          min={1}
+          placeholder="Bags"
+          value={row.bags}
+          disabled={disabled}
+          onChange={(e) => update({ bags: e.target.value })}
+          className={cn('h-8 text-right tabular-nums', overCapacityFor(row) && 'border-warning')}
+        />
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-2">
-      {racks.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          This room has no racks yet — the bags will be stored unplaced.
-        </p>
-      ) : (
-        <>
-          {rows.map((row, idx) => {
-            const rack = racks.find((r) => r.id === row.rack_id);
-            const bags = parseInt(row.bags) || 0;
-            const overCapacity =
-              rack != null && bags > 0 && rack.current_occupancy_bags + bags > rack.max_capacity_bags;
-            return (
-              <div key={idx} className="flex items-center gap-2">
-                <select
-                  className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 text-sm"
-                  value={row.rack_id}
-                  disabled={disabled}
-                  onChange={(e) => update(idx, { rack_id: e.target.value })}
-                >
-                  <option value="">Select rack…</option>
-                  {racks
-                    .filter((r) => r.id === row.rack_id || !usedRackIds.has(r.id))
-                    .map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {rackOccupancyHint(r)}
-                      </option>
-                    ))}
-                </select>
-                <Input
-                  type="number"
-                  min={1}
-                  placeholder="Bags"
-                  value={row.bags}
-                  disabled={disabled}
-                  onChange={(e) => update(idx, { bags: e.target.value })}
-                  className={cn('h-9 w-28 tabular-nums', overCapacity && 'border-warning')}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 shrink-0"
-                  disabled={disabled}
-                  onClick={() => onChange(rows.filter((_, i) => i !== idx))}
-                  aria-label="Remove row"
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden />
-                </Button>
-              </div>
-            );
-          })}
-
+      <EditableRows
+        rows={rows}
+        onChange={onChange}
+        columns={columns}
+        newRow={() => ({ rack_id: '', bags: '' })}
+        addLabel="Add rack"
+        maxRows={racks.length}
+        disabled={disabled}
+        footer={
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={disabled || rows.length >= racks.length}
-              onClick={() => onChange([...rows, { rack_id: '', bags: '' }])}
-            >
-              <Plus className="h-3.5 w-3.5" aria-hidden />
-              Add rack
-            </Button>
-            {totalBags > 0 && rows.length === 0 && racks.length > 0 && (
+            {totalBags > 0 && rows.length === 0 && (
               <Button
                 type="button"
                 variant="outline"
@@ -133,7 +134,7 @@ export function RackAllocationEditor({ racks, rows, onChange, totalBags, disable
             )}
             <span
               className={cn(
-                'ml-auto text-xs tabular-nums',
+                'text-xs tabular-nums',
                 remaining < 0 ? 'font-medium text-destructive' : 'text-muted-foreground',
               )}
             >
@@ -142,17 +143,13 @@ export function RackAllocationEditor({ racks, rows, onChange, totalBags, disable
                 : `${remaining.toLocaleString()} of ${totalBags.toLocaleString()} bags unplaced`}
             </span>
           </div>
+        }
+      />
 
-          {rows.some((row) => {
-            const rack = racks.find((r) => r.id === row.rack_id);
-            const bags = parseInt(row.bags) || 0;
-            return rack != null && bags > 0 && rack.current_occupancy_bags + bags > rack.max_capacity_bags;
-          }) && (
-            <p className="text-xs text-amber-700">
-              A rack will exceed its capacity — allowed, but consider spreading the bags.
-            </p>
-          )}
-        </>
+      {rows.some(overCapacityFor) && (
+        <p className="text-xs text-amber-700">
+          A rack will exceed its capacity — allowed, but consider spreading the bags.
+        </p>
       )}
     </div>
   );

@@ -17,7 +17,8 @@ import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
-import { CapacityBar, capacityPct } from '@/components/capacity-bar';
+import { CapacityBar, capacityPct, capacityTier, DEFAULT_CAPACITY_WARN_PCT } from '@/components/capacity-bar';
+import { useFacility } from '@/hooks/use-reference-data';
 import { UrduText } from '@/components/ui/urdu-text';
 import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/format';
@@ -76,6 +77,8 @@ export default function RoomDetailPage() {
     queryKey: qk.chambers.detail(chamberId),
     queryFn: () => apiClient<RoomDetail>(`/v1/chambers/${chamberId}`),
   });
+  const { data: facility } = useFacility();
+  const warnPct = facility?.settings?.chamber_capacity_warning_pct ?? DEFAULT_CAPACITY_WARN_PCT;
 
   const [tempInput, setTempInput] = useState('');
   const [selectedRack, setSelectedRack] = useState<Rack | null>(null);
@@ -125,6 +128,9 @@ export default function RoomDetailPage() {
   if (!chamber) return <p className="text-destructive">Room not found</p>;
 
   const pct = capacityPct(chamber.current_occupancy_bags, chamber.max_capacity_bags);
+  const tier = capacityTier(pct, warnPct);
+  const pctColor =
+    tier === 'critical' ? 'text-destructive' : tier === 'warn' ? 'text-warning' : 'text-foreground';
 
   return (
     <div>
@@ -149,7 +155,7 @@ export default function RoomDetailPage() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Room Info</CardTitle>
@@ -170,13 +176,13 @@ export default function RoomDetailPage() {
             <CardTitle className="text-sm">Occupancy</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="mb-4 text-center">
-              <span className="text-4xl font-bold tabular-nums">{pct}%</span>
+            <div className="mb-3 text-center">
+              <span className={cn('text-2xl font-bold tabular-nums', pctColor)}>{pct}%</span>
               <p className="mt-1 text-sm text-muted-foreground tabular-nums">
                 {chamber.current_occupancy_bags.toLocaleString()} / {chamber.max_capacity_bags.toLocaleString()} bags
               </p>
             </div>
-            <CapacityBar occupied={chamber.current_occupancy_bags} capacity={chamber.max_capacity_bags} heightClass="h-3" />
+            <CapacityBar occupied={chamber.current_occupancy_bags} capacity={chamber.max_capacity_bags} heightClass="h-3" warnPct={warnPct} />
             {chamber.unplaced_bags > 0 && (
               <p className="mt-3 text-center text-xs text-amber-700">
                 {chamber.unplaced_bags.toLocaleString()} bags in this room are not assigned to a rack yet.
@@ -187,7 +193,7 @@ export default function RoomDetailPage() {
       </div>
 
       {/* ── Rack grid ─────────────────────────────────────────── */}
-      <Card className="mb-6">
+      <Card className="mb-4">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
             <Rows3 className="h-4 w-4 text-muted-foreground" aria-hidden />
@@ -237,7 +243,9 @@ export default function RoomDetailPage() {
                           </span>
                         )}
                       </div>
-                      <CapacityBar occupied={rack.current_occupancy_bags} capacity={rack.max_capacity_bags} className="mb-1.5" />
+                      {/* Racks have no owner-configurable warning — the API only soft-warns past
+                          literal 100% (placement.service.ts), so that's the only line to show. */}
+                      <CapacityBar occupied={rack.current_occupancy_bags} capacity={rack.max_capacity_bags} className="mb-1.5" warnPct={100} />
                       <p className="text-xs text-muted-foreground tabular-nums">
                         {rack.current_occupancy_bags.toLocaleString()} / {rack.max_capacity_bags.toLocaleString()} bags · {rackPct}%
                       </p>
@@ -267,7 +275,7 @@ export default function RoomDetailPage() {
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="h-8 hover:bg-transparent">
                   <TableHead>Date/Time</TableHead>
                   <TableHead>Temperature</TableHead>
                   <TableHead>Recorded By</TableHead>
@@ -281,11 +289,11 @@ export default function RoomDetailPage() {
                       ? log.temperature_c >= chamber.temperature_min_c && log.temperature_c <= chamber.temperature_max_c
                       : true;
                   return (
-                    <TableRow key={log.id}>
-                      <TableCell>{formatDateTime(log.recorded_at)}</TableCell>
-                      <TableCell className={cn('font-medium tabular-nums', inRange ? 'text-green-700' : 'text-destructive')}>{log.temperature_c}°C</TableCell>
-                      <TableCell>{log.recorded_by_name || '—'}</TableCell>
-                      <TableCell className="text-muted-foreground">{log.source}</TableCell>
+                    <TableRow key={log.id} className="h-7">
+                      <TableCell className="py-1">{formatDateTime(log.recorded_at)}</TableCell>
+                      <TableCell className={cn('py-1 font-medium tabular-nums', inRange ? 'text-green-700' : 'text-destructive')}>{log.temperature_c}°C</TableCell>
+                      <TableCell className="py-1">{log.recorded_by_name || '—'}</TableCell>
+                      <TableCell className="py-1 text-muted-foreground">{log.source}</TableCell>
                     </TableRow>
                   );
                 })}
@@ -296,7 +304,7 @@ export default function RoomDetailPage() {
       </Card>
 
       {chamber.notes && (
-        <Card className="mt-6">
+        <Card className="mt-4">
           <CardHeader><CardTitle className="text-sm">Notes</CardTitle></CardHeader>
           <CardContent><p className="text-sm">{chamber.notes}</p></CardContent>
         </Card>
@@ -339,7 +347,7 @@ function RackLotsDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>
             Rack {rack.name}
@@ -424,7 +432,7 @@ function RackEditDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-sm">
+      <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>{rack ? `Edit Rack ${rack.name}` : 'Add Rack'}</DialogTitle>
         </DialogHeader>

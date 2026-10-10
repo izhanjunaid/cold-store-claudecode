@@ -42,7 +42,7 @@ export default function SeasonalSummaryPage() {
     return (
       <div>
         <PageHeader title="Seasonal Summary" />
-        <p className="text-muted-foreground">Seasonal summary requires OWNER role.</p>
+        <p className="text-muted-foreground">You don&apos;t have permission to view the seasonal summary.</p>
       </div>
     );
   }
@@ -54,9 +54,9 @@ export default function SeasonalSummaryPage() {
         description="Inbound, outbound and revenue across a date range"
         actions={
           <div className="flex items-center gap-2">
-            <Input type="date" aria-label="From date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9 w-auto tabular-nums" />
+            <Input type="date" aria-label="From date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-8 w-auto tabular-nums" />
             <span className="text-muted-foreground">–</span>
-            <Input type="date" aria-label="To date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9 w-auto tabular-nums" />
+            <Input type="date" aria-label="To date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-8 w-auto tabular-nums" />
           </div>
         }
       />
@@ -65,7 +65,7 @@ export default function SeasonalSummaryPage() {
         <PageSkeleton />
       ) : data ? (
         <>
-          <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
             <StatTile size="compact" label="Inbound (bags)" value={formatCount(data.total_inbound_bags)} />
             <StatTile size="compact" label="Outbound (bags)" value={formatCount(data.total_outbound_bags)} />
             <StatTile
@@ -87,7 +87,7 @@ export default function SeasonalSummaryPage() {
             </div>
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="h-8 hover:bg-transparent">
                   <TableHead>Commodity</TableHead>
                   <TableHead className="text-right">Inbound (bags)</TableHead>
                   <TableHead className="text-right">Outbound (bags)</TableHead>
@@ -101,11 +101,11 @@ export default function SeasonalSummaryPage() {
                   </TableRow>
                 ) : (
                   data.commodities.map((c) => (
-                    <TableRow key={c.commodity_id}>
-                      <TableCell>{c.commodity_name}</TableCell>
-                      <TableCell className="text-right tabular-nums">{c.inbound_bags.toLocaleString()}</TableCell>
-                      <TableCell className="text-right tabular-nums">{c.outbound_bags.toLocaleString()}</TableCell>
-                      <TableCell className="text-right tabular-nums text-green-700">{c.revenue_pkr.toLocaleString()}</TableCell>
+                    <TableRow key={c.commodity_id} className="h-7">
+                      <TableCell className="py-1">{c.commodity_name}</TableCell>
+                      <TableCell className="py-1 text-right tabular-nums">{c.inbound_bags.toLocaleString()}</TableCell>
+                      <TableCell className="py-1 text-right tabular-nums">{c.outbound_bags.toLocaleString()}</TableCell>
+                      <TableCell className="py-1 text-right tabular-nums text-green-700">{c.revenue_pkr.toLocaleString()}</TableCell>
                     </TableRow>
                   ))
                 )}

@@ -7,12 +7,14 @@ import { apiClient } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
+import { useFacility } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layout/page-header';
 import { UrduText } from '@/components/ui/urdu-text';
+import { capacityPct, capacityTier, DEFAULT_CAPACITY_WARN_PCT, type CapacityTier } from '@/components/capacity-bar';
 import { cn } from '@/lib/utils';
 
 interface Rack {
@@ -53,17 +55,25 @@ interface RackLot {
   bags: number;
 }
 
-function fillTier(pct: number) {
-  if (pct >= 90) return { bg: 'bg-red-500', text: 'text-white', border: 'border-red-700', label: 'Full' };
-  if (pct >= 70) return { bg: 'bg-amber-400', text: 'text-gray-900', border: 'border-amber-600', label: 'Busy' };
-  if (pct > 0) return { bg: 'bg-emerald-500', text: 'text-white', border: 'border-emerald-700', label: 'Open' };
-  return { bg: 'bg-secondary', text: 'text-muted-foreground', border: 'border-border', label: 'Empty' };
+/**
+ * Map-tile styling for each capacityTier — same breakpoints as CapacityBar/chambers list, so a
+ * room reads the same fill severity everywhere. `warnPct` (chamber_capacity_warning_pct) decides
+ * where 'critical' starts; only the empty case is map-specific (0 bags has no bar-color analogue).
+ */
+function tileStyle(pct: number, warnPct: number): { bg: string; text: string; border: string; label: string } {
+  if (pct === 0) return { bg: 'bg-secondary', text: 'text-muted-foreground', border: 'border-border', label: 'Empty' };
+  const tier: CapacityTier = capacityTier(pct, warnPct);
+  if (tier === 'critical') return { bg: 'bg-red-500', text: 'text-white', border: 'border-red-700', label: 'Full' };
+  if (tier === 'warn') return { bg: 'bg-amber-400', text: 'text-gray-900', border: 'border-amber-600', label: 'Busy' };
+  return { bg: 'bg-emerald-500', text: 'text-white', border: 'border-emerald-700', label: 'Open' };
 }
 
 export default function RoomMapPage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const canView = can(user, 'chambers.manage');
+  const { data: facility } = useFacility();
+  const warnPct = facility?.settings?.chamber_capacity_warning_pct ?? DEFAULT_CAPACITY_WARN_PCT;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -77,7 +87,7 @@ export default function RoomMapPage() {
     return (
       <div>
         <PageHeader title="Room Map" />
-        <p className="text-muted-foreground">Room map requires MANAGER role or higher.</p>
+        <p className="text-muted-foreground">You don&apos;t have permission to view the room map.</p>
       </div>
     );
   }
@@ -97,9 +107,9 @@ export default function RoomMapPage() {
       <Card className="mb-4">
         <CardContent className="flex flex-wrap items-center gap-4 py-3 text-xs">
           <span className="font-medium text-muted-foreground">Fill level:</span>
-          <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-emerald-500" /> Open (1–69%)</span>
-          <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-amber-400" /> Busy (70–89%)</span>
-          <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-red-500" /> Full (90%+)</span>
+          <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-emerald-500" /> Open (1–{Math.round(warnPct * 0.8)}%)</span>
+          <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-amber-400" /> Busy ({Math.round(warnPct * 0.8) + 1}–{warnPct}%)</span>
+          <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-red-500" /> Full (over {warnPct}%)</span>
           <span className="flex items-center gap-2"><span className="h-3 w-3 rounded border bg-secondary" /> Empty</span>
         </CardContent>
       </Card>
@@ -111,12 +121,12 @@ export default function RoomMapPage() {
           ))}
         </div>
       ) : chambers.length === 0 ? (
-        <Card><CardContent className="py-12 text-center text-muted-foreground">No rooms configured.</CardContent></Card>
+        <Card><CardContent className="py-8 text-center text-muted-foreground">No rooms configured.</CardContent></Card>
       ) : (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {chambers.map((c) => {
-            const pct = c.max_capacity_bags > 0 ? Math.round((c.current_occupancy_bags / c.max_capacity_bags) * 100) : 0;
-            const tier = fillTier(pct);
+            const pct = capacityPct(c.current_occupancy_bags, c.max_capacity_bags);
+            const tier = tileStyle(pct, warnPct);
             return (
               <button
                 key={c.id}
@@ -206,7 +216,7 @@ function RoomDrillDownDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{room?.name ?? 'Room'}</DialogTitle>
         </DialogHeader>
@@ -232,8 +242,9 @@ function RoomDrillDownDialog({
             {[...racks]
               .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
               .map((r) => {
-                const pct = r.max_capacity_bags > 0 ? Math.round((r.current_occupancy_bags / r.max_capacity_bags) * 100) : 0;
-                const tier = fillTier(pct);
+                const pct = capacityPct(r.current_occupancy_bags, r.max_capacity_bags);
+                // Racks have no owner-configurable threshold — only a literal-100% soft warning.
+                const tier = tileStyle(pct, 100);
                 return (
                   <button
                     key={r.id}

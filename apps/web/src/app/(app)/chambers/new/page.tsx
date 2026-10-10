@@ -3,10 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Plus, Trash2 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
-import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
+import { FormActions, EntrySheet, EntryGroup, EditableRows, type EditableRowColumn } from '@/components/form';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/layout/page-header';
@@ -30,7 +29,40 @@ const EMPTY = {
   notes: '',
 };
 const SELECT_CLASS =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  'flex h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+
+const rackColumns: EditableRowColumn<RackRow>[] = [
+  {
+    key: 'name',
+    header: 'Name',
+    width: '1fr',
+    render: (row, update) => (
+      <Input
+        value={row.name}
+        onChange={(e) => update({ name: e.target.value })}
+        placeholder="Rack name, e.g. R-1"
+        maxLength={50}
+        className="h-8"
+      />
+    ),
+  },
+  {
+    key: 'capacity',
+    header: 'Capacity (bags)',
+    width: '160px',
+    align: 'right',
+    render: (row, update) => (
+      <Input
+        type="number"
+        min={1}
+        value={row.capacity}
+        onChange={(e) => update({ capacity: e.target.value })}
+        placeholder="Capacity"
+        className="h-8 text-right tabular-nums"
+      />
+    ),
+  },
+];
 
 export default function RoomCreatePage() {
   const router = useRouter();
@@ -45,11 +77,6 @@ export default function RoomCreatePage() {
   }, []);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const setRack = (idx: number, patch: Partial<RackRow>) =>
-    setRacks((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-
-  const addRack = () =>
-    setRacks((rows) => [...rows, { name: `R-${rows.length + 1}`, capacity: '' }]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,7 +121,7 @@ export default function RoomCreatePage() {
         )}
         <EntrySheet>
           <EntryGroup title="Room" columns={2}>
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className="space-y-1 sm:col-span-2">
               <Label>
                 Name <span className="text-destructive">*</span>
               </Label>
@@ -106,7 +133,7 @@ export default function RoomCreatePage() {
                 placeholder="e.g. Room A1"
               />
             </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>
                   Capacity (bags) <span className="text-destructive">*</span>
                 </Label>
@@ -121,7 +148,7 @@ export default function RoomCreatePage() {
                   placeholder="e.g. 5000"
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Commodity restriction</Label>
                 <select
                   value={form.commodity_restriction_id}
@@ -136,7 +163,7 @@ export default function RoomCreatePage() {
                   ))}
                 </select>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Min temp (°C)</Label>
                 <Input
                   type="number"
@@ -149,7 +176,7 @@ export default function RoomCreatePage() {
                   placeholder="e.g. 2"
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>Max temp (°C)</Label>
                 <Input
                   type="number"
@@ -162,7 +189,7 @@ export default function RoomCreatePage() {
                   placeholder="e.g. 5"
                 />
               </div>
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className="space-y-1 sm:col-span-2">
               <Label>Notes</Label>
               <Input
                 value={form.notes}
@@ -177,39 +204,13 @@ export default function RoomCreatePage() {
               <p className="text-xs text-muted-foreground">
                 Lay out the room&apos;s racks now — lots can then be placed rack-by-rack.
               </p>
-              {racks.map((rack, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <Input
-                    value={rack.name}
-                    onChange={(e) => setRack(idx, { name: e.target.value })}
-                    placeholder="Rack name, e.g. R-1"
-                    maxLength={50}
-                    className="flex-1"
-                  />
-                  <Input
-                    type="number"
-                    min={1}
-                    value={rack.capacity}
-                    onChange={(e) => setRack(idx, { capacity: e.target.value })}
-                    placeholder="Capacity (bags)"
-                    className="w-40 tabular-nums"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 shrink-0"
-                    onClick={() => setRacks((rows) => rows.filter((_, i) => i !== idx))}
-                    aria-label="Remove rack"
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden />
-                  </Button>
-                </div>
-              ))}
-              <Button type="button" variant="outline" size="sm" onClick={addRack}>
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-                Add rack
-              </Button>
+              <EditableRows
+                rows={racks}
+                onChange={setRacks}
+                columns={rackColumns}
+                newRow={() => ({ name: `R-${racks.length + 1}`, capacity: '' })}
+                addLabel="Add rack"
+              />
             </div>
           </EntryGroup>
         </EntrySheet>

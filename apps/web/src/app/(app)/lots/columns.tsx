@@ -2,12 +2,20 @@ import Link from 'next/link';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { UrduText } from '@/components/ui/urdu-text';
 import type { DataTableColumn } from '@/components/data-table';
+import { LotRowActions } from './lot-row-actions';
 
 import { formatDate } from '@/lib/format';
+import { cn } from '@/lib/utils';
+
+/** Facility default when a commodity has no `default_storage_days_alert` override — mirrors the
+ *  API's own constant (apps/api/src/modules/reporting/reports/lot-aging.ts). */
+export const DEFAULT_STORAGE_ALERT_DAYS = 90;
+
 export interface LotRow {
   id: string;
   lot_number: string;
   owner_party_name: string | null;
+  commodity_id: string;
   commodity_name: string | null;
   variety_name: string | null;
   marka: string | null;
@@ -19,7 +27,16 @@ export interface LotRow {
   status: string;
 }
 
-export const lotColumns: DataTableColumn<LotRow>[] = [
+interface GetLotColumnsOptions {
+  /** commodity_id -> its days-in-storage alert threshold, from useCommodities(). Same coloring
+   *  rule as reports/lot-aging so a lot doesn't read "fine" on the list and "flagged" on the report. */
+  commodityThresholds: Map<string, number>;
+  /** Same gate as LotLocationCard's Move/Edit Placement actions on lot detail. */
+  canOperate: boolean;
+}
+
+export function getLotColumns({ commodityThresholds, canOperate }: GetLotColumnsOptions): DataTableColumn<LotRow>[] {
+  return [
   {
     id: 'lot_number',
     header: 'Lot #',
@@ -93,7 +110,14 @@ export const lotColumns: DataTableColumn<LotRow>[] = [
     header: 'Days',
     numeric: true,
     sortId: 'days_in_storage',
-    cell: (lot) => lot.days_in_storage,
+    cell: (lot) => {
+      const threshold = commodityThresholds.get(lot.commodity_id) ?? DEFAULT_STORAGE_ALERT_DAYS;
+      return (
+        <span className={cn(lot.days_in_storage > threshold && 'font-medium text-destructive')}>
+          {lot.days_in_storage}
+        </span>
+      );
+    },
     csv: (lot) => lot.days_in_storage,
   },
   {
@@ -102,4 +126,11 @@ export const lotColumns: DataTableColumn<LotRow>[] = [
     cell: (lot) => <StatusBadge status={lot.status} />,
     csv: (lot) => lot.status,
   },
-];
+  {
+    id: 'actions',
+    header: '',
+    enableHiding: false,
+    cell: (lot) => <LotRowActions lot={lot} canOperate={canOperate} />,
+  },
+  ];
+}

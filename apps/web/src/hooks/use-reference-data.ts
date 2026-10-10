@@ -17,6 +17,8 @@ export interface PartyRef {
 export interface CommodityRef {
   id: string;
   name: string;
+  /** Days-in-storage alert threshold for this commodity (see reports/lot-aging). Null = facility default. */
+  default_storage_days_alert?: number | null;
 }
 
 export interface VarietyRef {

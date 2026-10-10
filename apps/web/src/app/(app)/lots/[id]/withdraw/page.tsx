@@ -144,8 +144,8 @@ export default function WithdrawPage() {
         </div>
       )}
 
-      <Card className="mb-5 bg-muted/30">
-        <CardContent className="grid grid-cols-2 gap-3 pt-6 text-sm md:grid-cols-4">
+      <Card className="mb-4 bg-muted/30">
+        <CardContent className="grid grid-cols-2 gap-3 p-4 text-sm md:grid-cols-4">
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Lot</div>
             <div className="font-mono font-medium">{lot.lot_number}</div>
@@ -224,7 +224,7 @@ export default function WithdrawPage() {
             </div>
 
             {form.withdrawal_type === 'PARTIAL' && (
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label>
                   Bags to withdraw <span className="text-destructive">*</span>{' '}
                   <span className="font-normal text-muted-foreground">(max {lot.current_balance_bags - 1})</span>
@@ -241,7 +241,7 @@ export default function WithdrawPage() {
               </div>
             )}
 
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label htmlFor="outbound_date">Outbound date <span className="text-destructive">*</span></Label>
               <Input
                 id="outbound_date"
@@ -257,7 +257,7 @@ export default function WithdrawPage() {
                 </p>
               )}
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Vehicle number</Label>
               <Input
                 type="text"
@@ -267,7 +267,7 @@ export default function WithdrawPage() {
                 placeholder="Optional"
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Receiving party</Label>
               <Combobox
                 value={form.receiving_party_id}
@@ -278,7 +278,7 @@ export default function WithdrawPage() {
                 testId="combobox-receiving_party_id"
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label>Notes</Label>
               <Textarea
                 value={form.notes}

@@ -70,7 +70,7 @@ export default function OwnershipTransfersPage() {
     return (
       <div>
         <PageHeader title="Ownership Transfer Log" />
-        <p className="text-muted-foreground">Ownership transfer log requires MANAGER role or higher.</p>
+        <p className="text-muted-foreground">You don&apos;t have permission to view the ownership transfer log.</p>
       </div>
     );
   }

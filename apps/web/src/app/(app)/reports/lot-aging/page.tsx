@@ -49,7 +49,7 @@ export default function LotAgingPage() {
     return (
       <div>
         <PageHeader title="Lot Aging" />
-        <p className="text-muted-foreground">Lot aging requires MANAGER role or higher.</p>
+        <p className="text-muted-foreground">You don&apos;t have permission to view lot aging.</p>
       </div>
     );
   }

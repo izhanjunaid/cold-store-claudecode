@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
@@ -7,18 +8,35 @@ import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable, useTableState } from '@/components/data-table';
 import { useListQuery } from '@/hooks/use-list-query';
-import { useChambers, useParties } from '@/hooks/use-reference-data';
+import { useChambers, useParties, useCommodities } from '@/hooks/use-reference-data';
+import { useAuthStore } from '@/stores/auth.store';
+import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
-import { lotColumns, type LotRow } from './columns';
+import { getLotColumns, DEFAULT_STORAGE_ALERT_DAYS, type LotRow } from './columns';
 
-const FILTER_KEYS = ['search', 'marka', 'status', 'chamber_id', 'party_id'] as const;
+const FILTER_KEYS = ['search', 'marka', 'status', 'chamber_id', 'party_id', 'commodity_id'] as const;
 
 export default function LotListPage() {
   const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+  const canOperate = can(user, 'outbound.record');
   const { state, setPage, setPerPage, setSort, setFilter, resetFilters, queryParams } =
     useTableState(FILTER_KEYS);
   const { data: chambers = [] } = useChambers();
   const { data: parties = [] } = useParties();
+  const { data: commodities = [] } = useCommodities();
+
+  const commodityThresholds = useMemo(
+    () =>
+      new Map(
+        commodities.map((c) => [c.id, c.default_storage_days_alert ?? DEFAULT_STORAGE_ALERT_DAYS]),
+      ),
+    [commodities],
+  );
+  const columns = useMemo(
+    () => getLotColumns({ commodityThresholds, canOperate }),
+    [commodityThresholds, canOperate],
+  );
 
   const { data, isLoading, isError } = useListQuery<LotRow>(
     qk.lots.list(queryParams),
@@ -42,7 +60,7 @@ export default function LotListPage() {
       />
 
       <DataTable
-        columns={lotColumns}
+        columns={columns}
         data={data?.data ?? []}
         meta={data?.meta}
         isLoading={isLoading}
@@ -80,6 +98,11 @@ export default function LotListPage() {
               key: 'party_id',
               label: 'Owner',
               options: parties.map((p) => ({ label: p.name, value: p.id })),
+            },
+            {
+              key: 'commodity_id',
+              label: 'Commodity',
+              options: commodities.map((c) => ({ label: c.name, value: c.id })),
             },
           ],
         }}
