@@ -110,6 +110,16 @@ describe('RatePlanListPage — custom tariff', () => {
     expect(body).not.toHaveProperty('season_end_date');
   });
 
+  // Found in a real browser: the tariff form made the dialog 900px tall with no scrolling, so on a
+  // laptop-height window the title and the Create button were off-screen and unreachable.
+  // jsdom has no layout, so pin the two classes that make it scroll.
+  it('the dialog caps its height and scrolls, so Create stays reachable on a short window', async () => {
+    await openNewTariffPlan();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('max-h-[90vh]');
+    expect(dialog.className).toContain('overflow-y-auto');
+  });
+
   it('the calendar preset locks month counting and bills a split month', async () => {
     await openNewTariffPlan();
     choosePreset('calendar-split');

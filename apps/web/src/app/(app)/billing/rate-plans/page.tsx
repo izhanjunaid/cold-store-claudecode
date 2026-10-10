@@ -264,7 +264,9 @@ export default function RatePlanListPage() {
       />
 
       <Dialog open={showModal} onOpenChange={setShowModal}>
-        <DialogContent>
+        {/* The custom-tariff form is taller than a laptop window: cap the height and scroll,
+            or the title and the Create button fall off-screen and cannot be reached. */}
+        <DialogContent size="lg" className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Edit Rate Plan' : 'New Rate Plan'}</DialogTitle>
           </DialogHeader>
