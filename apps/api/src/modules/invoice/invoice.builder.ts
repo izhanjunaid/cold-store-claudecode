@@ -25,6 +25,8 @@ interface DraftInvoiceParams {
   rateType: RateType;
   rateAmountPkr: number;
   minBillingDays: number;
+  tariff?: unknown;
+  seasonEndDate?: Date | null;
   createdBy: string;
 }
 
@@ -51,6 +53,8 @@ async function createDraftInvoice(
     periodStart: params.periodStart,
     periodEnd: params.periodEnd,
     minBillingDays: params.minBillingDays,
+    tariff: params.tariff,
+    seasonEndDate: params.seasonEndDate,
   });
 
   const subTotal = charge.amountPkr;
@@ -146,6 +150,8 @@ export async function buildInvoiceFromOutbound(
     rateType: ratePlan.rateType,
     rateAmountPkr: Number(ratePlan.rateAmountPkr),
     minBillingDays: ratePlan.minBillingDays,
+    tariff: ratePlan.tariff,
+    seasonEndDate: ratePlan.seasonEndDate,
     createdBy: outbound.createdBy,
   });
 }
@@ -158,7 +164,14 @@ interface TransferAccruedInvoiceParams {
   periodStart: Date;
   periodEnd: Date;
   quantityBags: number;
-  ratePlan: { id: string; rateType: RateType; rateAmountPkr: number; minBillingDays: number };
+  ratePlan: {
+    id: string;
+    rateType: RateType;
+    rateAmountPkr: number;
+    minBillingDays: number;
+    tariff?: unknown;
+    seasonEndDate?: Date | null;
+  };
   createdBy: string;
 }
 
@@ -188,6 +201,8 @@ export async function buildOwnershipTransferAccruedInvoice(
     rateType: params.ratePlan.rateType,
     rateAmountPkr: params.ratePlan.rateAmountPkr,
     minBillingDays: params.ratePlan.minBillingDays,
+    tariff: params.ratePlan.tariff,
+    seasonEndDate: params.ratePlan.seasonEndDate,
     createdBy: params.createdBy,
   });
 }

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { QueryBoolean } from './common';
 import { RateType } from './enums';
+import { Tariff, tariffPlanIssue } from '../tariff';
 
 export const CreateRatePlanRequest = z
   .object({
@@ -11,6 +12,7 @@ export const CreateRatePlanRequest = z
     season_start_date: z.string().date().optional(),
     season_end_date: z.string().date().optional(),
     min_billing_days: z.number().int().min(1).default(1),
+    tariff: Tariff.optional(),
   })
   .refine(
     (v) =>
@@ -31,7 +33,16 @@ export const CreateRatePlanRequest = z
       message: 'season_start_date must be before season_end_date',
       path: ['season_end_date'],
     },
-  );
+  )
+  .refine((v) => (v.rate_type === 'TARIFF_PER_BAG') === (v.tariff !== undefined), {
+    message: 'tariff is required for TARIFF_PER_BAG and not allowed for any other rate type',
+    path: ['tariff'],
+  })
+  .superRefine((v, ctx) => {
+    if (!v.tariff) return;
+    const issue = tariffPlanIssue(v.tariff, v.season_end_date ? new Date(v.season_end_date) : null);
+    if (issue) ctx.addIssue({ code: z.ZodIssueCode.custom, message: issue, path: ['season_end_date'] });
+  });
 
 export const UpdateRatePlanRequest = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -40,6 +51,7 @@ export const UpdateRatePlanRequest = z.object({
   season_start_date: z.string().date().optional().nullable(),
   season_end_date: z.string().date().optional().nullable(),
   min_billing_days: z.number().int().min(1).optional(),
+  tariff: Tariff.optional(),
   is_active: z.boolean().optional(),
 });
 
@@ -59,6 +71,7 @@ export const RatePlanResponse = z.object({
   season_start_date: z.string().nullable(),
   season_end_date: z.string().nullable(),
   min_billing_days: z.number(),
+  tariff: Tariff.nullable(),
   is_active: z.boolean(),
   created_at: z.string(),
 });

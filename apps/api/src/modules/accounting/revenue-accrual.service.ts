@@ -1,5 +1,5 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
-import { addDays, fromIsoDate, round2, toIsoDate } from '@coldchain/shared';
+import { addDays, computeTariffCharge, fromIsoDate, round2, Tariff, toIsoDate } from '@coldchain/shared';
 import { advisoryXactLock } from '../../common/advisory-lock';
 import { computeStorageCharge, billingPeriodStart } from '../invoice/storage-charge';
 import { resolveFacilitySettings } from '../facility/facility.service';
@@ -138,6 +138,37 @@ export class RevenueAccrualService {
         const full = bags * Number(plan.rateAmountPkr);
         // Only what was earned inside the accrual window.
         const amountPkr = round2(full * (fraction(periodEnd) - fraction(windowStart)));
+        if (amountPkr > 0) {
+          shares.push({ lot, bags, days: Math.ceil(daysBetween(windowStart, periodEnd)), revenueAccountCode, amountPkr });
+        }
+        continue;
+      }
+
+      if (plan.rateType === 'TARIFF_PER_BAG') {
+        // A stepped tariff is accrued as the difference of two whole-stay charges, never
+        // as a charge restarted at the accrual start: restarting would apply the opening
+        // (the ½ month, the season fee) a second time to a lot already in storage.
+        const rule = {
+          monthRatePkr: Number(plan.rateAmountPkr),
+          minBillingDays: plan.minBillingDays,
+          seasonEndDate: plan.seasonEndDate,
+          tariff: Tariff.parse(plan.tariff),
+        };
+        const toEnd = computeTariffCharge(rule, bags, billingStart, periodEnd);
+        const toStart = windowStart > billingStart ? computeTariffCharge(rule, bags, billingStart, windowStart) : null;
+        let amountPkr = toEnd.amountPkr - (toStart?.amountPkr ?? 0);
+        if (toEnd.seasonFeePerBagPkr > 0 && plan.seasonEndDate) {
+          // The season fee is earned evenly across the season (like a SEASONAL plan);
+          // only what falls past the season end is added as it falls due.
+          const spreadStart = plan.seasonStartDate && plan.seasonStartDate > billingStart ? plan.seasonStartDate : billingStart;
+          const totalDays = daysBetween(spreadStart, plan.seasonEndDate);
+          const fraction = (d: Date) => (totalDays > 0 ? Math.min(Math.max(daysBetween(spreadStart, d) / totalDays, 0), 1) : 1);
+          const extension = (c: typeof toEnd | null) => (c ? c.perBagPkr - c.seasonFeePerBagPkr : 0);
+          amountPkr =
+            bags * toEnd.seasonFeePerBagPkr * (fraction(periodEnd) - fraction(windowStart)) +
+            bags * (extension(toEnd) - extension(toStart));
+        }
+        amountPkr = round2(Math.max(amountPkr, 0));
         if (amountPkr > 0) {
           shares.push({ lot, bags, days: Math.ceil(daysBetween(windowStart, periodEnd)), revenueAccountCode, amountPkr });
         }

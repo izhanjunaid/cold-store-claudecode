@@ -184,6 +184,12 @@ Manages withdrawal of produce from storage — full or partial — records outbo
   - If rate_type = SEASONAL_PER_BAG: `quantity × seasonal_rate` (regardless of duration within season)
   - If rate_type = MONTHLY_PER_BAG: `quantity × monthly_rate × ceil(days / 30)`
   - If rate_type = DAILY_PER_BAG: `quantity × daily_rate × days`
+  - If rate_type = TARIFF_PER_BAG (custom stepped tariff — Lahore apple "adhi month" billing and its variants): the plan's `tariff` rule is applied to the days in storage, in this order. Source: `packages/shared/src/tariff.ts`.
+    1. **Opening** takes its stretch first and is always charged in full: a fixed block (`BLOCK`: first N days = M months, e.g. 15 days = ½ month), the rest of the arrival calendar month (`SPLIT_MONTH`: arriving on or before day N = full month, later = ½ month), or one season fee up to the plan's season end (`SEASON`). A lot arriving after the season end pays ordinary rates.
+    2. **Whole months** of what is left: 30-day blocks, or real calendar months.
+    3. **Leftover days**: free up to `grace_days`; beyond that charged per day (monthly rate ÷ 30, or an explicit `day_rate`), as a half month if ≤ `half_month_days` else a full month, or always a full month.
+    4. Never less than `min_billing_days` days of rent.
+    Monthly rate, minimum days and season dates live in the plan's own columns; the JSON holds only the rule's shape. Presets in the rate-plan form fill the rule, and a "Try it" box shows the bill for sample dates. Invalid combinations (split month with 30-day months, a block with calendar months, a season fee without a season end) are refused.
 - Service charge line items: added manually from service catalog
 - Sub-total, optional GST, grand total
 

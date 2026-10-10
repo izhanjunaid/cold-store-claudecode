@@ -1,5 +1,5 @@
 import type { RateType } from '@coldchain/db';
-import { round2 } from '@coldchain/shared';
+import { computeTariffCharge, round2, Tariff } from '@coldchain/shared';
 
 export interface StorageChargeInput {
   rateType: RateType;
@@ -8,6 +8,9 @@ export interface StorageChargeInput {
   periodStart: Date;
   periodEnd: Date;
   minBillingDays: number;
+  /** TARIFF_PER_BAG only: the plan's rule, and the season end it may refer to. */
+  tariff?: unknown;
+  seasonEndDate?: Date | null;
 }
 
 export interface StorageChargeResult {
@@ -67,12 +70,39 @@ export function computeStorageCharge(input: StorageChargeInput): StorageChargeRe
     };
   }
 
-  // DAILY_PER_BAG
-  return {
-    description: `Storage (Daily) — ${bags} bags × ${days} day(s) = ${bags * days} bag-days × Rs.${rate}`,
-    quantity: bags * days,
-    unitPricePkr: rate,
-    amountPkr: round2(bags * days * rate),
-    days,
-  };
+  if (input.rateType === 'DAILY_PER_BAG') {
+    return {
+      description: `Storage (Daily) — ${bags} bags × ${days} day(s) = ${bags * days} bag-days × Rs.${rate}`,
+      quantity: bags * days,
+      unitPricePkr: rate,
+      amountPkr: round2(bags * days * rate),
+      days,
+    };
+  }
+
+  if (input.rateType === 'TARIFF_PER_BAG') {
+    if (!input.tariff) throw new Error('A TARIFF_PER_BAG rate plan has no tariff');
+    const t = computeTariffCharge(
+      {
+        monthRatePkr: rate,
+        minBillingDays: input.minBillingDays,
+        seasonEndDate: input.seasonEndDate,
+        tariff: Tariff.parse(input.tariff),
+      },
+      bags,
+      input.periodStart,
+      input.periodEnd,
+    );
+    return {
+      description: `Storage — ${t.breakdown.map((b) => b.label).join(' + ') || 'no charge'} (Rs.${t.perBagPkr} per bag × ${bags} bags)`,
+      quantity: bags,
+      unitPricePkr: t.perBagPkr,
+      amountPkr: t.amountPkr,
+      days: t.days,
+    };
+  }
+
+  // A new RateType must be billed deliberately — never silently as daily.
+  const unhandled: never = input.rateType;
+  throw new Error(`No storage charge rule for rate type ${String(unhandled)}`);
 }

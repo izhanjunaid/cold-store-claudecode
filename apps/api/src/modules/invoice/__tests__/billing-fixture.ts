@@ -13,7 +13,13 @@ export const POTATO_ID = '00000000-0000-0000-0000-000000000100';
 export const CHAMBER_A = '00000000-0000-0000-0000-000000000200';
 export const RATE_PLAN_SEASONAL = '00000000-0000-0000-0000-000000000501';
 
-type InvoiceOpts = { bags?: number; inbound?: string; outbound?: string; book?: 'PACCI' | 'KATCHI' };
+type InvoiceOpts = {
+  bags?: number;
+  inbound?: string;
+  outbound?: string;
+  book?: 'PACCI' | 'KATCHI';
+  ratePlanId?: string;
+};
 
 export async function billingFixture(app: FastifyInstance) {
   const tokens = {
@@ -46,7 +52,7 @@ export async function billingFixture(app: FastifyInstance) {
     const op = opts.book === 'KATCHI' ? tokens.owner : tokens.operator;
     const mgr = opts.book === 'KATCHI' ? tokens.owner : tokens.manager;
     const lot = await call('POST', '/v1/lots', op, {
-      owner_party_id: partyId, commodity_id: POTATO_ID, rate_plan_id: RATE_PLAN_SEASONAL, chamber_id: CHAMBER_A,
+      owner_party_id: partyId, commodity_id: POTATO_ID, rate_plan_id: opts.ratePlanId ?? RATE_PLAN_SEASONAL, chamber_id: CHAMBER_A,
       quantity_bags: bags, accepted_weight_kg: bags * 20, inbound_date: opts.inbound ?? '2026-03-01',
       ...(opts.book ? { book_type: opts.book } : {}),
     });

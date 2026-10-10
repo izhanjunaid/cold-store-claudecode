@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Pencil, Plus } from 'lucide-react';
+import type { Tariff } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -16,6 +17,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 import { DataTable, type DataTableColumn } from '@/components/data-table';
+import { DEFAULT_TARIFF, TariffFields, tariffIssue } from './tariff-fields';
 
 import { formatDate, formatMoney } from '@/lib/format';
 interface RatePlan {
@@ -28,6 +30,7 @@ interface RatePlan {
   season_start_date: string | null;
   season_end_date: string | null;
   min_billing_days: number;
+  tariff: Tariff | null;
   is_active: boolean;
 }
 
@@ -35,6 +38,7 @@ const RATE_TYPE_LABELS: Record<string, string> = {
   SEASONAL_PER_BAG: 'Seasonal / Bag',
   MONTHLY_PER_BAG: 'Monthly / Bag',
   DAILY_PER_BAG: 'Daily / Bag',
+  TARIFF_PER_BAG: 'Custom tariff',
 };
 const SELECT_CLASS =
   'flex h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
@@ -47,6 +51,7 @@ interface FormData {
   season_start_date: string;
   season_end_date: string;
   min_billing_days: string;
+  tariff: Tariff;
   is_active: boolean;
 }
 const EMPTY: FormData = {
@@ -57,6 +62,7 @@ const EMPTY: FormData = {
   season_start_date: '',
   season_end_date: '',
   min_billing_days: '1',
+  tariff: DEFAULT_TARIFF,
   is_active: true,
 };
 
@@ -72,6 +78,7 @@ export default function RatePlanListPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormData>(EMPTY);
+  const [original, setOriginal] = useState<FormData>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
 
   const fetchPlans = async () => {
@@ -88,8 +95,11 @@ export default function RatePlanListPage() {
     fetchPlans();
   }, [isActiveFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const set = (k: keyof FormData, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: keyof FormData, v: string | boolean | Tariff) => setForm((f) => ({ ...f, [k]: v }));
   const isSeasonal = form.rate_type === 'SEASONAL_PER_BAG';
+  const isTariff = form.rate_type === 'TARIFF_PER_BAG';
+  const needsSeason = isSeasonal || (isTariff && form.tariff.opening.type === 'SEASON');
+  const tariffProblem = isTariff ? tariffIssue(form.tariff, form.season_end_date) : null;
 
   const openCreate = () => {
     setForm(EMPTY);
@@ -97,7 +107,7 @@ export default function RatePlanListPage() {
     setShowModal(true);
   };
   const openEdit = (plan: RatePlan) => {
-    setForm({
+    const next: FormData = {
       name: plan.name,
       commodity_id: plan.commodity_id ?? '',
       rate_type: plan.rate_type,
@@ -105,8 +115,11 @@ export default function RatePlanListPage() {
       season_start_date: plan.season_start_date ?? '',
       season_end_date: plan.season_end_date ?? '',
       min_billing_days: String(plan.min_billing_days),
+      tariff: plan.tariff ?? DEFAULT_TARIFF,
       is_active: plan.is_active,
-    });
+    };
+    setForm(next);
+    setOriginal(next);
     setEditingId(plan.id);
     setShowModal(true);
   };
@@ -115,21 +128,28 @@ export default function RatePlanListPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const payload: Record<string, unknown> = {
-        name: form.name,
-        rate_amount_pkr: parseFloat(form.rate_amount_pkr),
-        min_billing_days: parseInt(form.min_billing_days) || 1,
-        commodity_id: form.commodity_id || null,
-      };
-      if (isSeasonal) {
-        payload['season_start_date'] = form.season_start_date;
-        payload['season_end_date'] = form.season_end_date;
-      }
+      const rate = parseFloat(form.rate_amount_pkr);
+      const minDays = parseInt(form.min_billing_days) || 1;
+      const payload: Record<string, unknown> = { name: form.name, commodity_id: form.commodity_id || null };
       if (editingId) {
+        // Only what changed: a plan that lots already use refuses rate changes, and
+        // re-sending the unchanged rates must not make a rename look like one.
+        if (rate !== parseFloat(original.rate_amount_pkr)) payload['rate_amount_pkr'] = rate;
+        if (minDays !== (parseInt(original.min_billing_days) || 1)) payload['min_billing_days'] = minDays;
+        if (needsSeason && form.season_start_date !== original.season_start_date) payload['season_start_date'] = form.season_start_date || null;
+        if (needsSeason && form.season_end_date !== original.season_end_date) payload['season_end_date'] = form.season_end_date;
+        if (isTariff && JSON.stringify(form.tariff) !== JSON.stringify(original.tariff)) payload['tariff'] = form.tariff;
         payload['is_active'] = form.is_active;
         await apiClient(`/v1/rate-plans/${editingId}`, { method: 'PATCH', body: payload });
       } else {
+        payload['rate_amount_pkr'] = rate;
+        payload['min_billing_days'] = minDays;
         payload['rate_type'] = form.rate_type;
+        if (needsSeason) {
+          if (form.season_start_date) payload['season_start_date'] = form.season_start_date;
+          payload['season_end_date'] = form.season_end_date;
+        }
+        if (isTariff) payload['tariff'] = form.tariff;
         await apiClient('/v1/rate-plans', { method: 'POST', body: payload });
       }
       setShowModal(false);
@@ -276,12 +296,13 @@ export default function RatePlanListPage() {
                     <option value="SEASONAL_PER_BAG">Seasonal / Bag</option>
                     <option value="MONTHLY_PER_BAG">Monthly / Bag</option>
                     <option value="DAILY_PER_BAG">Daily / Bag</option>
+                    <option value="TARIFF_PER_BAG">Custom tariff (½ month, months, days…)</option>
                   </select>
                 )}
               </div>
               <div className="space-y-1">
                 <Label>
-                  Rate Amount (PKR) <span className="text-destructive">*</span>
+                  {isTariff ? 'Monthly rate per bag (PKR)' : 'Rate Amount (PKR)'} <span className="text-destructive">*</span>
                 </Label>
                 <Input
                   type="number"
@@ -303,17 +324,17 @@ export default function RatePlanListPage() {
                   className="tabular-nums"
                 />
               </div>
-              {isSeasonal && (
+              {needsSeason && (
                 <>
                   <div className="space-y-1">
                     <Label>
-                      Season Start <span className="text-destructive">*</span>
+                      Season Start {isSeasonal && <span className="text-destructive">*</span>}
                     </Label>
                     <Input
                       type="date"
                       value={form.season_start_date}
                       onChange={(e) => set('season_start_date', e.target.value)}
-                      required
+                      required={isSeasonal}
                       className="tabular-nums"
                     />
                   </div>
@@ -332,6 +353,15 @@ export default function RatePlanListPage() {
                 </>
               )}
             </div>
+            {isTariff && (
+              <TariffFields
+                tariff={form.tariff}
+                onChange={(t) => set('tariff', t)}
+                monthRate={parseFloat(form.rate_amount_pkr) || 0}
+                minDays={parseInt(form.min_billing_days) || 1}
+                seasonEnd={form.season_end_date}
+              />
+            )}
             {editingId && (
               <label className="flex items-center gap-2.5 text-sm">
                 <Checkbox checked={form.is_active} onCheckedChange={(c) => set('is_active', !!c)} />
@@ -342,7 +372,7 @@ export default function RatePlanListPage() {
               <Button type="button" variant="outline" onClick={() => setShowModal(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={submitting || !!tariffProblem}>
                 {submitting ? 'Saving…' : editingId ? 'Save Changes' : 'Create Rate Plan'}
               </Button>
             </DialogFooter>

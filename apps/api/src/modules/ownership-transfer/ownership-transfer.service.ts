@@ -135,6 +135,8 @@ export class OwnershipTransferService {
             rateType: parentLot.ratePlan.rateType,
             rateAmountPkr: Number(parentLot.ratePlan.rateAmountPkr),
             minBillingDays: parentLot.ratePlan.minBillingDays,
+            tariff: parentLot.ratePlan.tariff,
+            seasonEndDate: parentLot.ratePlan.seasonEndDate,
           },
           createdBy: input.operatorId,
         });

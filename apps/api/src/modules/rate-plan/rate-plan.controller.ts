@@ -42,6 +42,7 @@ export async function ratePlanRoutes(app: FastifyInstance) {
         seasonStartDate: body.season_start_date,
         seasonEndDate: body.season_end_date,
         minBillingDays: body.min_billing_days,
+        tariff: body.tariff,
       });
       return sendSuccess(reply.status(201), result);
     },
@@ -74,6 +75,7 @@ export async function ratePlanRoutes(app: FastifyInstance) {
         seasonStartDate: body.season_start_date,
         seasonEndDate: body.season_end_date,
         minBillingDays: body.min_billing_days,
+        tariff: body.tariff,
         isActive: body.is_active,
       });
       return sendSuccess(reply, result);
