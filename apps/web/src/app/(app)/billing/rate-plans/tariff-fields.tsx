@@ -120,10 +120,10 @@ function TryIt({ tariff, monthRate, minDays, seasonEnd }: { tariff: Tariff; mont
       {result ? (
         <div className="text-sm" aria-live="polite">
           <p>
-            {result.days} day(s): {result.breakdown.map((b) => `${b.label} Rs ${formatMoney(b.pkr)}`).join(' + ') || 'no charge'}
+            {result.days} day(s): {result.breakdown.map((b) => `${b.label} ${formatMoney(b.pkr)}`).join(' + ') || 'no charge'}
           </p>
           <p className="font-medium tabular-nums">
-            Rs {formatMoney(result.perBagPkr)} per bag × {bags} bags = Rs {formatMoney(result.amountPkr)}
+            {formatMoney(result.perBagPkr)} per bag × {bags} bags = {formatMoney(result.amountPkr)}
           </p>
         </div>
       ) : (
