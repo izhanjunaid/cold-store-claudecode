@@ -49,6 +49,10 @@ export interface FacilityRefs {
   varietyId?: string;
   chamberId: string;
   seasonalRatePlanId: string;
+  // Labels, for picking them in the intake form's search comboboxes.
+  commodityName: string;
+  chamberName: string;
+  seasonalRatePlanName: string;
 }
 
 export async function getFacilityRefs(
@@ -85,6 +89,9 @@ export async function getFacilityRefs(
     commodityId: potato.id,
     chamberId: chamber.id,
     seasonalRatePlanId: seasonal.id,
+    commodityName: potato.name,
+    chamberName: chamber.name,
+    seasonalRatePlanName: seasonal.name,
   };
 }
 

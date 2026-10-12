@@ -140,20 +140,12 @@ test.describe('Muhammad Aslam — full potato season', () => {
         timeout: 15_000,
       });
 
-      // Wait for the reference data to populate (commodity is a native select).
-      await expect(page.locator(`select[name="commodity_id"] option[value="${refs.commodityId}"]`)).toHaveCount(1, {
-        timeout: 15_000,
-      });
-
-      // Owner is now a type-ahead Combobox (large party list).
+      // Owner, commodity, room and rate plan are type-ahead Comboboxes (phase/16).
       await pickCombobox(page, 'combobox-owner_party_id', aslam.name);
-      await page.locator('select[name="commodity_id"]').selectOption(refs.commodityId);
-      // Wait for chambers + rate plans to filter after commodity selection
-      await expect(page.locator(`select[name="chamber_id"] option[value="${refs.chamberId}"]`)).toHaveCount(1, {
-        timeout: 5_000,
-      });
-      await page.locator('select[name="chamber_id"]').selectOption(refs.chamberId);
-      await page.locator('select[name="rate_plan_id"]').selectOption(refs.seasonalRatePlanId);
+      await pickCombobox(page, 'combobox-commodity_id', refs.commodityName);
+      // Rooms and rate plans filter by the commodity just picked.
+      await pickCombobox(page, 'combobox-chamber_id', refs.chamberName);
+      await pickCombobox(page, 'combobox-rate_plan_id', refs.seasonalRatePlanName);
       await page.locator('input[name="quantity_bags"]').fill('500');
       await page.locator('input[name="accepted_weight_kg"]').fill('49850');
       await page.locator('input[name="declared_weight_kg"]').fill('50000');
