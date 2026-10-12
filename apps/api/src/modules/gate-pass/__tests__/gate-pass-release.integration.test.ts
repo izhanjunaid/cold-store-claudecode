@@ -39,7 +39,15 @@ let partyId: string;
 
 type Res = { statusCode: number; body: string };
 const code = (r: Res) => JSON.parse(r.body).error?.code as string | undefined;
-const data = <T = Record<string, any>>(r: Res) => JSON.parse(r.body).data as T;
+type PassBody = {
+  outbound_ids: string[];
+  cleared_by: string | null;
+  override_reason: string | null;
+  quantity_mismatch_flag: boolean;
+  authorized_quantity: number | null;
+  credit_authorized_by: string | null;
+};
+const data = <T = PassBody>(r: Res) => JSON.parse(r.body).data as T;
 
 async function cleanup() {
   await withGuardsDisabled(prisma, async () => {
