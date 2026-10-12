@@ -19,7 +19,7 @@ export type BookType = z.infer<typeof BookType>;
 export const LotStatus = z.enum(['ACTIVE', 'CLOSED', 'SUSPENDED']);
 export type LotStatus = z.infer<typeof LotStatus>;
 
-export const RateType = z.enum(['SEASONAL_PER_BAG', 'MONTHLY_PER_BAG', 'DAILY_PER_BAG']);
+export const RateType = z.enum(['SEASONAL_PER_BAG', 'MONTHLY_PER_BAG', 'DAILY_PER_BAG', 'TARIFF_PER_BAG']);
 export type RateType = z.infer<typeof RateType>;
 
 export const ServiceUnitType = z.enum(['PER_BAG', 'PER_TON', 'FLAT']);

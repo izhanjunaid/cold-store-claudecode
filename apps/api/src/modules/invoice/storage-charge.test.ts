@@ -92,6 +92,27 @@ describe('computeStorageCharge', () => {
     ).toEqual(new Date('2026-03-01'));
   });
 
+  it('TARIFF: bills the plan rule, with qty × unit price = amount', () => {
+    const r = computeStorageCharge({
+      ...base,
+      rateAmountPkr: 30,
+      rateType: 'TARIFF_PER_BAG',
+      tariff: { opening: { type: 'BLOCK', days: 15, months_charged: 0.5 } },
+      ...days(50),
+    });
+    expect(r.unitPricePkr).toBe(50); // 15 + 30 + 5
+    expect(r.quantity).toBe(100);
+    expect(r.amountPkr).toBe(5000);
+    expect(r.description).toContain('½ month + 1 month + 5 days');
+  });
+
+  it('TARIFF without a rule, and an unknown rate type, fail loudly instead of billing as daily', () => {
+    expect(() => computeStorageCharge({ ...base, rateType: 'TARIFF_PER_BAG', ...days(10) })).toThrow('no tariff');
+    expect(() => computeStorageCharge({ ...base, rateType: 'WEEKLY_PER_BAG' as never, ...days(10) })).toThrow(
+      'No storage charge rule',
+    );
+  });
+
   it('zero bags throws an error', () => {
     expect(() =>
       computeStorageCharge({ ...base, rateType: 'SEASONAL_PER_BAG', quantityBags: 0, ...days(10) }),

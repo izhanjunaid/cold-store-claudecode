@@ -1,4 +1,5 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
+import { RATE_UNIT_LABEL, type RateType } from '@coldchain/shared';
 import { LotRepository, LOT_INCLUDE_SHAPE } from './lot.repository';
 import { applyPlacements, type PlacementInput } from './placement.service';
 import { Errors } from '../../common/errors';
@@ -434,7 +435,7 @@ export class LotService {
       chamberName: typedLot.chamber?.name ?? '',
       ratePlanName: typedLot.ratePlan?.name ?? '',
       rateAmountPkr: typedLot.ratePlan ? Number(typedLot.ratePlan.rateAmountPkr) : 0,
-      rateType: typedLot.ratePlan?.rateType ?? '',
+      rateType: typedLot.ratePlan ? (RATE_UNIT_LABEL[typedLot.ratePlan.rateType as RateType] ?? typedLot.ratePlan.rateType) : '',
       vehicleNumber: typedLot.vehicleNumber,
       marka: typedLot.marka,
       operatorName: typedLot.createdByUser?.name ?? '',

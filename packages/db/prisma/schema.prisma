@@ -61,6 +61,7 @@ enum RateType {
   SEASONAL_PER_BAG
   MONTHLY_PER_BAG
   DAILY_PER_BAG
+  TARIFF_PER_BAG
 }
 
 enum ServiceUnitType {
@@ -642,6 +643,7 @@ model RatePlan {
   seasonStartDate    DateTime? @map("season_start_date") @db.Date
   seasonEndDate      DateTime? @map("season_end_date") @db.Date
   minBillingDays     Int       @default(1) @map("min_billing_days")
+  tariff             Json?
   revenueAccountCode String?   @map("revenue_account_code") @db.VarChar(10)
   isActive           Boolean   @default(true) @map("is_active")
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz()

@@ -31,6 +31,8 @@ let app: FastifyInstance;
 let ownerToken: string;
 let dailyPlanId: string;
 let seasonalNoEndPlanId: string;
+let tariffPlanId: string;
+let tariffSeasonPlanId: string;
 let partyId: string;
 let originalSettings: unknown;
 
@@ -186,6 +188,38 @@ beforeAll(async () => {
       },
     })
   ).id;
+  // "First 15 days cost a full month" — an opening that a charge restarted at the accrual
+  // start would apply a second time.
+  tariffPlanId = (
+    await prisma.ratePlan.create({
+      data: {
+        facilityId: TEST_FACILITY_ID,
+        name: 'Accrual Test — Tariff',
+        commodityId: POTATO_ID,
+        rateType: 'TARIFF_PER_BAG',
+        rateAmountPkr: 30,
+        minBillingDays: 1,
+        revenueAccountCode: REVENUE_ACCOUNT,
+        tariff: { opening: { type: 'BLOCK', days: 15, months_charged: 1 } },
+      },
+    })
+  ).id;
+  tariffSeasonPlanId = (
+    await prisma.ratePlan.create({
+      data: {
+        facilityId: TEST_FACILITY_ID,
+        name: 'Accrual Test — Tariff, season fee',
+        commodityId: POTATO_ID,
+        rateType: 'TARIFF_PER_BAG',
+        rateAmountPkr: 30,
+        minBillingDays: 1,
+        revenueAccountCode: REVENUE_ACCOUNT,
+        seasonStartDate: new Date(`${YEAR}-09-01T00:00:00.000Z`),
+        seasonEndDate: new Date(`${YEAR}-11-30T00:00:00.000Z`),
+        tariff: { opening: { type: 'SEASON', fee: 120 } },
+      },
+    })
+  ).id;
   const party = await app.inject({
     method: 'POST',
     url: '/v1/parties',
@@ -315,5 +349,64 @@ describe('what is not accrued, and says so', () => {
       where: { facilityId: TEST_FACILITY_ID, sourceTable: 'revenue_accrual', entryType: 'ACCRUAL', periodYear: YEAR, periodMonth: 8 },
     });
     expect(posted).toBe(0);
+  });
+});
+
+// Last on purpose: it closes September–November, after every month above.
+describe('a stepped tariff is accrued from where the accrual starts, not restarted there', () => {
+  let tariffLotId: string;
+  let seasonLotId: string;
+
+  it('the opening is not charged a second time when the accrual starts mid-stay', async () => {
+    // Lot in 10 Sep, accrual starts 1 Oct. Whole stay to 31 Oct (51 days) = 30 + 30 + 6 = 66 a bag;
+    // already earned by 1 Oct (21 days) = 30 + 6 = 36. Earned since: 30 a bag. A charge restarted at
+    // 1 Oct would bill 30 days as a fresh opening (30 + 15 = 45) and over-accrue.
+    await setStartDate(`${YEAR}-10-01`);
+    tariffLotId = (await createLot(tariffPlanId, BAGS, `${YEAR}-09-10`)).id;
+    seasonLotId = (await createLot(tariffSeasonPlanId, BAGS, `${YEAR}-09-10`)).id;
+    expect((await closeMonth(YEAR, 9)).statusCode).toBe(201);
+    expect((await closeMonth(YEAR, 10)).statusCode).toBe(201);
+    expect(await accruedBalanceForLot(tariffLotId, lastDay(YEAR, 10))).toBeCloseTo(BAGS * 30, 2);
+  });
+
+  it('a season fee is spread evenly over the season, from the accrual start', async () => {
+    // 120 a bag over 10 Sep → 30 Nov (81 days); 30 of those days fall in October.
+    expect(await accruedBalanceForLot(seasonLotId, lastDay(YEAR, 10))).toBeCloseTo((BAGS * 120 * 30) / 81, 2);
+  });
+
+  it('billed on withdrawal, the invoice and the accruals converge to nothing standing', async () => {
+    const out = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(ownerToken),
+      payload: { lot_id: tariffLotId, withdrawal_type: 'FULL', quantity_withdrawn_bags: BAGS, outbound_date: `${YEAR}-11-20` },
+    });
+    expect(out.statusCode).toBe(201);
+    const outboundId = JSON.parse(out.body).data.id;
+    await app.inject({
+      method: 'PATCH',
+      url: `/v1/outbound-events/${outboundId}/weight`,
+      headers: authHeaders(ownerToken),
+      payload: { outbound_weight_kg: BAGS * 20 },
+    });
+    const finOut = await app.inject({
+      method: 'POST',
+      url: `/v1/outbound-events/${outboundId}/finalize`,
+      headers: authHeaders(ownerToken),
+      payload: {},
+    });
+    expect(finOut.statusCode).toBe(200);
+    const draftId = JSON.parse(finOut.body).data.invoice_id as string;
+    const fin = await app.inject({
+      method: 'POST',
+      url: `/v1/invoices/${draftId}/finalize`,
+      headers: authHeaders(ownerToken),
+      payload: {},
+    });
+    expect(fin.statusCode).toBe(200);
+    // 10 Sep → 20 Nov = 71 days: 30 (opening) + 30 (a month) + 26 days = 86 a bag.
+    expect(Number(JSON.parse(fin.body).data.sub_total_pkr)).toBeCloseTo(BAGS * 86, 2);
+    expect((await closeMonth(YEAR, 11)).statusCode).toBe(201);
+    expect(await accruedBalanceForLot(tariffLotId)).toBeCloseTo(0, 2);
   });
 });
