@@ -206,7 +206,8 @@ X-Facility-ID: <facility_uuid>
 | GET | `/outbound-events/:id` | Outbound event detail | All |
 | PATCH | `/outbound-events/:id/weight` | Record outbound weight | OPERATOR+ |
 | POST | `/outbound-events/:id/finalize` | Finalize and close (triggers invoice) | MANAGER+ |
-| GET | `/outbound-events/:id/dispatch-note` | Get dispatch note PDF URL | OPERATOR+ |
+| POST | `/outbound-events/:id/cancel` | Cancel a withdrawal that has not left (PENDING/WEIGHED/DISPUTED); body `{ reason }`; frees its bags | OPERATOR+ (`outbound.record`) |
+| GET | `/outbound-events/:id/dispatch-note` | Get dispatch note PDF URL (409 for a cancelled withdrawal) | OPERATOR+ |
 
 **POST /outbound-events — Request**
 ```json
@@ -337,6 +338,21 @@ X-Facility-ID: <facility_uuid>
 | `SYSTEM_ACCOUNT_PROTECTED` | 409 | System accounts cannot be deleted or recoded |
 | `CREDIT_NOTE_EXCEEDS_INVOICE` | 422 | Credit note total exceeds original invoice |
 | `VALIDATION_ERROR` | 400 | Invalid input; field-level detail in error.field |
+| `LOT_BALANCE_RESERVED` | 409 | Bags are held by open withdrawals (message names their dispatch notes); dispatch or cancel them first |
+| `DATE_IN_FUTURE` | 422 | A date after today (Lahore calendar); MANAGER+ only |
+| `OUTBOUND_CANCELLED` | 409 | The withdrawal was cancelled |
+| `OUTBOUND_QUANTITY_STALE` | 409 | A FULL withdrawal no longer equals the lot balance; cancel and rebook |
+| `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization |
+| `GATE_OUTWARD_INVOICE_NOT_FINAL` | 422 | A withdrawal on the truck is billed on a DRAFT invoice — finalize it first (credit cannot cover a draft) |
+| `GATE_OUTWARD_NOT_DISPATCHED` | 422 | The named withdrawal has not been dispatched |
+| `GATE_OUTWARD_ALREADY_USED` | 409 | The withdrawal already left on another truck |
+| `GATE_OUTWARD_PLATE_MISMATCH` | 422 | Truck plate ≠ the withdrawal's booked vehicle (or none booked); MANAGER may override with a reason |
+| `GATE_OUTWARD_COUNT_REQUIRED` | 422 | The guard's bag count is required when a withdrawal leaves |
+| `GATE_OUTWARD_COUNT_MISMATCH` | 422 | Count ≠ bags dispatched (never states the expected number); MANAGER may override with a reason |
+| `GATE_OUTWARD_UNMATCHED_LOAD` | 422 | A counted load no dispatched withdrawal accounts for; MANAGER may override with a reason |
+| `GATE_OVERRIDE_REQUIRES_MANAGER` | 403 | `override_reason` sent by someone below MANAGER |
+| `GATE_SELF_RELEASE` | 403 | The releaser booked or dispatched a withdrawal on this truck (MANAGER+ exempt) |
+| `CONSTRAINT_VIOLATION` | 409 | A database rule refused the change (e.g. a lot balance below zero) |
 | `INTERNAL_ERROR` | 500 | Unexpected server error |
 
 ---

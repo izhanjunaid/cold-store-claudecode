@@ -24,7 +24,7 @@
 
 As of Phase 15, authorization is a **capability matrix the owner can edit**, not a
 hardcoded role hierarchy. The source of truth is the permission registry in
-`packages/shared/src/permissions.ts` (42 keys). Each key has a `defaultMinRole`
+`packages/shared/src/permissions.ts` (50 keys as of fast-dispatch Phase 0; the group list below predates some later keys — the file is authoritative). Each key has a `defaultMinRole`
 that **exactly reproduces the pre-Phase-15 `requireMinRole` threshold**, so with
 no customization the effective permissions are identical to the historical
 behaviour documented in the matrix below. The API enforces every key at the
@@ -36,18 +36,20 @@ caller's effective key list, and the web app gates nav/actions with `can(user, k
   defaults. OWNER always holds every key. Three keys are **alwaysOwner** (never
   delegable): `users.manage`, `settings.manage`, `permissions.manage`.
 - **Fixed rules outside the matrix** (deliberate audit controls, still seniority-based
-  via `roleAtLeast`): KATCHI book access (MANAGER read / OWNER write), backdating and
-  third-party release (MANAGER+), and gate-pass credit authorization (MANAGER+).
+  via `roleAtLeast`): KATCHI book access (MANAGER read / OWNER write), backdating,
+  future-dated inbound/outbound dates and third-party release (MANAGER+), and at the
+  gate: credit authorization, overriding a count/plate mismatch or an unmatched load
+  (with a stored reason), and exemption from the no-self-release rule (all MANAGER+).
   Reference-data GET routes remain authenticate-only so every role keeps the read
   access it has today.
 
 **Registry keys by group** (default minimum role in parentheses; the owner may grant/revoke per role):
 
-- **Parties**: `parties.manage`(OPERATOR), `parties.delete`(MANAGER)
+- **Parties**: `parties.manage`(OPERATOR), `parties.delete`(MANAGER), `parties.credit_terms`(MANAGER — set or change a credit limit / terms; `parties.manage` alone can only re-send the stored values)
 - **Commodities**: `commodities.manage`(MANAGER)
 - **Rooms & Racks**: `chambers.manage`(MANAGER), `chambers.log_temperature`(OPERATOR)
 - **Inbound & Lots**: `lots.manage`(OPERATOR), `lots.transfer_ownership`(MANAGER)
-- **Outbound**: `outbound.record`(OPERATOR), `outbound.finalize`(MANAGER)
+- **Outbound**: `outbound.record`(OPERATOR — book, weigh, cancel an undispatched withdrawal), `outbound.finalize`(MANAGER)
 - **Gate Pass**: `gate_passes.log`(SECURITY), `gate_passes.link_lot`(OPERATOR)
 - **Billing**: `rate_plans.manage`(MANAGER), `service_charges.manage`(MANAGER), `billing.view`(ACCOUNTANT), `invoices.manage`(MANAGER), `invoices.write_off`(OWNER), `payments.record`(ACCOUNTANT)
 - **Accounting**: `accounting.view`(ACCOUNTANT), `accounting.manage_accounts`(OWNER), `accounting.post_journal`(MANAGER), `accounting.period_lock`(MANAGER), `accounting.period_unlock`(OWNER)
