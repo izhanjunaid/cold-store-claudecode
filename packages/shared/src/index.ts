@@ -30,6 +30,7 @@ export * from './accounting-accounts';
 export * from './account-code';
 export * from './money';
 export * from './fiscal';
+export * from './vehicle';
 export * from './chart';
 export * from './journal-sources';
 export * from './tariff';

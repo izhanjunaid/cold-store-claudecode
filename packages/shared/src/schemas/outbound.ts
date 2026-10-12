@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { WithdrawalType, OutboundStatus } from './enums';
+import { VehicleNumber } from '../vehicle';
 
 export const CreateOutboundRequest = z.object({
   lot_id: z.string().uuid(),
@@ -8,10 +9,16 @@ export const CreateOutboundRequest = z.object({
   outbound_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
   receiving_party_id: z.string().uuid().optional(),
   third_party_release: z.boolean().optional(),
-  vehicle_number: z.string().max(20).optional(),
+  vehicle_number: VehicleNumber.optional(),
   notes: z.string().optional(),
 });
 export type CreateOutboundRequest = z.infer<typeof CreateOutboundRequest>;
+
+/** Cancel a withdrawal that has not left (PENDING, WEIGHED or DISPUTED); the lot is untouched. */
+export const CancelOutboundRequest = z.object({
+  reason: z.string().trim().min(3).max(400),
+});
+export type CancelOutboundRequest = z.infer<typeof CancelOutboundRequest>;
 
 export const UpdateOutboundWeightRequest = z.object({
   outbound_weight_kg: z.number().positive(),
@@ -51,5 +58,9 @@ export const OutboundEventResponse = z.object({
   weight_variance_pct: z.number().nullable(),
   created_at: z.string(),
   created_by_name: z.string(),
+  finalized_at: z.string().nullable().optional(),
+  voided_at: z.string().nullable().optional(),
+  void_reason: z.string().nullable().optional(),
+  gate_pass_id: z.string().uuid().nullable().optional(),
 });
 export type OutboundEventResponse = z.infer<typeof OutboundEventResponse>;

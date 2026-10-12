@@ -52,6 +52,20 @@ async function errorHandler(app: FastifyInstance) {
       });
     }
 
+    // A database CHECK the code did not anticipate (e.g. lots_current_balance_nonnegative):
+    // the request conflicts with the data, not a server fault. Prisma surfaces it
+    // either as a known request error carrying the SQLSTATE or as raw text.
+    if (isCheckViolation(error)) {
+      app.log.warn(error);
+      return reply.status(409).send({
+        success: false,
+        error: {
+          code: 'CONSTRAINT_VIOLATION',
+          message: 'This change would break a data rule (for example, a lot balance below zero) and was refused.',
+        },
+      });
+    }
+
     // Unknown errors
     app.log.error(error);
     return reply.status(500).send({
@@ -62,6 +76,12 @@ async function errorHandler(app: FastifyInstance) {
       },
     });
   });
+}
+
+function isCheckViolation(error: unknown): boolean {
+  const e = error as { code?: string; meta?: { code?: string }; message?: string };
+  if (e?.meta?.code === '23514') return true;
+  return typeof e?.message === 'string' && /\b23514\b|violates check constraint/.test(e.message);
 }
 
 export default fp(errorHandler);
