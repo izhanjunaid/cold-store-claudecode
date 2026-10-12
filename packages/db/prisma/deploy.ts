@@ -60,12 +60,30 @@ function prismaCli(args: string): void {
  * table does not exist until 0034 applies, so only the update that introduces it
  * can fail without a record — every later one is recorded.
  */
-async function recordOutcome(startedAt: Date, failure: unknown): Promise<void> {
+async function recordOutcome(startedAt: Date, failure: unknown, warning: string | null = null): Promise<void> {
   if (!(await tableExists('deploy_runs'))) return;
-  const error = failure === undefined ? null : failure instanceof Error ? failure.message : String(failure);
+  const error =
+    failure === undefined ? warning : failure instanceof Error ? failure.message : String(failure);
   await prisma.deployRun.create({
     data: { targetVersion: TARGET_VERSION, startedAt, succeeded: failure === undefined, error: error?.slice(-4000) ?? null },
   });
+}
+
+/**
+ * Data a migration could not validate, reported instead of failing the update.
+ * 0038 adds `lots_current_balance_nonnegative` NOT VALID when a lot is already
+ * below zero (the finalize race it fixes); such a lot then refuses every update,
+ * so the owner must hear about it. Recorded on the succeeded deploy_runs row,
+ * where Settings → Software shows it.
+ */
+async function dataWarnings(): Promise<string | null> {
+  if (!(await tableExists('lots'))) return null;
+  const negative = await prisma.$queryRawUnsafe<{ lot_number: string; current_balance_bags: number }[]>(
+    `SELECT lot_number, current_balance_bags FROM lots WHERE current_balance_bags < 0 ORDER BY lot_number`,
+  );
+  if (negative.length === 0) return null;
+  const list = negative.map((l) => `${l.lot_number} (${l.current_balance_bags})`).join(', ');
+  return `Lots with a negative bag balance need correcting by your ColdChain provider before they can be changed: ${list}`;
 }
 
 async function tableExists(name: string): Promise<boolean> {
@@ -154,7 +172,7 @@ async function repairMigrationHistory(): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
+async function main(): Promise<string | null> {
   await prisma.$queryRawUnsafe(`SELECT pg_advisory_lock(hashtext($1))::text AS _lock`, LOCK_KEY);
 
   console.log('1/3 checking migration history...');
@@ -172,12 +190,16 @@ async function main(): Promise<void> {
   }
   if (!added) console.log('  already up to date.');
 
+  const warning = await dataWarnings();
+  if (warning) console.warn(`\nWARNING: ${warning}`);
+
   console.log('\nDatabase is ready for this release.');
+  return warning;
 }
 
 const startedAt = new Date();
 main()
-  .then(() => recordOutcome(startedAt, undefined))
+  .then((warning) => recordOutcome(startedAt, undefined, warning))
   .catch(async (e) => {
     console.error('\nDatabase update FAILED — the previous version is still running.\n');
     console.error(e);
