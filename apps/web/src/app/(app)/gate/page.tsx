@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { FileText, RefreshCw, Truck } from 'lucide-react';
+import { localIsoDate } from '@coldchain/shared';
 import { apiClient, apiClientList, ApiError } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { can } from '@/lib/permissions';
 import { hasMinRole } from '@/lib/rbac';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,10 +15,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/empty-state';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/ui/status-badge';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -45,7 +49,19 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = 
   CANCELLED: 'danger',
 };
 
-const GATE_ALLOWED_ROLES = ['OWNER', 'MANAGER', 'OPERATOR', 'SECURITY'];
+// The truck does not match its dispatch (bag count, plate, or a load nothing was
+// dispatched for). A manager may release it anyway with a written reason; anyone
+// else recounts or calls one.
+const OVERRIDABLE_CODES = new Set([
+  'GATE_OUTWARD_COUNT_MISMATCH',
+  'GATE_OUTWARD_PLATE_MISMATCH',
+  'GATE_OUTWARD_UNMATCHED_LOAD',
+]);
+
+// A blank box is "not counted yet"; 0 is a real count (an empty truck).
+function parseCount(raw: string): number | null {
+  return /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : null;
+}
 
 function relativeTime(iso: string): string {
   const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -80,9 +96,10 @@ async function printGatePassReceipt(passId: string) {
 
 export default function GatePassConsolePage() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
+  const canGate = can(user, 'gate_passes.log');
+  // Credit release and overriding a gate check are fixed seniority rules, not matrix keys.
   const canManager = !!user && hasMinRole(user.role, 'MANAGER');
-  const canSecurity = GATE_ALLOWED_ROLES.includes(user?.role ?? '');
 
   const [passes, setPasses] = useState<GatePass[]>([]);
   const [recentCleared, setRecentCleared] = useState<GatePass[]>([]);
@@ -97,14 +114,17 @@ export default function GatePassConsolePage() {
   const [outwardModal, setOutwardModal] = useState<GatePass | null>(null);
   const [outwardOutboundId, setOutwardOutboundId] = useState('');
   const [creditAuth, setCreditAuth] = useState(false);
+  // The guard's count is blind: the dialog never shows what was dispatched.
+  const [outwardCount, setOutwardCount] = useState('');
+  const [overrideReason, setOverrideReason] = useState('');
   const [outwardErr, setOutwardErr] = useState<string | null>(null);
-  const [outwardBlocked, setOutwardBlocked] = useState(false);
+  const [outwardErrCode, setOutwardErrCode] = useState<string | null>(null);
   const [outwardLoading, setOutwardLoading] = useState(false);
 
   const fetchActive = useCallback(async () => {
-    if (!canSecurity) return;
+    if (!canGate) return;
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localIsoDate();
       const [active, cleared] = await Promise.all([
         apiClientList<GatePass>('/v1/gate-passes?active=true&page_size=50'),
         apiClientList<GatePass>(`/v1/gate-passes?status=CLEARED&date_from=${today}&page_size=20`),
@@ -116,7 +136,7 @@ export default function GatePassConsolePage() {
     } finally {
       setLoading(false);
     }
-  }, [canSecurity]);
+  }, [canGate]);
 
   useEffect(() => {
     fetchActive();
@@ -125,10 +145,10 @@ export default function GatePassConsolePage() {
   }, [fetchActive]);
 
   useEffect(() => {
-    if (user && !canSecurity) router.replace('/dashboard');
-  }, [user, canSecurity, router]);
+    if (user && !canGate) router.replace('/dashboard');
+  }, [user, canGate, router]);
 
-  if (!canSecurity) {
+  if (!canGate) {
     return (
       <div>
         <PageHeader title="Gate Pass Console" />
@@ -164,31 +184,51 @@ export default function GatePassConsolePage() {
     }
   }
 
-  async function submitOutward() {
-    if (!outwardModal) return;
+  function openOutward(p: GatePass) {
+    setOutwardModal(p);
+    setOutwardOutboundId(p.related_outbound_id ?? '');
+    setCreditAuth(false);
+    setOutwardCount('');
+    setOverrideReason('');
+    setOutwardErr(null);
+    setOutwardErrCode(null);
+  }
+
+  /** `withOverride`: a manager releasing a truck that failed a gate check, with a reason. */
+  async function submitOutward(withOverride = false) {
+    const declared = parseCount(outwardCount);
+    if (!outwardModal || declared == null) return;
     setOutwardLoading(true);
     setOutwardErr(null);
-    setOutwardBlocked(false);
+    setOutwardErrCode(null);
     try {
       const cleared = await apiClient<GatePass>(`/v1/gate-passes/${outwardModal.id}/outward`, {
         method: 'POST',
         body: {
-          ...(outwardOutboundId ? { outbound_event_id: outwardOutboundId } : {}),
+          ...(outwardOutboundId.trim() ? { outbound_event_id: outwardOutboundId.trim() } : {}),
           ...(creditAuth ? { credit_authorization: true } : {}),
+          declared_quantity: declared,
+          ...(withOverride ? { override_reason: overrideReason.trim() } : {}),
         },
       });
       setOutwardModal(null);
       setOutwardOutboundId('');
       setCreditAuth(false);
+      setOutwardCount('');
+      setOverrideReason('');
       toast.success(`Cleared ${cleared.vehicle_number} — TAT ${formatTurnaround(cleared.turnaround_seconds)}`);
       fetchActive();
     } catch (err) {
-      setOutwardBlocked(err instanceof ApiError && err.code === 'GATE_OUTWARD_BLOCKED');
+      setOutwardErrCode(err instanceof ApiError ? err.code : null);
       setOutwardErr(err instanceof Error ? err.message : 'Failed to clear outward');
     } finally {
       setOutwardLoading(false);
     }
   }
+
+  const countValid = parseCount(outwardCount) != null;
+  const outwardBlocked = outwardErrCode === 'GATE_OUTWARD_BLOCKED';
+  const outwardMismatch = outwardErrCode != null && OVERRIDABLE_CODES.has(outwardErrCode);
 
   return (
     <div>
@@ -284,16 +324,7 @@ export default function GatePassConsolePage() {
                     <Button variant="outline" size="sm" onClick={() => printGatePassReceipt(p.id)}>
                       Print
                     </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setOutwardModal(p);
-                        setOutwardOutboundId(p.related_outbound_id ?? '');
-                        setCreditAuth(false);
-                        setOutwardErr(null);
-                        setOutwardBlocked(false);
-                      }}
-                    >
+                    <Button size="sm" onClick={() => openOutward(p)}>
                       Clear Outward
                     </Button>
                   </li>
@@ -335,22 +366,45 @@ export default function GatePassConsolePage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Clear Outward — {outwardModal?.vehicle_number}</DialogTitle>
+            <DialogDescription>
+              Pass {outwardModal?.pass_number}
+              {outwardModal?.related_dispatch_note_number ? ` • Dispatch ${outwardModal.related_dispatch_note_number}` : ''}
+            </DialogDescription>
           </DialogHeader>
           {outwardModal && (
             <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Pass {outwardModal.pass_number}
-                {outwardModal.related_dispatch_note_number ? ` • Dispatch ${outwardModal.related_dispatch_note_number}` : ''}
-              </p>
               <div className="space-y-1.5">
-                <Label>Outbound event ID (optional)</Label>
+                <Label htmlFor="outward-count">
+                  Bags counted on truck <span className="text-destructive">*</span>
+                </Label>
                 <Input
-                  value={outwardOutboundId}
-                  onChange={(e) => setOutwardOutboundId(e.target.value)}
-                  placeholder="Auto-match by vehicle if blank"
-                  className="font-mono"
+                  id="outward-count"
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step={1}
+                  value={outwardCount}
+                  onChange={(e) => setOutwardCount(e.target.value)}
+                  aria-describedby="outward-count-help"
+                  required
+                  className="h-12 font-mono text-lg tabular-nums"
                 />
+                <p id="outward-count-help" className="text-xs text-muted-foreground">
+                  Count the bags on the truck. Enter 0 for an empty truck.
+                </p>
               </div>
+              {canManager && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="outward-outbound-id">Outbound event ID (optional)</Label>
+                  <Input
+                    id="outward-outbound-id"
+                    value={outwardOutboundId}
+                    onChange={(e) => setOutwardOutboundId(e.target.value)}
+                    placeholder="Auto-match by vehicle if blank"
+                    className="font-mono"
+                  />
+                </div>
+              )}
               {canManager && (
                 <label htmlFor="credit-auth" className="flex items-center gap-2 text-sm">
                   <input
@@ -365,13 +419,44 @@ export default function GatePassConsolePage() {
               )}
               {outwardErr && (
                 <div
+                  role="alert"
                   className={
                     outwardBlocked
-                      ? 'rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive'
-                      : 'rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800'
+                      ? 'space-y-1 rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive'
+                      : 'space-y-1 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800'
                   }
                 >
-                  {outwardBlocked ? 'Payment Pending — escalate to Manager' : outwardErr}
+                  <p>{outwardErr}</p>
+                  {outwardBlocked && (
+                    <p className="font-semibold">
+                      {canManager ? 'Tick “Authorize on credit” to release on credit.' : 'Escalate to Manager.'}
+                    </p>
+                  )}
+                  {outwardMismatch && !canManager && <p className="font-semibold">Recount, or call a manager.</p>}
+                </div>
+              )}
+              {outwardMismatch && canManager && (
+                <div className="space-y-1.5 rounded-md border border-amber-300 p-3">
+                  <Label htmlFor="override-reason">
+                    Override reason <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="override-reason"
+                    value={overrideReason}
+                    onChange={(e) => setOverrideReason(e.target.value)}
+                    placeholder="Why this truck may leave anyway"
+                    rows={2}
+                    maxLength={400}
+                  />
+                  <p className="text-xs text-muted-foreground">Saved on the gate pass.</p>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => submitOutward(true)}
+                    disabled={outwardLoading || !countValid || overrideReason.trim().length < 3}
+                  >
+                    Release anyway
+                  </Button>
                 </div>
               )}
             </div>
@@ -380,7 +465,7 @@ export default function GatePassConsolePage() {
             <Button variant="outline" onClick={() => setOutwardModal(null)}>
               Cancel
             </Button>
-            <Button onClick={submitOutward} disabled={outwardLoading}>
+            <Button onClick={() => submitOutward()} disabled={outwardLoading || !countValid}>
               {outwardLoading ? 'Clearing…' : 'Clear Outward'}
             </Button>
           </DialogFooter>

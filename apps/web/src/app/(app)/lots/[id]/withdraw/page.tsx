@@ -2,15 +2,20 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { fromIsoDate, localIsoDate, normalizePlate } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
+import { hasMinRole } from '@/lib/rbac';
+import { useAuthStore } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { PartyPicker } from '@/components/party/party-picker';
 import { PageHeader } from '@/components/layout/page-header';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
+import { MASKS, MASK_PLACEHOLDER } from '@/components/form/masks';
 import { useLotPlacements } from '@/components/lot-location';
 import { useFacility } from '@/hooks/use-reference-data';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -20,6 +25,7 @@ interface Lot {
   id: string;
   lot_number: string;
   status: string;
+  owner_party_id: string;
   owner_party_name: string | null;
   billing_party_id: string;
   billing_party_name: string | null;
@@ -35,6 +41,7 @@ export default function WithdrawPage() {
   const params = useParams();
   const router = useRouter();
   const lotId = params['id'] as string;
+  const user = useAuthStore((s) => s.user);
 
   const [lot, setLot] = useState<Lot | null>(null);
   const { data: location } = useLotPlacements(lotId);
@@ -46,8 +53,10 @@ export default function WithdrawPage() {
   const [form, setForm] = useState({
     withdrawal_type: 'FULL' as 'FULL' | 'PARTIAL',
     quantity_withdrawn_bags: '',
-    outbound_date: new Date().toISOString().slice(0, 10),
+    // The viewer's calendar day: the UTC date read as yesterday before 05:00 in Lahore.
+    outbound_date: localIsoDate(),
     receiving_party_id: '',
+    third_party_release: false,
     vehicle_number: '',
     notes: '',
   });
@@ -73,11 +82,22 @@ export default function WithdrawPage() {
 
   // Server enforcement (outbound.service.ts) only rejects this on submit for
   // OPERATOR-level users; surface it here too so it isn't a surprise error.
+  // Both sides are calendar dates (UTC midnights), so the difference is whole days.
   const backdatingMaxDays = facility?.settings?.backdating_max_days ?? null;
+  const today = localIsoDate();
   const daysBack = form.outbound_date
-    ? Math.floor((Date.now() - new Date(form.outbound_date).getTime()) / 86_400_000)
+    ? Math.round((fromIsoDate(today).getTime() - fromIsoDate(form.outbound_date).getTime()) / 86_400_000)
     : 0;
   const isBackdated = backdatingMaxDays !== null && daysBack > backdatingMaxDays;
+  // The server refuses a future date below MANAGER (DATE_IN_FUTURE).
+  const isFutureDated = !!form.outbound_date && form.outbound_date > today;
+
+  // Goods going to anyone but the current owner is a third-party release: the
+  // server wants it flagged, and only a manager may flag it (a fixed seniority
+  // rule outside the permission matrix).
+  const isManager = hasMinRole(user?.role, 'MANAGER');
+  const isThirdParty = !!lot && !!form.receiving_party_id && form.receiving_party_id !== lot.owner_party_id;
+  const blockedThirdParty = isThirdParty && !isManager;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,6 +111,12 @@ export default function WithdrawPage() {
           `Partial quantity must be less than current balance (${lot.current_balance_bags}). Use FULL to withdraw the whole lot.`,
         );
     }
+    // The gate matches the outgoing truck by its plate, so it is not optional here.
+    const plate = form.vehicle_number.trim();
+    if (normalizePlate(plate).length < 2) return setError("Enter the truck's number plate");
+    if (blockedThirdParty) return setError('Releasing to someone other than the owner needs a manager.');
+    if (isThirdParty && !form.third_party_release)
+      return setError('Tick “Third-party release” to confirm, or pick the owner as receiver.');
     setSubmitting(true);
     try {
       const qty = form.withdrawal_type === 'FULL' ? lot.current_balance_bags : Number(form.quantity_withdrawn_bags);
@@ -101,7 +127,8 @@ export default function WithdrawPage() {
         outbound_date: form.outbound_date,
       };
       if (form.receiving_party_id) body['receiving_party_id'] = form.receiving_party_id;
-      if (form.vehicle_number) body['vehicle_number'] = form.vehicle_number;
+      if (isThirdParty && form.third_party_release) body['third_party_release'] = true;
+      body['vehicle_number'] = plate;
       if (form.notes) body['notes'] = form.notes;
       const res = await apiClient<{ id: string }>('/v1/outbound-events', { method: 'POST', body });
       router.push(`/outbound-events/${res.id}`);
@@ -246,23 +273,34 @@ export default function WithdrawPage() {
                   Backdated {daysBack} days — manager approval required.
                 </p>
               )}
+              {isFutureDated && (
+                <p className="text-xs text-amber-600">Future date — only a manager can save this.</p>
+              )}
             </div>
             <div className="space-y-1.5">
-              <Label>Vehicle number</Label>
+              <Label htmlFor="vehicle_number">
+                Vehicle number <span className="text-destructive">*</span>
+              </Label>
               <Input
+                id="vehicle_number"
+                name="vehicle_number"
                 type="text"
+                required
                 maxLength={20}
+                autoComplete="off"
                 value={form.vehicle_number}
-                onChange={(e) => setForm({ ...form, vehicle_number: e.target.value })}
-                placeholder="Optional"
+                onChange={(e) => setForm({ ...form, vehicle_number: MASKS.vehicle(e.target.value) })}
+                placeholder={MASK_PLACEHOLDER.vehicle}
               />
+              <p className="text-xs text-muted-foreground">The gate checks the truck by this plate.</p>
             </div>
             <div className="space-y-1.5">
               <Label>Receiving party</Label>
               <PartyPicker
                 clearable
                 value={form.receiving_party_id}
-                onChange={(v) => setForm({ ...form, receiving_party_id: v })}
+                // A new receiver needs the third-party box ticked afresh.
+                onChange={(v) => setForm({ ...form, receiving_party_id: v, third_party_release: false })}
                 placeholder="— Optional —"
                 testId="combobox-receiving_party_id"
               />
@@ -276,11 +314,29 @@ export default function WithdrawPage() {
                 placeholder="Optional"
               />
             </div>
+
+            {isThirdParty && (
+              <div className="col-span-full">
+                {isManager ? (
+                  <label className="flex items-center gap-2.5 text-sm">
+                    <Checkbox
+                      checked={form.third_party_release}
+                      onCheckedChange={(c) => setForm({ ...form, third_party_release: !!c })}
+                    />
+                    Third-party release — goods go to someone other than the owner
+                  </label>
+                ) : (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    Releasing to someone other than the owner needs a manager.
+                  </div>
+                )}
+              </div>
+            )}
           </EntryGroup>
         </EntrySheet>
 
         <FormActions>
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={submitting || blockedThirdParty}>
             {submitting ? 'Creating…' : 'Create Withdrawal'}
           </Button>
           <Button type="button" variant="outline" onClick={() => router.push(`/lots/${lotId}`)}>

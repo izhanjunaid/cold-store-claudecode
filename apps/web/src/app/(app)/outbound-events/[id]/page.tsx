@@ -3,12 +3,22 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { FileText, Truck } from 'lucide-react';
+import { Ban, FileText, Receipt, Truck } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { useCan } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
@@ -34,7 +44,17 @@ interface OutboundEvent {
   prorated_inbound_weight_kg: number | null;
   weight_variance_pct: number | null;
   created_by_name: string;
+  /** Set by finalize — the withdrawal's invoice. */
+  invoice_id: string | null;
+  finalized_at: string | null;
+  /** Set by cancel, with the reason the user typed. */
+  voided_at: string | null;
+  void_reason: string | null;
 }
+
+/** Statuses the server lets a withdrawal be cancelled from (it has not left). */
+const CANCELLABLE: OutboundEvent['status'][] = ['PENDING', 'WEIGHED', 'DISPUTED'];
+const MIN_REASON = 3;
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -45,11 +65,97 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+/**
+ * Cancel a withdrawal that has not left — modelled on VoidInvoiceDialog: a
+ * required reason, one request. The server frees the bags it was holding.
+ * Errors stay inside the dialog so the typed reason is not lost.
+ */
+function CancelWithdrawalDialog({
+  open,
+  onOpenChange,
+  eventId,
+  onCancelled,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  eventId: string;
+  onCancelled: (event: OutboundEvent) => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const trimmed = reason.trim();
+
+  const submit = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await apiClient<OutboundEvent>(`/v1/outbound-events/${eventId}/cancel`, {
+        method: 'POST',
+        body: { reason: trimmed },
+      });
+      setReason('');
+      onOpenChange(false);
+      onCancelled(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not cancel the withdrawal');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) setError(null);
+        onOpenChange(o);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Cancel this withdrawal?</DialogTitle>
+          <DialogDescription>
+            Use this if these bags are not going out. They go back to the lot. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1">
+          <Label htmlFor="cancel-reason">Reason</Label>
+          <Textarea
+            id="cancel-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. Truck did not come"
+            maxLength={400}
+            rows={3}
+          />
+        </div>
+        {error && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Go back
+          </Button>
+          <Button variant="destructive" disabled={trimmed.length < MIN_REASON || saving} onClick={submit}>
+            {saving ? 'Cancelling…' : 'Cancel withdrawal'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function OutboundEventDetailPage() {
   const params = useParams();
   const router = useRouter();
   const confirm = useConfirm();
   const eventId = params['id'] as string;
+  const canFinalize = useCan('outbound.finalize');
+  const canRecord = useCan('outbound.record');
+  const canViewInvoice = useCan('billing.view');
 
   const [event, setEvent] = useState<OutboundEvent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,6 +163,7 @@ export default function OutboundEventDetailPage() {
   const [weightInput, setWeightInput] = useState('');
   const [savingWeight, setSavingWeight] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
   // Optional per-rack pick record, keyed by rack_id (empty = auto-trim).
   const [picks, setPicks] = useState<Record<string, string>>({});
   const { data: location } = useLotPlacements(event?.lot_id ?? '');
@@ -152,6 +259,10 @@ export default function OutboundEventDetailPage() {
   if (!event) return <p className="text-destructive">Not found.</p>;
 
   const isActionable = event.status !== 'DISPATCHED' && event.status !== 'CANCELLED';
+  const isCancelled = event.status === 'CANCELLED';
+  // Rack picks only travel with finalize, so only someone who can finalize enters them.
+  const canPick = event.status === 'WEIGHED' && canFinalize;
+  const canCancel = canRecord && CANCELLABLE.includes(event.status);
 
   return (
     <div className="max-w-2xl">
@@ -168,6 +279,17 @@ export default function OutboundEventDetailPage() {
           {event.lot_number}
         </Button>
       </div>
+
+      {isCancelled && (
+        <div
+          role="status"
+          className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          <span className="font-semibold">Cancelled</span>
+          {event.voided_at && ` on ${formatDate(event.voided_at)}`}
+          {event.void_reason && `: ${event.void_reason}`}
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -194,55 +316,57 @@ export default function OutboundEventDetailPage() {
         </CardContent>
       </Card>
 
-      <Card className="mb-5">
-        <CardHeader>
-          <CardTitle className="text-sm">Weight</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {event.status === 'PENDING' && (
-            <form onSubmit={handleRecordWeight} className="flex items-end gap-3">
-              <div className="flex-1 space-y-1.5">
-                <Label>Outbound Weight (kg) <span className="text-destructive">*</span></Label>
-                <Input
-                  type="number"
-                  min={0.01}
-                  step={0.01}
-                  value={weightInput}
-                  onChange={(e) => setWeightInput(e.target.value)}
-                  placeholder="e.g. 4850.00"
-                  className="tabular-nums"
-                  required
-                />
-              </div>
-              <Button type="submit" disabled={savingWeight}>
-                {savingWeight ? 'Saving…' : 'Record Weight'}
-              </Button>
-            </form>
-          )}
-
-          {event.outbound_weight_kg != null && (
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <Field label="Outbound Weight" value={`${event.outbound_weight_kg.toLocaleString()} kg`} />
-              {event.prorated_inbound_weight_kg != null && (
-                <Field label="Prorated Inbound" value={`${event.prorated_inbound_weight_kg.toLocaleString()} kg`} />
-              )}
-              {event.weight_variance_pct != null && (
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Variance</div>
-                  <div className={`mt-0.5 font-semibold ${Math.abs(event.weight_variance_pct) > 5 ? 'text-destructive' : 'text-foreground'}`}>
-                    {event.weight_variance_pct > 0 ? '+' : ''}
-                    {event.weight_variance_pct.toFixed(2)}%
-                  </div>
+      {(!isCancelled || event.outbound_weight_kg != null) && (
+        <Card className="mb-5">
+          <CardHeader>
+            <CardTitle className="text-sm">Weight</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {event.status === 'PENDING' && (
+              <form onSubmit={handleRecordWeight} className="flex items-end gap-3">
+                <div className="flex-1 space-y-1.5">
+                  <Label>Outbound Weight (kg) <span className="text-destructive">*</span></Label>
+                  <Input
+                    type="number"
+                    min={0.01}
+                    step={0.01}
+                    value={weightInput}
+                    onChange={(e) => setWeightInput(e.target.value)}
+                    placeholder="e.g. 4850.00"
+                    className="tabular-nums"
+                    required
+                  />
                 </div>
-              )}
-            </div>
-          )}
-
-          {event.status === 'PENDING' && event.outbound_weight_kg == null && (
-            <p className="mt-2 text-xs text-muted-foreground">Weight not yet recorded.</p>
-          )}
-        </CardContent>
-      </Card>
+                <Button type="submit" disabled={savingWeight}>
+                  {savingWeight ? 'Saving…' : 'Record Weight'}
+                </Button>
+              </form>
+            )}
+  
+            {event.outbound_weight_kg != null && (
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <Field label="Outbound Weight" value={`${event.outbound_weight_kg.toLocaleString()} kg`} />
+                {event.prorated_inbound_weight_kg != null && (
+                  <Field label="Prorated Inbound" value={`${event.prorated_inbound_weight_kg.toLocaleString()} kg`} />
+                )}
+                {event.weight_variance_pct != null && (
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Variance</div>
+                    <div className={`mt-0.5 font-semibold ${Math.abs(event.weight_variance_pct) > 5 ? 'text-destructive' : 'text-foreground'}`}>
+                      {event.weight_variance_pct > 0 ? '+' : ''}
+                      {event.weight_variance_pct.toFixed(2)}%
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+  
+            {event.status === 'PENDING' && event.outbound_weight_kg == null && (
+              <p className="mt-2 text-xs text-muted-foreground">Weight not yet recorded.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {isActionable && location && (location.placements.length > 0 || location.unplaced_bags > 0) && (
         <Card className="mb-5">
@@ -257,14 +381,14 @@ export default function OutboundEventDetailPage() {
             ) : (
               <>
                 <p className="mb-3 text-xs text-muted-foreground">
-                  Where the stock sits{event.status === 'WEIGHED' ? ' — optionally record which racks the bags were pulled from; left blank, the fullest racks are reduced automatically' : ''}.
+                  Where the stock sits{canPick ? ' — optionally record which racks the bags were pulled from; left blank, the fullest racks are reduced automatically' : ''}.
                 </p>
                 <div className="space-y-2">
                   {location.placements.map((p) => (
                     <div key={p.rack_id} className="flex items-center gap-3 text-sm">
                       <span className="w-24 font-medium">{p.rack_name}</span>
                       <span className="w-28 text-muted-foreground tabular-nums">{p.bags.toLocaleString()} bags here</span>
-                      {event.status === 'WEIGHED' && (
+                      {canPick && (
                         <Input
                           type="number"
                           min={0}
@@ -285,18 +409,47 @@ export default function OutboundEventDetailPage() {
         </Card>
       )}
 
+      {event.status === 'WEIGHED' && !canFinalize && (
+        <p className="mb-3 text-sm text-muted-foreground">Waiting for a manager to dispatch.</p>
+      )}
+
       <div className="flex flex-wrap gap-3">
-        {isActionable && event.status === 'WEIGHED' && (
+        {event.status === 'WEIGHED' && canFinalize && (
           <Button onClick={handleFinalize} disabled={finalizing || pickError != null}>
             <Truck className="h-4 w-4" aria-hidden />
             {finalizing ? 'Finalizing…' : 'Finalize & Dispatch'}
           </Button>
         )}
-        <Button variant="outline" onClick={handlePrintDispatchNote}>
-          <FileText className="h-4 w-4" aria-hidden />
-          Print Dispatch Note
-        </Button>
+        {event.invoice_id && canViewInvoice && (
+          <Button variant="outline" onClick={() => router.push(`/invoices/${event.invoice_id}`)}>
+            <Receipt className="h-4 w-4" aria-hidden />
+            View invoice
+          </Button>
+        )}
+        {!isCancelled && (
+          <Button variant="outline" onClick={handlePrintDispatchNote}>
+            <FileText className="h-4 w-4" aria-hidden />
+            Print Dispatch Note
+          </Button>
+        )}
+        {canCancel && (
+          <Button variant="outline" className="text-destructive" onClick={() => setCancelOpen(true)}>
+            <Ban className="h-4 w-4" aria-hidden />
+            Cancel withdrawal
+          </Button>
+        )}
       </div>
+
+      <CancelWithdrawalDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        eventId={eventId}
+        onCancelled={(updated) => {
+          setEvent(updated);
+          setError(null);
+          toast.success('Withdrawal cancelled — its bags are free again.');
+        }}
+      />
     </div>
   );
 }

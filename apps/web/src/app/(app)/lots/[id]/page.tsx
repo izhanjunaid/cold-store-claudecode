@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeftRight, FileText, PackageMinus } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -103,9 +104,11 @@ export default function LotDetailPage() {
   const [activeTab, setActiveTab] = useState(recentTransferId ? 'ownership' : 'overview');
   const [receiptLoading, setReceiptLoading] = useState(false);
   const user = useAuthStore((s) => s.user);
-  const canTransfer = user?.role === 'OWNER' || user?.role === 'MANAGER';
-  const canWithdraw =
-    user?.role != null && ['OWNER', 'MANAGER', 'ACCOUNTANT', 'OPERATOR'].includes(user.role);
+  // Each action shows only with the permission key its API route checks.
+  const canTransfer = can(user, 'lots.transfer_ownership');
+  const canWithdraw = can(user, 'outbound.record');
+  // Rack placement and room moves (PUT /placements, POST /move) are lots.manage.
+  const canPlace = can(user, 'lots.manage');
 
   const fetchLot = useCallback(async () => {
     setLoading(true);
@@ -280,7 +283,7 @@ export default function LotDetailPage() {
         </CardContent>
       </Card>
 
-      <LotLocationCard lotId={id} canOperate={canWithdraw && canAct} />
+      <LotLocationCard lotId={id} canOperate={canPlace && canAct} />
 
       <Card>
         <Tabs value={activeTab} onValueChange={setActiveTab}>

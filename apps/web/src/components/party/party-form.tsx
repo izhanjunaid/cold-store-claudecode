@@ -12,6 +12,7 @@ import { NumberField } from '@/components/form/number-field';
 import { MaskedField } from '@/components/form/masked-field';
 import { TextareaField } from '@/components/form/textarea-field';
 import { apiClient } from '@/lib/api-client';
+import { useCan } from '@/lib/permissions';
 import { useApiMutation } from '@/hooks/use-api-mutation';
 import { applyApiErrorToForm } from '@/lib/form-errors';
 import { PartyField } from '@/components/party/party-picker';
@@ -67,6 +68,9 @@ interface PartyFormProps {
 
 export function PartyForm({ initialData, partyId, mode, canChangeType = true }: PartyFormProps) {
   const router = useRouter();
+  // Credit limit and terms are a control (dispatch and the gate weigh credit
+  // against them), so they need parties.credit_terms, not just parties.manage.
+  const canSetCredit = useCan('parties.credit_terms');
 
   const form = useForm<PartyFormValues>({
     resolver: zodResolver(partySchema),
@@ -96,14 +100,18 @@ export function PartyForm({ initialData, partyId, mode, canChangeType = true }: 
       name: values.name,
       ...(canChangeType ? { party_type: values.party_type } : {}),
       phone_primary: values.phone_primary,
-      credit_terms_days: parseInt(values.credit_terms_days) || 30,
     };
+    // Without parties.credit_terms the credit fields are left out entirely, so an
+    // edit by the munshi never touches what a manager set.
+    if (canSetCredit) {
+      payload['credit_terms_days'] = parseInt(values.credit_terms_days) || 30;
+      if (values.credit_limit_pkr) payload['credit_limit_pkr'] = parseFloat(values.credit_limit_pkr);
+    }
     if (values.name_urdu) payload['name_urdu'] = values.name_urdu;
     if (values.phone_secondary) payload['phone_secondary'] = values.phone_secondary;
     if (values.address) payload['address'] = values.address;
     if (values.cnic) payload['cnic'] = values.cnic;
     if (values.parent_arhti_id) payload['parent_arhti_id'] = values.parent_arhti_id;
-    if (values.credit_limit_pkr) payload['credit_limit_pkr'] = parseFloat(values.credit_limit_pkr);
     if (values.notes) payload['notes'] = values.notes;
     save.mutate(payload);
   };
@@ -150,8 +158,23 @@ export function PartyForm({ initialData, partyId, mode, canChangeType = true }: 
           </EntryGroup>
 
           <EntryGroup title="Credit" columns={4}>
-            <NumberField control={control} name="credit_limit_pkr" label="Credit limit" min={0} suffix="PKR" />
-            <NumberField control={control} name="credit_terms_days" label="Credit terms" min={0} suffix="days" />
+            <NumberField
+              control={control}
+              name="credit_limit_pkr"
+              label="Credit limit"
+              min={0}
+              suffix="PKR"
+              disabled={!canSetCredit}
+              description={canSetCredit ? undefined : 'Only a manager can set credit terms.'}
+            />
+            <NumberField
+              control={control}
+              name="credit_terms_days"
+              label="Credit terms"
+              min={0}
+              suffix="days"
+              disabled={!canSetCredit}
+            />
             <TextareaField control={control} name="notes" label="Notes" rows={1} className="sm:col-span-2" />
           </EntryGroup>
         </EntrySheet>

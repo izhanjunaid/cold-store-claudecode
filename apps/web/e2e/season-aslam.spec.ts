@@ -2,11 +2,12 @@
  * Muhammad Aslam's potato season — end-to-end UI walkthrough.
  *
  * Single farmer, single lot, three withdrawals spanning the season:
- *   1. Create party (OPERATOR)
+ *   1. Create party (MANAGER — setting a credit limit needs parties.credit_terms)
  *   2. Gate inward + lot creation + parchi (SECURITY + OPERATOR)
  *   3. Link gate pass to lot
  *   4. Withdrawal #1 — 200 bags, cash payment, gate cleared
- *   5. Withdrawal #2 — 200 bags, cheque payment, gate cleared
+ *   5. Withdrawal #2 — 200 bags, cheque payment, released on manager credit (an
+ *      uncleared cheque is not payment at the gate)
  *   6. Withdrawal #3 — 100 bags FULL, partial payment + manager credit override
  *   7. Ledger review
  *
@@ -60,8 +61,9 @@ test.describe('Muhammad Aslam — full potato season', () => {
     const refs = await getFacilityRefs(request, opHeaders);
 
     // ─────────────────────────────────────────────────────────────────────
-    await test.step('01 — create party Muhammad Aslam (OPERATOR)', async () => {
-      await loginAs('OPERATOR');
+    await test.step('01 — create party Muhammad Aslam (MANAGER)', async () => {
+      // A credit limit and terms need parties.credit_terms (MANAGER by default).
+      await loginAs('MANAGER');
       await page.goto('/parties/new');
       await expect(page.getByRole('heading', { name: /create.*party|new party/i })).toBeVisible({
         timeout: 15_000,
@@ -261,7 +263,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
         await page.locator('input[type="number"]').first().fill(String(opts.bags));
       }
       await page.locator('input[type="date"]').fill(todayISO());
-      await page.locator('input[placeholder="Optional"]').first().fill(opts.vehicle);
+      await page.locator('input[name="vehicle_number"]').fill(opts.vehicle);
       await shot(page, `${opts.shotPrefix}-a-withdraw-form.png`);
 
       await Promise.all([
@@ -401,6 +403,9 @@ test.describe('Muhammad Aslam — full potato season', () => {
       await row.getByRole('button', { name: /clear outward/i }).click();
       await expect(page.getByRole('heading', { name: /clear outward/i })).toBeVisible();
 
+      // The guard counts the bags on the truck (blind: the dialog never shows the expected number).
+      await page.getByLabel(/bags counted/i).fill(String(opts.bags));
+
       if (opts.creditAuthorize) {
         await page.getByLabel(/authorize on credit/i).check();
         await shot(page, `${opts.shotPrefix}-f-credit-auth-modal.png`);
@@ -445,6 +450,8 @@ test.describe('Muhammad Aslam — full potato season', () => {
         paymentMethod: 'CHEQUE',
         payFull: true,
         paymentRef: 'MCB-7788231',
+        // The cheque is recorded but not yet cleared, so it is credit at the gate.
+        creditAuthorize: true,
         shotPrefix: '06',
       });
       invoice2Total = r.invoiceTotal;

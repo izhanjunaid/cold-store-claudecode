@@ -25,6 +25,8 @@ interface NumberFieldProps<T extends FieldValues> {
   suffix?: string;
   className?: string;
   inputName?: string;
+  /** Read-only: shown but not editable (e.g. the user lacks the permission to change it). */
+  disabled?: boolean;
 }
 
 /**
@@ -44,6 +46,7 @@ export function NumberField<T extends FieldValues>({
   suffix,
   className,
   inputName,
+  disabled,
 }: NumberFieldProps<T>) {
   return (
     <FormField
@@ -67,6 +70,7 @@ export function NumberField<T extends FieldValues>({
                 min={min}
                 max={max}
                 step={step}
+                disabled={disabled || field.disabled}
                 className={cn('tabular-nums', suffix && 'pr-12')}
               />
             </FormControl>
