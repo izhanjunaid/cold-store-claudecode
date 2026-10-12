@@ -767,12 +767,23 @@ model OutboundEvent {
   outboundDate          DateTime       @map("outbound_date") @db.Date
   receivingPartyId      String?        @map("receiving_party_id") @db.Uuid
   ownerPartyIdSnapshot  String?        @map("owner_party_id_snapshot") @db.Uuid
-  vehicleNumber         String?        @map("vehicle_number") @db.VarChar(20)
+  vehicleNumber         String?        @map("vehicle_number") @db.VarChar(30)
   dispatchNoteNumber    String?        @map("dispatch_note_number") @db.VarChar(30)
   status                OutboundStatus @default(PENDING)
   notes                 String?        @db.Text
   createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz()
   createdBy             String         @map("created_by") @db.Uuid
+  /// Who dispatched it, and when (0038). The gate will not let the person who
+  /// booked or dispatched a withdrawal also release its truck.
+  finalizedAt           DateTime?      @map("finalized_at") @db.Timestamptz()
+  finalizedBy           String?        @map("finalized_by") @db.Uuid
+  /// A cancelled withdrawal (status CANCELLED) follows the void convention (0038).
+  voidedAt              DateTime?      @map("voided_at") @db.Timestamptz()
+  voidedBy              String?        @map("voided_by") @db.Uuid
+  voidReason            String?        @map("void_reason") @db.Text
+  /// The truck visit that carried this withdrawal out (0038). One withdrawal
+  /// leaves on exactly one truck; one truck may carry several withdrawals.
+  gatePassId            String?        @map("gate_pass_id") @db.Uuid
 
   lot                Lot        @relation(fields: [lotId], references: [id])
   facility           Facility   @relation(fields: [facilityId], references: [id])
@@ -780,10 +791,12 @@ model OutboundEvent {
   ownerPartySnapshot Party?     @relation("OutboundOwnerSnapshot", fields: [ownerPartyIdSnapshot], references: [id])
   createdByUser      User       @relation("OutboundCreatedBy", fields: [createdBy], references: [id])
   invoice            Invoice?
-  gatePasses         GatePass[]
+  gatePasses         GatePass[] @relation("GatePassRelatedOutbound")
+  gatePass           GatePass?  @relation("OutboundGatePass", fields: [gatePassId], references: [id], onDelete: SetNull)
 
   @@unique([facilityId, dispatchNoteNumber])
   @@index([lotId])
+  @@index([gatePassId])
   @@index([facilityId, status])
   @@index([facilityId, outboundDate, status])
   @@map("outbound_events")
@@ -1440,12 +1453,22 @@ model GatePass {
   createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   clearedAt            DateTime?         @map("cleared_at") @db.Timestamptz()
   createdBy            String            @map("created_by") @db.Uuid
+  /// Who released the truck, and on whose credit authority (0038). User
+  /// references are SQL foreign keys kept as plain scalars.
+  clearedBy                 String?   @map("cleared_by") @db.Uuid
+  creditAuthorizedBy        String?   @map("credit_authorized_by") @db.Uuid
+  creditAuthorizedAt        DateTime? @map("credit_authorized_at") @db.Timestamptz()
+  creditAuthorizedAmountPkr Decimal?  @map("credit_authorized_amount_pkr") @db.Decimal(14, 2)
+  /// A manager's reason for releasing despite a count or plate mismatch.
+  overrideReason            String?   @map("override_reason") @db.Text
 
-  facility        Facility       @relation(fields: [facilityId], references: [id])
-  relatedLot      Lot?           @relation(fields: [relatedLotId], references: [id])
-  relatedOutbound OutboundEvent? @relation(fields: [relatedOutboundId], references: [id])
-  party           Party?         @relation("GatePassDepositor", fields: [partyId], references: [id])
-  createdByUser   User           @relation("GatePassCreatedBy", fields: [createdBy], references: [id])
+  facility         Facility        @relation(fields: [facilityId], references: [id])
+  relatedLot       Lot?            @relation(fields: [relatedLotId], references: [id])
+  /// Legacy single link, still written for rollback; clearedOutbounds is authoritative.
+  relatedOutbound  OutboundEvent?  @relation("GatePassRelatedOutbound", fields: [relatedOutboundId], references: [id])
+  clearedOutbounds OutboundEvent[] @relation("OutboundGatePass")
+  party            Party?          @relation("GatePassDepositor", fields: [partyId], references: [id])
+  createdByUser    User            @relation("GatePassCreatedBy", fields: [createdBy], references: [id])
 
   @@unique([facilityId, passNumber])
   @@index([facilityId, status])
