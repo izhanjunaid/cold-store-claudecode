@@ -117,6 +117,13 @@ describe('LotDetailPage actions', () => {
     await renderPage();
     expect(screen.getByTestId('lot-location')).toHaveAttribute('data-can-operate', 'true');
     expect(screen.queryByRole('button', { name: /new withdrawal/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /print receipt/i })).toBeInTheDocument();
+  });
+
+  it('offers Print Receipt only with lots.manage (the receipt route needs it)', async () => {
+    permissions = ['outbound.record'];
+    await renderPage();
+    expect(screen.queryByRole('button', { name: /print receipt/i })).toBeNull();
   });
 
   it('offers no actions on a closed lot, even to the owner', async () => {

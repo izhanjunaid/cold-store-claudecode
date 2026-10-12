@@ -188,10 +188,13 @@ export default function LotDetailPage() {
                 New Withdrawal
               </Button>
             )}
-            <Button variant="outline" onClick={handlePrintReceipt} disabled={receiptLoading}>
-              <FileText className="h-4 w-4" aria-hidden />
-              {receiptLoading ? 'Preparing…' : 'Print Receipt'}
-            </Button>
+            {/* GET /v1/lots/:id/receipt is lots.manage. */}
+            {canPlace && (
+              <Button variant="outline" onClick={handlePrintReceipt} disabled={receiptLoading}>
+                <FileText className="h-4 w-4" aria-hidden />
+                {receiptLoading ? 'Preparing…' : 'Print Receipt'}
+              </Button>
+            )}
           </>
         }
       />

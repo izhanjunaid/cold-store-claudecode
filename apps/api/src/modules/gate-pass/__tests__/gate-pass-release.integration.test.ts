@@ -212,33 +212,57 @@ describe('matching the truck to its withdrawals', () => {
     expect(JSON.parse(out.body).error.message).toMatch(/Payment Pending/);
   });
 
-  it('matches by dispatch time: a load dispatched last evening matches, one from three days ago does not', async () => {
-    const recent = await dispatched(40, 'LHR-7001');
-    await pay(recent.invoiceId);
+  it('a load dispatched days ago is still on the truck until it leaves; one dispatched before these rules is not matched', async () => {
+    // Dispatched three days ago — the truck waited for a cheque — and not gone yet.
+    const waited = await dispatched(40, 'LHR-7001');
+    await pay(waited.invoiceId);
+    const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000);
     await prisma.outboundEvent.update({
-      where: { id: recent.id },
-      data: { finalizedAt: new Date(Date.now() - 20 * 3_600_000) },
+      where: { id: waited.id },
+      data: { finalizedAt: threeDaysAgo, createdAt: threeDaysAgo },
     });
     const passA = await arrive('LHR-7001');
     const ok = await release(passA, { declared_quantity: 40 });
     expect(ok.statusCode).toBe(200);
-    expect(data(ok).outbound_ids).toEqual([recent.id]);
+    expect(data(ok).outbound_ids).toEqual([waited.id]);
 
-    const old = await dispatched(30, 'LHR-7002');
-    await pay(old.invoiceId);
-    const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000);
-    await prisma.outboundEvent.update({
-      where: { id: old.id },
-      data: { finalizedAt: threeDaysAgo, createdAt: threeDaysAgo },
-    });
+    // Dispatched before this release (no finalized_at): it may have left untracked,
+    // so it never rides along on a later truck by plate.
+    const legacy = await dispatched(30, 'LHR-7002');
+    await pay(legacy.invoiceId);
+    await prisma.outboundEvent.update({ where: { id: legacy.id }, data: { finalizedAt: null } });
     const passB = await arrive('LHR-7002');
     const loaded = await release(passB, { declared_quantity: 30 });
     expect(loaded.statusCode).toBe(422);
     expect(code(loaded)).toBe('GATE_OUTWARD_UNMATCHED_LOAD');
-    // An empty truck (count 0) still leaves freely.
-    const empty = await release(passB, { declared_quantity: 0 });
-    expect(empty.statusCode).toBe(200);
-    expect(data(empty).outbound_ids).toEqual([]);
+    // A manager can still name it explicitly.
+    const named = await release(passB, { outbound_event_id: legacy.id, declared_quantity: 30 }, managerToken);
+    expect(named.statusCode).toBe(200);
+    expect(data(named).outbound_ids).toEqual([legacy.id]);
+  });
+
+  it('an empty truck leaving does not erase the count it came in with', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/inward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: 'LHR-7003', declared_quantity: 60 },
+    });
+    const passId = data<{ id: string }>(res).id;
+    const lotId = await createLot(50);
+    const link = await app.inject({
+      method: 'PATCH',
+      url: `/v1/gate-passes/${passId}/link-lot`,
+      headers: authHeaders(operatorToken),
+      payload: { lot_id: lotId },
+    });
+    expect(data(link).quantity_mismatch_flag).toBe(true);
+
+    const out = await release(passId, { declared_quantity: 0 });
+    expect(out.statusCode).toBe(200);
+    const body = data<PassBody & { declared_quantity: number }>(out);
+    expect(body.declared_quantity).toBe(60);
+    expect(body.quantity_mismatch_flag).toBe(true);
   });
 
   it('an empty truck leaves with a count of 0, or with no count at all (older clients)', async () => {
@@ -297,13 +321,13 @@ describe('a withdrawal leaves on one truck only', () => {
     const byPlate = await release(second, { declared_quantity: 40 });
     expect([byPlate.statusCode, code(byPlate)]).toEqual([422, 'GATE_OUTWARD_UNMATCHED_LOAD']);
 
-    const byId = await release(second, { outbound_event_id: ob.id, declared_quantity: 40 });
+    const byId = await release(second, { outbound_event_id: ob.id, declared_quantity: 40 }, managerToken);
     expect([byId.statusCode, code(byId)]).toEqual([409, 'GATE_OUTWARD_ALREADY_USED']);
 
     const logged = await app.inject({
       method: 'POST',
       url: '/v1/gate-passes/outward',
-      headers: authHeaders(securityToken),
+      headers: authHeaders(managerToken),
       payload: { vehicle_number: 'LHR-6100', outbound_event_id: ob.id, declared_quantity: 40 },
     });
     expect([logged.statusCode, code(logged)]).toEqual([409, 'GATE_OUTWARD_ALREADY_USED']);
@@ -330,6 +354,20 @@ describe('a withdrawal leaves on one truck only', () => {
 });
 
 describe('a named withdrawal', () => {
+  it('only a manager may name one — a guard or the munshi cannot pick which load is checked', async () => {
+    const paid = await dispatched(10, 'LHR-6250');
+    await pay(paid.invoiceId);
+    await dispatched(15, 'LHR-6250'); // unpaid, same truck
+    const pass = await arrive('LHR-6250');
+    for (const token of [securityToken, operatorToken]) {
+      const res = await release(pass, { outbound_event_id: paid.id, declared_quantity: 10 }, token);
+      expect([res.statusCode, code(res)]).toEqual([403, 'GATE_OVERRIDE_REQUIRES_MANAGER']);
+    }
+    // By plate, both loads are checked, and the unpaid one holds the truck.
+    const byPlate = await release(pass, { declared_quantity: 25 });
+    expect([byPlate.statusCode, code(byPlate)]).toEqual([422, 'GATE_OUTWARD_INVOICE_NOT_FINAL']);
+  });
+
   it('must be dispatched', async () => {
     const lotId = await createLot(10);
     const create = await app.inject({
@@ -340,7 +378,7 @@ describe('a named withdrawal', () => {
     });
     const pending = data<{ id: string }>(create).id;
     const pass = await arrive('LHR-6300');
-    const res = await release(pass, { outbound_event_id: pending, declared_quantity: 10 });
+    const res = await release(pass, { outbound_event_id: pending, declared_quantity: 10 }, managerToken);
     expect([res.statusCode, code(res)]).toEqual([422, 'GATE_OUTWARD_NOT_DISPATCHED']);
   });
 
@@ -351,9 +389,9 @@ describe('a named withdrawal', () => {
     await pay(noPlate.invoiceId);
     const pass = await arrive('ISB-1234');
 
-    const mismatch = await release(pass, { outbound_event_id: other.id, declared_quantity: 15 });
+    const mismatch = await release(pass, { outbound_event_id: other.id, declared_quantity: 15 }, managerToken);
     expect([mismatch.statusCode, code(mismatch)]).toEqual([422, 'GATE_OUTWARD_PLATE_MISMATCH']);
-    const blank = await release(pass, { outbound_event_id: noPlate.id, declared_quantity: 12 });
+    const blank = await release(pass, { outbound_event_id: noPlate.id, declared_quantity: 12 }, managerToken);
     expect([blank.statusCode, code(blank)]).toEqual([422, 'GATE_OUTWARD_PLATE_MISMATCH']);
 
     const ok = await release(
@@ -412,6 +450,8 @@ describe('payment at the gate', () => {
     const ok = await release(pass, { declared_quantity: 18, credit_authorization: true }, managerToken);
     expect(ok.statusCode).toBe(200);
     expect(data(ok).credit_authorized_by).toBeTruthy();
+    // Nothing was billed, so the amount on credit is unknown — never a misleading Rs 0.
+    expect(data<PassBody & { credit_authorized_amount_pkr: number | null }>(ok).credit_authorized_amount_pkr).toBeNull();
   });
 });
 

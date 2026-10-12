@@ -345,6 +345,29 @@ describe('cancelling a withdrawal', () => {
     }
   });
 
+  it('a withdrawal that already left on a truck (released before dispatch under the old gate rules) cannot be cancelled', async () => {
+    const lotId = await createLot(100);
+    const ob = await booked(lotId, 20);
+    const pass = await prisma.gatePass.create({
+      data: {
+        facilityId: TEST_FACILITY_ID,
+        passNumber: `GP-LEGACY-${Date.now()}`,
+        direction: 'INWARD',
+        vehicleNumber: 'LEGACY-1',
+        status: 'CLEARED',
+        clearedAt: new Date(),
+        relatedOutboundId: ob,
+        createdBy: managerId,
+      },
+    });
+    const res = await cancel(ob);
+    expect([res.statusCode, code(res)]).toEqual([409, 'OUTBOUND_ALREADY_LEFT']);
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: ob } })).status).toBe('PENDING');
+    await withGuardsDisabled(prisma, async () => {
+      await prisma.gatePass.delete({ where: { id: pass.id } });
+    });
+  });
+
   it('needs a reason, and the booking permission', async () => {
     const lotId = await createLot(100);
     const ob = await booked(lotId, 10);

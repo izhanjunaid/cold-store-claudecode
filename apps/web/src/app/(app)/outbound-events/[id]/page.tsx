@@ -322,7 +322,7 @@ export default function OutboundEventDetailPage() {
             <CardTitle className="text-sm">Weight</CardTitle>
           </CardHeader>
           <CardContent>
-            {event.status === 'PENDING' && (
+            {event.status === 'PENDING' && canRecord && (
               <form onSubmit={handleRecordWeight} className="flex items-end gap-3">
                 <div className="flex-1 space-y-1.5">
                   <Label>Outbound Weight (kg) <span className="text-destructive">*</span></Label>
@@ -426,7 +426,7 @@ export default function OutboundEventDetailPage() {
             View invoice
           </Button>
         )}
-        {!isCancelled && (
+        {!isCancelled && canRecord && (
           <Button variant="outline" onClick={handlePrintDispatchNote}>
             <FileText className="h-4 w-4" aria-hidden />
             Print Dispatch Note

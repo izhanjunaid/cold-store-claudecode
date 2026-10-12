@@ -252,7 +252,7 @@ describe('Phase 9 — Gate Pass (M10)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id, declared_quantity: 100 },
+      payload: { declared_quantity: 100 },
     });
     expect(out.statusCode).toBe(200);
     const data = JSON.parse(out.body).data;
@@ -288,7 +288,7 @@ describe('Phase 9 — Gate Pass (M10)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id, declared_quantity: 100 },
+      payload: { declared_quantity: 100 },
     });
     expect(out.statusCode).toBe(422);
     expect(JSON.parse(out.body).error.code).toBe('GATE_OUTWARD_BLOCKED');
@@ -351,7 +351,7 @@ describe('Phase 9 — Gate Pass (M10)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id, credit_authorization: true, declared_quantity: 100 },
+      payload: { credit_authorization: true, declared_quantity: 100 },
     });
     expect(out.statusCode).toBe(403);
     expect(JSON.parse(out.body).error.code).toBe('GATE_CREDIT_AUTH_REQUIRES_MANAGER');
@@ -456,7 +456,7 @@ describe('Gate-side quantity & commodity verification (Fix #1)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id, declared_quantity: 100 },
+      payload: { declared_quantity: 100 },
     });
     expect(out.statusCode).toBe(200);
     const data = JSON.parse(out.body).data;
@@ -478,7 +478,7 @@ describe('Gate-side quantity & commodity verification (Fix #1)', () => {
       method: 'POST',
       url: '/v1/gate-passes/outward',
       headers: authHeaders(securityToken),
-      payload: { vehicle_number: 'LHR-Q600', outbound_event_id: ob.id, declared_quantity: 90 },
+      payload: { vehicle_number: 'LHR-Q600', declared_quantity: 90 },
     });
     expect(blocked.statusCode).toBe(422);
     const err = JSON.parse(blocked.body).error;
@@ -524,7 +524,7 @@ describe('Gate-side quantity & commodity verification (Fix #1)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id, declared_quantity: 95 }, // counted 95 vs authorized 100
+      payload: { declared_quantity: 95 }, // counted 95 vs authorized 100
     });
     expect(blocked.statusCode).toBe(422);
     expect(JSON.parse(blocked.body).error.code).toBe('GATE_OUTWARD_COUNT_MISMATCH');
@@ -534,7 +534,7 @@ describe('Gate-side quantity & commodity verification (Fix #1)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id, declared_quantity: 95, override_reason: 'trust me' },
+      payload: { declared_quantity: 95, override_reason: 'trust me' },
     });
     expect(guardOverride.statusCode).toBe(403);
     expect(JSON.parse(guardOverride.body).error.code).toBe('GATE_OVERRIDE_REQUIRES_MANAGER');

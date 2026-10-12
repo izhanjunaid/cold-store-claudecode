@@ -104,7 +104,9 @@ export function PartyForm({ initialData, partyId, mode, canChangeType = true }: 
     // Without parties.credit_terms the credit fields are left out entirely, so an
     // edit by the munshi never touches what a manager set.
     if (canSetCredit) {
-      payload['credit_terms_days'] = parseInt(values.credit_terms_days) || 30;
+      // 0 days (cash only) is a real choice, not "blank": only an empty box means 30.
+      const terms = parseInt(values.credit_terms_days, 10);
+      payload['credit_terms_days'] = Number.isNaN(terms) ? 30 : terms;
       if (values.credit_limit_pkr) payload['credit_limit_pkr'] = parseFloat(values.credit_limit_pkr);
     }
     if (values.name_urdu) payload['name_urdu'] = values.name_urdu;

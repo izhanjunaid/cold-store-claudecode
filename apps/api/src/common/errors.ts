@@ -123,6 +123,12 @@ export const Errors = {
     new AppError('DATE_IN_FUTURE', 'This date is after today; only a MANAGER or higher may enter a future date', 422, field),
   OUTBOUND_CANCELLED: () =>
     new AppError('OUTBOUND_CANCELLED', 'This withdrawal was cancelled', 409),
+  OUTBOUND_ALREADY_LEFT: () =>
+    new AppError(
+      'OUTBOUND_ALREADY_LEFT',
+      'This withdrawal already left the store on a truck — it cannot be cancelled, only dispatched',
+      409,
+    ),
   OUTBOUND_QUANTITY_STALE: (balance: number, quantity: number) =>
     new AppError(
       'OUTBOUND_QUANTITY_STALE',

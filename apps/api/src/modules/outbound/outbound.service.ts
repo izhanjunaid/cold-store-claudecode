@@ -299,10 +299,20 @@ export class OutboundService {
   async cancel(facilityId: string, id: string, userId: string, reason: string) {
     return this.prisma.$transaction(async (tx) => {
       if (!(await lockRow(tx, 'outbound_events', id, facilityId))) throw Errors.OUTBOUND_NOT_FOUND();
-      const ob = await tx.outboundEvent.findFirst({ where: { id, facilityId }, select: { status: true } });
+      const ob = await tx.outboundEvent.findFirst({
+        where: { id, facilityId },
+        select: { status: true, gatePassId: true },
+      });
       if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
       if (ob.status === 'DISPATCHED') throw Errors.OUTBOUND_ALREADY_FINALIZED();
       if (ob.status === 'CANCELLED') throw Errors.OUTBOUND_CANCELLED();
+      // A withdrawal released at the gate before it was dispatched (possible under
+      // the old gate rules, and stamped by 0038's backfill) is physically gone:
+      // cancelling it would put bags back on the books that are not in the store.
+      const releasedByLegacyPass = await tx.gatePass.count({
+        where: { relatedOutboundId: id, status: 'CLEARED' },
+      });
+      if (ob.gatePassId || releasedByLegacyPass > 0) throw Errors.OUTBOUND_ALREADY_LEFT();
       const updated = await this.repo.update(tx, id, {
         status: 'CANCELLED',
         voidedAt: new Date(),

@@ -8,9 +8,7 @@ import type {
   LogOutwardRequestType,
 } from '@coldchain/shared';
 import {
-  BUSINESS_TIME_ZONE,
   addDays,
-  businessDate,
   businessDayStart,
   normalizePlate,
   round2,
@@ -263,6 +261,10 @@ export class GatePassService {
     // 2. The withdrawals on this truck: the one named, or every dispatched
     //    withdrawal booked on this plate that has not left yet.
     let outbounds: ReleaseOutbound[];
+    // Naming one withdrawal skips matching the rest of the truck's load, so it is
+    // a manager's call: otherwise whoever booked an unpaid withdrawal could name a
+    // paid one on the same truck and drive both out.
+    if (body.outbound_event_id && !isManager) throw Errors.GATE_OVERRIDE_REQUIRES_MANAGER();
     const explicitId = body.outbound_event_id ?? pass.relatedOutboundId ?? null;
     if (explicitId) {
       if (!(await lockRow(tx, 'outbound_events', explicitId, facilityId))) {
@@ -303,7 +305,9 @@ export class GatePassService {
           status: 'CLEARED',
           clearedAt: new Date(),
           clearedBy: userId,
-          ...(declared != null ? { declaredQuantity: declared, quantityMismatchFlag: unmatchedLoad } : {}),
+          // An empty exit says nothing about the load, so it leaves the count the
+          // truck came in with (and its mismatch flag) as they were.
+          ...(unmatchedLoad ? { declaredQuantity: declared, quantityMismatchFlag: true } : {}),
           ...(overrideUsed ? { overrideReason } : {}),
           notes: body.notes ?? pass.notes,
         },
@@ -382,8 +386,14 @@ export class GatePassService {
         relatedOutboundId: explicitId ?? first.id,
         declaredQuantity: declared,
         quantityMismatchFlag: countMismatch,
+        // The amount left on credit; unknown (null) when a withdrawal had no valid
+        // bill, so an unbilled release never reads as a Rs 0 one.
         ...(needsCredit
-          ? { creditAuthorizedBy: userId, creditAuthorizedAt: now, creditAuthorizedAmountPkr: outstanding }
+          ? {
+              creditAuthorizedBy: userId,
+              creditAuthorizedAt: now,
+              creditAuthorizedAmountPkr: unbilled != null ? null : outstanding,
+            }
           : {}),
         ...(overrideUsed ? { overrideReason } : {}),
         notes: body.notes ?? pass.notes,
@@ -395,39 +405,36 @@ export class GatePassService {
 
   /**
    * Every dispatched withdrawal booked on this truck's plate that has not left
-   * yet, locked. Plates compare by letters and digits only. "Recent" is by
-   * dispatch time — a withdrawal may be backdated, so its outbound date says
-   * nothing about when it was loaded — from the earlier of the facility day the
-   * truck arrived and yesterday.
+   * yet, locked. Plates compare by letters and digits only. "Not left yet" is
+   * `gate_pass_id IS NULL`, with no date cutoff: a load dispatched days ago whose
+   * truck waited for a cheque to clear is still on the truck. Only withdrawals
+   * dispatched under these rules (finalized_at set) match by plate — one
+   * dispatched before them may already have left untracked, so it leaves only by
+   * a manager naming it.
    */
   private async matchByPlate(
     tx: Prisma.TransactionClient,
     facilityId: string,
-    pass: { id: string; vehicleNumber: string; createdAt: Date },
+    pass: { id: string; vehicleNumber: string },
   ): Promise<ReleaseOutbound[]> {
     const plate = normalizePlate(pass.vehicleNumber);
     if (!plate) return [];
-    const arrived = businessDate(pass.createdAt);
-    const yesterday = addDays(businessDate(), -1);
-    const since = arrived < yesterday ? arrived : yesterday;
     const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
       `SELECT o.id FROM outbound_events o
         WHERE o.facility_id = $1::uuid
           AND o.status = 'DISPATCHED'
           AND o.voided_at IS NULL
           AND o.gate_pass_id IS NULL
+          AND o.finalized_at IS NOT NULL
           AND o.vehicle_number IS NOT NULL
           AND regexp_replace(upper(o.vehicle_number), '[^A-Z0-9]', '', 'g') = $2
-          AND COALESCE(o.finalized_at, o.created_at) >= ($3::date::timestamp AT TIME ZONE $4)
           AND NOT EXISTS (
             SELECT 1 FROM gate_passes g
-             WHERE g.related_outbound_id = o.id AND g.status = 'CLEARED' AND g.id <> $5::uuid)
+             WHERE g.related_outbound_id = o.id AND g.status = 'CLEARED' AND g.id <> $3::uuid)
         ORDER BY o.id
         FOR UPDATE OF o`,
       facilityId,
       plate,
-      since,
-      BUSINESS_TIME_ZONE,
       pass.id,
     );
     if (rows.length === 0) return [];

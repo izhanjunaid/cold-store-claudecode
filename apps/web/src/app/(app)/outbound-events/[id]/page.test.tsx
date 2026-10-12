@@ -267,6 +267,26 @@ describe('OutboundEventDetailPage — cancel withdrawal', () => {
 
     expect(screen.queryByRole('button', { name: /cancel withdrawal/i })).not.toBeInTheDocument();
   });
+
+  it('without outbound.record offers no weight entry and no dispatch note (both routes need it)', async () => {
+    role = 'ACCOUNTANT';
+    permissions = ['billing.view'];
+    event = makeEvent({ status: 'PENDING', outbound_weight_kg: null });
+    renderPage();
+    await loaded();
+
+    expect(screen.queryByRole('button', { name: /record weight/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /print dispatch note/i })).not.toBeInTheDocument();
+  });
+
+  it('with outbound.record a pending withdrawal can be weighed and its note printed', async () => {
+    event = makeEvent({ status: 'PENDING', outbound_weight_kg: null });
+    renderPage();
+    await loaded();
+
+    expect(screen.getByRole('button', { name: /record weight/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /print dispatch note/i })).toBeInTheDocument();
+  });
 });
 
 describe('OutboundEventDetailPage — cancelled withdrawal', () => {

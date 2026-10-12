@@ -125,6 +125,16 @@ describe('PartyForm credit fields', () => {
     expect(body['credit_terms_days']).toBe(45);
   });
 
+  it('keeps 0-day (cash-only) terms as 0 — it is a real choice, not a blank', async () => {
+    role = 'MANAGER';
+    permissions = ['parties.manage', 'parties.credit_terms'];
+    renderForm({ initialData: { ...STORED, credit_terms_days: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith(`/parties/${PARTY_ID}`));
+    expect(savedBody()['credit_terms_days']).toBe(0);
+  });
+
   it('the owner always may set credit terms', async () => {
     role = 'OWNER';
     permissions = [];

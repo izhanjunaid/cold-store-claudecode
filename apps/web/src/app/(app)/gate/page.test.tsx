@@ -179,6 +179,52 @@ describe('GatePassConsolePage — clear outward', () => {
     expect(screen.queryByText(/137/)).not.toBeInTheDocument();
   });
 
+  it('a plate override that then hits a payment block keeps its reason when the manager adds credit', async () => {
+    role = 'MANAGER';
+    apiClient
+      .mockRejectedValueOnce(
+        new ApiError('plate mismatch', { code: 'GATE_OUTWARD_PLATE_MISMATCH', status: 422 }),
+      )
+      .mockRejectedValueOnce(
+        new ApiError('Payment Pending — balance 4500.00 PKR', { code: 'GATE_OUTWARD_BLOCKED', status: 422 }),
+      );
+    const dialog = await openClearOutward();
+    enterCount(dialog, '20');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+    fireEvent.change(await within(dialog).findByLabelText(/override reason/i), {
+      target: { value: 'Truck swapped after breakdown' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /release anyway/i }));
+
+    // Payment now blocks it: the reason box stays, and the next try — with credit
+    // ticked, from the main button — still carries the reason.
+    await within(dialog).findByText(/Payment Pending/);
+    expect(within(dialog).getByLabelText(/override reason/i)).toHaveValue('Truck swapped after breakdown');
+    fireEvent.click(within(dialog).getByLabelText(/authorize on credit/i));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+
+    await waitFor(() => expect(outwardPosts()).toHaveLength(3));
+    expect(outwardPosts()[2]![1].body).toEqual({
+      declared_quantity: 20,
+      credit_authorization: true,
+      override_reason: 'Truck swapped after breakdown',
+    });
+  });
+
+  it('a guard never names a withdrawal, even when the pass carries a link', async () => {
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve({
+        data: path.includes('active=true') ? [{ ...PASS, related_outbound_id: 'ob-9' }] : [],
+        meta: { page: 1, per_page: 50, total: 1 },
+      }),
+    );
+    const dialog = await openClearOutward();
+    enterCount(dialog, '5');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+    await waitFor(() => expect(outwardPosts()).toHaveLength(1));
+    expect(outwardPosts()[0]![1].body).toEqual({ declared_quantity: 5 });
+  });
+
   it('on a count mismatch a guard is told to recount and gets no override', async () => {
     apiClient.mockRejectedValueOnce(
       new ApiError('The bag count does not match the dispatch — recount, or call a manager', {

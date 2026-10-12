@@ -117,6 +117,10 @@ export default function GatePassConsolePage() {
   // The guard's count is blind: the dialog never shows what was dispatched.
   const [outwardCount, setOutwardCount] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
+  // Once a check is overridable, the reason stays on screen (and is sent with every
+  // retry) until the dialog closes — e.g. a plate override that then hits a payment
+  // block must keep its reason when the manager adds credit.
+  const [overrideOffered, setOverrideOffered] = useState(false);
   const [outwardErr, setOutwardErr] = useState<string | null>(null);
   const [outwardErrCode, setOutwardErrCode] = useState<string | null>(null);
   const [outwardLoading, setOutwardLoading] = useState(false);
@@ -190,6 +194,7 @@ export default function GatePassConsolePage() {
     setCreditAuth(false);
     setOutwardCount('');
     setOverrideReason('');
+    setOverrideOffered(false);
     setOutwardErr(null);
     setOutwardErrCode(null);
   }
@@ -198,6 +203,8 @@ export default function GatePassConsolePage() {
   async function submitOutward(withOverride = false) {
     const declared = parseCount(outwardCount);
     if (!outwardModal || declared == null) return;
+    const reason = overrideReason.trim();
+    const sendOverride = canManager && (withOverride || (overrideOffered && reason.length >= 3));
     setOutwardLoading(true);
     setOutwardErr(null);
     setOutwardErrCode(null);
@@ -205,10 +212,11 @@ export default function GatePassConsolePage() {
       const cleared = await apiClient<GatePass>(`/v1/gate-passes/${outwardModal.id}/outward`, {
         method: 'POST',
         body: {
-          ...(outwardOutboundId.trim() ? { outbound_event_id: outwardOutboundId.trim() } : {}),
+          // Naming a withdrawal is a manager's call (the server refuses it from anyone else).
+          ...(canManager && outwardOutboundId.trim() ? { outbound_event_id: outwardOutboundId.trim() } : {}),
           ...(creditAuth ? { credit_authorization: true } : {}),
           declared_quantity: declared,
-          ...(withOverride ? { override_reason: overrideReason.trim() } : {}),
+          ...(sendOverride ? { override_reason: reason } : {}),
         },
       });
       setOutwardModal(null);
@@ -219,7 +227,9 @@ export default function GatePassConsolePage() {
       toast.success(`Cleared ${cleared.vehicle_number} — TAT ${formatTurnaround(cleared.turnaround_seconds)}`);
       fetchActive();
     } catch (err) {
-      setOutwardErrCode(err instanceof ApiError ? err.code : null);
+      const errCode = err instanceof ApiError ? err.code : null;
+      setOutwardErrCode(errCode);
+      if (errCode && OVERRIDABLE_CODES.has(errCode)) setOverrideOffered(true);
       setOutwardErr(err instanceof Error ? err.message : 'Failed to clear outward');
     } finally {
       setOutwardLoading(false);
@@ -435,7 +445,7 @@ export default function GatePassConsolePage() {
                   {outwardMismatch && !canManager && <p className="font-semibold">Recount, or call a manager.</p>}
                 </div>
               )}
-              {outwardMismatch && canManager && (
+              {(outwardMismatch || overrideOffered) && canManager && (
                 <div className="space-y-1.5 rounded-md border border-amber-300 p-3">
                   <Label htmlFor="override-reason">
                     Override reason <span className="text-destructive">*</span>
