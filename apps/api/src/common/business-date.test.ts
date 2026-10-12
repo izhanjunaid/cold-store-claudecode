@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUSINESS_TIME_ZONE, businessDate, normalizePlate, VehicleNumber } from '@coldchain/shared';
+import { BUSINESS_TIME_ZONE, businessDate, businessDayStart, normalizePlate, VehicleNumber } from '@coldchain/shared';
 
 describe('businessDate — the facility clock (Asia/Karachi, UTC+5)', () => {
   it('names the zone the rules are written against', () => {
@@ -22,6 +22,12 @@ describe('businessDate — the facility clock (Asia/Karachi, UTC+5)', () => {
 
   it('crosses a year boundary', () => {
     expect(businessDate(new Date('2026-12-31T19:00:00Z'))).toBe('2027-01-01');
+  });
+
+  it('a business day starts at midnight in Lahore, 19:00 UTC the evening before', () => {
+    expect(businessDayStart('2026-10-12').toISOString()).toBe('2026-10-11T19:00:00.000Z');
+    expect(businessDate(businessDayStart('2026-10-12'))).toBe('2026-10-12');
+    expect(businessDate(new Date(businessDayStart('2026-10-12').getTime() - 1))).toBe('2026-10-11');
   });
 });
 

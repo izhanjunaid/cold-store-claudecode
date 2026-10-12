@@ -59,6 +59,32 @@ export function businessDate(at: Date = new Date()): IsoDate {
   return `${parts['year']}-${parts['month']}-${parts['day']}`;
 }
 
+const businessClockFormat = new Intl.DateTimeFormat('en-US', {
+  timeZone: BUSINESS_TIME_ZONE,
+  hourCycle: 'h23',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+});
+
+/** The instant the facility's calendar day `iso` begins (midnight in Lahore). */
+export function businessDayStart(iso: IsoDate): Date {
+  const utcMidnight = fromIsoDate(iso);
+  const p = Object.fromEntries(
+    businessClockFormat.formatToParts(utcMidnight).map((x) => [x.type, x.value]),
+  ) as Record<string, string>;
+  // The facility's wall clock at UTC midnight, read as if it were UTC: the
+  // difference is the zone's offset on that day.
+  const wall = Date.UTC(
+    Number(p['year']), Number(p['month']) - 1, Number(p['day']),
+    Number(p['hour']), Number(p['minute']), Number(p['second']),
+  );
+  return new Date(utcMidnight.getTime() - (wall - utcMidnight.getTime()));
+}
+
 export function addDays(iso: IsoDate, days: number): IsoDate {
   return toIsoDate(new Date(fromIsoDate(iso).getTime() + days * DAY_MS));
 }

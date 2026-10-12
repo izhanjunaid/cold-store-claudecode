@@ -35,6 +35,10 @@ const gatePassInclude = {
       ownerPartySnapshot: { select: { name: true } },
     },
   },
+  clearedOutbounds: {
+    select: { id: true, quantityWithdrawnBags: true, dispatchNoteNumber: true },
+    orderBy: { createdAt: 'asc' },
+  },
   party: { select: { id: true, name: true } },
 } satisfies Prisma.GatePassInclude;
 
@@ -46,6 +50,10 @@ const gatePassListInclude = {
       quantityWithdrawnBags: true,
       lot: { select: lotLocationSelect },
     },
+  },
+  clearedOutbounds: {
+    select: { id: true, quantityWithdrawnBags: true, dispatchNoteNumber: true },
+    orderBy: { createdAt: 'asc' },
   },
   party: { select: { id: true, name: true } },
 } satisfies Prisma.GatePassInclude;
