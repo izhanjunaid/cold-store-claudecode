@@ -3,6 +3,7 @@ import {
   CreateOutboundRequest,
   UpdateOutboundWeightRequest,
   FinalizeOutboundRequest,
+  CancelOutboundRequest,
 } from '@coldchain/shared';
 import { OutboundService } from './outbound.service';
 import { OutboundRepository } from './outbound.repository';
@@ -85,6 +86,26 @@ export async function outboundRoutes(app: FastifyInstance) {
         body.notes,
         body.picked_from?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
         request.user!.userId,
+      );
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/outbound-events/:id/cancel — a withdrawal that has not left
+  // (PENDING/WEIGHED/DISPUTED); frees the bags it held. Same key as booking one.
+  app.route({
+    method: 'POST',
+    url: '/v1/outbound-events/:id/cancel',
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
+    schema: { params: IdParam, body: CancelOutboundRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof CancelOutboundRequest>;
+      const result = await service.cancel(
+        request.user!.facilityId,
+        id,
+        request.user!.userId,
+        body.reason,
       );
       return sendSuccess(reply, result);
     },

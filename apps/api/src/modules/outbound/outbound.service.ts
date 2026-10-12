@@ -7,6 +7,9 @@ import { buildInvoiceFromOutbound } from '../invoice/invoice.builder';
 import { reconcileWithdrawal, type PlacementInput } from '../lot/placement.service';
 import { roleAtLeast } from '../../plugins/auth';
 import { resolveFacilitySettings } from '../facility/facility.service';
+import { lockRow } from '../../common/row-lock';
+import { addDays, businessDate } from '@coldchain/shared';
+import { OPEN_OUTBOUND_STATUSES, openReservation } from './reservation';
 
 function toNumber(d: { toString(): string } | null | undefined): number | null {
   if (d == null) return null;
@@ -60,6 +63,10 @@ function formatOutbound(ob: OutboundWithRelations, invoiceId: string | null = nu
     invoice_id: invoiceId,
     created_at: ob.createdAt.toISOString(),
     created_by_name: ob.createdByUser.name,
+    finalized_at: ob.finalizedAt ? ob.finalizedAt.toISOString() : null,
+    voided_at: ob.voidedAt ? ob.voidedAt.toISOString() : null,
+    void_reason: ob.voidReason ?? null,
+    gate_pass_id: ob.gatePassId ?? null,
   };
 }
 
@@ -115,6 +122,14 @@ export class OutboundService {
         }
       }
 
+      // Bags booked on withdrawals that have not left yet are not free: without
+      // this, two bookings could each pass against the full balance and the second
+      // dispatch would drive the lot negative.
+      const reserved = await openReservation(tx, params.facilityId, params.lotId);
+      if (reserved.bags > 0 && params.quantityWithdrawnBags > balance - reserved.bags) {
+        throw Errors.LOT_BALANCE_RESERVED(Math.max(0, balance - reserved.bags), reserved.dispatchNotes);
+      }
+
       if (params.receivingPartyId) {
         const party = await tx.party.findFirst({
           where: { id: params.receivingPartyId, facilityId: params.facilityId },
@@ -134,18 +149,20 @@ export class OutboundService {
 
       const outboundDate = new Date(params.outboundDate);
 
-      // Backdating guard: OPERATOR-level users may only backdate within the
-      // configured window; MANAGER+ may exceed it.
+      // Date guards against the facility's calendar (not the container's): below
+      // MANAGER, no future date, and backdating only within the configured window.
+      const today = businessDate();
+      const isManager = roleAtLeast(params.userRole, 'MANAGER');
+      if (!isManager && params.outboundDate > today) {
+        throw Errors.DATE_IN_FUTURE('outbound_date');
+      }
       const facility = await tx.facility.findUnique({
         where: { id: params.facilityId },
       });
       const settings = resolveFacilitySettings(facility?.settings ?? null);
       const maxBackdateDays = settings.backdating_max_days;
-      if (maxBackdateDays !== null && !roleAtLeast(params.userRole, 'MANAGER')) {
-        const earliest = new Date();
-        earliest.setHours(0, 0, 0, 0);
-        earliest.setDate(earliest.getDate() - maxBackdateDays);
-        if (outboundDate < earliest) {
+      if (maxBackdateDays !== null && !isManager) {
+        if (params.outboundDate < addDays(today, -maxBackdateDays)) {
           throw Errors.BACKDATING_LIMIT_EXCEEDED(maxBackdateDays);
         }
       }
@@ -185,46 +202,59 @@ export class OutboundService {
   }
 
   async recordWeight(facilityId: string, id: string, outboundWeightKg: number) {
-    const ob = await this.repo.findById(facilityId, id);
-    if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
-    if (ob.status === 'DISPATCHED' || ob.status === 'CANCELLED') {
-      throw Errors.OUTBOUND_ALREADY_FINALIZED();
-    }
-
     return this.prisma.$transaction(async (tx) => {
-      const updated = await this.repo.update(tx, id, {
-        outboundWeightKg: outboundWeightKg,
-        status: 'WEIGHED',
+      // Conditional on the status in the same statement: a finalize committing
+      // between a read and an unconditional write used to flip a DISPATCHED
+      // withdrawal back to WEIGHED, ready to be dispatched (and decremented) again.
+      const { count } = await tx.outboundEvent.updateMany({
+        where: { id, facilityId, status: { in: [...OPEN_OUTBOUND_STATUSES] } },
+        data: { outboundWeightKg, status: 'WEIGHED' },
       });
-      return formatOutbound(updated);
+      if (count === 0) {
+        const ob = await tx.outboundEvent.findFirst({ where: { id, facilityId }, select: { status: true } });
+        if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
+        if (ob.status === 'CANCELLED') throw Errors.OUTBOUND_CANCELLED();
+        throw Errors.OUTBOUND_ALREADY_FINALIZED();
+      }
+      const updated = await this.repo.findByIdTx(tx, facilityId, id);
+      return formatOutbound(updated!);
     });
   }
 
   async finalize(
     facilityId: string,
     id: string,
-    notes?: string,
-    pickedFrom?: PlacementInput[],
-    finalizedBy?: string,
+    notes: string | undefined,
+    pickedFrom: PlacementInput[] | undefined,
+    finalizedBy: string,
   ) {
     return this.prisma.$transaction(async (tx) => {
-      const ob = await tx.outboundEvent.findFirst({
-        where: { id, facilityId },
-        include: { lot: true },
-      });
+      // Lock order: the withdrawal, then its lot (then its racks). Nothing locks a
+      // lot and then an existing withdrawal, so this cannot deadlock. The second of
+      // two concurrent finalizes waits here and then sees DISPATCHED.
+      if (!(await lockRow(tx, 'outbound_events', id, facilityId))) throw Errors.OUTBOUND_NOT_FOUND();
+      const ob = await tx.outboundEvent.findFirst({ where: { id, facilityId } });
       if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
       if (ob.status === 'DISPATCHED') throw Errors.OUTBOUND_ALREADY_FINALIZED();
+      if (ob.status === 'CANCELLED') throw Errors.OUTBOUND_CANCELLED();
       if (ob.status !== 'WEIGHED') throw Errors.OUTBOUND_WEIGHT_REQUIRED();
 
-      // Row-lock the lot
-      await tx.$queryRawUnsafe(
-        `SELECT 1 FROM lots WHERE id = $1::uuid FOR UPDATE`,
-        ob.lotId,
-      );
-
-      const newBalance = ob.lot.currentBalanceBags - ob.quantityWithdrawnBags;
-      const isFullClose =
-        ob.withdrawalType === 'FULL' || newBalance === 0;
+      // Read the lot only after locking it: the balance read before the lock could
+      // be stale by the time it was written back, losing a concurrent change.
+      if (!(await lockRow(tx, 'lots', ob.lotId, facilityId))) throw Errors.LOT_NOT_FOUND();
+      const lot = await tx.lot.findUniqueOrThrow({
+        where: { id: ob.lotId },
+        select: { status: true, currentBalanceBags: true, chamberId: true },
+      });
+      if (lot.status !== 'ACTIVE') throw Errors.LOT_NOT_ACTIVE();
+      if (ob.withdrawalType === 'FULL' && ob.quantityWithdrawnBags !== lot.currentBalanceBags) {
+        throw Errors.OUTBOUND_QUANTITY_STALE(lot.currentBalanceBags, ob.quantityWithdrawnBags);
+      }
+      const newBalance = lot.currentBalanceBags - ob.quantityWithdrawnBags;
+      if (newBalance < 0) {
+        throw Errors.LOT_BALANCE_INSUFFICIENT(lot.currentBalanceBags, ob.quantityWithdrawnBags);
+      }
+      const isFullClose = ob.withdrawalType === 'FULL' || newBalance === 0;
 
       await tx.lot.update({
         where: { id: ob.lotId },
@@ -241,15 +271,17 @@ export class OutboundService {
       await reconcileWithdrawal(tx, {
         facilityId,
         lotId: ob.lotId,
-        chamberId: ob.lot.chamberId,
+        chamberId: lot.chamberId,
         newBalance,
         withdrawnBags: ob.quantityWithdrawnBags,
         pickedFrom,
-        movedBy: finalizedBy ?? ob.createdBy,
+        movedBy: finalizedBy,
       });
 
       const updated = await this.repo.update(tx, id, {
         status: 'DISPATCHED',
+        finalizedAt: new Date(),
+        finalizedBy,
         ...(notes ? { notes } : {}),
       });
 
@@ -259,9 +291,33 @@ export class OutboundService {
     });
   }
 
+  /**
+   * Cancel a withdrawal that has not left: PENDING, WEIGHED or DISPUTED (docs/14 §6).
+   * The lot is untouched — its balance only ever moves at dispatch — so cancelling
+   * simply frees the bags the booking held. Follows the void convention.
+   */
+  async cancel(facilityId: string, id: string, userId: string, reason: string) {
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await lockRow(tx, 'outbound_events', id, facilityId))) throw Errors.OUTBOUND_NOT_FOUND();
+      const ob = await tx.outboundEvent.findFirst({ where: { id, facilityId }, select: { status: true } });
+      if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
+      if (ob.status === 'DISPATCHED') throw Errors.OUTBOUND_ALREADY_FINALIZED();
+      if (ob.status === 'CANCELLED') throw Errors.OUTBOUND_CANCELLED();
+      const updated = await this.repo.update(tx, id, {
+        status: 'CANCELLED',
+        voidedAt: new Date(),
+        voidedBy: userId,
+        voidReason: reason,
+      });
+      return formatOutbound(updated);
+    });
+  }
+
   async getDispatchNotePdf(facilityId: string, id: string): Promise<{ filename: string; pdf: Buffer }> {
     const ob = await this.repo.findById(facilityId, id);
     if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
+    // A cancelled withdrawal must not produce a paper the driver could show at the gate.
+    if (ob.status === 'CANCELLED') throw Errors.OUTBOUND_CANCELLED();
 
     const facility = await this.prisma.facility.findUnique({ where: { id: facilityId } });
 

@@ -523,11 +523,20 @@ describe('Withdrawal placement reconciliation', () => {
       payload: { picked_from: [{ rack_id: RACK_A1, bags: 60 }] },
     });
     expect(fRes.statusCode).toBe(400);
+
+    // The rejected finalize leaves the withdrawal open, holding its 50 bags;
+    // cancel it so the lot's whole balance is free again.
+    const cRes = await app.inject({
+      method: 'POST',
+      url: `/v1/outbound-events/${obId}/cancel`,
+      headers: authHeaders(operatorToken),
+      payload: { reason: 'picks were wrong; rebooking' },
+    });
+    expect(cRes.statusCode).toBe(200);
   });
 
   it('FULL withdrawal clears all placements', async () => {
-    // Balance 250 (A1=150, A2=100). Finalize the pending 50-bag withdrawal
-    // first is not needed — it was rejected, so balance is still 250.
+    // Balance 250 (A1=150, A2=100): the 50-bag withdrawal above was cancelled.
     await withdrawAndFinalize(250, 'FULL');
 
     const pRes = await app.inject({

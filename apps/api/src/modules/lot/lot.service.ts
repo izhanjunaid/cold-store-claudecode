@@ -1,5 +1,5 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
-import { RATE_UNIT_LABEL, type RateType } from '@coldchain/shared';
+import { RATE_UNIT_LABEL, addDays, businessDate, fromIsoDate, type RateType } from '@coldchain/shared';
 import { LotRepository, LOT_INCLUDE_SHAPE } from './lot.repository';
 import { applyPlacements, type PlacementInput } from './placement.service';
 import { Errors } from '../../common/errors';
@@ -283,18 +283,23 @@ export class LotService {
       throw Errors.WEIGHT_DISPUTE_UNRESOLVED();
     }
 
-    // 6/7/8. Dates + lot number + insert in one transaction
-    const entryDate = new Date();
-    entryDate.setHours(0, 0, 0, 0);
-    const inboundDate = input.inboundDate ? new Date(input.inboundDate) : entryDate;
+    // 6/7/8. Dates + lot number + insert in one transaction. "Today" is the
+    // facility's calendar date, not the container's (UTC) one.
+    const today = businessDate();
+    const entryDate = fromIsoDate(today);
+    const inboundIso = input.inboundDate ?? today;
+    const inboundDate = fromIsoDate(inboundIso);
 
-    // 5a. Backdating guard: OPERATOR-level users may only backdate within
-    // the configured window; MANAGER+ may exceed it (audit-logged via trigger).
+    // 5a. Date guards: below MANAGER, no future inbound date (it would shorten the
+    // billed stay) and backdating only within the configured window; MANAGER+ may
+    // exceed both (audit-logged via trigger).
+    const isManager = roleAtLeast(input.userRole, 'MANAGER');
+    if (!isManager && inboundIso > today) {
+      throw Errors.DATE_IN_FUTURE('inbound_date');
+    }
     const maxBackdateDays = settings.backdating_max_days;
-    if (maxBackdateDays !== null && !roleAtLeast(input.userRole, 'MANAGER')) {
-      const earliest = new Date(entryDate);
-      earliest.setDate(earliest.getDate() - maxBackdateDays);
-      if (inboundDate < earliest) {
+    if (maxBackdateDays !== null && !isManager) {
+      if (inboundIso < addDays(today, -maxBackdateDays)) {
         throw Errors.BACKDATING_LIMIT_EXCEEDED(maxBackdateDays);
       }
     }
