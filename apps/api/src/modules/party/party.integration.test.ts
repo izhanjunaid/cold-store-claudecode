@@ -262,3 +262,81 @@ describe('Party list · kind filter', () => {
     expect(await ids('supplier')).toEqual([supplierId]);
   });
 });
+
+describe('credit limit & terms need parties.credit_terms (MANAGER by default)', () => {
+  let partyId: string;
+  let managerToken: string;
+
+  const patch = (token: string, payload: Record<string, unknown>) =>
+    app.inject({
+      method: 'PATCH',
+      url: `/v1/parties/${partyId}`,
+      headers: authHeaders(token),
+      payload,
+    });
+
+  beforeAll(async () => {
+    managerToken = (await loginAsRole(app, 'MANAGER')).accessToken;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/parties',
+      headers: authHeaders(managerToken),
+      payload: {
+        name: `Credit Terms Arhti ${Date.now()}`,
+        party_type: 'ARHTI',
+        phone_primary: '03004450001',
+        credit_terms_days: 45,
+        credit_limit_pkr: 250000,
+      },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    partyId = JSON.parse(res.body).data.id;
+  });
+
+  it('the munshi cannot give a new party a credit limit or non-default terms', async () => {
+    const withLimit = await app.inject({
+      method: 'POST',
+      url: '/v1/parties',
+      headers: authHeaders(operatorToken),
+      payload: { name: 'Limit By Munshi', party_type: 'FARMER', phone_primary: '03004450002', credit_limit_pkr: 900000 },
+    });
+    expect(withLimit.statusCode).toBe(403);
+    expect(JSON.parse(withLimit.body).error.message).toMatch(/parties\.credit_terms/);
+
+    const longTerms = await app.inject({
+      method: 'POST',
+      url: '/v1/parties',
+      headers: authHeaders(operatorToken),
+      payload: { name: 'Terms By Munshi', party_type: 'FARMER', phone_primary: '03004450003', credit_terms_days: 90 },
+    });
+    expect(longTerms.statusCode).toBe(403);
+  });
+
+  it('the munshi can still edit a party when the form re-sends the unchanged limit and terms', async () => {
+    const res = await patch(operatorToken, {
+      address: 'Shop 12, Badami Bagh',
+      credit_limit_pkr: 250000,
+      credit_terms_days: 45,
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(JSON.parse(res.body).data.address).toBe('Shop 12, Badami Bagh');
+  });
+
+  it('the munshi cannot raise the limit or stretch the terms', async () => {
+    expect((await patch(operatorToken, { credit_limit_pkr: 999999 })).statusCode).toBe(403);
+    expect((await patch(operatorToken, { credit_terms_days: 120 })).statusCode).toBe(403);
+    const party = JSON.parse(
+      (await app.inject({ method: 'GET', url: `/v1/parties/${partyId}`, headers: authHeaders(managerToken) })).body,
+    ).data;
+    expect(party.credit_limit_pkr).toBe(250000);
+    expect(party.credit_terms_days).toBe(45);
+  });
+
+  it('a manager can change both', async () => {
+    const res = await patch(managerToken, { credit_limit_pkr: 300000, credit_terms_days: 60 });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body).data;
+    expect(body.credit_limit_pkr).toBe(300000);
+    expect(body.credit_terms_days).toBe(60);
+  });
+});

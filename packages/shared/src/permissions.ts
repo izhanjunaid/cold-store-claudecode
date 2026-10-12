@@ -43,6 +43,7 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
   // Parties
   { key: 'parties.manage', group: 'Parties', label: 'Create & edit parties', description: 'Add or update farmers, traders, arhtis and buyers.', defaultMinRole: 'OPERATOR' },
   { key: 'parties.delete', group: 'Parties', label: 'Deactivate parties', description: 'Soft-delete a party record.', defaultMinRole: 'MANAGER' },
+  { key: 'parties.credit_terms', group: 'Parties', label: 'Set credit limit & terms', description: "Set or change a party's credit limit and payment terms.", defaultMinRole: 'MANAGER' },
 
   // Commodities
   { key: 'commodities.manage', group: 'Commodities', label: 'Manage commodities & varieties', description: 'Add or edit commodities and their varieties.', defaultMinRole: 'MANAGER' },
