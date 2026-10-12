@@ -341,6 +341,7 @@ X-Facility-ID: <facility_uuid>
 | `LOT_BALANCE_RESERVED` | 409 | Bags are held by open withdrawals (message names their dispatch notes); dispatch or cancel them first |
 | `DATE_IN_FUTURE` | 422 | A date after today (Lahore calendar); MANAGER+ only |
 | `OUTBOUND_CANCELLED` | 409 | The withdrawal was cancelled |
+| `OUTBOUND_ALREADY_LEFT` | 409 | Cancel refused: a truck already carried this withdrawal out (the old gate allowed that before dispatch) |
 | `OUTBOUND_QUANTITY_STALE` | 409 | A FULL withdrawal no longer equals the lot balance; cancel and rebook |
 | `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization |
 | `GATE_OUTWARD_INVOICE_NOT_FINAL` | 422 | A withdrawal on the truck is billed on a DRAFT invoice — finalize it first (credit cannot cover a draft) |
@@ -350,7 +351,7 @@ X-Facility-ID: <facility_uuid>
 | `GATE_OUTWARD_COUNT_REQUIRED` | 422 | The guard's bag count is required when a withdrawal leaves |
 | `GATE_OUTWARD_COUNT_MISMATCH` | 422 | Count ≠ bags dispatched (never states the expected number); MANAGER may override with a reason |
 | `GATE_OUTWARD_UNMATCHED_LOAD` | 422 | A counted load no dispatched withdrawal accounts for; MANAGER may override with a reason |
-| `GATE_OVERRIDE_REQUIRES_MANAGER` | 403 | `override_reason` sent by someone below MANAGER |
+| `GATE_OVERRIDE_REQUIRES_MANAGER` | 403 | `override_reason` or `outbound_event_id` (naming a withdrawal) sent by someone below MANAGER |
 | `GATE_SELF_RELEASE` | 403 | The releaser booked or dispatched a withdrawal on this truck (MANAGER+ exempt) |
 | `CONSTRAINT_VIOLATION` | 409 | A database rule refused the change (e.g. a lot balance below zero) |
 | `INTERNAL_ERROR` | 500 | Unexpected server error |
