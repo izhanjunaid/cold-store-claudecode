@@ -64,6 +64,24 @@ export const GatePassListQuery = z.object({
 });
 export type GatePassListQueryType = z.infer<typeof GatePassListQuery>;
 
+/**
+ * Where a truck at the gate stands, from the dispatch desk's side: can it be released now?
+ * Carries no bag quantity — the guard's count is blind.
+ */
+export const GateReleaseState = z.enum(['READY', 'PAYMENT_PENDING', 'BILL_DRAFT', 'NOT_DISPATCHED', 'NO_BOOKING']);
+export type GateReleaseStateType = z.infer<typeof GateReleaseState>;
+
+export const GateRelease = z.object({
+  state: GateReleaseState,
+  dispatch_notes: z.array(z.string()),
+  /** What is still owed on the dispatched withdrawals, uncleared cheques counted as owed. */
+  outstanding_pkr: z.number(),
+  cheque_pending: z.boolean(),
+  marka: z.string().nullable(),
+  owner_party_name: z.string().nullable(),
+});
+export type GateReleaseType = z.infer<typeof GateRelease>;
+
 export const GatePassResponse = z.object({
   id: z.string().uuid(),
   pass_number: z.string(),
@@ -100,5 +118,7 @@ export const GatePassResponse = z.object({
   override_reason: z.string().nullable().optional(),
   // Every withdrawal that left on this truck (a truck may carry several lots).
   outbound_ids: z.array(z.string().uuid()).optional(),
+  /** Only on the active list (?active=true). */
+  release: GateRelease.optional(),
 });
 export type GatePassResponseType = z.infer<typeof GatePassResponse>;

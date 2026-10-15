@@ -64,3 +64,48 @@ export const OutboundEventResponse = z.object({
   gate_pass_id: z.string().uuid().nullable().optional(),
 });
 export type OutboundEventResponse = z.infer<typeof OutboundEventResponse>;
+
+// ── Dispatch desk ────────────────────────────────────────────────────────────
+
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
+
+/** GET /v1/outbound-events — the desk's queue. `status` is a comma-separated list. */
+export const OutboundListQuery = z.object({
+  status: z.string().trim().min(1).optional(),
+  date_from: dateOnly.optional(),
+  date_to: dateOnly.optional(),
+  /** Dispatch note number, vehicle plate or lot number. */
+  search: z.string().trim().min(1).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  page_size: z.coerce.number().int().min(1).max(100).default(30),
+});
+export type OutboundListQueryType = z.infer<typeof OutboundListQuery>;
+
+export const DispatchPaymentMode = z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE', 'MOBILE_WALLET', 'CREDIT']);
+export type DispatchPaymentModeType = z.infer<typeof DispatchPaymentMode>;
+
+/**
+ * POST /v1/outbound-events/:id/dispatch-and-collect — dispatch the weighed withdrawal,
+ * finalize its bill and take the money in one transaction. The client sends the total
+ * it showed; a different total on the server is refused (what was reviewed is what posts).
+ */
+export const DispatchAndCollectRequest = z
+  .object({
+    expected_total_pkr: z.number().nonnegative(),
+    picked_from: z
+      .array(z.object({ rack_id: z.string().uuid(), bags: z.number().int().positive() }))
+      .optional(),
+    /** Pre-added service lines (apply_at_dispatch) to leave off this bill. Needs invoices.manage. */
+    skip_service_charge_ids: z.array(z.string().uuid()).optional(),
+    payment: z.object({
+      mode: DispatchPaymentMode,
+      reference_number: z.string().trim().max(100).optional(),
+      cheque_date: dateOnly.optional(),
+    }),
+    notes: z.string().optional(),
+  })
+  .refine((b) => b.payment.mode !== 'CHEQUE' || !!b.payment.cheque_date, {
+    message: 'A cheque needs its date',
+    path: ['payment', 'cheque_date'],
+  });
+export type DispatchAndCollectRequestType = z.infer<typeof DispatchAndCollectRequest>;

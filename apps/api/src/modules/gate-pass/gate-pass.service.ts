@@ -1,5 +1,7 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import type {
+  GateReleaseStateType,
+  GateReleaseType,
   ClearOutwardRequestType,
   GatePassListQueryType,
   GatePassResponseType,
@@ -36,6 +38,15 @@ const releaseSelect = {
 type ReleaseOutbound = Prisma.OutboundEventGetPayload<{ select: typeof releaseSelect }>;
 
 const dnOf = (o: { dispatchNoteNumber: string | null; id: string }) => o.dispatchNoteNumber ?? o.id.slice(0, 8);
+
+const emptyRelease = (): GateReleaseType => ({
+  state: 'NO_BOOKING',
+  dispatch_notes: [],
+  outstanding_pkr: 0,
+  cheque_pending: false,
+  marka: null,
+  owner_party_name: null,
+});
 
 export class GatePassService {
   constructor(
@@ -178,8 +189,15 @@ export class GatePassService {
       if (query.date_to) (where.createdAt as Prisma.DateTimeFilter).lt = businessDayStart(addDays(query.date_to, 1));
     }
     const [rows, total] = await this.repo.list(facilityId, where, query.page, query.page_size);
+    const data = rows.map((r) => formatGatePass(r));
+    if (query.active) {
+      const previews = await this.releasePreviews(facilityId, data.map((d) => d.vehicle_number));
+      data.forEach((d) => {
+        d.release = previews.get(normalizePlate(d.vehicle_number)) ?? emptyRelease();
+      });
+    }
     return {
-      data: rows.map((r) => formatGatePass(r)),
+      data,
       meta: { total, page: query.page, per_page: query.page_size },
     };
   }
@@ -188,6 +206,76 @@ export class GatePassService {
     const row = await this.repo.findById(facilityId, id);
     if (!row) throw Errors.GATE_PASS_NOT_FOUND();
     return formatGatePass(row);
+  }
+
+  /**
+   * For trucks at the gate: can each be released now? Read-only, and the same plate
+   * rule clearOutwardInternal then enforces (letters and digits, not left yet,
+   * dispatched under the current rules). Bag quantities are never part of it.
+   */
+  private async releasePreviews(facilityId: string, plates: string[]): Promise<Map<string, GateReleaseType>> {
+    const wanted = new Set(plates.map(normalizePlate).filter(Boolean));
+    const result = new Map<string, GateReleaseType>();
+    if (wanted.size === 0) return result;
+
+    const open = await this.prisma.outboundEvent.findMany({
+      where: {
+        facilityId,
+        voidedAt: null,
+        gatePassId: null,
+        vehicleNumber: { not: null },
+        status: { in: ['PENDING', 'WEIGHED', 'DISPUTED', 'DISPATCHED'] },
+        gatePasses: { none: { status: 'CLEARED' } },
+      },
+      select: {
+        id: true,
+        dispatchNoteNumber: true,
+        status: true,
+        vehicleNumber: true,
+        finalizedAt: true,
+        lot: { select: { marka: true } },
+        ownerPartySnapshot: { select: { name: true } },
+        invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    const byPlate = new Map<string, typeof open>();
+    for (const o of open) {
+      const key = normalizePlate(o.vehicleNumber ?? '');
+      if (!wanted.has(key)) continue;
+      // Dispatched before these rules (no finalized_at) may already have left untracked.
+      if (o.status === 'DISPATCHED' && !o.finalizedAt) continue;
+      byPlate.set(key, [...(byPlate.get(key) ?? []), o]);
+    }
+
+    const invoiceIds = [...byPlate.values()].flat().flatMap((o) => (o.invoice ? [o.invoice.id] : []));
+    const pending = await this.pendingChequeTotals(this.prisma as unknown as Prisma.TransactionClient, invoiceIds);
+
+    for (const [plate, list] of byPlate) {
+      let outstanding = 0;
+      let chequePending = false;
+      let state: GateReleaseStateType = 'READY';
+      for (const o of list) {
+        if (o.status !== 'DISPATCHED') { state = 'NOT_DISPATCHED'; break; }
+        const inv = o.invoice;
+        if (inv?.status === 'DRAFT') { state = 'BILL_DRAFT'; continue; }
+        if (!inv || inv.status === 'VOID') { if (state === 'READY') state = 'PAYMENT_PENDING'; continue; }
+        const uncleared = pending.get(inv.id) ?? 0;
+        if (uncleared > 0.005) chequePending = true;
+        outstanding += Math.max(0, Number(inv.totalPkr) - Number(inv.amountPaidPkr) + uncleared);
+      }
+      outstanding = round2(outstanding);
+      if (state === 'READY' && outstanding > 0.01) state = 'PAYMENT_PENDING';
+      result.set(plate, {
+        state,
+        dispatch_notes: list.map((o) => o.dispatchNoteNumber ?? o.id.slice(0, 8)),
+        outstanding_pkr: outstanding,
+        cheque_pending: chequePending,
+        marka: list.find((o) => o.lot.marka)?.lot.marka ?? null,
+        owner_party_name: list.find((o) => o.ownerPartySnapshot)?.ownerPartySnapshot?.name ?? null,
+      });
+    }
+    return result;
   }
 
   // ---------- internals ----------

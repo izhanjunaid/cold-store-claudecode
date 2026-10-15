@@ -123,6 +123,13 @@ export const Errors = {
     new AppError('DATE_IN_FUTURE', 'This date is after today; only a MANAGER or higher may enter a future date', 422, field),
   OUTBOUND_CANCELLED: () =>
     new AppError('OUTBOUND_CANCELLED', 'This withdrawal was cancelled', 409),
+  DISPATCH_TOTAL_CHANGED: (expected: number, actual: number) =>
+    new AppError(
+      'DISPATCH_TOTAL_CHANGED',
+      `The bill is now Rs ${actual.toFixed(2)}, not the Rs ${expected.toFixed(2)} shown — review it again before collecting`,
+      409,
+      'expected_total_pkr',
+    ),
   OUTBOUND_ALREADY_LEFT: () =>
     new AppError(
       'OUTBOUND_ALREADY_LEFT',

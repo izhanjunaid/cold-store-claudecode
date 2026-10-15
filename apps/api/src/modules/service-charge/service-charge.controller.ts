@@ -38,6 +38,7 @@ export async function serviceChargeRoutes(app: FastifyInstance) {
         name: body.name,
         unitType: body.unit_type,
         unitPricePkr: body.unit_price_pkr,
+        applyAtDispatch: body.apply_at_dispatch,
       });
       return sendSuccess(reply.status(201), result);
     },
@@ -68,6 +69,7 @@ export async function serviceChargeRoutes(app: FastifyInstance) {
         unitType: body.unit_type,
         unitPricePkr: body.unit_price_pkr,
         isActive: body.is_active,
+        applyAtDispatch: body.apply_at_dispatch,
       });
       return sendSuccess(reply, result);
     },

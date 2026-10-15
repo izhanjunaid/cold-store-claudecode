@@ -274,6 +274,35 @@ export class InvoiceService {
   }
 
   /**
+   * Add catalog service lines to a DRAFT invoice inside the caller's transaction and
+   * return its new total. The dispatch checkout pre-adds the charges marked
+   * apply_at_dispatch, so a forgotten loading charge is a deliberate omission, not a
+   * default — a finalized bill can only be corrected downward.
+   */
+  async addServiceLinesInTransaction(
+    tx: Prisma.TransactionClient,
+    invoiceId: string,
+    lines: { serviceChargeId: string; description: string; quantity: number; unitPricePkr: number }[],
+  ): Promise<number> {
+    const existing = await tx.invoiceLineItem.findMany({ where: { invoiceId }, select: { sortOrder: true } });
+    let sort = existing.reduce((m, l) => Math.max(m, l.sortOrder), 0);
+    for (const l of lines) {
+      sort += 1;
+      await this.repo.addLine(tx, invoiceId, {
+        lineType: 'SERVICE',
+        description: l.description,
+        quantity: l.quantity,
+        unitPricePkr: l.unitPricePkr,
+        serviceChargeId: l.serviceChargeId,
+        amountPkr: round2(l.quantity * l.unitPricePkr),
+        sortOrder: sort,
+      });
+    }
+    await this.repo.recomputeTotals(tx, invoiceId);
+    const updated = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { totalPkr: true } });
+    return Number(updated.totalPkr);
+  }
+  /**
    * Void a finalized, unpaid invoice: post a full reversal of its JE-01 and set
    * status VOID. Only allowed when nothing downstream has consumed the invoice
    * (no payments, credit notes or surcharges) — otherwise correct it with a

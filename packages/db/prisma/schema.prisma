@@ -665,6 +665,8 @@ model ServiceCharge {
   unitPricePkr       Decimal         @map("unit_price_pkr") @db.Decimal(10, 2)
   revenueAccountCode String?         @map("revenue_account_code") @db.VarChar(10)
   isActive           Boolean         @default(true) @map("is_active")
+  /// Pre-added to the bill at dispatch (0039): loading/labour belong on every one.
+  applyAtDispatch    Boolean         @default(false) @map("apply_at_dispatch")
   createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz()
 
   facility     Facility          @relation(fields: [facilityId], references: [id])

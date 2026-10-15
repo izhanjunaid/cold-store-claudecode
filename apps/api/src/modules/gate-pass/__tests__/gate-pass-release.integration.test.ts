@@ -478,3 +478,87 @@ describe('the guard and the count', () => {
     expect(mgr.statusCode).toBe(200);
   });
 });
+
+describe('release preview on the active list (what the gate console shows before the guard taps)', () => {
+  const activeRelease = async (passId: string) => {
+    const res = await app.inject({ method: 'GET', url: '/v1/gate-passes?active=true&page_size=100', headers: authHeaders(securityToken) });
+    expect(res.statusCode).toBe(200);
+    const row = (JSON.parse(res.body).data as { id: string; release: Record<string, unknown> }[]).find((r) => r.id === passId);
+    expect(row, 'pass is on the active list').toBeDefined();
+    return row!.release as {
+      state: string;
+      dispatch_notes: string[];
+      outstanding_pkr: number;
+      cheque_pending: boolean;
+      marka: string | null;
+      owner_party_name: string | null;
+    };
+  };
+
+  it('walks a truck from nothing booked to ready, and what it says is what the release then enforces', async () => {
+    const pass = await arrive('LHR-5500');
+    expect((await activeRelease(pass)).state).toBe('NO_BOOKING');
+
+    // Booked and weighed, not dispatched yet.
+    const lotId = await createLot(30);
+    const booked = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(operatorToken),
+      payload: { lot_id: lotId, withdrawal_type: 'FULL', quantity_withdrawn_bags: 30, outbound_date: '2026-09-01', vehicle_number: 'lhr 5500' },
+    });
+    expect(booked.statusCode).toBe(201);
+    expect((await activeRelease(pass)).state).toBe('NOT_DISPATCHED');
+    await prisma.outboundEvent.deleteMany({ where: { id: data<{ id: string }>(booked).id } });
+
+    const ob = await dispatched(30, 'LHR-5500'); // dispatched, bill still a draft
+    expect((await activeRelease(pass)).state).toBe('BILL_DRAFT');
+
+    await finalizeInvoice(ob.invoiceId); // billed, unpaid
+    const owed = await activeRelease(pass);
+    expect(owed.state).toBe('PAYMENT_PENDING');
+    expect(owed.outstanding_pkr).toBeGreaterThan(0);
+    expect(owed.dispatch_notes).toHaveLength(1);
+    expect((await release(pass, { declared_quantity: 30 })).statusCode).toBe(422);
+
+    await pay(ob.invoiceId, 'CASH', true);
+    const ready = await activeRelease(pass);
+    expect([ready.state, ready.outstanding_pkr]).toEqual(['READY', 0]);
+    expect((await release(pass, { declared_quantity: 30 })).statusCode).toBe(200);
+  });
+
+  it('counts an uncleared cheque as still owed, and says so', async () => {
+    const ob = await dispatched(25, 'LHR-5501');
+    await pay(ob.invoiceId, 'CHEQUE');
+    const pass = await arrive('LHR-5501');
+    const r = await activeRelease(pass);
+    expect([r.state, r.cheque_pending]).toEqual(['PAYMENT_PENDING', true]);
+    expect(r.outstanding_pkr).toBeGreaterThan(0);
+  });
+
+  it('carries the owner and marka for the guard to check, and never a bag count', async () => {
+    const ob = await dispatched(20, 'LHR-5502');
+    await pay(ob.invoiceId);
+    const pass = await arrive('LHR-5502');
+    const r = await activeRelease(pass);
+    expect(r.state).toBe('READY');
+    expect(r.owner_party_name).toBeTruthy();
+    expect(Object.keys(r).sort()).toEqual(['cheque_pending', 'dispatch_notes', 'marka', 'outstanding_pkr', 'owner_party_name', 'state']);
+    // Nothing in the whole payload names the 20 bags that were dispatched.
+    const res = await app.inject({ method: 'GET', url: '/v1/gate-passes?active=true', headers: authHeaders(securityToken) });
+    expect(res.body).not.toMatch(/quantity_withdrawn|"quantity"/);
+  });
+
+  it('only the active list carries it, and a withdrawal that already left no longer shows', async () => {
+    const ob = await dispatched(15, 'LHR-5503');
+    await pay(ob.invoiceId);
+    const pass = await arrive('LHR-5503');
+    expect((await activeRelease(pass)).state).toBe('READY');
+    expect((await release(pass, { declared_quantity: 15 })).statusCode).toBe(200);
+
+    const next = await arrive('LHR-5503');
+    expect((await activeRelease(next)).state).toBe('NO_BOOKING');
+    const byId = await app.inject({ method: 'GET', url: `/v1/gate-passes/${next}`, headers: authHeaders(securityToken) });
+    expect(data(byId)).not.toHaveProperty('release');
+  });
+});

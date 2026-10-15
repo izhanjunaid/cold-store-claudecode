@@ -4,9 +4,18 @@ import {
   UpdateOutboundWeightRequest,
   FinalizeOutboundRequest,
   CancelOutboundRequest,
+  OutboundListQuery,
+  DispatchAndCollectRequest,
 } from '@coldchain/shared';
 import { OutboundService } from './outbound.service';
 import { OutboundRepository } from './outbound.repository';
+import { DispatchCheckoutService } from './dispatch-checkout.service';
+import { InvoiceService } from '../invoice/invoice.service';
+import { InvoiceRepository } from '../invoice/invoice.repository';
+import { PaymentService } from '../payment/payment.service';
+import { PaymentRepository } from '../payment/payment.repository';
+import { JournalEntryService } from '../accounting/journal-entry.service';
+import { PeriodLockService } from '../accounting/period-lock.service';
 import { sendSuccess } from '../../common/response';
 import { z } from 'zod';
 
@@ -14,6 +23,27 @@ const IdParam = z.object({ id: z.string().uuid() });
 
 export async function outboundRoutes(app: FastifyInstance) {
   const service = new OutboundService(app.prisma, new OutboundRepository(app.prisma));
+  const journalEntry = new JournalEntryService(app.prisma, new PeriodLockService(app.prisma));
+  const checkout = new DispatchCheckoutService(
+    app.prisma,
+    service,
+    new InvoiceService(app.prisma, new InvoiceRepository(app.prisma), journalEntry),
+    new PaymentService(app.prisma, new PaymentRepository(app.prisma), journalEntry),
+  );
+
+  // GET /v1/outbound-events — the dispatch desk's queue. outbound.record (the guard's
+  // gate_passes.log is not enough): the rows carry bag counts, which the guard counts blind.
+  app.route({
+    method: 'GET',
+    url: '/v1/outbound-events',
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
+    schema: { querystring: OutboundListQuery },
+    handler: async (request, reply) => {
+      const query = request.query as z.infer<typeof OutboundListQuery>;
+      const result = await checkout.list(request.user!.facilityId, query);
+      return sendSuccess(reply, result.data, result.meta);
+    },
+  });
 
   // POST /v1/outbound-events
   app.route({
@@ -86,6 +116,43 @@ export async function outboundRoutes(app: FastifyInstance) {
         body.notes,
         body.picked_from?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
         request.user!.userId,
+      );
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // GET /v1/outbound-events/:id/checkout-preview — the bill a weighed withdrawal will carry.
+  app.route({
+    method: 'GET',
+    url: '/v1/outbound-events/:id/checkout-preview',
+    preHandler: [app.authenticate, app.requirePermission('outbound.finalize')],
+    schema: { params: IdParam },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      return sendSuccess(reply, await checkout.preview(request.user!.facilityId, id));
+    },
+  });
+
+  // POST /v1/outbound-events/:id/dispatch-and-collect — dispatch, bill and collect in one
+  // transaction. The route needs outbound.finalize; the handler also checks invoices.manage
+  // and (unless on credit) payments.record before anything is written.
+  app.route({
+    method: 'POST',
+    url: '/v1/outbound-events/:id/dispatch-and-collect',
+    preHandler: [app.authenticate, app.requirePermission('outbound.finalize')],
+    schema: { params: IdParam, body: DispatchAndCollectRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as z.infer<typeof DispatchAndCollectRequest>;
+      const result = await checkout.dispatchAndCollect(
+        {
+          facilityId: request.user!.facilityId,
+          userId: request.user!.userId,
+          role: request.user!.role,
+          permissions: await app.ensurePermissions(request),
+        },
+        id,
+        body,
       );
       return sendSuccess(reply, result);
     },

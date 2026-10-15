@@ -8,6 +8,7 @@ interface ServiceChargeRecord {
   unitType: string;
   unitPricePkr: { toString(): string };
   isActive: boolean;
+  applyAtDispatch: boolean;
   createdAt: Date;
 }
 
@@ -19,6 +20,7 @@ function toResponse(sc: ServiceChargeRecord) {
     unit_type: sc.unitType,
     unit_price_pkr: Number(sc.unitPricePkr),
     is_active: sc.isActive,
+    apply_at_dispatch: sc.applyAtDispatch,
     created_at: sc.createdAt.toISOString(),
   };
 }
@@ -42,6 +44,7 @@ export class ServiceChargeService {
     name: string;
     unitType: 'PER_BAG' | 'PER_TON' | 'FLAT';
     unitPricePkr: number;
+    applyAtDispatch?: boolean;
   }) {
     const existing = await this.repo.findByName(input.facilityId, input.name);
     if (existing) {
@@ -52,6 +55,7 @@ export class ServiceChargeService {
       name: input.name,
       unitType: input.unitType,
       unitPricePkr: input.unitPricePkr,
+      ...(input.applyAtDispatch !== undefined && { applyAtDispatch: input.applyAtDispatch }),
     });
     return toResponse(sc as ServiceChargeRecord);
   }
@@ -64,6 +68,7 @@ export class ServiceChargeService {
       unitType?: 'PER_BAG' | 'PER_TON' | 'FLAT';
       unitPricePkr?: number;
       isActive?: boolean;
+      applyAtDispatch?: boolean;
     },
   ) {
     const sc = await this.repo.findById(facilityId, id);
@@ -73,6 +78,7 @@ export class ServiceChargeService {
       ...(input.unitType !== undefined && { unitType: input.unitType }),
       ...(input.unitPricePkr !== undefined && { unitPricePkr: input.unitPricePkr }),
       ...(input.isActive !== undefined && { isActive: input.isActive }),
+      ...(input.applyAtDispatch !== undefined && { applyAtDispatch: input.applyAtDispatch }),
     });
     return toResponse(updated as ServiceChargeRecord);
   }
