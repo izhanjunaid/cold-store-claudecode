@@ -17,6 +17,7 @@ import { LotLocationCard, LotMovementsTimeline } from '@/components/lot-location
 
 import { formatDate, formatDateTime } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
+import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
 interface Lot {
@@ -103,6 +104,7 @@ export default function LotDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(recentTransferId ? 'ownership' : 'overview');
   const [receiptLoading, setReceiptLoading] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const user = useAuthStore((s) => s.user);
   // Each action shows only with the permission key its API route checks.
   const canTransfer = can(user, 'lots.transfer_ownership');
@@ -183,7 +185,8 @@ export default function LotDetailPage() {
               </Button>
             )}
             {canWithdraw && canAct && (
-              <Button onClick={() => router.push(`/lots/${id}/withdraw`)}>
+              // Opens the drawer; /lots/:id/withdraw remains as the full-page deep link.
+              <Button onClick={() => setWithdrawOpen(true)}>
                 <PackageMinus className="h-4 w-4" aria-hidden />
                 New Withdrawal
               </Button>
@@ -198,6 +201,10 @@ export default function LotDetailPage() {
           </>
         }
       />
+
+      {canWithdraw && canAct && (
+        <WithdrawSheet open={withdrawOpen} onOpenChange={setWithdrawOpen} lotId={id} lotNumber={lot.lot_number} />
+      )}
 
       <div className="mb-4 flex items-center gap-2">
         <StatusBadge status={lot.status} />

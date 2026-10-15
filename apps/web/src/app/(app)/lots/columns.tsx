@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { UrduText } from '@/components/ui/urdu-text';
 import type { DataTableColumn } from '@/components/data-table';
+import { LotWithdrawAction } from '@/components/outbound/lot-withdraw-action';
 
 import { formatDate } from '@/lib/format';
 export interface LotRow {
@@ -101,5 +102,11 @@ export const lotColumns: DataTableColumn<LotRow>[] = [
     header: 'Status',
     cell: (lot) => <StatusBadge status={lot.status} />,
     csv: (lot) => lot.status,
+  },
+  {
+    id: 'actions',
+    header: '',
+    enableHiding: false,
+    cell: (lot) => <LotWithdrawAction lot={lot} />,
   },
 ];

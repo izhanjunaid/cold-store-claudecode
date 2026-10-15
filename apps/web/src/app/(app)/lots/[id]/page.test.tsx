@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 
 const LOT_ID = 'lot-1';
+const push = vi.fn();
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), back: vi.fn() }),
+  useRouter: () => ({ push, back: vi.fn() }),
   useParams: () => ({ id: LOT_ID }),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => `/lots/${LOT_ID}`,
@@ -30,6 +31,11 @@ vi.mock('@/components/lot-location', () => ({
     <div data-testid="lot-location" data-can-operate={String(canOperate)} />
   ),
   LotMovementsTimeline: () => null,
+}));
+
+// The form has its own tests; here only whether New Withdrawal opens the drawer for this lot.
+vi.mock('@/components/outbound/withdraw-form', () => ({
+  WithdrawForm: ({ lotId }: { lotId: string }) => <div data-testid="withdraw-form" data-lot-id={lotId} />,
 }));
 
 import LotDetailPage from './page';
@@ -87,6 +93,16 @@ describe('LotDetailPage actions', () => {
     await renderPage();
     expect(screen.getByRole('button', { name: /new withdrawal/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /transfer ownership/i })).toBeNull();
+  });
+
+  it('New Withdrawal opens the drawer for this lot instead of leaving the page', async () => {
+    permissions = ['outbound.record'];
+    push.mockReset();
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /new withdrawal/i }));
+
+    expect(await screen.findByTestId('withdraw-form')).toHaveAttribute('data-lot-id', LOT_ID);
+    expect(push).not.toHaveBeenCalled();
   });
 
   it('shows Transfer Ownership only with lots.transfer_ownership', async () => {

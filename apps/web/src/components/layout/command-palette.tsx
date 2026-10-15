@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -10,7 +11,8 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Boxes, Users } from 'lucide-react';
+import { Boxes, PackageMinus, Users } from 'lucide-react';
+import { can } from '@/lib/permissions';
 import { apiClientList } from '@/lib/api-client';
 import { useDebounced } from '@/hooks/use-debounced';
 import { useAuthStore } from '@/stores/auth.store';
@@ -30,6 +32,8 @@ interface LotHit {
   lot_number: string;
   marka: string | null;
   commodity?: { name: string } | null;
+  status?: string;
+  current_balance_bags?: number;
 }
 
 interface PartyHit {
@@ -169,22 +173,31 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
               <CommandSeparator />
               <CommandGroup heading="Lots">
                 {lots.map((lot) => (
-                  <CommandItem
-                    key={lot.id}
-                    value={`lot-${lot.id}`}
-                    onSelect={() => go(`/lots/${lot.id}`)}
-                  >
-                    <Boxes className="mr-2 h-4 w-4" aria-hidden />
-                    <span className="font-mono text-xs">{lot.lot_number}</span>
-                    {lot.marka && (
-                      <span className="ml-2 text-muted-foreground">{lot.marka}</span>
+                  <Fragment key={lot.id}>
+                    <CommandItem value={`lot-${lot.id}`} onSelect={() => go(`/lots/${lot.id}`)}>
+                      <Boxes className="mr-2 h-4 w-4" aria-hidden />
+                      <span className="font-mono text-xs">{lot.lot_number}</span>
+                      {lot.marka && (
+                        <span className="ml-2 text-muted-foreground">{lot.marka}</span>
+                      )}
+                      {lot.commodity?.name && (
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {lot.commodity.name}
+                        </span>
+                      )}
+                    </CommandItem>
+                    {/* Straight to the withdrawal form, skipping the lot page. Only where one can be booked. */}
+                    {can(user, 'outbound.record') && lot.status === 'ACTIVE' && (lot.current_balance_bags ?? 0) > 0 && (
+                      <CommandItem
+                        value={`withdraw-${lot.id}`}
+                        onSelect={() => go(`/lots/${lot.id}/withdraw`)}
+                      >
+                        <PackageMinus className="mr-2 h-4 w-4" aria-hidden />
+                        <span>Withdraw</span>
+                        <span className="ml-1 font-mono text-xs">{lot.lot_number}</span>
+                      </CommandItem>
                     )}
-                    {lot.commodity?.name && (
-                      <span className="ml-auto text-xs text-muted-foreground">
-                        {lot.commodity.name}
-                      </span>
-                    )}
-                  </CommandItem>
+                  </Fragment>
                 ))}
               </CommandGroup>
             </>
