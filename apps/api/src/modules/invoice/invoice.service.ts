@@ -214,54 +214,63 @@ export class InvoiceService {
     userId: string,
     body: FinalizeInvoiceRequestType,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      if (!(await lockRow(tx, 'invoices', invoiceId, facilityId))) throw Errors.INVOICE_NOT_FOUND();
-      const inv = await tx.invoice.findUniqueOrThrow({
-        where: { id: invoiceId },
-        include: {
-          billingParty: { select: RECEIVABLE_PARTY_SELECT },
-          lot: { select: { id: true, lotNumber: true, commodity: { select: { revenueAccountCode: true } } } },
-          lineItems: { orderBy: { sortOrder: 'asc' }, include: REVENUE_LINE_INCLUDE },
-        },
-      });
-      if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
-      // JE-01 posts revenue lines only; a reduction is a discount (docs/25 R-07).
-      if (inv.lineItems.some((l) => Number(l.amountPkr) <= 0)) {
-        throw Errors.VALIDATION_ERROR('Remove the negative adjustment and give the reduction as a discount', 'line_items');
-      }
-      if (body.notes) {
-        await tx.invoice.update({ where: { id: invoiceId }, data: { notes: body.notes } });
-      }
-      // Number from the invoice's own date, not the wall clock at finalize: a backdated
-      // invoice belongs to its own month's sequence, matching the period it posts to.
-      const invoiceNumber = await generateInvoiceNumber(tx, facilityId, inv.invoiceDate);
-      const updated = await this.repo.finalize(tx, invoiceId, invoiceNumber, userId);
+    return this.prisma.$transaction((tx) => this.finalizeInTransaction(tx, facilityId, invoiceId, userId, body));
+  }
 
-      // JE-01 posts atomically with finalize, so the GL always agrees with the invoice.
-      const posted = await this.journalEntry.postInTransaction(
-        tx,
-        facilityId,
-        userId,
-        buildJE01InvoiceFinalized({
-          invoiceId: inv.id,
-          invoiceNumber,
-          invoiceDate: inv.invoiceDate,
-          totalPkr: Number(inv.totalPkr),
-          gstAmountPkr: Number(inv.gstAmountPkr),
-          discountAmountPkr: Number(inv.discountAmountPkr),
-          bookType: inv.bookType,
-          billingParty: receivableParty(inv.billingParty),
-          lot: { id: inv.lot.id, lotNumber: inv.lot.lotNumber },
-          lines: inv.lineItems.map((l) => ({
-            revenueAccountCode: revenueAccountForLine(l, inv.lot.commodity),
-            amountPkr: Number(l.amountPkr),
-          })),
-        }),
-      );
-      await tx.invoice.update({ where: { id: invoiceId }, data: { journalEntryId: posted.id } });
-
-      return formatInvoice(updated);
+  /** Finalize inside the caller's transaction (the dispatch-and-collect checkout runs it with the dispatch and the receipt). */
+  async finalizeInTransaction(
+    tx: Prisma.TransactionClient,
+    facilityId: string,
+    invoiceId: string,
+    userId: string,
+    body: FinalizeInvoiceRequestType,
+  ) {
+    if (!(await lockRow(tx, 'invoices', invoiceId, facilityId))) throw Errors.INVOICE_NOT_FOUND();
+    const inv = await tx.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: {
+        billingParty: { select: RECEIVABLE_PARTY_SELECT },
+        lot: { select: { id: true, lotNumber: true, commodity: { select: { revenueAccountCode: true } } } },
+        lineItems: { orderBy: { sortOrder: 'asc' }, include: REVENUE_LINE_INCLUDE },
+      },
     });
+    if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
+    // JE-01 posts revenue lines only; a reduction is a discount (docs/25 R-07).
+    if (inv.lineItems.some((l) => Number(l.amountPkr) <= 0)) {
+      throw Errors.VALIDATION_ERROR('Remove the negative adjustment and give the reduction as a discount', 'line_items');
+    }
+    if (body.notes) {
+      await tx.invoice.update({ where: { id: invoiceId }, data: { notes: body.notes } });
+    }
+    // Number from the invoice's own date, not the wall clock at finalize: a backdated
+    // invoice belongs to its own month's sequence, matching the period it posts to.
+    const invoiceNumber = await generateInvoiceNumber(tx, facilityId, inv.invoiceDate);
+    const updated = await this.repo.finalize(tx, invoiceId, invoiceNumber, userId);
+
+    // JE-01 posts atomically with finalize, so the GL always agrees with the invoice.
+    const posted = await this.journalEntry.postInTransaction(
+      tx,
+      facilityId,
+      userId,
+      buildJE01InvoiceFinalized({
+        invoiceId: inv.id,
+        invoiceNumber,
+        invoiceDate: inv.invoiceDate,
+        totalPkr: Number(inv.totalPkr),
+        gstAmountPkr: Number(inv.gstAmountPkr),
+        discountAmountPkr: Number(inv.discountAmountPkr),
+        bookType: inv.bookType,
+        billingParty: receivableParty(inv.billingParty),
+        lot: { id: inv.lot.id, lotNumber: inv.lot.lotNumber },
+        lines: inv.lineItems.map((l) => ({
+          revenueAccountCode: revenueAccountForLine(l, inv.lot.commodity),
+          amountPkr: Number(l.amountPkr),
+        })),
+      }),
+    );
+    await tx.invoice.update({ where: { id: invoiceId }, data: { journalEntryId: posted.id } });
+
+    return formatInvoice(updated);
   }
 
   /**

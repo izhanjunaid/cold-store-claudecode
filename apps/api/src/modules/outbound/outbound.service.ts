@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@coldchain/db';
+import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { OutboundRepository, type OutboundWithRelations } from './outbound.repository';
 import { generateDispatchNoteNumber } from './dispatch-note-number';
@@ -228,67 +228,84 @@ export class OutboundService {
     pickedFrom: PlacementInput[] | undefined,
     finalizedBy: string,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      // Lock order: the withdrawal, then its lot (then its racks). Nothing locks a
-      // lot and then an existing withdrawal, so this cannot deadlock. The second of
-      // two concurrent finalizes waits here and then sees DISPATCHED.
-      if (!(await lockRow(tx, 'outbound_events', id, facilityId))) throw Errors.OUTBOUND_NOT_FOUND();
-      const ob = await tx.outboundEvent.findFirst({ where: { id, facilityId } });
-      if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
-      if (ob.status === 'DISPATCHED') throw Errors.OUTBOUND_ALREADY_FINALIZED();
-      if (ob.status === 'CANCELLED') throw Errors.OUTBOUND_CANCELLED();
-      if (ob.status !== 'WEIGHED') throw Errors.OUTBOUND_WEIGHT_REQUIRED();
+    const { outbound } = await this.prisma.$transaction((tx) =>
+      this.finalizeInTransaction(tx, facilityId, id, notes, pickedFrom, finalizedBy),
+    );
+    return outbound;
+  }
 
-      // Read the lot only after locking it: the balance read before the lock could
-      // be stale by the time it was written back, losing a concurrent change.
-      if (!(await lockRow(tx, 'lots', ob.lotId, facilityId))) throw Errors.LOT_NOT_FOUND();
-      const lot = await tx.lot.findUniqueOrThrow({
-        where: { id: ob.lotId },
-        select: { status: true, currentBalanceBags: true, chamberId: true },
-      });
-      if (lot.status !== 'ACTIVE') throw Errors.LOT_NOT_ACTIVE();
-      if (ob.withdrawalType === 'FULL' && ob.quantityWithdrawnBags !== lot.currentBalanceBags) {
-        throw Errors.OUTBOUND_QUANTITY_STALE(lot.currentBalanceBags, ob.quantityWithdrawnBags);
-      }
-      const newBalance = lot.currentBalanceBags - ob.quantityWithdrawnBags;
-      if (newBalance < 0) {
-        throw Errors.LOT_BALANCE_INSUFFICIENT(lot.currentBalanceBags, ob.quantityWithdrawnBags);
-      }
-      const isFullClose = ob.withdrawalType === 'FULL' || newBalance === 0;
+  /**
+   * Dispatch inside the caller's transaction, so the dispatch-and-collect checkout
+   * can dispatch, bill and take the money atomically. Returns the dispatched
+   * withdrawal's response and the DRAFT invoice it built.
+   */
+  async finalizeInTransaction(
+    tx: Prisma.TransactionClient,
+    facilityId: string,
+    id: string,
+    notes: string | undefined,
+    pickedFrom: PlacementInput[] | undefined,
+    finalizedBy: string,
+  ) {
+    // Lock order: the withdrawal, then its lot (then its racks). Nothing locks a
+    // lot and then an existing withdrawal, so this cannot deadlock. The second of
+    // two concurrent finalizes waits here and then sees DISPATCHED.
+    if (!(await lockRow(tx, 'outbound_events', id, facilityId))) throw Errors.OUTBOUND_NOT_FOUND();
+    const ob = await tx.outboundEvent.findFirst({ where: { id, facilityId } });
+    if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
+    if (ob.status === 'DISPATCHED') throw Errors.OUTBOUND_ALREADY_FINALIZED();
+    if (ob.status === 'CANCELLED') throw Errors.OUTBOUND_CANCELLED();
+    if (ob.status !== 'WEIGHED') throw Errors.OUTBOUND_WEIGHT_REQUIRED();
 
-      await tx.lot.update({
-        where: { id: ob.lotId },
-        data: {
-          currentBalanceBags: newBalance,
-          ...(isFullClose
-            ? { status: 'CLOSED', closedAt: ob.outboundDate }
-            : {}),
-        },
-      });
-
-      // Keep rack placements consistent with the reduced balance: explicit
-      // picks trim their racks; any remainder auto-trims largest-first.
-      await reconcileWithdrawal(tx, {
-        facilityId,
-        lotId: ob.lotId,
-        chamberId: lot.chamberId,
-        newBalance,
-        withdrawnBags: ob.quantityWithdrawnBags,
-        pickedFrom,
-        movedBy: finalizedBy,
-      });
-
-      const updated = await this.repo.update(tx, id, {
-        status: 'DISPATCHED',
-        finalizedAt: new Date(),
-        finalizedBy,
-        ...(notes ? { notes } : {}),
-      });
-
-      const invoice = await buildInvoiceFromOutbound(tx, id);
-
-      return formatOutbound(updated, invoice.id);
+    // Read the lot only after locking it: the balance read before the lock could
+    // be stale by the time it was written back, losing a concurrent change.
+    if (!(await lockRow(tx, 'lots', ob.lotId, facilityId))) throw Errors.LOT_NOT_FOUND();
+    const lot = await tx.lot.findUniqueOrThrow({
+      where: { id: ob.lotId },
+      select: { status: true, currentBalanceBags: true, chamberId: true },
     });
+    if (lot.status !== 'ACTIVE') throw Errors.LOT_NOT_ACTIVE();
+    if (ob.withdrawalType === 'FULL' && ob.quantityWithdrawnBags !== lot.currentBalanceBags) {
+      throw Errors.OUTBOUND_QUANTITY_STALE(lot.currentBalanceBags, ob.quantityWithdrawnBags);
+    }
+    const newBalance = lot.currentBalanceBags - ob.quantityWithdrawnBags;
+    if (newBalance < 0) {
+      throw Errors.LOT_BALANCE_INSUFFICIENT(lot.currentBalanceBags, ob.quantityWithdrawnBags);
+    }
+    const isFullClose = ob.withdrawalType === 'FULL' || newBalance === 0;
+
+    await tx.lot.update({
+      where: { id: ob.lotId },
+      data: {
+        currentBalanceBags: newBalance,
+        ...(isFullClose
+          ? { status: 'CLOSED', closedAt: ob.outboundDate }
+          : {}),
+      },
+    });
+
+    // Keep rack placements consistent with the reduced balance: explicit
+    // picks trim their racks; any remainder auto-trims largest-first.
+    await reconcileWithdrawal(tx, {
+      facilityId,
+      lotId: ob.lotId,
+      chamberId: lot.chamberId,
+      newBalance,
+      withdrawnBags: ob.quantityWithdrawnBags,
+      pickedFrom,
+      movedBy: finalizedBy,
+    });
+
+    const updated = await this.repo.update(tx, id, {
+      status: 'DISPATCHED',
+      finalizedAt: new Date(),
+      finalizedBy,
+      ...(notes ? { notes } : {}),
+    });
+
+    const invoice = await buildInvoiceFromOutbound(tx, id);
+
+    return { outbound: formatOutbound(updated, invoice.id), invoiceId: invoice.id };
   }
 
   /**
