@@ -182,6 +182,8 @@ stateDiagram-v2
 | PENDING/WEIGHED/DISPUTED | CANCELLED | `POST /v1/outbound-events/:id/cancel` (`outbound.record`, reason required) | Lot balance unchanged; its bags are free again. `voided_at/by`, `void_reason` set. No dispatch note can be printed for it. Refused (`OUTBOUND_ALREADY_LEFT`) if a truck already carried it out, which the old gate allowed before dispatch |
 | PENDING | DISPUTED | Quantity dispute at outbound | Lot qty held; note required (not built yet) |
 
+The **dispatch desk** drives WEIGHED → DISPATCHED through `POST /v1/outbound-events/:id/dispatch-and-collect` (`DispatchCheckoutService`), which composes `finalizeInTransaction`, the bill's default service lines, `InvoiceService.finalizeInTransaction` (JE-01) and, unless on credit, `PaymentService.recordInTransaction` (JE-02) in one transaction. The bill is therefore never left as a DRAFT by this path, and a failure at any step (including the receipt) leaves the withdrawal WEIGHED with nothing posted. The older Finalize & Dispatch (DRAFT bill) remains for the withdrawal page.
+
 An ownership transfer also respects open withdrawals. A PARTIAL transfer may take only the free bags. A FULL transfer waits until no withdrawal is open, because the open withdrawal would release goods to the previous owner.
 
 ---

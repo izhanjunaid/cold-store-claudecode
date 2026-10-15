@@ -206,6 +206,9 @@ X-Facility-ID: <facility_uuid>
 | GET | `/outbound-events/:id` | Outbound event detail | All |
 | PATCH | `/outbound-events/:id/weight` | Record outbound weight | OPERATOR+ |
 | POST | `/outbound-events/:id/finalize` | Finalize and close (triggers invoice) | MANAGER+ |
+| GET | `/outbound-events` | Dispatch queue: withdrawals with the stage each has reached (BOOKED, WEIGHED, DISPATCHED, PAID, LEFT); filters `status` (csv), `date_from/to` (business days), `search` (DN / plate / lot #). Carries bag counts, so it needs `outbound.record`, not the guard's `gate_passes.log` | OPERATOR+ |
+| GET | `/outbound-events/:id/checkout-preview` | The bill a WEIGHED withdrawal will carry (storage line, apply-at-dispatch service lines, GST, total), without writing it | MANAGER+ (`outbound.finalize`) |
+| POST | `/outbound-events/:id/dispatch-and-collect` | Dispatch, finalize the bill and take the money in one transaction. Body `{ expected_total_pkr, payment: { mode: CASH/BANK_TRANSFER/CHEQUE/MOBILE_WALLET/CREDIT, reference_number?, cheque_date? }, skip_service_charge_ids?, picked_from?, notes? }`. Refused with 409 `DISPATCH_TOTAL_CHANGED` if the bill is no longer `expected_total_pkr`. Needs `outbound.finalize`, `invoices.manage` and (unless CREDIT) `payments.record`; a missing key is named before anything is written | MANAGER+ |
 | POST | `/outbound-events/:id/cancel` | Cancel a withdrawal that has not left (PENDING/WEIGHED/DISPUTED); body `{ reason }`; frees its bags | OPERATOR+ (`outbound.record`) |
 | GET | `/outbound-events/:id/dispatch-note` | Get dispatch note PDF URL (409 for a cancelled withdrawal) | OPERATOR+ |
 
@@ -341,6 +344,7 @@ X-Facility-ID: <facility_uuid>
 | `LOT_BALANCE_RESERVED` | 409 | Bags are held by open withdrawals (message names their dispatch notes); dispatch or cancel them first |
 | `DATE_IN_FUTURE` | 422 | A date after today (Lahore calendar); MANAGER+ only |
 | `OUTBOUND_CANCELLED` | 409 | The withdrawal was cancelled |
+| `DISPATCH_TOTAL_CHANGED` | 409 | Dispatch & collect: the bill differs from the total the client reviewed; nothing was written — review the new bill |
 | `OUTBOUND_ALREADY_LEFT` | 409 | Cancel refused: a truck already carried this withdrawal out (the old gate allowed that before dispatch) |
 | `OUTBOUND_QUANTITY_STALE` | 409 | A FULL withdrawal no longer equals the lot balance; cancel and rebook |
 | `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization |

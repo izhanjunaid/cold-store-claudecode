@@ -49,7 +49,7 @@ caller's effective key list, and the web app gates nav/actions with `can(user, k
 - **Commodities**: `commodities.manage`(MANAGER)
 - **Rooms & Racks**: `chambers.manage`(MANAGER), `chambers.log_temperature`(OPERATOR)
 - **Inbound & Lots**: `lots.manage`(OPERATOR), `lots.transfer_ownership`(MANAGER)
-- **Outbound**: `outbound.record`(OPERATOR — book, weigh, cancel an undispatched withdrawal), `outbound.finalize`(MANAGER)
+- **Outbound**: `outbound.record`(OPERATOR — book, weigh, cancel an undispatched withdrawal, read the dispatch queue), `outbound.finalize`(MANAGER — also dispatch & collect, which additionally needs `invoices.manage` and, unless on credit, `payments.record`)
 - **Gate Pass**: `gate_passes.log`(SECURITY), `gate_passes.link_lot`(OPERATOR)
 - **Billing**: `rate_plans.manage`(MANAGER), `service_charges.manage`(MANAGER), `billing.view`(ACCOUNTANT), `invoices.manage`(MANAGER), `invoices.write_off`(OWNER), `payments.record`(ACCOUNTANT)
 - **Accounting**: `accounting.view`(ACCOUNTANT), `accounting.manage_accounts`(OWNER), `accounting.post_journal`(MANAGER), `accounting.period_lock`(MANAGER), `accounting.period_unlock`(OWNER)
