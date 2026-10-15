@@ -39,6 +39,12 @@ describe('navGroupsForUser', () => {
     expect(items).not.toContain('/accounting');
   });
 
+  it('shows the dispatch desk to whoever can book withdrawals, not to the guard', () => {
+    expect(hrefs('OPERATOR')).toContain('/dispatch');
+    expect(hrefs('MANAGER')).toContain('/dispatch');
+    expect(hrefs('SECURITY')).not.toContain('/dispatch');
+  });
+
   it('shows gate to SECURITY but not dashboard', () => {
     const items = hrefs('SECURITY');
     expect(items).toContain('/gate');

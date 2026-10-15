@@ -41,6 +41,8 @@ export interface WithdrawFormProps {
   variant?: 'page' | 'sheet';
   onCreated: (outboundId: string) => void;
   onCancel: () => void;
+  /** Plates of trucks inside the store; one tap fills the vehicle field with a plate the gate will match exactly. */
+  plateSuggestions?: string[];
 }
 
 /**
@@ -48,7 +50,7 @@ export interface WithdrawFormProps {
  * `/lots/[id]/withdraw` (kept as the deep link) and the drawer opened from lot
  * rows (`WithdrawSheet`) — the same split as `/payments/new` and `PaymentForm`.
  */
-export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel }: WithdrawFormProps) {
+export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, plateSuggestions }: WithdrawFormProps) {
   const user = useAuthStore((s) => s.user);
 
   const [lot, setLot] = useState<Lot | null>(null);
@@ -297,6 +299,23 @@ export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel }: W
               onChange={(e) => setForm({ ...form, vehicle_number: MASKS.vehicle(e.target.value) })}
               placeholder={MASK_PLACEHOLDER.vehicle}
             />
+            {plateSuggestions && plateSuggestions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5" aria-label="Trucks inside">
+                <span className="text-xs text-muted-foreground">Inside:</span>
+                {plateSuggestions.map((plate) => (
+                  <Button
+                    key={plate}
+                    type="button"
+                    size="sm"
+                    variant={form.vehicle_number === plate ? 'default' : 'outline'}
+                    className="h-6 px-2 font-mono text-xs"
+                    onClick={() => setForm({ ...form, vehicle_number: MASKS.vehicle(plate) })}
+                  >
+                    {plate}
+                  </Button>
+                ))}
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">The gate checks the truck by this plate.</p>
           </div>
           <div className="space-y-1.5">

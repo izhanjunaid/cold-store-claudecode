@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import { withGuardsDisabled } from '../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
+import { businessDate } from '@coldchain/shared';
 import type { FastifyInstance } from 'fastify';
 import { DispatchCheckoutService } from './dispatch-checkout.service';
 
@@ -343,28 +344,31 @@ describe('the queue', () => {
     });
     expect(create.statusCode).toBe(201);
 
-    const all = await app.inject({ method: 'GET', url: '/v1/outbound-events', headers: authHeaders(operatorToken) });
+    const all = await app.inject({ method: 'GET', url: '/v1/outbound-events?page_size=100', headers: authHeaders(operatorToken) });
     expect(all.statusCode).toBe(200);
     const rows = data<any[]>(all);
     expect(rows.find((r) => r.id === booked.id)).toMatchObject({ stage: 'WEIGHED', vehicle_number: 'LHR-7701', owner_party_name: expect.any(String) });
     expect(rows.find((r) => r.vehicle_number === 'LHR-7702').stage).toBe('BOOKED');
 
+    // Other suites share this facility, so look only at the rows this test made.
+    const mine = (rs: any[]) => rs.filter((r) => ['LHR-7701', 'LHR-7702'].includes(r.vehicle_number));
     const onlyWeighed = data<any[]>(
-      await app.inject({ method: 'GET', url: '/v1/outbound-events?status=WEIGHED', headers: authHeaders(operatorToken) }),
+      await app.inject({ method: 'GET', url: '/v1/outbound-events?status=WEIGHED&page_size=100', headers: authHeaders(operatorToken) }),
     );
-    expect(onlyWeighed.map((r) => r.vehicle_number)).toEqual(['LHR-7701']);
+    expect(mine(onlyWeighed).map((r) => r.vehicle_number)).toEqual(['LHR-7701']);
     const byPlate = data<any[]>(
       await app.inject({ method: 'GET', url: '/v1/outbound-events?search=7702', headers: authHeaders(operatorToken) }),
     );
-    expect(byPlate.map((r) => r.vehicle_number)).toEqual(['LHR-7702']);
-    const today = new Date().toISOString().slice(0, 10);
+    expect(mine(byPlate).map((r) => r.vehicle_number)).toEqual(['LHR-7702']);
+    // The queue's days are the facility's (Lahore), which is not the UTC date for part of every day.
+    const today = businessDate();
     const dated = await app.inject({
       method: 'GET',
-      url: `/v1/outbound-events?date_from=${today}&date_to=${today}`,
+      url: `/v1/outbound-events?date_from=${today}&date_to=${today}&page_size=100`,
       headers: authHeaders(operatorToken),
     });
     expect(dated.statusCode).toBe(200);
-    expect(data<any[]>(dated).length).toBe(2);
+    expect(mine(data<any[]>(dated))).toHaveLength(2);
     const bad = await app.inject({ method: 'GET', url: '/v1/outbound-events?status=NOPE', headers: authHeaders(operatorToken) });
     expect([bad.statusCode, code(bad)]).toEqual([400, 'VALIDATION_ERROR']);
   });

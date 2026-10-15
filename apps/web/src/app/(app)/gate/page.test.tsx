@@ -289,3 +289,71 @@ describe('GatePassConsolePage — clear outward', () => {
     expect(within(reopened).getByRole('button', { name: /^clear outward$/i })).toBeDisabled();
   });
 });
+
+describe('Ready to leave', () => {
+  const READY = {
+    ...PASS,
+    id: 'pass-ready',
+    vehicle_number: 'LHR-7777',
+    release: {
+      state: 'READY' as const,
+      dispatch_notes: ['DN-260101-0009'],
+      outstanding_pkr: 0,
+      cheque_pending: false,
+      marka: 'AH',
+      owner_party_name: 'Haji Sahib',
+    },
+  };
+  const OWES = {
+    ...PASS,
+    id: 'pass-owes',
+    vehicle_number: 'LHR-8888',
+    release: {
+      state: 'PAYMENT_PENDING' as const,
+      dispatch_notes: ['DN-260101-0010'],
+      outstanding_pkr: 4500,
+      cheque_pending: true,
+      marka: null,
+      owner_party_name: 'Other Party',
+    },
+  };
+
+  function listWith(...passes: unknown[]) {
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve({ data: path.includes('active=true') ? passes : [], meta: { page: 1, per_page: 50, total: passes.length } }),
+    );
+  }
+
+  it('lists only paid trucks under Ready to leave, with owner, marka and dispatch note', async () => {
+    listWith(READY, OWES);
+    render(<GatePassConsolePage />);
+    const card = (await screen.findByText('Ready to leave')).closest('div[class*="border-green"]') as HTMLElement;
+    expect(within(card).getByText('LHR-7777')).toBeInTheDocument();
+    expect(within(card).getByText(/Haji Sahib/)).toBeInTheDocument();
+    expect(within(card).getByText(/Marka: AH/)).toBeInTheDocument();
+    expect(within(card).getByText(/DN-260101-0009/)).toBeInTheDocument();
+    expect(within(card).queryByText('LHR-8888')).not.toBeInTheDocument();
+  });
+
+  it('tells the guard why a truck cannot leave yet', async () => {
+    listWith(READY, OWES);
+    render(<GatePassConsolePage />);
+    expect(await screen.findByText(/Payment pending — Rs 4,500 \(cheque not cleared\)/)).toBeInTheDocument();
+    expect(screen.getByText('Paid — ready to leave')).toBeInTheDocument();
+  });
+  it('Release opens the same blind count dialog, and shows no expected count', async () => {
+    listWith({ ...READY, authorized_quantity: 137 });
+    render(<GatePassConsolePage />);
+    fireEvent.click(await screen.findByRole('button', { name: /^release$/i }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText(/bags counted/i)).toBeInTheDocument();
+    expect(screen.queryByText(/137/)).not.toBeInTheDocument();
+  });
+
+  it('shows no Ready to leave card when nothing is ready', async () => {
+    listWith(OWES);
+    render(<GatePassConsolePage />);
+    await screen.findByText('LHR-8888');
+    expect(screen.queryByText('Ready to leave')).not.toBeInTheDocument();
+  });
+});

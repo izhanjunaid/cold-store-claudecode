@@ -40,6 +40,15 @@ interface GatePass {
   related_location?: string | null;
   created_at: string;
   turnaround_seconds: number | null;
+  /** On the active list only: can this truck be released now? Never carries a bag count. */
+  release?: {
+    state: 'READY' | 'PAYMENT_PENDING' | 'BILL_DRAFT' | 'NOT_DISPATCHED' | 'NO_BOOKING';
+    dispatch_notes: string[];
+    outstanding_pkr: number;
+    cheque_pending: boolean;
+    marka: string | null;
+    owner_party_name: string | null;
+  };
 }
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = {
@@ -48,6 +57,25 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = 
   CLEARED: 'muted',
   CANCELLED: 'danger',
 };
+
+/** Why a truck can or cannot leave yet, in the words the guard needs. */
+function releaseLabel(r: NonNullable<GatePass['release']>): { text: string; tone: 'success' | 'warning' | 'danger' | 'muted' } {
+  switch (r.state) {
+    case 'READY':
+      return { text: 'Paid — ready to leave', tone: 'success' };
+    case 'PAYMENT_PENDING':
+      return {
+        text: `Payment pending — Rs ${r.outstanding_pkr.toLocaleString()}${r.cheque_pending ? ' (cheque not cleared)' : ''}`,
+        tone: 'danger',
+      };
+    case 'BILL_DRAFT':
+      return { text: 'Bill not finalized yet', tone: 'warning' };
+    case 'NOT_DISPATCHED':
+      return { text: 'Not dispatched yet', tone: 'warning' };
+    default:
+      return { text: 'No dispatch booked', tone: 'muted' };
+  }
+}
 
 // The truck does not match its dispatch (bag count, plate, or a load nothing was
 // dispatched for). A manager may release it anyway with a written reason; anyone
@@ -236,6 +264,7 @@ export default function GatePassConsolePage() {
     }
   }
 
+  const readyToLeave = passes.filter((p) => p.release?.state === 'READY');
   const countValid = parseCount(outwardCount) != null;
   const outwardBlocked = outwardErrCode === 'GATE_OUTWARD_BLOCKED';
   const outwardMismatch = outwardErrCode != null && OVERRIDABLE_CODES.has(outwardErrCode);
@@ -243,6 +272,33 @@ export default function GatePassConsolePage() {
   return (
     <div>
       <PageHeader title="Gate Pass Console" description="Log arriving vehicles and clear outbound dispatches." />
+
+      {readyToLeave.length > 0 && (
+        <Card className="mb-6 border-green-300">
+          <CardHeader>
+            <CardTitle className="text-base">Ready to leave</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-2">
+              {readyToLeave.map((p) => (
+                <li key={p.id} className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50/50 p-3">
+                  <div className="flex-1">
+                    <span className="font-mono text-lg font-bold">{p.vehicle_number}</span>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      {p.release!.owner_party_name ?? '—'}
+                      {p.release!.marka && <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 font-semibold">Marka: {p.release!.marka}</span>}
+                      <span className="ml-2">{p.release!.dispatch_notes.join(', ')}</span>
+                    </div>
+                  </div>
+                  <Button size="sm" className="h-10 px-5" onClick={() => openOutward(p)}>
+                    Release
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Log Arrival */}
@@ -318,6 +374,14 @@ export default function GatePassConsolePage() {
                         {p.pass_number} • {p.driver_name ?? 'unknown driver'} • {relativeTime(p.created_at)}
                         {p.related_lot_number && <span className="ml-1">• Lot {p.related_lot_number}</span>}
                       </div>
+                      {p.release && (() => {
+                        const r = releaseLabel(p.release);
+                        return (
+                          <div className="mt-1">
+                            <StatusBadge status={r.text} tone={r.tone} raw />
+                          </div>
+                        );
+                      })()}
                       {(p.related_location || p.related_marka) && (
                         <div className="mt-0.5 text-xs">
                           {p.related_location && (

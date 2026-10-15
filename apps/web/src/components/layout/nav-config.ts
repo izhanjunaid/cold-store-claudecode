@@ -6,6 +6,7 @@ import {
   CircleDollarSign,
   DoorOpen,
   HandCoins,
+  PackageMinus,
   LayoutDashboard,
   PlusCircle,
   ReceiptText,
@@ -57,6 +58,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Lots', href: '/lots', icon: Boxes },
       { label: 'Rooms', href: '/chambers', icon: Warehouse },
       { label: 'Commodities', href: '/commodities', icon: Sprout, permission: 'commodities.manage' },
+      { label: 'Dispatch Desk', href: '/dispatch', icon: PackageMinus, permission: 'outbound.record' },
       { label: 'Gate Pass', href: '/gate', icon: DoorOpen, permission: 'gate_passes.log' },
       // Quality (M6) has no UI yet — do not add a nav item until its page exists,
       // a link that 404s is worse than no link.
@@ -112,6 +114,7 @@ export const NAV_GROUPS: NavGroup[] = [
  */
 export const PALETTE_ACTIONS: NavItem[] = [
   { label: 'New Inbound', href: '/lots/new', icon: Boxes },
+  { label: 'New Dispatch', href: '/dispatch', icon: PackageMinus, permission: 'outbound.record' },
   { label: 'New Party', href: '/parties/new', icon: UserPlus },
   { label: 'Record Payment', href: '/payments/new', icon: Banknote, permission: 'billing.view' },
   {

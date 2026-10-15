@@ -5,6 +5,11 @@
 export type ListFilters = Record<string, string | number | boolean | undefined>;
 
 export const qk = {
+  outbound: {
+    all: ['outbound'] as const,
+    list: (filters: ListFilters) => ['outbound', 'list', filters] as const,
+    preview: (id: string) => ['outbound', 'preview', id] as const,
+  },
   lots: {
     all: ['lots'] as const,
     list: (filters: ListFilters) => ['lots', 'list', filters] as const,

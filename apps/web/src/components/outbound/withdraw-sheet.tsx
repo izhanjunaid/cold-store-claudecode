@@ -10,6 +10,10 @@ export interface WithdrawSheetProps {
   /** The lot to withdraw from; the form loads it itself. */
   lotId: string;
   lotNumber?: string;
+  /** Trucks inside, offered as one-tap plates in the form. */
+  plateSuggestions?: string[];
+  /** Called after booking instead of opening the withdrawal's page (the dispatch desk stays put). */
+  onBooked?: (outboundId: string) => void;
 }
 
 /**
@@ -21,7 +25,7 @@ export interface WithdrawSheetProps {
  * After booking it goes to the withdrawal's page: weighing still happens there
  * until the dispatch desk replaces that step.
  */
-export function WithdrawSheet({ open, onOpenChange, lotId, lotNumber }: WithdrawSheetProps) {
+export function WithdrawSheet({ open, onOpenChange, lotId, lotNumber, plateSuggestions, onBooked }: WithdrawSheetProps) {
   const router = useRouter();
 
   return (
@@ -36,9 +40,11 @@ export function WithdrawSheet({ open, onOpenChange, lotId, lotNumber }: Withdraw
             key={lotId}
             lotId={lotId}
             variant="sheet"
+            plateSuggestions={plateSuggestions}
             onCreated={(id) => {
               onOpenChange(false);
-              router.push(`/outbound-events/${id}`);
+              if (onBooked) onBooked(id);
+              else router.push(`/outbound-events/${id}`);
             }}
             onCancel={() => onOpenChange(false)}
           />
