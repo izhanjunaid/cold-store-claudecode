@@ -489,7 +489,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
       await page.goto(`/parties/${partyId}`);
       await expect(page.getByText(aslam.name).first()).toBeVisible({ timeout: 10_000 });
       await page.getByRole('tab', { name: /^ledger$/i }).click();
-      await expect(page.getByText(/outstanding/i)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(/outstanding/i).first()).toBeVisible({ timeout: 15_000 });
       await shot(page, '08-ledger.png');
 
       const ledger = await (
