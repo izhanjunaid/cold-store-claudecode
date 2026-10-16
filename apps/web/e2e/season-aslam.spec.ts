@@ -392,7 +392,10 @@ test.describe('Muhammad Aslam — full potato season', () => {
         .locator('li')
         .filter({ hasText: opts.vehicle })
         .first();
-      await row.getByRole('button', { name: /clear outward/i }).click();
+      // A paid truck is listed first under "Ready to leave" with a Release button; a truck that
+      // still owes (or has no bill) is only in the inside list with Clear Outward. Both open the
+      // same dialog.
+      await row.getByRole('button', { name: /^(release|clear outward)$/i }).click();
       await expect(page.getByRole('heading', { name: /clear outward/i })).toBeVisible();
 
       // The guard counts the bags on the truck (blind: the dialog never shows the expected number).
