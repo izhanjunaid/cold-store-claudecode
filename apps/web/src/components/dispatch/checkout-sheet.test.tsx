@@ -98,6 +98,17 @@ describe('CheckoutSheet', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it('does not price the bill again once the truck is dispatched (that read would be refused)', async () => {
+    const { onDone } = renderSheet();
+    await screen.findByText(/Storage \(Seasonal\)/);
+    const priced = () => apiClient.mock.calls.filter(([p]) => String(p).endsWith('/checkout-preview')).length;
+    expect(priced()).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: /Dispatch & Collect/ }));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(priced()).toBe(1);
+  });
+
   it('leaving a pre-added charge off changes the total it sends, and says which one was left off', async () => {
     renderSheet();
     fireEvent.click(await screen.findByLabelText(/Loading/));

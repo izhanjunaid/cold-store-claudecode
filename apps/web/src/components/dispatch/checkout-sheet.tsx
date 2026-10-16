@@ -154,7 +154,8 @@ export function CheckoutSheet({
         },
       });
       toast.success(mode === 'CREDIT' ? 'Dispatched — bill on credit' : `Dispatched and collected ${formatMoney(total)}`);
-      queryClient.invalidateQueries({ queryKey: qk.outbound.all });
+      // Lists only: refetching this sheet's own preview now would 409 (the truck is dispatched).
+      queryClient.invalidateQueries({ queryKey: qk.outbound.lists });
       onOpenChange(false);
       onDone(result);
     } catch (e) {

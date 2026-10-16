@@ -70,6 +70,8 @@ export default function DispatchDeskPage() {
   const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
   const canUse = !user || can(user, 'outbound.record');
+  // Ask the server only once the user is known and may: no unauthenticated or 403 requests while loading.
+  const canQuery = !!user && can(user, 'outbound.record');
   const canDispatch = can(user, 'outbound.finalize') && can(user, 'invoices.manage');
 
   const [search, setSearch] = useState('');
@@ -88,7 +90,7 @@ export default function DispatchDeskPage() {
     queryKey: ['dispatch', 'lot-search', debounced],
     queryFn: async () =>
       (await apiClientList<LotHit>(`/v1/lots?search=${encodeURIComponent(debounced)}&status=ACTIVE&per_page=8`)).data,
-    enabled: canUse && debounced.length >= 2,
+    enabled: canQuery && debounced.length >= 2,
   });
 
   // Trucks inside: their plates are one tap away when booking, so the gate matches them exactly.
@@ -101,7 +103,7 @@ export default function DispatchDeskPage() {
         return []; // not everyone who books holds the gate permission
       }
     },
-    enabled: canUse,
+    enabled: canQuery,
     refetchInterval: 15_000,
   });
   const plates = [...new Set(inside.map((p) => p.vehicle_number))];
@@ -112,21 +114,22 @@ export default function DispatchDeskPage() {
     page_size: 50,
   };
   const { data, isLoading } = useListQuery<DispatchRow>(qk.outbound.list(params), '/v1/outbound-events', params, {
-    enabled: canUse,
+    enabled: canQuery,
     refetchInterval: 15_000,
   });
   const rows = (data?.data ?? []).filter((r) => r.stage !== 'LEFT' && r.stage !== 'CANCELLED');
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: qk.outbound.all });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: qk.outbound.lists });
 
   async function afterCheckout(result: CheckoutResult) {
+    // The queue first: rendering the note can take minutes and must not hold the row on "Weighed".
+    refresh();
     if (result.payment?.receipt_number) toast.message(`Receipt ${result.payment.receipt_number}`);
     try {
       await openDispatchNotePdf(result.outbound.id);
     } catch {
       /* the row's Print button is the fallback */
     }
-    refresh();
   }
 
   if (!canUse) {

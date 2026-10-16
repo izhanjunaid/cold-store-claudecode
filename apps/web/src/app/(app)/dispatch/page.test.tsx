@@ -21,10 +21,11 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
 
 let role = 'MANAGER';
 let permissions: string[] = ['outbound.record', 'outbound.finalize', 'invoices.manage', 'payments.record'];
+let userLoaded = true;
 vi.mock('@/stores/auth.store', () => ({
   // Honour the selector so `useAuthStore((s) => s.user)` works.
   useAuthStore: (selector?: (s: unknown) => unknown) => {
-    const state = { user: { role, permissions } };
+    const state = { user: userLoaded ? { role, permissions } : null };
     return selector ? selector(state) : state;
   },
 }));
@@ -32,8 +33,20 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: v
 
 // The two sheets have their own tests; here only that the desk opens them for the right row.
 vi.mock('@/components/dispatch/checkout-sheet', () => ({
-  CheckoutSheet: ({ outboundId, lotId }: { outboundId: string; lotId?: string }) => (
-    <div data-testid="checkout" data-id={outboundId} data-lot={lotId} />
+  CheckoutSheet: ({
+    outboundId,
+    lotId,
+    onDone,
+  }: {
+    outboundId: string;
+    lotId?: string;
+    onDone: (r: unknown) => void;
+  }) => (
+    <div data-testid="checkout" data-id={outboundId} data-lot={lotId}>
+      <button type="button" onClick={() => onDone({ outbound: { id: outboundId }, invoice: {}, payment: null })}>
+        finish checkout
+      </button>
+    </div>
   ),
 }));
 vi.mock('@/components/outbound/withdraw-sheet', () => ({
@@ -42,6 +55,7 @@ vi.mock('@/components/outbound/withdraw-sheet', () => ({
   ),
 }));
 vi.mock('@/components/dispatch/dispatch-pdf', () => ({ openDispatchNotePdf: vi.fn().mockResolvedValue(undefined) }));
+import { openDispatchNotePdf } from '@/components/dispatch/dispatch-pdf';
 vi.mock('@/components/billing/invoice-pdf', () => ({ openInvoicePdf: vi.fn().mockResolvedValue(undefined) }));
 
 import DispatchDeskPage from './page';
@@ -90,6 +104,7 @@ beforeEach(() => {
   apiClientList.mockReset();
   role = 'MANAGER';
   permissions = ['outbound.record', 'outbound.finalize', 'invoices.manage', 'payments.record'];
+  userLoaded = true;
   apiClient.mockResolvedValue({});
   apiClientList.mockImplementation((path: string) => {
     if (path.startsWith('/v1/outbound-events')) return Promise.resolve({ data: ROWS, meta: { total: ROWS.length, page: 1, per_page: 50 } });
@@ -193,6 +208,28 @@ describe('Dispatch Desk', () => {
     expect(drawer).toHaveAttribute('data-lot', 'lot-7');
     // The same plate logged twice is offered once.
     expect(drawer).toHaveAttribute('data-plates', 'LHR-9999');
+  });
+
+  it('the queue refreshes at once after a checkout, even while the dispatch note is still rendering', async () => {
+    // Rendering the note can take minutes (Chromium); the row must not sit on "Weighed" meanwhile.
+    vi.mocked(openDispatchNotePdf).mockReturnValueOnce(new Promise(() => {}));
+    renderPage();
+    const weighed = (await screen.findByText('DN-WEIGHED')).closest('tr') as HTMLElement;
+    fireEvent.click(within(weighed).getByRole('button', { name: /Dispatch & Collect/ }));
+    await screen.findByTestId('checkout');
+    const queueFetches = () => apiClientList.mock.calls.filter(([p]) => String(p).startsWith('/v1/outbound-events')).length;
+    const before = queueFetches();
+    fireEvent.click(screen.getByRole('button', { name: 'finish checkout' }));
+    await waitFor(() => expect(queueFetches()).toBeGreaterThan(before));
+    expect(openDispatchNotePdf).toHaveBeenCalledWith('ob-weighed');
+  });
+
+  it('asks the server nothing until the signed-in user is known', async () => {
+    userLoaded = false;
+    renderPage();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(apiClientList).not.toHaveBeenCalled();
+    expect(apiClient).not.toHaveBeenCalled();
   });
 
   it('is closed to someone who cannot book withdrawals', async () => {
