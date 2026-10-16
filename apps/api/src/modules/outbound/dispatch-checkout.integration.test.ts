@@ -283,6 +283,51 @@ describe('dispatch & collect', () => {
     expect(onCredit.statusCode, onCredit.body).toBe(200);
   });
 
+  it('rack picks: the racks named are the ones reduced; a bad pick refuses the whole checkout and nothing moves', async () => {
+    const rackA = '00000000-0000-0000-0000-000000000210';
+    const rackB = '00000000-0000-0000-0000-000000000211';
+    const lotId = await createLot(100, operatorToken, {
+      placements: [
+        { rack_id: rackA, bags: 60 },
+        { rack_id: rackB, bags: 40 },
+      ],
+    });
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(operatorToken),
+      payload: { lot_id: lotId, withdrawal_type: 'PARTIAL', quantity_withdrawn_bags: 50, outbound_date: '2026-09-01', vehicle_number: 'LHR-9002' },
+    });
+    expect(create.statusCode, create.body).toBe(201);
+    const id = data<{ id: string }>(create).id;
+    const w = await app.inject({
+      method: 'PATCH',
+      url: `/v1/outbound-events/${id}/weight`,
+      headers: authHeaders(operatorToken),
+      payload: { outbound_weight_kg: 50 * 19.5 },
+    });
+    expect(w.statusCode, w.body).toBe(200);
+    const total = data(await preview(id)).total_pkr as number;
+    const racks = async () =>
+      Object.fromEntries(
+        (await prisma.lotRackPlacement.findMany({ where: { lotId } })).map((p) => [p.rackId, p.bags]),
+      );
+
+    // 45 bags off a rack that holds 40: the total (45) is within the 50 withdrawn, the rack is not.
+    const bad = await checkout(id, cash(total, { picked_from: [{ rack_id: rackB, bags: 45 }] }));
+    expect([bad.statusCode, code(bad)]).toEqual([400, 'VALIDATION_ERROR']);
+    await untouched(lotId, id, 100);
+    expect(await racks()).toEqual({ [rackA]: 60, [rackB]: 40 });
+    expect(await prisma.payment.count({ where: { partyId } })).toBe(0);
+    expect(await prisma.journalEntry.count({ where: { facilityId: TEST_FACILITY_ID } })).toBe(0);
+
+    // The corrected pick goes through: 40 off B (emptied), 10 off A — not the auto-trim's choice.
+    const good = await checkout(id, cash(total, { picked_from: [{ rack_id: rackB, bags: 40 }, { rack_id: rackA, bags: 10 }] }));
+    expect(good.statusCode, good.body).toBe(200);
+    expect(await racks()).toEqual({ [rackA]: 50 });
+    expect((await prisma.lot.findUniqueOrThrow({ where: { id: lotId } })).currentBalanceBags).toBe(50);
+  });
+
   it('two checkouts of one withdrawal: one takes the money, the other is refused — one bill, one receipt', async () => {
     for (let round = 0; round < 3; round++) {
       const { id } = await weighed(40);

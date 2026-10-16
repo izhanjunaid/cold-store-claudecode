@@ -20,6 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/layout/page-header';
 import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
+import { CancelWithdrawalDialog } from '@/components/outbound/cancel-withdrawal-dialog';
 import { CheckoutSheet, type CheckoutResult } from '@/components/dispatch/checkout-sheet';
 import { openDispatchNotePdf } from '@/components/dispatch/dispatch-pdf';
 import { openInvoicePdf } from '@/components/billing/invoice-pdf';
@@ -75,6 +76,7 @@ export default function DispatchDeskPage() {
   const [debounced, setDebounced] = useState('');
   const [bookLot, setBookLot] = useState<LotHit | null>(null);
   const [checkoutId, setCheckoutId] = useState<string | null>(null);
+  const [cancelId, setCancelId] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 250);
@@ -211,6 +213,7 @@ export default function DispatchDeskPage() {
                     onChanged={refresh}
                     onCollect={() => setCheckoutId(row.id)}
                     onOpen={() => router.push(`/outbound-events/${row.id}`)}
+                    onCancel={() => setCancelId(row.id)}
                   />
                 ))}
               </TableBody>
@@ -233,11 +236,23 @@ export default function DispatchDeskPage() {
           }}
         />
       )}
+      {cancelId && (
+        <CancelWithdrawalDialog
+          open
+          onOpenChange={(o) => !o && setCancelId(null)}
+          eventId={cancelId}
+          onCancelled={() => {
+            toast.success('Withdrawal cancelled — its bags are free again.');
+            refresh();
+          }}
+        />
+      )}
       {checkoutId && (
         <CheckoutSheet
           open
           onOpenChange={(o) => !o && setCheckoutId(null)}
           outboundId={checkoutId}
+          lotId={rows.find((r) => r.id === checkoutId)?.lot_id}
           onDone={afterCheckout}
         />
       )}
@@ -251,12 +266,14 @@ function DispatchRowView({
   onChanged,
   onCollect,
   onOpen,
+  onCancel,
 }: {
   row: DispatchRow;
   canDispatch: boolean;
   onChanged: () => void;
   onCollect: () => void;
   onOpen: () => void;
+  onCancel: () => void;
 }) {
   const router = useRouter();
   const [weight, setWeight] = useState('');
@@ -343,6 +360,11 @@ function DispatchRowView({
                 </Button>
               )}
             </>
+          )}
+          {(row.stage === 'BOOKED' || row.stage === 'WEIGHED') && (
+            <Button size="sm" variant="ghost" className="text-destructive" onClick={onCancel}>
+              Cancel
+            </Button>
           )}
           <Button size="sm" variant="ghost" onClick={onOpen}>
             Details

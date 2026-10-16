@@ -8,17 +8,9 @@ import { apiClient } from '@/lib/api-client';
 import { useCan } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { CancelWithdrawalDialog } from '@/components/outbound/cancel-withdrawal-dialog';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
@@ -54,7 +46,6 @@ interface OutboundEvent {
 
 /** Statuses the server lets a withdrawal be cancelled from (it has not left). */
 const CANCELLABLE: OutboundEvent['status'][] = ['PENDING', 'WEIGHED', 'DISPUTED'];
-const MIN_REASON = 3;
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -62,89 +53,6 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
       <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-0.5 font-medium">{value}</div>
     </div>
-  );
-}
-
-/**
- * Cancel a withdrawal that has not left — modelled on VoidInvoiceDialog: a
- * required reason, one request. The server frees the bags it was holding.
- * Errors stay inside the dialog so the typed reason is not lost.
- */
-function CancelWithdrawalDialog({
-  open,
-  onOpenChange,
-  eventId,
-  onCancelled,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  eventId: string;
-  onCancelled: (event: OutboundEvent) => void;
-}) {
-  const [reason, setReason] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const trimmed = reason.trim();
-
-  const submit = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      const updated = await apiClient<OutboundEvent>(`/v1/outbound-events/${eventId}/cancel`, {
-        method: 'POST',
-        body: { reason: trimmed },
-      });
-      setReason('');
-      onOpenChange(false);
-      onCancelled(updated);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not cancel the withdrawal');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) setError(null);
-        onOpenChange(o);
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Cancel this withdrawal?</DialogTitle>
-          <DialogDescription>
-            Use this if these bags are not going out. They go back to the lot. This cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-1">
-          <Label htmlFor="cancel-reason">Reason</Label>
-          <Textarea
-            id="cancel-reason"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="e.g. Truck did not come"
-            maxLength={400}
-            rows={3}
-          />
-        </div>
-        {error && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </div>
-        )}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Go back
-          </Button>
-          <Button variant="destructive" disabled={trimmed.length < MIN_REASON || saving} onClick={submit}>
-            {saving ? 'Cancelling…' : 'Cancel withdrawal'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -440,7 +348,7 @@ export default function OutboundEventDetailPage() {
         )}
       </div>
 
-      <CancelWithdrawalDialog
+      <CancelWithdrawalDialog<OutboundEvent>
         open={cancelOpen}
         onOpenChange={setCancelOpen}
         eventId={eventId}

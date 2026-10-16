@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RackPicks, picksTotal, toPickedFrom, type RackPicksValue } from '@/components/outbound/rack-picks';
 import {
   Sheet,
   SheetBody,
@@ -72,11 +73,14 @@ export function CheckoutSheet({
   open,
   onOpenChange,
   outboundId,
+  lotId,
   onDone,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   outboundId: string;
+  /** The withdrawal's lot: lets the sheet offer "picked from which racks" (optional). */
+  lotId?: string;
   onDone: (result: CheckoutResult) => void;
 }) {
   const user = useAuthStore((s) => s.user);
@@ -88,6 +92,7 @@ export function CheckoutSheet({
   const [reference, setReference] = useState('');
   const [chequeDate, setChequeDate] = useState('');
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  const [picks, setPicks] = useState<RackPicksValue>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,6 +114,7 @@ export function CheckoutSheet({
       setReference('');
       setChequeDate('');
       setSkipped(new Set());
+      setPicks({});
       setError(null);
     }
   }, [open, outboundId, canCollect]);
@@ -120,8 +126,11 @@ export function CheckoutSheet({
   const total = round2(subTotal + gst);
 
   const needsReference = mode === 'BANK_TRANSFER' || mode === 'MOBILE_WALLET';
+  const pickedFrom = toPickedFrom(picks);
+  const overPicked = !!preview && picksTotal(picks) > preview.quantity_withdrawn_bags;
   const blocked =
     !holdsKeys ||
+    overPicked ||
     (mode !== 'CREDIT' && !canCollect) ||
     (mode === 'CHEQUE' && !chequeDate) ||
     (needsReference && reference.trim().length === 0);
@@ -136,6 +145,7 @@ export function CheckoutSheet({
         body: {
           expected_total_pkr: total,
           ...(skipped.size > 0 ? { skip_service_charge_ids: [...skipped] } : {}),
+          ...(pickedFrom.length > 0 ? { picked_from: pickedFrom } : {}),
           payment: {
             mode,
             ...(reference.trim() ? { reference_number: reference.trim() } : {}),
@@ -235,6 +245,15 @@ export function CheckoutSheet({
                   <span className="tabular-nums">{formatMoney(total)}</span>
                 </div>
               </div>
+
+              {lotId && holdsKeys && (
+                <RackPicks
+                  lotId={lotId}
+                  withdrawnBags={preview.quantity_withdrawn_bags}
+                  value={picks}
+                  onChange={setPicks}
+                />
+              )}
 
               <div className="space-y-1.5">
                 <Label>Payment</Label>

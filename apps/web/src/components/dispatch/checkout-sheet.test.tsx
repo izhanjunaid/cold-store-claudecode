@@ -50,15 +50,17 @@ const RESULT = {
   payment: { id: 'pay-1', receipt_number: 'RCP-202609-0001' },
 };
 
-function renderSheet(onDone = vi.fn(), onOpenChange = vi.fn()) {
+function renderSheet(onDone = vi.fn(), onOpenChange = vi.fn(), lotId?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <CheckoutSheet open onOpenChange={onOpenChange} outboundId={OB} onDone={onDone} />
+      <CheckoutSheet open onOpenChange={onOpenChange} outboundId={OB} lotId={lotId} onDone={onDone} />
     </QueryClientProvider>,
   );
   return { onDone, onOpenChange };
 }
+
+let placements: { rack_id: string; rack_name: string; bags: number }[] = [];
 
 const posts = () => apiClient.mock.calls.filter(([, opts]) => opts?.method === 'POST');
 
@@ -66,9 +68,13 @@ beforeEach(() => {
   apiClient.mockReset();
   role = 'MANAGER';
   permissions = ['outbound.finalize', 'invoices.manage', 'payments.record'];
+  placements = [];
   apiClient.mockImplementation((path: string, opts?: { method?: string }) => {
     if (opts?.method === 'POST') return Promise.resolve(RESULT);
     if (path.endsWith('/checkout-preview')) return Promise.resolve(PREVIEW);
+    if (path.endsWith('/placements')) {
+      return Promise.resolve({ lot_id: 'lot-1', chamber_id: 'c1', chamber_name: 'Room 1', current_balance_bags: 300, placements, unplaced_bags: 0 });
+    }
     return Promise.resolve(null);
   });
 });
@@ -141,6 +147,49 @@ describe('CheckoutSheet', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/The bill is now Rs 5,400/);
     const priced = () => apiClient.mock.calls.filter(([p]) => String(p).endsWith('/checkout-preview')).length;
     await waitFor(() => expect(priced()).toBeGreaterThanOrEqual(2));
+  });
+
+  describe('picked from which racks', () => {
+    beforeEach(() => {
+      placements = [
+        { rack_id: 'r1', rack_name: 'Rack A', bags: 250 },
+        { rack_id: 'r2', rack_name: 'Rack B', bags: 50 },
+      ];
+    });
+
+    it('sends the racks the bags came off, and only those', async () => {
+      renderSheet(vi.fn(), vi.fn(), 'lot-1');
+      fireEvent.change(await screen.findByLabelText('Bags picked from Rack A'), { target: { value: '60' } });
+      fireEvent.change(screen.getByLabelText('Bags picked from Rack B'), { target: { value: '40' } });
+      fireEvent.click(screen.getByRole('button', { name: /Dispatch & Collect/ }));
+      await waitFor(() => expect(posts()).toHaveLength(1));
+      expect(posts()[0]![1].body.picked_from).toEqual([
+        { rack_id: 'r1', bags: 60 },
+        { rack_id: 'r2', bags: 40 },
+      ]);
+    });
+
+    it('left blank, sends no picks at all (the server trims the fullest racks)', async () => {
+      renderSheet(vi.fn(), vi.fn(), 'lot-1');
+      await screen.findByLabelText('Bags picked from Rack A');
+      fireEvent.click(await screen.findByRole('button', { name: /Dispatch & Collect/ }));
+      await waitFor(() => expect(posts()).toHaveLength(1));
+      expect(posts()[0]![1].body).not.toHaveProperty('picked_from');
+    });
+
+    it('more bags picked than withdrawn is refused before anything is sent', async () => {
+      renderSheet(vi.fn(), vi.fn(), 'lot-1');
+      fireEvent.change(await screen.findByLabelText('Bags picked from Rack A'), { target: { value: '101' } });
+      expect(await screen.findByRole('alert')).toHaveTextContent(/exceed the withdrawn quantity \(100\)/);
+      expect(screen.getByRole('button', { name: /Dispatch & Collect/ })).toBeDisabled();
+    });
+
+    it('a lot with no rack placements shows no rack section', async () => {
+      placements = [];
+      renderSheet(vi.fn(), vi.fn(), 'lot-1');
+      await screen.findByText(/Storage \(Seasonal\)/);
+      expect(screen.queryByText(/Picked from/)).not.toBeInTheDocument();
+    });
   });
 
   it('without the manager keys it cannot dispatch, and says why', async () => {

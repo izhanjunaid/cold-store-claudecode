@@ -32,7 +32,9 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: v
 
 // The two sheets have their own tests; here only that the desk opens them for the right row.
 vi.mock('@/components/dispatch/checkout-sheet', () => ({
-  CheckoutSheet: ({ outboundId }: { outboundId: string }) => <div data-testid="checkout" data-id={outboundId} />,
+  CheckoutSheet: ({ outboundId, lotId }: { outboundId: string; lotId?: string }) => (
+    <div data-testid="checkout" data-id={outboundId} data-lot={lotId} />
+  ),
 }));
 vi.mock('@/components/outbound/withdraw-sheet', () => ({
   WithdrawSheet: ({ lotId, plateSuggestions }: { lotId: string; plateSuggestions?: string[] }) => (
@@ -140,7 +142,10 @@ describe('Dispatch Desk', () => {
     const { unmount } = renderPage();
     const weighed = (await screen.findByText('DN-WEIGHED')).closest('tr') as HTMLElement;
     fireEvent.click(within(weighed).getByRole('button', { name: /Dispatch & Collect/ }));
-    expect(await screen.findByTestId('checkout')).toHaveAttribute('data-id', 'ob-weighed');
+    const checkout = await screen.findByTestId('checkout');
+    expect(checkout).toHaveAttribute('data-id', 'ob-weighed');
+    // The checkout is told which lot, so it can offer "picked from which racks".
+    expect(checkout).toHaveAttribute('data-lot', 'lot-1');
     unmount();
 
     role = 'OPERATOR';
@@ -149,6 +154,35 @@ describe('Dispatch Desk', () => {
     const again = (await screen.findByText('DN-WEIGHED')).closest('tr') as HTMLElement;
     expect(within(again).queryByRole('button', { name: /Dispatch & Collect/ })).not.toBeInTheDocument();
     expect(within(again).getByText(/Waiting for a manager/)).toBeInTheDocument();
+  });
+
+  it('offers Cancel only while the truck has not been dispatched', async () => {
+    renderPage();
+    const booked = (await screen.findByText('DN-BOOKED')).closest('tr') as HTMLElement;
+    expect(within(booked).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    const weighed = screen.getByText('DN-WEIGHED').closest('tr') as HTMLElement;
+    expect(within(weighed).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    const owes = screen.getByText('DN-OWES').closest('tr') as HTMLElement;
+    expect(within(owes).queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+  });
+
+  it('cancels a booked withdrawal with a reason and refreshes the queue', async () => {
+    renderPage();
+    const booked = (await screen.findByText('DN-BOOKED')).closest('tr') as HTMLElement;
+    fireEvent.click(within(booked).getByRole('button', { name: 'Cancel' }));
+    const confirm = await screen.findByRole('button', { name: 'Cancel withdrawal' });
+    expect(confirm).toBeDisabled(); // a reason is required
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Truck did not come' } });
+    const queueFetches = () => apiClientList.mock.calls.filter(([p]) => String(p).startsWith('/v1/outbound-events')).length;
+    const before = queueFetches();
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(apiClient).toHaveBeenCalledWith('/v1/outbound-events/ob-booked/cancel', {
+        method: 'POST',
+        body: { reason: 'Truck did not come' },
+      }),
+    );
+    await waitFor(() => expect(queueFetches()).toBeGreaterThan(before));
   });
 
   it('finds a lot and opens the withdrawal drawer with the trucks inside as one-tap plates', async () => {
