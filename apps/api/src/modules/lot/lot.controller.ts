@@ -144,7 +144,7 @@ export async function lotRoutes(app: FastifyInstance) {
   app.route({
     method: 'GET',
     url: '/v1/lots/:id/placement-slip',
-    preHandler: [app.authenticate],
+    preHandler: [app.authenticate, app.forbidBlindRole],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

@@ -302,7 +302,10 @@ describe('matching the truck to its withdrawals', () => {
     const out = await release(pass, { declared_quantity: 50 });
     expect(out.statusCode).toBe(200);
     const body = data(out);
-    expect(body.authorized_quantity).toBe(50);
+    // The guard is not told what it was checked against; a manager reads the sum.
+    expect(body.authorized_quantity).toBeNull();
+    const asManager = await app.inject({ method: 'GET', url: `/v1/gate-passes/${pass}`, headers: authHeaders(managerToken) });
+    expect(data(asManager).authorized_quantity).toBe(50);
     expect([...body.outbound_ids].sort()).toEqual([a.id, b.id].sort());
     const rows = await prisma.outboundEvent.findMany({ where: { id: { in: [a.id, b.id] } } });
     expect(rows.every((r) => r.gatePassId === pass)).toBe(true);
@@ -547,6 +550,11 @@ describe('release preview on the active list (what the gate console shows before
     // Nothing in the whole payload names the 20 bags that were dispatched.
     const res = await app.inject({ method: 'GET', url: '/v1/gate-passes?active=true', headers: authHeaders(securityToken) });
     expect(res.body).not.toMatch(/quantity_withdrawn|"quantity"/);
+    // And no stock quantity or rack count in any row of it (the SECURITY role is redacted: common/blind-count.ts).
+    for (const p of JSON.parse(res.body).data as { authorized_quantity?: number | null; related_location?: string | null }[]) {
+      expect(p.authorized_quantity ?? null).toBeNull();
+      expect(p.related_location ?? '').not.toMatch(/×/);
+    }
   });
 
   it('only the active list carries it, and a withdrawal that already left no longer shows', async () => {

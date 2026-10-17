@@ -9,6 +9,7 @@ import {
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { Errors } from '../../common/errors';
+import { isBlindRole } from '../../common/blind-count';
 import { GatePassRepository } from './gate-pass.repository';
 import { GatePassService } from './gate-pass.service';
 import { renderGatePassReceipt } from '../pdf/pdf.service';
@@ -151,7 +152,8 @@ export async function gatePassRoutes(app: FastifyInstance) {
           marka: pass.related_marka ?? null,
           unitLabel: pass.related_unit_label ?? null,
           declaredQuantity: pass.declared_quantity ?? null,
-          authorizedQuantity: pass.authorized_quantity ?? null,
+          // The PDF is a Buffer, so the global redaction hook never sees it: the guard prints this blind too.
+          authorizedQuantity: isBlindRole(request.user?.role) ? null : (pass.authorized_quantity ?? null),
           quantityMismatch: pass.quantity_mismatch_flag,
           depositorName: pass.party_name ?? null,
           ownerName: pass.owner_party_name ?? null,

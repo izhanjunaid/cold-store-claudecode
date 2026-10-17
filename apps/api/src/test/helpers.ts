@@ -8,6 +8,7 @@ import facilityScope from '../plugins/facility-scope';
 import authPlugin from '../plugins/auth';
 import permissionsPlugin from '../plugins/permissions';
 import mailPlugin from '../plugins/mail';
+import blindRedactionPlugin from '../plugins/blind-redaction';
 import type { MailConfig } from '../modules/mail/mail.service';
 import { authRoutes } from '../modules/auth/auth.controller';
 import { partyRoutes } from '../modules/party/party.controller';
@@ -64,6 +65,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(facilityScope);
   await testApp.register(authPlugin);
   await testApp.register(permissionsPlugin);
+  await testApp.register(blindRedactionPlugin);
   await testApp.register(mailPlugin, {
     transportFactory: (config) => ({
       sendMail: async (opts) => {

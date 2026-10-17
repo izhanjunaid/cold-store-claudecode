@@ -42,7 +42,7 @@ export const OutboundEventResponse = z.object({
   lot_number: z.string(),
   facility_id: z.string().uuid(),
   withdrawal_type: WithdrawalType,
-  quantity_withdrawn_bags: z.number(),
+  quantity_withdrawn_bags: z.number().nullable(),
   outbound_weight_kg: z.number().nullable(),
   outbound_date: z.string(),
   receiving_party_id: z.string().uuid().nullable(),

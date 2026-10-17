@@ -44,6 +44,7 @@ import { auditRoutes } from './modules/audit/audit.controller';
 import { notificationRoutes } from './modules/notifications/notifications.controller';
 import { systemRoutes } from './modules/system/system.controller';
 import { testRoutes } from './modules/_test/test.controller';
+import blindRedactionPlugin from './plugins/blind-redaction';
 
 export async function buildApp() {
   const app = Fastify({
@@ -75,6 +76,7 @@ export async function buildApp() {
   await app.register(authPlugin);
   await app.register(permissionsPlugin);
   await app.register(mailPlugin);
+  await app.register(blindRedactionPlugin); // the gate guard counts bags blind (common/blind-count.ts)
 
   // OpenAPI / Swagger
   await app.register(swagger, {

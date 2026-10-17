@@ -41,7 +41,7 @@ export const RackResponse = z.object({
   chamber_id: z.string().uuid(),
   name: z.string(),
   max_capacity_bags: z.number(),
-  current_occupancy_bags: z.number(),
+  current_occupancy_bags: z.number().nullable(),
   position: z.number(),
   is_active: z.boolean(),
   notes: z.string().nullable(),
@@ -55,7 +55,7 @@ export const RackLotRow = z.object({
   owner_party_name: z.string().nullable(),
   commodity_name: z.string().nullable(),
   marka: z.string().nullable(),
-  bags: z.number(),
+  bags: z.number().nullable(),
 });
 
 export const ChamberResponse = z.object({
@@ -65,15 +65,15 @@ export const ChamberResponse = z.object({
   commodity_restriction_id: z.string().uuid().nullable(),
   commodity_restriction_name: z.string().nullable().optional(),
   max_capacity_bags: z.number(),
-  current_occupancy_bags: z.number(),
-  available_capacity_bags: z.number(),
+  current_occupancy_bags: z.number().nullable(),
+  available_capacity_bags: z.number().nullable(),
   temperature_min_c: z.number().nullable(),
   temperature_max_c: z.number().nullable(),
   is_active: z.boolean(),
   notes: z.string().nullable(),
   rack_count: z.number().optional(),
   racks: z.array(RackResponse).optional(),
-  unplaced_bags: z.number().optional(),
+  unplaced_bags: z.number().nullable().optional(),
   last_temperature: z.object({
     temperature_c: z.number(),
     recorded_at: z.string(),

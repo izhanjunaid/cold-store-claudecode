@@ -312,6 +312,9 @@ export const Errors = {
       'No dispatched withdrawal matches this loaded truck — check the vehicle number with the munshi, or call a manager',
       422,
     ),
+  // Documents whose bag counts sit inside text or a PDF cannot be redacted field by field, so the guard does not get them.
+  BLIND_ROLE_FORBIDDEN: () =>
+    new AppError('BLIND_ROLE_FORBIDDEN', 'This document shows stock quantities, which the gate role does not see', 403),
   GATE_OVERRIDE_REQUIRES_MANAGER: () =>
     new AppError('GATE_OVERRIDE_REQUIRES_MANAGER', 'Only a MANAGER or higher can override a gate check', 403),
   GATE_SELF_RELEASE: () =>

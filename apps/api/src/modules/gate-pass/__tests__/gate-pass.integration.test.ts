@@ -460,7 +460,10 @@ describe('Gate-side quantity & commodity verification (Fix #1)', () => {
     });
     expect(out.statusCode).toBe(200);
     const data = JSON.parse(out.body).data;
-    expect(data.authorized_quantity).toBe(100);
+    // The guard is told nothing about the quantity it was checked against (blind count); a manager reads it.
+    expect(data.authorized_quantity).toBeNull();
+    const asManager = await app.inject({ method: 'GET', url: `/v1/gate-passes/${passId}`, headers: authHeaders(managerToken) });
+    expect(JSON.parse(asManager.body).data.authorized_quantity).toBe(100);
     expect(data.outbound_ids).toEqual([ob.id]);
     expect(data.related_commodity_name).toBe('POTATO');
     expect(data.related_unit_label).toBe('Bags');
