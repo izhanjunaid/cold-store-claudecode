@@ -15,7 +15,7 @@ import { UrduText } from '@/components/ui/urdu-text';
 import { PageHeader } from '@/components/layout/page-header';
 import { LotLocationCard, LotMovementsTimeline } from '@/components/lot-location';
 
-import { formatDate, formatDateTime } from '@/lib/format';
+import { formatDate, formatDateTime, formatCount } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
 import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
@@ -261,8 +261,8 @@ export default function LotDetailPage() {
               label="Bags (Balance / Original)"
               value={
                 <>
-                  {lot.current_balance_bags.toLocaleString()}
-                  <span className="text-muted-foreground"> / {lot.quantity_bags.toLocaleString()}</span>
+                  {formatCount(lot.current_balance_bags)}
+                  <span className="text-muted-foreground"> / {formatCount(lot.quantity_bags)}</span>
                 </>
               }
             />
@@ -357,7 +357,7 @@ export default function LotDetailPage() {
                         <TableCell className="font-medium">{EVENT_TYPE_LABELS[ev.event_type] ?? ev.event_type}</TableCell>
                         <TableCell className="text-muted-foreground">{ev.from_party_name ?? '—'}</TableCell>
                         <TableCell>{ev.to_party_name ?? '—'}</TableCell>
-                        <TableCell className="text-right tabular-nums">{ev.quantity_bags.toLocaleString()}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatCount(ev.quantity_bags)}</TableCell>
                         <TableCell className="text-right tabular-nums">{ev.transfer_price_pkr != null ? ev.transfer_price_pkr.toLocaleString() : '—'}</TableCell>
                         <TableCell>{formatDate(ev.effective_date)}</TableCell>
                         <TableCell className="text-muted-foreground">{ev.operator_name ?? '—'}</TableCell>
@@ -409,7 +409,7 @@ export default function LotDetailPage() {
                       <TableRow key={ev.id} className="cursor-pointer" onClick={() => router.push(`/outbound-events/${ev.id}`)}>
                         <TableCell className="font-mono">{ev.dispatch_note_number ?? '—'}</TableCell>
                         <TableCell>{ev.withdrawal_type}</TableCell>
-                        <TableCell className="text-right tabular-nums">{ev.quantity_withdrawn_bags.toLocaleString()}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatCount(ev.quantity_withdrawn_bags)}</TableCell>
                         <TableCell><StatusBadge status={ev.status} /></TableCell>
                         <TableCell>{formatDate(ev.outbound_date)}</TableCell>
                         <TableCell className="text-right">

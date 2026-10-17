@@ -107,6 +107,36 @@ async function loaded() {
   await screen.findByText('LOT-260101-0001');
 }
 
+describe('OutboundEventDetailPage — the gate guard counts blind', () => {
+  it('shows a dash, and does not crash, when the API sends the bag counts as null', async () => {
+    push.mockReset();
+    apiClient.mockReset();
+    role = 'SECURITY';
+    permissions = ['gate_passes.log'];
+    event = makeEvent({ quantity_withdrawn_bags: null });
+    apiClient.mockImplementation((path: string) => {
+      if (path === `/v1/outbound-events/${EVENT_ID}`) return Promise.resolve(event);
+      if (path === `/v1/lots/${LOT_ID}/placements`) {
+        return Promise.resolve({
+          lot_id: LOT_ID,
+          chamber_id: 'c1',
+          chamber_name: 'Room 1',
+          current_balance_bags: null,
+          placements: [{ rack_id: 'r1', rack_name: 'R-1', bags: null }],
+          unplaced_bags: null,
+        });
+      }
+      return Promise.resolve(null);
+    });
+    renderPage();
+    await loaded();
+    const bags = screen.getByText('Bags Withdrawn').nextElementSibling as HTMLElement;
+    expect(bags).toHaveTextContent('—');
+    expect(await screen.findByText(/R-1/)).toBeInTheDocument();
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+  });
+});
+
 describe('OutboundEventDetailPage — finalize gate', () => {
   beforeEach(() => {
     push.mockReset();

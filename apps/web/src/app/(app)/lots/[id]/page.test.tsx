@@ -88,6 +88,16 @@ describe('LotDetailPage actions', () => {
     permissions = [];
   });
 
+  it('for the gate guard, whose bag counts arrive as null, shows dashes and does not crash', async () => {
+    role = 'SECURITY';
+    permissions = ['gate_passes.log'];
+    lot = { ...LOT, quantity_bags: null, current_balance_bags: null } as unknown as typeof LOT;
+    await renderPage();
+    expect(screen.getByRole('heading', { name: LOT.lot_number })).toBeInTheDocument();
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+  });
+
   it('shows New Withdrawal only with outbound.record', async () => {
     permissions = ['outbound.record'];
     await renderPage();

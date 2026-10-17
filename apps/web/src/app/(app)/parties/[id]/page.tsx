@@ -22,7 +22,7 @@ import { qk } from '@/lib/query-keys';
 import { RecordPaymentSheet } from '@/components/billing/record-payment-sheet';
 import { IssueLoanDialog } from '@/components/party/issue-loan-dialog';
 
-import { formatDate, formatMoney } from '@/lib/format';
+import { formatDate, formatMoney, formatCount } from '@/lib/format';
 import { LotWithdrawAction } from '@/components/outbound/lot-withdraw-action';
 import { PageSkeleton } from '@/components/page-skeleton';
 interface Party {
@@ -390,7 +390,7 @@ export default function PartyDetailPage() {
                       <TableRow key={lot.id} className="h-7 cursor-pointer" onClick={() => router.push(`/lots/${lot.id}`)}>
                         <TableCell className="py-1 font-mono text-primary-700">{lot.lot_number}</TableCell>
                         <TableCell className="py-1">{lot.commodity_name ?? '—'}</TableCell>
-                        <TableCell className="py-1 text-right tabular-nums">{lot.current_balance_bags.toLocaleString()}</TableCell>
+                        <TableCell className="py-1 text-right tabular-nums">{formatCount(lot.current_balance_bags)}</TableCell>
                         <TableCell className="py-1">{formatDate(lot.inbound_date)}</TableCell>
                         <TableCell className="py-1">
                           <LotWithdrawAction lot={lot} />

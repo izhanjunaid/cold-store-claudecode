@@ -15,7 +15,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 import { useLotPlacements } from '@/components/lot-location';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatCount } from '@/lib/format';
 
 import { PageSkeleton } from '@/components/page-skeleton';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
@@ -211,7 +211,7 @@ export default function OutboundEventDetailPage() {
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
           <Field label="Withdrawal Type" value={event.withdrawal_type} />
-          <Field label="Bags Withdrawn" value={event.quantity_withdrawn_bags.toLocaleString()} />
+          <Field label="Bags Withdrawn" value={formatCount(event.quantity_withdrawn_bags)} />
           <Field label="Outbound Date" value={formatDate(event.outbound_date)} />
           <Field label="Operator" value={event.created_by_name} />
           {event.receiving_party_name && <Field label="Receiving Party" value={event.receiving_party_name} />}
@@ -284,7 +284,7 @@ export default function OutboundEventDetailPage() {
           <CardContent>
             {location.placements.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                All {location.unplaced_bags.toLocaleString()} bags are unplaced in {location.chamber_name ?? 'the room'}.
+                All {formatCount(location.unplaced_bags)} bags are unplaced in {location.chamber_name ?? 'the room'}.
               </p>
             ) : (
               <>
@@ -295,7 +295,7 @@ export default function OutboundEventDetailPage() {
                   {location.placements.map((p) => (
                     <div key={p.rack_id} className="flex items-center gap-3 text-sm">
                       <span className="w-24 font-medium">{p.rack_name}</span>
-                      <span className="w-28 text-muted-foreground tabular-nums">{p.bags.toLocaleString()} bags here</span>
+                      <span className="w-28 text-muted-foreground tabular-nums">{formatCount(p.bags)} bags here</span>
                       {canPick && (
                         <Input
                           type="number"

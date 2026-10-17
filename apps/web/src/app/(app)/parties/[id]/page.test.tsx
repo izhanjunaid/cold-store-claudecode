@@ -71,4 +71,18 @@ describe('PartyDetailPage — the tabs list this party only, and say when there 
     await waitFor(() => expect(screen.getByText(/Showing 1 of 130/)).toBeTruthy());
     expect(screen.getByRole('link', { name: 'View all' }).getAttribute('href')).toBe('/lots?status=ACTIVE&party_id=p1');
   });
+
+  it('shows a dash for a lot whose bag count the API withheld (the gate guard counts blind)', async () => {
+    apiClientList.mockImplementation((url: string) =>
+      Promise.resolve(
+        url.startsWith('/v1/lots')
+          ? { data: [{ ...LOT, current_balance_bags: null }], meta: { page: 1, per_page: 100, total: 1 } }
+          : { data: [], meta: { page: 1, per_page: 100, total: 0 } },
+      ),
+    );
+    render(<PartyDetailPage />);
+    const row = (await screen.findByText('LOT-0001')).closest('tr') as HTMLElement;
+    expect(row).toHaveTextContent('—');
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+  });
 });

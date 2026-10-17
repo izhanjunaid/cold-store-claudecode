@@ -4,7 +4,7 @@ import { UrduText } from '@/components/ui/urdu-text';
 import type { DataTableColumn } from '@/components/data-table';
 import { LotWithdrawAction } from '@/components/outbound/lot-withdraw-action';
 
-import { formatDate } from '@/lib/format';
+import { formatDate, formatCount } from '@/lib/format';
 export interface LotRow {
   id: string;
   lot_number: string;
@@ -72,14 +72,14 @@ export const lotColumns: DataTableColumn<LotRow>[] = [
     id: 'bags',
     header: 'Bags',
     numeric: true,
-    cell: (lot) => lot.quantity_bags.toLocaleString(),
+    cell: (lot) => formatCount(lot.quantity_bags),
     csv: (lot) => lot.quantity_bags,
   },
   {
     id: 'balance',
     header: 'Balance',
     numeric: true,
-    cell: (lot) => <span className="font-medium">{lot.current_balance_bags.toLocaleString()}</span>,
+    cell: (lot) => <span className="font-medium">{formatCount(lot.current_balance_bags)}</span>,
     csv: (lot) => lot.current_balance_bags,
   },
   {

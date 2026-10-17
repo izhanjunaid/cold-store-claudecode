@@ -20,7 +20,7 @@ import {
   allocationTotal,
   type AllocationRow,
 } from '@/components/rack-allocation-editor';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatCount } from '@/lib/format';
 
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
@@ -133,7 +133,7 @@ export function LotLocationCard({ lotId, canOperate }: { lotId: string; canOpera
           {loc.placements.map((p) => (
             <StatusBadge
               key={p.rack_id}
-              status={`${p.rack_name} × ${p.bags.toLocaleString()}`}
+              status={`${p.rack_name} × ${formatCount(p.bags)}`}
               tone="neutral"
               raw
               className="tabular-nums"
@@ -141,7 +141,7 @@ export function LotLocationCard({ lotId, canOperate }: { lotId: string; canOpera
           ))}
           {loc.unplaced_bags > 0 && (
             <StatusBadge
-              status={`Unplaced × ${loc.unplaced_bags.toLocaleString()}`}
+              status={`Unplaced × ${formatCount(loc.unplaced_bags)}`}
               tone="warning"
               raw
               className="tabular-nums"
@@ -318,7 +318,7 @@ function MoveLotDialog({
                       <option value="">Select…</option>
                       {loc.placements.map((p) => (
                         <option key={p.rack_id} value={p.rack_id}>
-                          {p.rack_name} ({p.bags.toLocaleString()} bags here)
+                          {p.rack_name} ({formatCount(p.bags)} bags here)
                         </option>
                       ))}
                     </select>
@@ -343,7 +343,7 @@ function MoveLotDialog({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Bags to move{fromPlacement ? ` (max ${fromPlacement.bags.toLocaleString()})` : ''}
+                    Bags to move{fromPlacement ? ` (max ${formatCount(fromPlacement.bags)})` : ''}
                   </label>
                   <Input
                     type="number"
@@ -372,12 +372,12 @@ function MoveLotDialog({
                 <option value="">Select room…</option>
                 {destChambers.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} ({c.available_capacity_bags.toLocaleString()} bags free)
+                    {c.name} ({formatCount(c.available_capacity_bags)} bags free)
                   </option>
                 ))}
               </select>
               <p className="mt-1 text-xs text-muted-foreground">
-                The whole lot ({loc.current_balance_bags.toLocaleString()} bags) moves together.
+                The whole lot ({formatCount(loc.current_balance_bags)} bags) moves together.
               </p>
               {destOverCapacity && (
                 <p className="mt-1 text-xs font-medium text-destructive">
@@ -467,7 +467,7 @@ export function LotMovementsTimeline({ lotId }: { lotId: string }) {
           <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" aria-hidden />
           <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
             <span className="font-medium">{MOVEMENT_LABELS[m.movement_type]}</span>
-            <span className="tabular-nums">{m.bags.toLocaleString()} bags</span>
+            <span className="tabular-nums">{formatCount(m.bags)} bags</span>
             <span className="text-muted-foreground">{movementRoute(m)}</span>
           </div>
           <p className="text-xs text-muted-foreground">

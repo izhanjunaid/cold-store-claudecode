@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { PageHeader } from '@/components/layout/page-header';
 import { UrduText } from '@/components/ui/urdu-text';
 import { cn } from '@/lib/utils';
+import { formatCount } from '@/lib/format';
 
 interface Rack {
   id: string;
@@ -136,7 +137,7 @@ export default function RoomMapPage() {
                 <div>
                   <div className="text-2xl font-bold leading-none tabular-nums">{pct}%</div>
                   <div className="mt-1 text-xs opacity-90 tabular-nums">
-                    {c.current_occupancy_bags.toLocaleString()} / {c.max_capacity_bags.toLocaleString()} bags
+                    {formatCount(c.current_occupancy_bags)} / {c.max_capacity_bags.toLocaleString()} bags
                   </div>
                   <div className="mt-0.5 text-xs opacity-80">
                     {tier.label}
@@ -212,7 +213,7 @@ function RoomDrillDownDialog({
 
         {room && (
           <p className="text-sm text-muted-foreground">
-            {room.current_occupancy_bags.toLocaleString()} of {room.max_capacity_bags.toLocaleString()} bags
+            {formatCount(room.current_occupancy_bags)} of {room.max_capacity_bags.toLocaleString()} bags
             {room.last_temperature && <span className="ml-2">· {room.last_temperature.temperature_c}°C</span>}
           </p>
         )}
@@ -251,7 +252,7 @@ function RoomDrillDownDialog({
               })}
             {room != null && room.unplaced_bags > 0 && (
               <span className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 tabular-nums">
-                Unplaced · {room.unplaced_bags.toLocaleString()} bags
+                Unplaced · {formatCount(room.unplaced_bags)} bags
               </span>
             )}
           </div>
@@ -278,7 +279,7 @@ function RoomDrillDownDialog({
                   {lot.marka && (
                     <UrduText className="rounded bg-secondary px-2 py-0.5 text-xs font-semibold">{lot.marka}</UrduText>
                   )}
-                  <span className="ml-auto shrink-0 font-medium tabular-nums">{lot.bags.toLocaleString()} bags</span>
+                  <span className="ml-auto shrink-0 font-medium tabular-nums">{formatCount(lot.bags)} bags</span>
                 </li>
               ))}
             </ul>
