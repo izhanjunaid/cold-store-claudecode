@@ -250,3 +250,48 @@ test('cancel a booked withdrawal from its desk row; then dispatch a partial one 
   expect(after.placements.find((p) => p.rack_id === racks.b)?.bags ?? 0).toBe(0);
   expect(after.placements.find((p) => p.rack_id === racks.a)?.bags).toBe(50);
 });
+
+test('the gate guard counts blind: the lot pages open for them with no bag count anywhere', async ({ page, request, loginAs }) => {
+  test.setTimeout(180_000);
+  const op = await authHeaders('OPERATOR');
+  const sec = await authHeaders('SECURITY');
+  const refs = await getFacilityRefs(request, op);
+  const tag = Date.now().toString(36).slice(-5).toUpperCase();
+  const party = await (
+    await request.post(`${API_URL}/v1/parties`, {
+      headers: op,
+      data: { name: `Blind Farmer ${tag}`, party_type: 'FARMER', phone_primary: `0315${Math.floor(Math.random() * 9_000_000 + 1_000_000)}` },
+    })
+  ).json();
+  const lotRes = await request.post(`${API_URL}/v1/lots`, {
+    headers: op,
+    data: {
+      owner_party_id: party.data.id,
+      commodity_id: refs.commodityId,
+      rate_plan_id: refs.seasonalRatePlanId,
+      chamber_id: refs.chamberId,
+      quantity_bags: 321,
+      accepted_weight_kg: 6420,
+      inbound_date: isoDaysAgo(30),
+    },
+  });
+  expect(lotRes.ok(), await lotRes.text()).toBeTruthy();
+  const lot = (await lotRes.json()).data as { id: string; lot_number: string };
+
+  // The API: the guard's copy has the field, empty; an operator's has the number.
+  const asGuard = (await (await request.get(`${API_URL}/v1/lots/${lot.id}`, { headers: sec })).json()).data;
+  expect(asGuard.current_balance_bags).toBeNull();
+  expect(asGuard.quantity_bags).toBeNull();
+  const asOperator = (await (await request.get(`${API_URL}/v1/lots/${lot.id}`, { headers: op })).json()).data;
+  expect(asOperator.current_balance_bags).toBe(321);
+
+  // The pages: they open, show a dash, and never print 321 or NaN.
+  await loginAs('SECURITY');
+  await page.goto(`/lots/${lot.id}`);
+  await expect(page.getByRole('heading', { name: lot.lot_number })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('body')).not.toContainText('321');
+  await expect(page.locator('body')).not.toContainText('NaN');
+  await page.goto('/lots');
+  await expect(page.getByText(lot.lot_number).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('body')).not.toContainText('NaN');
+});
