@@ -345,6 +345,7 @@ X-Facility-ID: <facility_uuid>
 | `DATE_IN_FUTURE` | 422 | A date after today (Lahore calendar); MANAGER+ only |
 | `OUTBOUND_CANCELLED` | 409 | The withdrawal was cancelled |
 | `DISPATCH_TOTAL_CHANGED` | 409 | Dispatch & collect: the bill differs from the total the client reviewed; nothing was written — review the new bill |
+| `BLIND_ROLE_FORBIDDEN` | 403 | The gate role (SECURITY) asked for a document that shows stock quantities (an invoice, its PDF, a lot's invoices, the placement slip). On every other response the guard receives, stock quantities are `null` (docs/07) |
 | `OUTBOUND_ALREADY_LEFT` | 409 | Cancel refused: a truck already carried this withdrawal out (the old gate allowed that before dispatch) |
 | `OUTBOUND_QUANTITY_STALE` | 409 | A FULL withdrawal no longer equals the lot balance; cancel and rebook |
 | `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization |
