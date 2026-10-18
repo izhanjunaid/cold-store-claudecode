@@ -111,6 +111,7 @@ export default function LotDetailPage() {
   const canWithdraw = can(user, 'outbound.record');
   // Rack placement and room moves (PUT /placements, POST /move) are lots.manage.
   const canPlace = can(user, 'lots.manage');
+  const guardView = user?.role === 'SECURITY';
 
   const fetchLot = useCallback(async () => {
     setLoading(true);
@@ -306,7 +307,11 @@ export default function LotDetailPage() {
                 ['inspections', 'Inspections'],
                 ['withdrawals', 'Withdrawals'],
                 ['billing', 'Billing'],
-              ] as const).map(([key, label]) => (
+              ] as const)
+                // The gate guard counts blind: the API refuses them a lot's invoices (BLIND_ROLE_FORBIDDEN),
+                // so the tab would only ever say "No invoices yet".
+                .filter(([key]) => !(guardView && key === 'billing'))
+                .map(([key, label]) => (
                 <TabsTrigger
                   key={key}
                   value={key}

@@ -98,6 +98,21 @@ describe('LotDetailPage actions', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 
+  it('the guard has no Billing tab (the API refuses them the invoices); everyone else does', async () => {
+    role = 'SECURITY';
+    permissions = ['gate_passes.log'];
+    await renderPage();
+    expect(screen.queryByRole('tab', { name: 'Billing' })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Withdrawals' })).toBeInTheDocument();
+  });
+
+  it('an operator keeps the Billing tab', async () => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    await renderPage();
+    expect(screen.getByRole('tab', { name: 'Billing' })).toBeInTheDocument();
+  });
+
   it('shows New Withdrawal only with outbound.record', async () => {
     permissions = ['outbound.record'];
     await renderPage();
