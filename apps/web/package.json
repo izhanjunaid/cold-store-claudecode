@@ -3,8 +3,8 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "build": "next build",
-    "dev": "next dev --port 3000",
+    "build": "node -e \"require('fs').rmSync('.next/standalone',{recursive:true,force:true})\" && next build",
+    "dev": "node -e \"require('fs').rmSync('.next/standalone',{recursive:true,force:true})\" && next dev --port 3000",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
