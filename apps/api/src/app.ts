@@ -66,7 +66,9 @@ export async function buildApp() {
   await app.register(helmet);
   await app.register(sensible);
   await app.register(rateLimit, {
-    max: 100,
+    // 100/min per client by default. RATE_LIMIT_MAX exists for the e2e walkthroughs, which drive a
+    // whole season from one address faster than any person could.
+    max: Number(process.env['RATE_LIMIT_MAX']) || 100,
     timeWindow: '1 minute',
   });
 
