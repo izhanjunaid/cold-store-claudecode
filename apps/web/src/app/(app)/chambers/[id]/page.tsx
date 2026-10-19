@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
-import { CapacityBar, capacityPct } from '@/components/capacity-bar';
+import { CapacityBar, capacityPct, formatCapacityPct } from '@/components/capacity-bar';
 import { UrduText } from '@/components/ui/urdu-text';
 import { cn } from '@/lib/utils';
 import { formatDateTime, formatCount } from '@/lib/format';
@@ -171,7 +171,7 @@ export default function RoomDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="mb-4 text-center">
-              <span className="text-4xl font-bold tabular-nums">{pct}%</span>
+              <span className="text-4xl font-bold tabular-nums">{formatCapacityPct(pct)}</span>
               <p className="mt-1 text-sm text-muted-foreground tabular-nums">
                 {formatCount(chamber.current_occupancy_bags)} / {chamber.max_capacity_bags.toLocaleString()} bags
               </p>
@@ -239,7 +239,7 @@ export default function RoomDetailPage() {
                       </div>
                       <CapacityBar occupied={rack.current_occupancy_bags} capacity={rack.max_capacity_bags} className="mb-1.5" />
                       <p className="text-xs text-muted-foreground tabular-nums">
-                        {formatCount(rack.current_occupancy_bags)} / {rack.max_capacity_bags.toLocaleString()} bags · {rackPct}%
+                        {formatCount(rack.current_occupancy_bags)} / {rack.max_capacity_bags.toLocaleString()} bags · {formatCapacityPct(rackPct)}
                       </p>
                       {!rack.is_active && <p className="mt-1 text-[10px] uppercase text-muted-foreground">Inactive</p>}
                     </button>

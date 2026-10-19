@@ -8,6 +8,7 @@ import { apiClient } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { useChambers, useRacks } from '@/hooks/use-reference-data';
 import { useApiMutation } from '@/hooks/use-api-mutation';
+import { useAuthStore } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -66,6 +67,8 @@ export function LotLocationCard({ lotId, canOperate }: { lotId: string; canOpera
   const [moveOpen, setMoveOpen] = useState(false);
   const [placeOpen, setPlaceOpen] = useState(false);
   const [slipLoading, setSlipLoading] = useState(false);
+  // The gate guard counts bags blind: the API sends them no counts and refuses the slip (it lists them).
+  const guardView = useAuthStore((s) => s.user)?.role === 'SECURITY';
 
   const invalidateLocation = () => {
     queryClient.invalidateQueries({ queryKey: qk.lots.placements(lotId) });
@@ -118,10 +121,12 @@ export function LotLocationCard({ lotId, canOperate }: { lotId: string; canOpera
               </Button>
             </>
           )}
-          <Button variant="outline" size="sm" onClick={printSlip} disabled={slipLoading}>
-            <FileText className="h-3.5 w-3.5" aria-hidden />
-            {slipLoading ? 'Preparing…' : 'Placement Slip'}
-          </Button>
+          {!guardView && (
+            <Button variant="outline" size="sm" onClick={printSlip} disabled={slipLoading}>
+              <FileText className="h-3.5 w-3.5" aria-hidden />
+              {slipLoading ? 'Preparing…' : 'Placement Slip'}
+            </Button>
+          )}
         </div>
       </CardHeader>
       <CardContent>
@@ -133,7 +138,7 @@ export function LotLocationCard({ lotId, canOperate }: { lotId: string; canOpera
           {loc.placements.map((p) => (
             <StatusBadge
               key={p.rack_id}
-              status={`${p.rack_name} × ${formatCount(p.bags)}`}
+              status={p.bags == null ? p.rack_name : `${p.rack_name} × ${formatCount(p.bags)}`}
               tone="neutral"
               raw
               className="tabular-nums"

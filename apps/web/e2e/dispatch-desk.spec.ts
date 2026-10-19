@@ -291,7 +291,22 @@ test('the gate guard counts blind: the lot pages open for them with no bag count
   await expect(page.getByRole('heading', { name: lot.lot_number })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('body')).not.toContainText('321');
   await expect(page.locator('body')).not.toContainText('NaN');
+  // The API refuses the guard a lot's invoices, so the tab that would list them is not there.
+  await expect(page.getByRole('tab', { name: 'Billing' })).toHaveCount(0);
   await page.goto('/lots');
   await expect(page.getByText(lot.lot_number).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('body')).not.toContainText('NaN');
+
+  // Rooms: occupancy is unknown to the guard, so no "0%" (a false zero) and no stock count.
+  const noFalseZero = /(^|[^\d.])0%/;
+  await page.goto('/chambers');
+  await expect(page.getByRole('heading', { name: 'Rooms' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/bags/).first()).toBeVisible();
+  expect(await page.locator('body').innerText()).not.toMatch(noFalseZero);
+  await page.goto(`/chambers/${refs.chamberId}`);
+  await expect(page.getByText('Occupancy').first()).toBeVisible({ timeout: 30_000 });
+  const room = await page.locator('body').innerText();
+  expect(room).not.toMatch(noFalseZero);
+  expect(room).not.toMatch(/not assigned to a rack/);
+  expect(room).not.toContain('NaN');
 });
