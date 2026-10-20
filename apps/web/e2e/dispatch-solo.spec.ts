@@ -156,11 +156,22 @@ test('a pre-approved party: the munshi dispatches on credit alone, and the gate 
   await page.getByRole('button', { name: /Dispatch on credit Rs\s?[\d,]+/ }).click();
   await expect(page.getByText(/Dispatched — bill on credit/i).first()).toBeVisible({ timeout: 30_000 });
 
+  // What the guard's screen is built from: READY on the approval, a flag only — no amount, no ceiling.
+  const sec = await authHeaders('SECURITY');
+  const active = (await (await request.get(`${API_URL}/v1/gate-passes?active=true&page_size=50`, { headers: sec })).json()).data as {
+    vehicle_number: string;
+    release?: { state: string; on_credit?: boolean };
+  }[];
+  const pass = active.find((p) => p.vehicle_number === truck)!;
+  expect(pass.release).toMatchObject({ state: 'READY', on_credit: true });
+
   await loginAs('SECURITY');
   await page.goto('/gate');
+  // The truck's own row under "Vehicles Currently Inside" says why it may go.
+  const inside = page.locator('li', { hasText: truck }).filter({ has: page.getByRole('button', { name: 'Clear Outward' }) });
+  await expect(inside.getByText('Credit approved — ready to leave')).toBeVisible({ timeout: 30_000 });
   const ready = page.locator('li', { hasText: truck }).filter({ has: page.getByRole('button', { name: 'Release' }) });
   await expect(ready).toBeVisible({ timeout: 30_000 });
-  await expect(ready.getByText(/Credit approved/i)).toBeVisible();
   await ready.getByRole('button', { name: 'Release' }).click();
   await page.getByLabel(/bags counted/i).fill(String(bags));
   await page.getByRole('button', { name: /^clear outward$/i }).click();
