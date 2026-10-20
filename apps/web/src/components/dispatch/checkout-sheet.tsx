@@ -46,6 +46,8 @@ export interface CheckoutPreview {
   gst_rate: number;
   gst_amount_pkr: number;
   total_pkr: number;
+  /** May the munshi finish this truck alone (the owner's solo switch)? Booleans and a reason only. */
+  solo?: { allowed: boolean; reason?: string; credit_available: boolean };
 }
 
 export interface CheckoutResult {
@@ -110,14 +112,14 @@ export function CheckoutSheet({
 
   useEffect(() => {
     if (open) {
-      setMode(canCollect ? 'CASH' : 'CREDIT');
+      setMode(holdsKeys && !canCollect ? 'CREDIT' : 'CASH');
       setReference('');
       setChequeDate('');
       setSkipped(new Set());
       setPicks({});
       setError(null);
     }
-  }, [open, outboundId, canCollect]);
+  }, [open, outboundId, canCollect, holdsKeys]);
 
   // The same arithmetic the server applies when it builds and re-prices the bill.
   const keptServices = preview?.service_lines.filter((l) => !skipped.has(l.service_charge_id)) ?? [];
@@ -125,13 +127,21 @@ export function CheckoutSheet({
   const gst = round2(subTotal * ((preview?.gst_rate ?? 0) / 100));
   const total = round2(subTotal + gst);
 
+  // Without the manager keys the owner's solo switch is the only way in: cash in full, or credit a
+  // standing approval covers, with every charge kept. The server enforces the same rules.
+  const solo = !holdsKeys && !!preview?.solo?.allowed;
+  const canFinish = holdsKeys || solo;
+  const creditOffered = holdsKeys || (solo && !!preview?.solo?.credit_available);
+  const modeOffered = (m: Mode) =>
+    holdsKeys ? m === 'CREDIT' || canCollect : solo ? m === 'CASH' || (m === 'CREDIT' && creditOffered) : false;
+
   const needsReference = mode === 'BANK_TRANSFER' || mode === 'MOBILE_WALLET';
   const pickedFrom = toPickedFrom(picks);
   const overPicked = !!preview && picksTotal(picks) > preview.quantity_withdrawn_bags;
   const blocked =
-    !holdsKeys ||
+    !canFinish ||
     overPicked ||
-    (mode !== 'CREDIT' && !canCollect) ||
+    !modeOffered(mode) ||
     (mode === 'CHEQUE' && !chequeDate) ||
     (needsReference && reference.trim().length === 0);
 
@@ -188,9 +198,16 @@ export function CheckoutSheet({
               {loadError instanceof Error ? loadError.message : 'Could not price this withdrawal'}
             </p>
           )}
-          {!holdsKeys && (
+          {!holdsKeys && !isLoading && !solo && (
             <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              Dispatching and billing a truck needs a manager.
+              Dispatching and billing this truck needs a manager
+              {preview?.solo?.reason ? ` — ${preview.solo.reason}` : ''}.
+            </p>
+          )}
+          {solo && (
+            <p className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+              You can finish this truck yourself: cash in full
+              {creditOffered ? ', or on this party’s approved credit' : ''}. Anything else needs a manager.
             </p>
           )}
 
@@ -213,6 +230,7 @@ export function CheckoutSheet({
                       <Checkbox
                         id={`svc-${l.service_charge_id}`}
                         checked={!off}
+                        disabled={solo}
                         onCheckedChange={(c) =>
                           setSkipped((prev) => {
                             const next = new Set(prev);
@@ -247,7 +265,7 @@ export function CheckoutSheet({
                 </div>
               </div>
 
-              {lotId && holdsKeys && (
+              {lotId && canFinish && (
                 <RackPicks
                   lotId={lotId}
                   withdrawnBags={preview.quantity_withdrawn_bags}
@@ -265,16 +283,21 @@ export function CheckoutSheet({
                       type="button"
                       size="sm"
                       variant={mode === m.value ? 'default' : 'outline'}
-                      disabled={m.value !== 'CREDIT' && !canCollect}
+                      disabled={!modeOffered(m.value)}
                       onClick={() => setMode(m.value)}
                     >
                       {m.label}
                     </Button>
                   ))}
                 </div>
-                {!canCollect && (
+                {holdsKeys && !canCollect && (
                   <p className="text-xs text-muted-foreground">
                     Taking money needs the payments permission; this one can go on credit.
+                  </p>
+                )}
+                {solo && !creditOffered && (
+                  <p className="text-xs text-muted-foreground">
+                    On credit is not offered for this party (no approval, or this bill would pass its limit).
                   </p>
                 )}
               </div>

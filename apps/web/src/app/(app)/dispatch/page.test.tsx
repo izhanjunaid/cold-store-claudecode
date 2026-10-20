@@ -171,6 +171,18 @@ describe('Dispatch Desk', () => {
     expect(within(again).getByText(/Waiting for a manager/)).toBeInTheDocument();
   });
 
+  it('with the owner’s solo switch on, the munshi gets the Dispatch & Collect button too', async () => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    apiClient.mockImplementation((path: string) =>
+      Promise.resolve(path === '/v1/facilities/me' ? { id: 'f', name: 'F', settings: { dispatch_solo_mode: true } } : {}),
+    );
+    renderPage();
+    const weighed = (await screen.findByText('DN-WEIGHED')).closest('tr') as HTMLElement;
+    expect(await within(weighed).findByRole('button', { name: /Dispatch & Collect/ })).toBeInTheDocument();
+    expect(within(weighed).queryByText(/Waiting for a manager/)).not.toBeInTheDocument();
+  });
+
   it('offers Cancel only while the truck has not been dispatched', async () => {
     renderPage();
     const booked = (await screen.findByText('DN-BOOKED')).closest('tr') as HTMLElement;

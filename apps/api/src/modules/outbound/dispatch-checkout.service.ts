@@ -8,6 +8,9 @@ import {
   type OutboundListQueryType,
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
+import { advisoryXactLock } from '../../common/advisory-lock';
+import { findActiveApproval, standingCreditCover } from '../credit-approval/credit-approval.service';
+import { resolveFacilitySettings } from '../facility/facility.service';
 import { previewInvoiceFromOutbound } from '../invoice/invoice.builder';
 import type { InvoiceService } from '../invoice/invoice.service';
 import type { PaymentService } from '../payment/payment.service';
@@ -138,7 +141,9 @@ export class DispatchCheckoutService {
   async preview(facilityId: string, id: string) {
     const ob = await this.prisma.outboundEvent.findFirst({
       where: { id, facilityId },
-      include: { lot: { select: { lotNumber: true, billingParty: { select: { id: true, name: true } } } } },
+      include: {
+        lot: { select: { lotNumber: true, bookType: true, billingPartyId: true, billingParty: { select: { id: true, name: true } } } },
+      },
     });
     if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
     if (ob.status === 'DISPATCHED') throw Errors.OUTBOUND_ALREADY_FINALIZED();
@@ -154,6 +159,15 @@ export class DispatchCheckoutService {
     const subTotal = round2(priced.subTotal + serviceTotal);
     // The same arithmetic InvoiceRepository.recomputeTotals applies to the built bill.
     const gstAmount = round2(subTotal * (priced.gstRate / 100));
+    const total = round2(subTotal + gstAmount);
+
+    // Whether the munshi may finish this truck alone, as booleans and a reason: never the party's
+    // ceiling or exposure. Credit is offered only if this bill fits under the approved ceiling.
+    const verdict = await this.soloVerdict(this.prisma, facilityId, ob.lot);
+    const creditAvailable =
+      verdict.allowed &&
+      verdict.creditApproved &&
+      (await standingCreditCover(this.prisma, facilityId, [{ partyId: ob.lot.billingPartyId, uncleared: total }])).covered;
 
     return {
       outbound_id: id,
@@ -182,7 +196,10 @@ export class DispatchCheckoutService {
       sub_total_pkr: subTotal,
       gst_rate: priced.gstRate,
       gst_amount_pkr: gstAmount,
-      total_pkr: round2(subTotal + gstAmount),
+      total_pkr: total,
+      solo: verdict.allowed
+        ? { allowed: true, credit_available: creditAvailable }
+        : { allowed: false, reason: verdict.reason, credit_available: false },
     };
   }
 
@@ -194,13 +211,13 @@ export class DispatchCheckoutService {
    * no trace of the earlier ones.
    */
   async dispatchAndCollect(caller: CheckoutCaller, id: string, body: DispatchAndCollectRequestType) {
-    this.assertPermissions(caller, body);
+    const solo = await this.authorize(caller, id, body);
 
     // Two checkouts racing for the numbering locks can deadlock; the loser is safe to rerun.
     for (let attempt = 0; ; attempt++) {
       try {
         // The checkout does many steps (dispatch, bill, two journal entries): more than Prisma's 5 s default.
-        return await this.prisma.$transaction((tx) => this.run(tx, caller, id, body), { timeout: 30_000, maxWait: 10_000 });
+        return await this.prisma.$transaction((tx) => this.run(tx, caller, id, body, solo), { timeout: 30_000, maxWait: 10_000 });
       } catch (e) {
         if (attempt < 1 && isDeadlock(e)) continue;
         throw e;
@@ -208,16 +225,71 @@ export class DispatchCheckoutService {
     }
   }
 
-  /** Every key the steps need, checked before any write so a refusal names the missing one. */
-  private assertPermissions(caller: CheckoutCaller, body: DispatchAndCollectRequestType) {
+  /**
+   * Who may run the checkout. A caller holding every key the steps need (the manager path) always
+   * may; the refusal names the missing one, before any write. Anyone else qualifies only through
+   * the owner's solo switch — cash in full, or credit a standing approval covers, on a PACCI bill
+   * with every default charge kept — and is otherwise told a manager must finish the truck.
+   * Returns whether the caller is going through the solo door.
+   */
+  private async authorize(caller: CheckoutCaller, id: string, body: DispatchAndCollectRequestType): Promise<boolean> {
     const need = ['outbound.finalize', 'invoices.manage'];
     if (body.payment.mode !== 'CREDIT') need.push('payments.record');
-    for (const key of need) {
-      if (!caller.permissions.has(key)) throw Errors.FORBIDDEN(`Missing permission: ${key}`);
+    const missing = need.find((key) => !caller.permissions.has(key));
+    if (!missing) return false;
+
+    // A manager-level caller with an owner-customised matrix keeps the plain message; a munshi is
+    // told why a manager is needed.
+    const refuse = (reason: string): never => {
+      if (caller.permissions.has('outbound.finalize')) throw Errors.FORBIDDEN(`Missing permission: ${missing}`);
+      throw Errors.DISPATCH_NEEDS_MANAGER(reason);
+    };
+
+    const ob = await this.prisma.outboundEvent.findFirst({
+      where: { id, facilityId: caller.facilityId },
+      select: { lot: { select: { bookType: true, billingPartyId: true } } },
+    });
+    if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
+
+    const verdict = await this.soloVerdict(this.prisma, caller.facilityId, ob.lot);
+    if (!verdict.allowed) return refuse(verdict.reason);
+    if ((body.skip_service_charge_ids ?? []).length > 0) return refuse('leaving a charge off the bill is a manager decision');
+    if (body.payment.mode === 'CREDIT') {
+      if (!verdict.creditApproved) return refuse('this party has no standing credit approval');
+    } else if (body.payment.mode !== 'CASH') {
+      return refuse('only cash or approved credit can be taken without a manager');
     }
+    return true;
   }
 
-  private async run(tx: Prisma.TransactionClient, caller: CheckoutCaller, id: string, body: DispatchAndCollectRequestType) {
+  /**
+   * May the munshi finish this truck alone? Needs the owner's switch and a PACCI lot. `creditApproved`
+   * says the billing party holds a live standing approval; whether the bill fits under its ceiling
+   * is checked at the checkout, under a lock, once the bill is in the ledger.
+   */
+  private async soloVerdict(
+    db: PrismaClient | Prisma.TransactionClient,
+    facilityId: string,
+    lot: { bookType: string; billingPartyId: string },
+  ): Promise<{ allowed: true; creditApproved: boolean } | { allowed: false; reason: string; creditApproved: false }> {
+    const facility = await db.facility.findUnique({ where: { id: facilityId }, select: { settings: true } });
+    if (!resolveFacilitySettings(facility?.settings ?? null).dispatch_solo_mode) {
+      return { allowed: false, reason: 'the owner has not switched on one-person dispatch', creditApproved: false };
+    }
+    if (lot.bookType !== 'PACCI') {
+      return { allowed: false, reason: 'a KATCHI-book bill is a manager decision', creditApproved: false };
+    }
+    const approval = await findActiveApproval(db, facilityId, lot.billingPartyId);
+    return { allowed: true, creditApproved: approval != null };
+  }
+
+  private async run(
+    tx: Prisma.TransactionClient,
+    caller: CheckoutCaller,
+    id: string,
+    body: DispatchAndCollectRequestType,
+    solo: boolean,
+  ) {
     const { facilityId, userId, role } = caller;
 
     const { outbound, invoiceId } = await this.outbound.finalizeInTransaction(
@@ -228,6 +300,15 @@ export class DispatchCheckoutService {
       body.picked_from?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
       userId,
     );
+    // Two solo credit dispatches for one party must not both pass the ceiling: take the party's
+    // credit lock now (after the outbound/lot locks, the order everything else uses) so the second
+    // one sees the first one's bill in the ledger. (The document-number locks taken further down
+    // happen to serialise two checkouts too, so the race test passes without this lock; it is here
+    // so the ceiling does not depend on that.)
+    if (solo && body.payment.mode === 'CREDIT') {
+      const bill = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { billingPartyId: true } });
+      await advisoryXactLock(tx, `${facilityId}:party-credit:${bill.billingPartyId}`);
+    }
 
     const ob = await tx.outboundEvent.findUniqueOrThrow({
       where: { id },
@@ -251,6 +332,13 @@ export class DispatchCheckoutService {
     }
 
     const invoice = await this.invoices.finalizeInTransaction(tx, facilityId, invoiceId, userId, {});
+
+    // The bill is in the ledger now, so the party's exposure includes it: it must still sit under the ceiling.
+    if (solo && body.payment.mode === 'CREDIT') {
+      const bill = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { billingPartyId: true } });
+      const cover = await standingCreditCover(tx, facilityId, [{ partyId: bill.billingPartyId, uncleared: 0 }]);
+      if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('this bill would take the party past its approved credit');
+    }
 
     let payment: { id: string; receipt_number: string | null } | null = null;
     if (body.payment.mode !== 'CREDIT' && total > 0.005) {

@@ -12,6 +12,7 @@ import { qk } from '@/lib/query-keys';
 import { formatMoney } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth.store';
 import { useListQuery } from '@/hooks/use-list-query';
+import { useFacility } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -73,7 +74,11 @@ export default function DispatchDeskPage() {
   const canUse = !user || can(user, 'outbound.record');
   // Ask the server only once the user is known and may: no unauthenticated or 403 requests while loading.
   const canQuery = !!user && can(user, 'outbound.record');
-  const canDispatch = can(user, 'outbound.finalize') && can(user, 'invoices.manage');
+  // The owner's solo switch lets the munshi try; the checkout sheet shows the exact verdict for the
+  // truck, and the server decides (this copy of the setting can be five minutes stale).
+  const { data: facility } = useFacility({ enabled: canQuery });
+  const soloOn = facility?.settings?.dispatch_solo_mode === true;
+  const canDispatch = (can(user, 'outbound.finalize') && can(user, 'invoices.manage')) || (canQuery && soloOn);
 
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');

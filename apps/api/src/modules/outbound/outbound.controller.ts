@@ -122,10 +122,12 @@ export async function outboundRoutes(app: FastifyInstance) {
   });
 
   // GET /v1/outbound-events/:id/checkout-preview — the bill a weighed withdrawal will carry.
+  // outbound.record, not .finalize: the munshi reads the bill, and the preview says whether the
+  // owner's solo switch lets them finish it.
   app.route({
     method: 'GET',
     url: '/v1/outbound-events/:id/checkout-preview',
-    preHandler: [app.authenticate, app.requirePermission('outbound.finalize')],
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
     schema: { params: IdParam },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
@@ -134,12 +136,13 @@ export async function outboundRoutes(app: FastifyInstance) {
   });
 
   // POST /v1/outbound-events/:id/dispatch-and-collect — dispatch, bill and collect in one
-  // transaction. The route needs outbound.finalize; the handler also checks invoices.manage
-  // and (unless on credit) payments.record before anything is written.
+  // transaction. The route needs outbound.record; the handler then wants outbound.finalize,
+  // invoices.manage and (unless on credit) payments.record, or the owner's solo switch for a
+  // clean truck (cash in full, or approved credit) — checked before anything is written.
   app.route({
     method: 'POST',
     url: '/v1/outbound-events/:id/dispatch-and-collect',
-    preHandler: [app.authenticate, app.requirePermission('outbound.finalize')],
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
     schema: { params: IdParam, body: DispatchAndCollectRequest },
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;

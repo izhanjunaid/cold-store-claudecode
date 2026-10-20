@@ -130,6 +130,9 @@ export const Errors = {
       409,
       'expected_total_pkr',
     ),
+  // Solo dispatch (C1b): the checkout is a manager's job unless the owner has let the munshi finish a clean truck alone.
+  DISPATCH_NEEDS_MANAGER: (reason: string) =>
+    new AppError('DISPATCH_NEEDS_MANAGER', `A manager must finish this truck: ${reason}`, 403),
   OUTBOUND_ALREADY_LEFT: () =>
     new AppError(
       'OUTBOUND_ALREADY_LEFT',

@@ -48,6 +48,7 @@ const data = <T = any>(r: Res) => JSON.parse(r.body).data as T;
 async function cleanup() {
   await withGuardsDisabled(prisma, async () => {
     await prisma.gatePass.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    await prisma.partyCreditApproval.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.paymentAllocation.deleteMany({ where: { payment: { facilityId: TEST_FACILITY_ID } } });
     await prisma.payment.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await prisma.invoiceLineItem.deleteMany({ where: { invoice: { facilityId: TEST_FACILITY_ID } } });
@@ -189,7 +190,7 @@ describe('checkout preview', () => {
     await untouched(lotId, id, 100);
   });
 
-  it('needs a weighed withdrawal and outbound.finalize', async () => {
+  it('needs a weighed withdrawal and outbound.record (the guard is refused)', async () => {
     const lotId = await createLot(50);
     const create = await app.inject({
       method: 'POST',
@@ -200,7 +201,17 @@ describe('checkout preview', () => {
     const pendingId = data<{ id: string }>(create).id;
     const notWeighed = await preview(pendingId);
     expect([notWeighed.statusCode, code(notWeighed)]).toEqual([422, 'OUTBOUND_WEIGHT_REQUIRED']);
-    expect((await preview(pendingId, operatorToken)).statusCode).toBe(403);
+    // The munshi reads the bill (the solo switch decides whether they may finish it).
+    const asOperator = await preview(pendingId, operatorToken);
+    expect([asOperator.statusCode, code(asOperator)]).toEqual([422, 'OUTBOUND_WEIGHT_REQUIRED']);
+    expect((await preview(pendingId, securityToken)).statusCode).toBe(403);
+  });
+
+  it('tells the munshi whether they may finish the truck alone — booleans and a reason, never a ceiling', async () => {
+    const { id } = await weighed(20);
+    const off = data(await preview(id, operatorToken));
+    expect(off.solo).toEqual({ allowed: false, reason: expect.stringContaining('one-person dispatch'), credit_available: false });
+    expect(JSON.stringify(off.solo)).not.toMatch(/max|ceiling|exposure/i);
   });
 });
 
@@ -432,5 +443,148 @@ describe('the queue', () => {
     )[0];
     expect(row.stage).toBe('DISPATCHED');
     expect(row.invoice).toMatchObject({ status: 'FINALIZED', total_pkr: total, balance_due_pkr: total });
+  });
+});
+
+describe('solo dispatch (the owner lets the munshi finish a clean truck)', () => {
+  const setSolo = async (on: boolean) => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/facilities/me',
+      headers: authHeaders(ownerToken),
+      payload: { settings: { dispatch_solo_mode: on } },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+  };
+  const approve = async (max: number) => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/parties/${partyId}/credit-approval`,
+      headers: authHeaders(managerToken),
+      payload: { max_outstanding_pkr: max },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+  };
+  const credit = (total: number) => ({ expected_total_pkr: total, payment: { mode: 'CREDIT' } });
+  const nothingWritten = async () => {
+    expect(await prisma.payment.count({ where: { partyId } })).toBe(0);
+    expect(await prisma.journalEntry.count({ where: { facilityId: TEST_FACILITY_ID } })).toBe(0);
+  };
+  const refusedAsManagerJob = (r: Res) => expect([r.statusCode, code(r)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+
+  afterAll(() => setSolo(false));
+
+  it('switch off: the munshi is told a manager must finish it, and nothing is written', async () => {
+    await setSolo(false);
+    const { id, lotId } = await weighed(30);
+    const total = data(await preview(id)).total_pkr as number;
+    refusedAsManagerJob(await checkout(id, cash(total), operatorToken));
+    await untouched(lotId, id, 30);
+    await nothingWritten();
+  });
+
+  it('switch on: the munshi takes cash in full alone — dispatched, billed, paid, with their own name on it', async () => {
+    await setSolo(true);
+    const { id } = await weighed(30);
+    const p = data(await preview(id, operatorToken));
+    expect(p.solo).toMatchObject({ allowed: true, credit_available: false });
+    const res = await checkout(id, cash(p.total_pkr), operatorToken);
+    expect(res.statusCode, res.body).toBe(200);
+    const inv = await prisma.invoice.findFirstOrThrow({ where: { outboundEventId: id } });
+    expect(inv.status).toBe('FINALIZED');
+    expect(Number(inv.amountPaidPkr)).toBeCloseTo(p.total_pkr, 2);
+    const out = await prisma.outboundEvent.findUniqueOrThrow({ where: { id } });
+    expect(out.status).toBe('DISPATCHED');
+    expect(out.finalizedBy).not.toBeNull();
+    const pay = await prisma.payment.findFirstOrThrow({ where: { partyId } });
+    expect(pay.createdBy).toBe(out.finalizedBy);
+  });
+
+  it('switch on: everything but cash or approved credit still needs a manager, and each refusal writes nothing', async () => {
+    await setSolo(true);
+    const { id, lotId } = await weighed(30);
+    const total = data(await preview(id)).total_pkr as number;
+    refusedAsManagerJob(await checkout(id, cash(total, { skip_service_charge_ids: [loadingChargeId] }), operatorToken));
+    refusedAsManagerJob(await checkout(id, { expected_total_pkr: total, payment: { mode: 'CHEQUE', cheque_date: businessDate() } }, operatorToken));
+    refusedAsManagerJob(await checkout(id, { expected_total_pkr: total, payment: { mode: 'BANK_TRANSFER' } }, operatorToken));
+    refusedAsManagerJob(await checkout(id, credit(total), operatorToken)); // no standing approval
+    await untouched(lotId, id, 30);
+    await nothingWritten();
+    // The manager's own path is unchanged by the switch.
+    const skipped = await checkout(id, cash(total - 60, { skip_service_charge_ids: [loadingChargeId] }));
+    expect(skipped.statusCode, skipped.body).toBe(200);
+  });
+
+  it('switch on: a KATCHI-book truck is a manager decision', async () => {
+    await setSolo(true);
+    const { id, lotId } = await weighed(30, { lotToken: ownerToken, lotExtra: { book_type: 'KATCHI' } });
+    const p = data(await preview(id, operatorToken));
+    expect(p.solo).toMatchObject({ allowed: false, credit_available: false });
+    refusedAsManagerJob(await checkout(id, cash(p.total_pkr), operatorToken));
+    await untouched(lotId, id, 30);
+    await nothingWritten();
+  });
+
+  it('on credit: a standing approval that covers the bill lets the munshi finish it; the gate then agrees', async () => {
+    await setSolo(true);
+    await approve(1_000_000);
+    const { id } = await weighed(30);
+    const p = data(await preview(id, operatorToken));
+    expect(p.solo.credit_available).toBe(true);
+    const res = await checkout(id, credit(p.total_pkr), operatorToken);
+    expect(res.statusCode, res.body).toBe(200);
+    const inv = await prisma.invoice.findFirstOrThrow({ where: { outboundEventId: id } });
+    expect(Number(inv.totalPkr) - Number(inv.amountPaidPkr)).toBeCloseTo(p.total_pkr, 2);
+    expect(await prisma.payment.count({ where: { partyId } })).toBe(0);
+  });
+
+  it('on credit: a ceiling the bill would pass, a lapsed or a revoked approval each send it to a manager', async () => {
+    await setSolo(true);
+    const { id, lotId } = await weighed(30);
+    const total = data(await preview(id)).total_pkr as number;
+
+    await approve(Math.floor(total) - 1); // one rupee short of this bill
+    expect(data(await preview(id, operatorToken)).solo.credit_available).toBe(false);
+    refusedAsManagerJob(await checkout(id, credit(total), operatorToken));
+    await untouched(lotId, id, 30);
+    await nothingWritten();
+
+    await approve(1_000_000);
+    await prisma.partyCreditApproval.updateMany({
+      where: { facilityId: TEST_FACILITY_ID, partyId, revokedAt: null },
+      data: { validUntil: new Date('2020-01-01') },
+    });
+    refusedAsManagerJob(await checkout(id, credit(total), operatorToken));
+
+    await prisma.partyCreditApproval.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+    await approve(1_000_000);
+    const revoke = await app.inject({
+      method: 'POST',
+      url: `/v1/parties/${partyId}/credit-approval/revoke`,
+      headers: authHeaders(managerToken),
+      payload: { reason: 'Party stopped paying' },
+    });
+    expect(revoke.statusCode, revoke.body).toBe(200);
+    refusedAsManagerJob(await checkout(id, credit(total), operatorToken));
+    await untouched(lotId, id, 30);
+    await nothingWritten();
+  });
+
+  it('two credit dispatches that each fit the ceiling but not together: one goes, the other is refused', async () => {
+    await setSolo(true);
+    const a = await weighed(40, { plate: 'LHR-9101' });
+    const b = await weighed(40, { plate: 'LHR-9102' });
+    const total = data(await preview(a.id)).total_pkr as number;
+    await approve(Math.round(total * 1.5)); // room for one bill, not two
+    const [ra, rb] = await Promise.all([
+      checkout(a.id, credit(total), operatorToken),
+      checkout(b.id, credit(total), operatorToken),
+    ]);
+    expect([ra.statusCode, rb.statusCode].sort()).toEqual([200, 403]);
+    refusedAsManagerJob([ra, rb].find((r) => r.statusCode === 403)!);
+    expect(await prisma.invoice.count({ where: { outboundEventId: { in: [a.id, b.id] }, status: 'FINALIZED' } })).toBe(1);
+    // The loser left no trace: its lot still holds its bags and it is still weighed.
+    const loser = ra.statusCode === 403 ? a : b;
+    await untouched(loser.lotId, loser.id, 40);
   });
 });

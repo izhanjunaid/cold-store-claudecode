@@ -59,6 +59,8 @@ export interface FacilitySettings {
   /** JE-25 — storage revenue is accrued monthly from this fiscal-year start (null: not yet). */
   revenue_accrual?: { start_date: string | null };
   fiscal_year_start_month?: number;
+  /** Fast-dispatch C1b — the munshi may finish a clean truck (cash, or approved credit) without a manager. */
+  dispatch_solo_mode?: boolean;
   [key: string]: unknown;
 }
 
@@ -169,10 +171,11 @@ export const isExpenseAccount = (a: AccountRef) =>
   EXPENSE_ACCOUNT_CLASSES.includes(a.account_class) && a.allow_manual_posting;
 
 /** Facility profile + settings (thresholds, GST, backdating limits). */
-export function useFacility() {
+export function useFacility(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: qk.facility.me,
     queryFn: () => apiClient<FacilityMe>('/v1/facilities/me'),
     staleTime: REFERENCE_STALE_TIME,
+    enabled: options.enabled ?? true,
   });
 }

@@ -211,6 +211,51 @@ describe('CheckoutSheet', () => {
     expect(screen.getByRole('button', { name: /Dispatch/ })).toBeDisabled();
   });
 
+  describe('one-person dispatch (the owner’s solo switch)', () => {
+    const soloPreview = (solo: unknown) => {
+      apiClient.mockImplementation((path: string, opts?: { method?: string }) => {
+        if (opts?.method === 'POST') return Promise.resolve(RESULT);
+        if (path.endsWith('/checkout-preview')) return Promise.resolve({ ...PREVIEW, solo });
+        return Promise.resolve(null);
+      });
+    };
+    beforeEach(() => {
+      role = 'OPERATOR';
+      permissions = ['outbound.record'];
+    });
+
+    it('the munshi takes cash in full: only Cash is offered, charges are fixed, and the body says so', async () => {
+      soloPreview({ allowed: true, credit_available: false });
+      renderSheet();
+      expect(await screen.findByText(/finish this truck yourself/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Cash' })).toBeEnabled();
+      for (const name of ['Bank transfer', 'Cheque', 'Mobile wallet', 'On credit']) {
+        expect(screen.getByRole('button', { name })).toBeDisabled();
+      }
+      expect(screen.getByLabelText(/Loading/)).toBeDisabled();
+      expect(screen.getByText(/On credit is not offered/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Dispatch & Collect Rs\s?5,200/ }));
+      await waitFor(() => expect(posts()).toHaveLength(1));
+      expect(posts()[0]![1].body).toEqual({ expected_total_pkr: 5200, payment: { mode: 'CASH' } });
+    });
+
+    it('credit appears only when the party’s approval covers this bill', async () => {
+      soloPreview({ allowed: true, credit_available: true });
+      renderSheet();
+      fireEvent.click(await screen.findByRole('button', { name: 'On credit' }));
+      fireEvent.click(screen.getByRole('button', { name: /Dispatch on credit/ }));
+      await waitFor(() => expect(posts()).toHaveLength(1));
+      expect(posts()[0]![1].body.payment).toEqual({ mode: 'CREDIT' });
+    });
+
+    it('when the switch is off, or the bill is KATCHI, it says why a manager is needed and cannot dispatch', async () => {
+      soloPreview({ allowed: false, reason: 'the owner has not switched on one-person dispatch', credit_available: false });
+      renderSheet();
+      expect(await screen.findByText(/needs a manager — the owner has not switched on one-person dispatch/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Dispatch/ })).toBeDisabled();
+    });
+  });
+
   it('without payments.record it can still go on credit, and cash is not offered', async () => {
     permissions = ['outbound.finalize', 'invoices.manage'];
     renderSheet();
