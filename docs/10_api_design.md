@@ -346,6 +346,11 @@ X-Facility-ID: <facility_uuid>
 | `OUTBOUND_CANCELLED` | 409 | The withdrawal was cancelled |
 | `DISPATCH_TOTAL_CHANGED` | 409 | Dispatch & collect: the bill differs from the total the client reviewed; nothing was written — review the new bill |
 | `BLIND_ROLE_FORBIDDEN` | 403 | The gate role (SECURITY) asked for a document that shows stock quantities (an invoice, its PDF, a lot's invoices, the placement slip). On every other response the guard receives, stock quantities are `null` (docs/07) |
+| `CASH_TRACKING_OFF` | 409 | A handover was attempted while cash tracking is off (Settings → Dispatch Desk Cash) |
+| `HANDOVER_NOTHING_PENDING` | 409 | The collector has no cash waiting (already counted, or the owner's own cash, which is not tracked) |
+| `HANDOVER_EXPECTED_CHANGED` | 409 | The cash waiting changed since the manager looked; nothing was written — count again |
+| `HANDOVER_SELF_CONFIRM` | 403 | Nobody counts their own cash |
+| `HANDOVER_NOT_FOUND` / `HANDOVER_ALREADY_VOIDED` | 404 / 409 | Void of a handover that does not exist or was already voided |
 | `OUTBOUND_ALREADY_LEFT` | 409 | Cancel refused: a truck already carried this withdrawal out (the old gate allowed that before dispatch) |
 | `OUTBOUND_QUANTITY_STALE` | 409 | A FULL withdrawal no longer equals the lot balance; cancel and rebook |
 | `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization, unless every unpaid bill belongs to a party with a live standing credit approval that holds its exposure (then the guard releases it alone) |
@@ -543,8 +548,13 @@ X-Facility-ID: <facility_uuid>
 | PATCH | `/gate-passes/:id/link-lot` | Link to generated lot after weigh-in | OPERATOR+ |
 | POST | `/gate-passes/:id/outward` | Dispatch truck (Clear) | SECURITY+ |
 | GET | `/parties/:id/credit-approval` | Whether the party has a live standing credit approval (`approved`, `valid_until`, approver). The ceiling and note only for `parties.credit_terms` holders | authenticated |
+
 | POST | `/parties/:id/credit-approval` | Approve credit: `{ max_outstanding_pkr, valid_until?, note? }`; replaces (revokes) any live approval; refuses a past date | MANAGER+ (`parties.credit_terms`) |
 | POST | `/parties/:id/credit-approval/revoke` | `{ reason }`; the party's credit-billed trucks need a manager at the gate again | MANAGER+ (`parties.credit_terms`) |
+| GET | `/dispatch/day?date=` | The desk's business day per collector: withdrawals dispatched, cash / bank / cheques taken, credit billed, and (when tracking is on) the cash waiting to be handed over and since when. Own row only unless `cash_handovers.confirm` | OPERATOR+ (`outbound.record`) |
+| POST | `/cash-handovers` | Count a collector's waiting cash: `{ collector_id, expected_cash_pkr, counted_cash_pkr, variance_reason? }`. 409 `HANDOVER_EXPECTED_CHANGED` if the pool moved; a difference needs a reason and posts JE-28 | MANAGER+ (`cash_handovers.confirm`) |
+| POST | `/cash-handovers/:id/void` | `{ reason }`; reverses the difference entry and frees the receipts | MANAGER+ (`cash_handovers.confirm`) |
+| GET | `/cash-handovers?collector_id=&has_variance=` | Handover history | MANAGER+ (`cash_handovers.confirm`) |
 
 ### 4.19 Peshgi / Loans (`/loans`)
 

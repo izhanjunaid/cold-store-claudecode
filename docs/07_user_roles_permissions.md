@@ -24,7 +24,7 @@
 
 As of Phase 15, authorization is a **capability matrix the owner can edit**, not a
 hardcoded role hierarchy. The source of truth is the permission registry in
-`packages/shared/src/permissions.ts` (50 keys as of fast-dispatch Phase 0; the group list below predates some later keys — the file is authoritative). Each key has a `defaultMinRole`
+`packages/shared/src/permissions.ts` (51 keys as of fast-dispatch Phase C1; the group list below predates some later keys — the file is authoritative). Each key has a `defaultMinRole`
 that **exactly reproduces the pre-Phase-15 `requireMinRole` threshold**, so with
 no customization the effective permissions are identical to the historical
 behaviour documented in the matrix below. The API enforces every key at the
@@ -41,6 +41,7 @@ caller's effective key list, and the web app gates nav/actions with `can(user, k
   gate: credit authorization, overriding a count/plate mismatch or an unmatched load
   (with a stored reason), and exemption from the no-self-release rule (all MANAGER+).
 - **Standing credit approvals (Phase C1a).** A manager (`parties.credit_terms`) can pre-approve a party for credit: a ceiling on what it may owe in total (both books, from the ledger, uncleared cheques counted as owed) and an optional last day, revocable, one live approval per party (a new one revokes the old; history is kept). A truck whose every unpaid bill belongs to a party with a live approval and headroom is READY at the gate and the guard can release it alone; the pass stores the approval ids and names the approving manager in `credit_authorized_by`. A manager ticking "Authorize on credit" still works and stays the recorded authority. A bill that is missing, voided or DRAFT is never covered. The ceiling is a rupee figure that could stand in for a bag count, so only holders of `parties.credit_terms` see it; the guard sees `on_credit: true` and nothing else.
+- **Cash handover (Phase C1c).** Every CASH receipt belongs to whoever recorded it (`payments.created_by`). With `cash_tracking_from` set (Settings → Dispatch Desk Cash, owner only), the CASH receipts recorded on or after that business day and not yet in a handover are that collector's "cash waiting". A holder of `cash_handovers.confirm` (MANAGER) counts it on the Dispatch Desk and records the handover: the figure shown is echoed back (a mismatch is refused with the new figure), a difference needs a reason and posts JE-28 to Cash Short & Over, a clean count posts nothing (every cash receipt already sits in 1010). Nobody counts their own cash (also a DB CHECK), the owner's own cash is not tracked, and a receipt is in at most one handover (UNIQUE). `GET /v1/dispatch/day` is for anyone who books withdrawals (`outbound.record`): they get their own row; holders of the key get every collector's. Cheques are listed by count and total, never counted as cash. A void reverses the difference entry and frees the receipts.
   Reference-data GET routes remain authenticate-only so every role keeps the read
   access it has today.
 
@@ -52,7 +53,7 @@ caller's effective key list, and the web app gates nav/actions with `can(user, k
 - **Inbound & Lots**: `lots.manage`(OPERATOR), `lots.transfer_ownership`(MANAGER)
 - **Outbound**: `outbound.record`(OPERATOR — book, weigh, cancel an undispatched withdrawal, read the dispatch queue), `outbound.finalize`(MANAGER — also dispatch & collect, which additionally needs `invoices.manage` and, unless on credit, `payments.record`)
 - **Gate Pass**: `gate_passes.log`(SECURITY), `gate_passes.link_lot`(OPERATOR)
-- **Billing**: `rate_plans.manage`(MANAGER), `service_charges.manage`(MANAGER), `billing.view`(ACCOUNTANT), `invoices.manage`(MANAGER), `invoices.write_off`(OWNER), `payments.record`(ACCOUNTANT)
+- **Billing**: `rate_plans.manage`(MANAGER), `service_charges.manage`(MANAGER), `billing.view`(ACCOUNTANT), `invoices.manage`(MANAGER), `invoices.write_off`(OWNER), `payments.record`(ACCOUNTANT), `cash_handovers.confirm`(MANAGER)
 - **Accounting**: `accounting.view`(ACCOUNTANT), `accounting.manage_accounts`(OWNER), `accounting.post_journal`(MANAGER), `accounting.period_lock`(MANAGER), `accounting.period_unlock`(OWNER)
 - **Fixed Assets**: `fixed_assets.manage`(OWNER)
 - **Payroll & HR**: `payroll.view`(ACCOUNTANT), `employees.manage`(MANAGER), `employees.terminate`(OWNER), `payroll.draft`(ACCOUNTANT), `payroll.finalize`(MANAGER), `payroll.remit`(OWNER)
