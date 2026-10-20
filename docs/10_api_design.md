@@ -348,7 +348,7 @@ X-Facility-ID: <facility_uuid>
 | `BLIND_ROLE_FORBIDDEN` | 403 | The gate role (SECURITY) asked for a document that shows stock quantities (an invoice, its PDF, a lot's invoices, the placement slip). On every other response the guard receives, stock quantities are `null` (docs/07) |
 | `OUTBOUND_ALREADY_LEFT` | 409 | Cancel refused: a truck already carried this withdrawal out (the old gate allowed that before dispatch) |
 | `OUTBOUND_QUANTITY_STALE` | 409 | A FULL withdrawal no longer equals the lot balance; cancel and rebook |
-| `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization |
+| `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization, unless every unpaid bill belongs to a party with a live standing credit approval that holds its exposure (then the guard releases it alone) |
 | `GATE_OUTWARD_INVOICE_NOT_FINAL` | 422 | A withdrawal on the truck is billed on a DRAFT invoice — finalize it first (credit cannot cover a draft) |
 | `GATE_OUTWARD_NOT_DISPATCHED` | 422 | The named withdrawal has not been dispatched |
 | `GATE_OUTWARD_ALREADY_USED` | 409 | The withdrawal already left on another truck |
@@ -542,6 +542,9 @@ X-Facility-ID: <facility_uuid>
 | GET | `/gate-passes` | List active vehicles | All |
 | PATCH | `/gate-passes/:id/link-lot` | Link to generated lot after weigh-in | OPERATOR+ |
 | POST | `/gate-passes/:id/outward` | Dispatch truck (Clear) | SECURITY+ |
+| GET | `/parties/:id/credit-approval` | Whether the party has a live standing credit approval (`approved`, `valid_until`, approver). The ceiling and note only for `parties.credit_terms` holders | authenticated |
+| POST | `/parties/:id/credit-approval` | Approve credit: `{ max_outstanding_pkr, valid_until?, note? }`; replaces (revokes) any live approval; refuses a past date | MANAGER+ (`parties.credit_terms`) |
+| POST | `/parties/:id/credit-approval/revoke` | `{ reason }`; the party's credit-billed trucks need a manager at the gate again | MANAGER+ (`parties.credit_terms`) |
 
 ### 4.19 Peshgi / Loans (`/loans`)
 

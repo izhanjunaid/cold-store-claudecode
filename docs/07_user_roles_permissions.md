@@ -40,6 +40,7 @@ caller's effective key list, and the web app gates nav/actions with `can(user, k
   future-dated inbound/outbound dates and third-party release (MANAGER+), and at the
   gate: credit authorization, overriding a count/plate mismatch or an unmatched load
   (with a stored reason), and exemption from the no-self-release rule (all MANAGER+).
+- **Standing credit approvals (Phase C1a).** A manager (`parties.credit_terms`) can pre-approve a party for credit: a ceiling on what it may owe in total (both books, from the ledger, uncleared cheques counted as owed) and an optional last day, revocable, one live approval per party (a new one revokes the old; history is kept). A truck whose every unpaid bill belongs to a party with a live approval and headroom is READY at the gate and the guard can release it alone; the pass stores the approval ids and names the approving manager in `credit_authorized_by`. A manager ticking "Authorize on credit" still works and stays the recorded authority. A bill that is missing, voided or DRAFT is never covered. The ceiling is a rupee figure that could stand in for a bag count, so only holders of `parties.credit_terms` see it; the guard sees `on_credit: true` and nothing else.
   Reference-data GET routes remain authenticate-only so every role keeps the read
   access it has today.
 
