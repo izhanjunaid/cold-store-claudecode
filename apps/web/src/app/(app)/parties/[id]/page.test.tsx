@@ -19,6 +19,8 @@ vi.mock('@/components/form', () => ({ useConfirm: () => vi.fn() }));
 vi.mock('@/hooks/use-api-mutation', () => ({ useApiMutation: () => ({ mutate: vi.fn(), isPending: false }) }));
 vi.mock('@/components/billing/record-payment-sheet', () => ({ RecordPaymentSheet: () => null }));
 vi.mock('@/components/party/issue-loan-dialog', () => ({ IssueLoanDialog: () => null }));
+// The standing-credit card has its own tests (and its own query client).
+vi.mock('@/components/party/standing-credit-card', () => ({ StandingCreditCard: () => null }));
 
 import PartyDetailPage from './page';
 

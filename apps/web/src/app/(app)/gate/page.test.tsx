@@ -341,6 +341,16 @@ describe('Ready to leave', () => {
     expect(await screen.findByText(/Payment pending — Rs 4,500 \(cheque not cleared\)/)).toBeInTheDocument();
     expect(screen.getByText('Paid — ready to leave')).toBeInTheDocument();
   });
+  it('a truck leaving on a standing credit approval is READY and says so — no amount, no ceiling', async () => {
+    listWith({ ...READY, release: { ...READY.release, outstanding_pkr: 48_000, on_credit: true } });
+    render(<GatePassConsolePage />);
+    const card = (await screen.findByText('Ready to leave')).closest('div[class*="border-green"]') as HTMLElement;
+    expect(within(card).getByText('LHR-7777')).toBeInTheDocument();
+    expect(screen.getByText('Credit approved — ready to leave')).toBeInTheDocument();
+    expect(screen.queryByText('Paid — ready to leave')).not.toBeInTheDocument();
+    expect(screen.queryByText(/48,000/)).not.toBeInTheDocument();
+  });
+
   it('Release opens the same blind count dialog, and shows no expected count', async () => {
     listWith({ ...READY, authorized_quantity: 137 });
     render(<GatePassConsolePage />);

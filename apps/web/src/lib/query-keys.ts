@@ -26,6 +26,7 @@ export const qk = {
     search: (query: string) => ['parties', 'search', query] as const,
     detail: (id: string) => ['parties', 'detail', id] as const,
     ledger: (id: string) => ['parties', 'ledger', id] as const,
+    creditApproval: (id: string) => ['parties', 'credit-approval', id] as const,
   },
   invoices: {
     all: ['invoices'] as const,

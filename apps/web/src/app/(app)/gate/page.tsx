@@ -48,6 +48,8 @@ interface GatePass {
     cheque_pending: boolean;
     marka: string | null;
     owner_party_name: string | null;
+    /** READY on a standing credit approval rather than payment. A flag only: no amount or ceiling. */
+    on_credit?: boolean;
   };
 }
 
@@ -62,7 +64,7 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = 
 function releaseLabel(r: NonNullable<GatePass['release']>): { text: string; tone: 'success' | 'warning' | 'danger' | 'muted' } {
   switch (r.state) {
     case 'READY':
-      return { text: 'Paid — ready to leave', tone: 'success' };
+      return { text: r.on_credit ? 'Credit approved — ready to leave' : 'Paid — ready to leave', tone: 'success' };
     case 'PAYMENT_PENDING':
       return {
         text: `Payment pending — Rs ${r.outstanding_pkr.toLocaleString()}${r.cheque_pending ? ' (cheque not cleared)' : ''}`,

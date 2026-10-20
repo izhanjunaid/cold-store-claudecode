@@ -21,6 +21,7 @@ import { useApiMutation } from '@/hooks/use-api-mutation';
 import { qk } from '@/lib/query-keys';
 import { RecordPaymentSheet } from '@/components/billing/record-payment-sheet';
 import { IssueLoanDialog } from '@/components/party/issue-loan-dialog';
+import { StandingCreditCard } from '@/components/party/standing-credit-card';
 
 import { formatDate, formatMoney, formatCount } from '@/lib/format';
 import { LotWithdrawAction } from '@/components/outbound/lot-withdraw-action';
@@ -329,6 +330,8 @@ export default function PartyDetailPage() {
           Over credit limit — outstanding exceeds the {formatMoney(party.credit_limit_pkr)} limit set for this party.
         </div>
       )}
+
+      <StandingCreditCard partyId={party.id} partyName={party.name} />
 
       <Card className="mb-4">
         <CardHeader>
