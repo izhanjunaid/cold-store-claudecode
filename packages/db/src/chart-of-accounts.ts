@@ -209,6 +209,7 @@ export const CHART_OF_ACCOUNTS: CoaSeed[] = [
   { code: '6080', name: 'Bad Debt Expense', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
   { code: '6090', name: 'Bank Charges', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT' },
   { code: '6100', name: 'Miscellaneous', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true },
+  { code: '6105', name: 'Cash Short & Over', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
   { code: '6120', name: 'Depreciation — Building', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
   { code: '6130', name: 'Depreciation — Vehicles', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },
   { code: '6140', name: 'Amortisation — Software', cls: 'EXPENSE', type: 'DETAIL', parent: '6000', normal: 'DEBIT', system: true, manual: false },

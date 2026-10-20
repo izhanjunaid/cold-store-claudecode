@@ -20,6 +20,7 @@ const NUMBERED_COLUMN = {
   party_loans: 'loan_number',
   bills: 'bill_number',
   supplier_payments: 'payment_number',
+  cash_handovers: 'handover_number',
 } as const;
 
 export type NumberedTable = keyof typeof NUMBERED_COLUMN;

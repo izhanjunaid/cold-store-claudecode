@@ -142,6 +142,23 @@ export const Errors = {
       `This FULL withdrawal is for ${quantity} bag(s) but the lot now holds ${balance}. Cancel it and book a new one.`,
       409,
     ),
+  // Cash handovers (Phase C1c)
+  CASH_TRACKING_OFF: () =>
+    new AppError('CASH_TRACKING_OFF', 'Cash tracking is not switched on — the owner turns it on in Settings', 409),
+  HANDOVER_NOTHING_PENDING: () =>
+    new AppError('HANDOVER_NOTHING_PENDING', 'This collector has no cash waiting to be handed over', 409),
+  HANDOVER_EXPECTED_CHANGED: (expected: number, actual: number) =>
+    new AppError(
+      'HANDOVER_EXPECTED_CHANGED',
+      `The cash waiting from this collector is now Rs ${actual.toFixed(2)}, not the Rs ${expected.toFixed(2)} shown — count it again`,
+      409,
+      'expected_cash_pkr',
+    ),
+  HANDOVER_SELF_CONFIRM: () =>
+    new AppError('HANDOVER_SELF_CONFIRM', 'You cannot count your own cash — another manager must', 403),
+  HANDOVER_NOT_FOUND: () => new AppError('HANDOVER_NOT_FOUND', 'Cash handover does not exist', 404),
+  HANDOVER_ALREADY_VOIDED: () =>
+    new AppError('HANDOVER_ALREADY_VOIDED', 'This handover has already been voided', 409),
   INVOICE_NOT_FOUND: () => new AppError('INVOICE_NOT_FOUND', 'Invoice does not exist', 404),
   INVOICE_LINE_NOT_FOUND: () =>
     new AppError('INVOICE_LINE_NOT_FOUND', 'Invoice line does not exist', 404),

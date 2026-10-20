@@ -18,6 +18,7 @@ import mailPlugin from './plugins/mail';
 import { authRoutes } from './modules/auth/auth.controller';
 import { partyRoutes } from './modules/party/party.controller';
 import { creditApprovalRoutes } from './modules/credit-approval/credit-approval.controller';
+import { cashHandoverRoutes } from './modules/cash-handover/cash-handover.controller';
 import { chamberRoutes } from './modules/chamber/chamber.controller';
 import { commodityRoutes } from './modules/commodity/commodity.controller';
 import { partnerRoutes } from './modules/partners/partner.controller';
@@ -114,6 +115,7 @@ export async function buildApp() {
   await app.register(authRoutes);
   await app.register(partyRoutes);
   await app.register(creditApprovalRoutes);
+  await app.register(cashHandoverRoutes);
   await app.register(chamberRoutes);
   await app.register(commodityRoutes);
   await app.register(partnerRoutes);

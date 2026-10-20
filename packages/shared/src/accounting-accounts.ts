@@ -91,6 +91,8 @@ export const SYSTEM_ACCOUNTS = {
   SALARIES_OFFICE_EOBI: '6015',
   BAD_DEBTS: '6080',
   MISCELLANEOUS: '6100',
+  /** Counted-vs-expected cash differences at a handover (JE-28): shortages debit it, overages credit it. */
+  CASH_SHORT_OVER: '6105',
   DEPRECIATION_BUILDING: '6120',
   DEPRECIATION_VEHICLES: '6130',
   AMORTISATION_SOFTWARE: '6140',

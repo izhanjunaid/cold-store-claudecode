@@ -150,6 +150,7 @@ export const JournalEntryType = z.enum([
   'OPENING_BALANCE',
   'OWNER_EQUITY',
   'CASH_TRANSFER',
+  'CASH_VARIANCE',
   'IMPAIRMENT',
   'BILL',
   'SUPPLIER_PAYMENT',
