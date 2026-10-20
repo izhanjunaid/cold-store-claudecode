@@ -40,6 +40,7 @@ const MUNSHI = row({
   user_name: 'Waseem Khan',
   dispatched: 3,
   cash_collected_pkr: 61_500,
+  other_collected_pkr: 18_000,
   cheques_count: 1,
   cheques_pkr: 9_000,
   credit_billed_pkr: 20_000,
@@ -77,6 +78,9 @@ describe('CashTodayCard', () => {
     expect(within(row).getByText('3')).toBeInTheDocument();
     expect(within(row).getAllByText(/61,500/).length).toBeGreaterThanOrEqual(2); // taken, and waiting
     expect(within(row).getByText(/1 · Rs\s?9,000/)).toBeInTheDocument();
+    // Bank transfers and wallets are part of the day too, in their own column.
+    expect(screen.getByRole('columnheader', { name: 'Bank / wallet' })).toBeInTheDocument();
+    expect(within(row).getByText(/18,000/)).toBeInTheDocument();
     expect(within(row).getByText(/since 18 Oct 2026/)).toBeInTheDocument();
   });
 

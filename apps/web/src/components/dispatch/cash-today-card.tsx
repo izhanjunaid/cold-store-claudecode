@@ -29,8 +29,8 @@ interface DayResponse {
 }
 
 /**
- * The desk's money for the day, per collector: trucks, cash taken, cheques, credit billed, and the cash
- * still waiting to be handed over. The munshi sees their own row; a manager sees everyone's and counts
+ * The desk's money for the day, per collector: trucks, cash taken, bank transfers and wallets, cheques,
+ * credit billed, and the cash still waiting to be handed over. The munshi sees their own row; a manager sees everyone's and counts
  * the cash (never their own: another manager or the owner does that).
  */
 export function CashTodayCard() {
@@ -58,6 +58,7 @@ export function CashTodayCard() {
               <TableHead>Collector</TableHead>
               <TableHead className="text-right">Dispatched</TableHead>
               <TableHead className="text-right">Cash taken</TableHead>
+              <TableHead className="text-right">Bank / wallet</TableHead>
               <TableHead className="text-right">Cheques</TableHead>
               <TableHead className="text-right">On credit</TableHead>
               {data.tracking && <TableHead className="text-right">Cash waiting</TableHead>}
@@ -76,6 +77,7 @@ export function CashTodayCard() {
                   </TableCell>
                   <TableCell className="py-1 text-right tabular-nums">{r.dispatched}</TableCell>
                   <TableCell className="py-1 text-right tabular-nums">{formatMoney(r.cash_collected_pkr)}</TableCell>
+                  <TableCell className="py-1 text-right tabular-nums">{formatMoney(r.other_collected_pkr)}</TableCell>
                   <TableCell className="py-1 text-right tabular-nums">
                     {r.cheques_count > 0 ? `${r.cheques_count} · ${formatMoney(r.cheques_pkr)}` : '—'}
                   </TableCell>
