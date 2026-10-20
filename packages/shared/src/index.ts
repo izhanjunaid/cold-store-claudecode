@@ -18,6 +18,7 @@ export * from './schemas/payables';
 export * from './schemas/peshgi';
 export * from './schemas/employee-advances';
 export * from './schemas/gate-pass';
+export * from './schemas/credit-approval';
 export * from './schemas/reports';
 export * from './schemas/surcharge';
 export * from './schemas/users';

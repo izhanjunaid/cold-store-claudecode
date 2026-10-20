@@ -79,6 +79,11 @@ export const GateRelease = z.object({
   cheque_pending: z.boolean(),
   marka: z.string().nullable(),
   owner_party_name: z.string().nullable(),
+  /**
+   * READY on a standing credit approval, not on payment. A flag only: the approval's
+   * ceiling and amounts never reach the guard.
+   */
+  on_credit: z.boolean().optional(),
 });
 export type GateReleaseType = z.infer<typeof GateRelease>;
 

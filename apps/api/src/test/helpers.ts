@@ -12,6 +12,7 @@ import blindRedactionPlugin from '../plugins/blind-redaction';
 import type { MailConfig } from '../modules/mail/mail.service';
 import { authRoutes } from '../modules/auth/auth.controller';
 import { partyRoutes } from '../modules/party/party.controller';
+import { creditApprovalRoutes } from '../modules/credit-approval/credit-approval.controller';
 import { chamberRoutes } from '../modules/chamber/chamber.controller';
 import { commodityRoutes } from '../modules/commodity/commodity.controller';
 import { partnerRoutes } from '../modules/partners/partner.controller';
@@ -77,6 +78,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   testApp.get('/health', async () => ({ success: true, data: { status: 'ok' } }));
   await testApp.register(authRoutes);
   await testApp.register(partyRoutes);
+  await testApp.register(creditApprovalRoutes);
   await testApp.register(chamberRoutes);
   await testApp.register(commodityRoutes);
   await testApp.register(partnerRoutes);

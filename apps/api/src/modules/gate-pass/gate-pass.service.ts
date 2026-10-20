@@ -18,6 +18,7 @@ import {
 import { Errors } from '../../common/errors';
 import { lockRow } from '../../common/row-lock';
 import { roleAtLeast } from '../../plugins/auth';
+import { standingCreditCover, type ActiveApproval } from '../credit-approval/credit-approval.service';
 import { generateGatePassNumber } from './gate-pass-number';
 import { GatePassRepository } from './gate-pass.repository';
 
@@ -33,7 +34,7 @@ const releaseSelect = {
   finalizedBy: true,
   voidedAt: true,
   gatePassId: true,
-  invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true } },
+  invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true, billingPartyId: true } },
 } satisfies Prisma.OutboundEventSelect;
 type ReleaseOutbound = Prisma.OutboundEventGetPayload<{ select: typeof releaseSelect }>;
 
@@ -235,7 +236,7 @@ export class GatePassService {
         finalizedAt: true,
         lot: { select: { marka: true } },
         ownerPartySnapshot: { select: { name: true } },
-        invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true } },
+        invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true, billingPartyId: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -255,6 +256,7 @@ export class GatePassService {
       let outstanding = 0;
       let chequePending = false;
       let state: GateReleaseStateType = 'READY';
+      const owing = new Map<string, number>(); // billing party -> its uncleared cheques, for parties that still owe
       for (const o of list) {
         if (o.status !== 'DISPATCHED') { state = 'NOT_DISPATCHED'; break; }
         const inv = o.invoice;
@@ -262,10 +264,23 @@ export class GatePassService {
         if (!inv || inv.status === 'VOID') { if (state === 'READY') state = 'PAYMENT_PENDING'; continue; }
         const uncleared = pending.get(inv.id) ?? 0;
         if (uncleared > 0.005) chequePending = true;
-        outstanding += Math.max(0, Number(inv.totalPkr) - Number(inv.amountPaidPkr) + uncleared);
+        const owed = Math.max(0, Number(inv.totalPkr) - Number(inv.amountPaidPkr) + uncleared);
+        outstanding += owed;
+        if (owed > 0.01) owing.set(inv.billingPartyId, (owing.get(inv.billingPartyId) ?? 0) + uncleared);
       }
       outstanding = round2(outstanding);
-      if (state === 'READY' && outstanding > 0.01) state = 'PAYMENT_PENDING';
+      // Money still owed holds the truck, unless every party that owes it holds a standing credit
+      // approval with headroom — the same helper the release uses, so READY here never meets a refusal there.
+      let onCredit = false;
+      if (state === 'READY' && outstanding > 0.01) {
+        const cover = await standingCreditCover(
+          this.prisma,
+          facilityId,
+          [...owing].map(([partyId, uncleared]) => ({ partyId, uncleared })),
+        );
+        if (cover.covered) onCredit = true;
+        else state = 'PAYMENT_PENDING';
+      }
       result.set(plate, {
         state,
         dispatch_notes: list.map((o) => o.dispatchNoteNumber ?? o.id.slice(0, 8)),
@@ -273,6 +288,7 @@ export class GatePassService {
         cheque_pending: chequePending,
         marka: list.find((o) => o.lot.marka)?.lot.marka ?? null,
         owner_party_name: list.find((o) => o.ownerPartySnapshot)?.ownerPartySnapshot?.name ?? null,
+        ...(onCredit ? { on_credit: true } : {}),
       });
     }
     return result;
@@ -419,6 +435,7 @@ export class GatePassService {
     let outstanding = 0;
     let unbilled: string | null = null;
     let chequesPending = false;
+    const owing = new Map<string, number>(); // billing party -> its uncleared cheques, for parties that still owe
     for (const o of outbounds) {
       const inv = o.invoice;
       if (inv?.status === 'DRAFT') throw Errors.GATE_OUTWARD_INVOICE_NOT_FINAL(dnOf(o));
@@ -428,20 +445,34 @@ export class GatePassService {
       }
       const uncleared = pending.get(inv.id) ?? 0;
       if (uncleared > 0.005) chequesPending = true;
-      outstanding += Math.max(0, Number(inv.totalPkr) - Number(inv.amountPaidPkr) + uncleared);
+      const owed = Math.max(0, Number(inv.totalPkr) - Number(inv.amountPaidPkr) + uncleared);
+      outstanding += owed;
+      if (owed > 0.01) owing.set(inv.billingPartyId, (owing.get(inv.billingPartyId) ?? 0) + uncleared);
     }
     outstanding = round2(outstanding);
     const needsCredit = unbilled != null || outstanding > 0.01;
+    // The standing approvals that carried the truck out, when no manager did.
+    let standing: ActiveApproval[] = [];
     if (needsCredit) {
-      if (!body.credit_authorization) {
-        throw Errors.GATE_OUTWARD_BLOCKED(
-          unbilled != null
-            ? `Withdrawal ${unbilled} has no valid bill — a manager must authorize this release on credit`
-            : `Payment Pending — balance ${outstanding.toFixed(2)} PKR` +
-                (chequesPending ? ' (includes cheques not yet cleared)' : ''),
-        );
+      if (body.credit_authorization) {
+        if (!isManager) throw Errors.GATE_CREDIT_AUTH_REQUIRES_MANAGER();
+      } else {
+        // Only a truck whose every bill exists can leave on a standing approval: an unbilled or
+        // voided withdrawal has no amount to cover and stays a manager's call.
+        const cover =
+          unbilled == null
+            ? await standingCreditCover(tx, facilityId, [...owing].map(([partyId, uncleared]) => ({ partyId, uncleared })))
+            : { covered: false, approvals: [] as ActiveApproval[] };
+        if (!cover.covered) {
+          throw Errors.GATE_OUTWARD_BLOCKED(
+            unbilled != null
+              ? `Withdrawal ${unbilled} has no valid bill — a manager must authorize this release on credit`
+              : `Payment Pending — balance ${outstanding.toFixed(2)} PKR` +
+                  (chequesPending ? ' (includes cheques not yet cleared)' : ''),
+          );
+        }
+        standing = cover.approvals;
       }
-      if (!isManager) throw Errors.GATE_CREDIT_AUTH_REQUIRES_MANAGER();
     }
 
     // 7. The guard's count, checked blind against what was dispatched.
@@ -476,11 +507,14 @@ export class GatePassService {
         quantityMismatchFlag: countMismatch,
         // The amount left on credit; unknown (null) when a withdrawal had no valid
         // bill, so an unbilled release never reads as a Rs 0 one.
+        // On a standing approval the authority is the manager who approved the party, and the
+        // approval is named on the pass; otherwise it is the manager who released it.
         ...(needsCredit
           ? {
-              creditAuthorizedBy: userId,
+              creditAuthorizedBy: standing.length > 0 ? standing[0]!.approvedBy : userId,
               creditAuthorizedAt: now,
               creditAuthorizedAmountPkr: unbilled != null ? null : outstanding,
+              ...(standing.length > 0 ? { creditApprovalIds: { set: standing.map((a) => a.id) } } : {}),
             }
           : {}),
         ...(overrideUsed ? { overrideReason } : {}),

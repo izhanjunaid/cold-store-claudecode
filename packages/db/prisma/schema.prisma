@@ -386,6 +386,7 @@ model Facility {
   payrollRuns      PayrollRun[]
   partyLoans       PartyLoan[]
   gatePasses       GatePass[]
+  creditApprovals  PartyCreditApproval[]
 
   racks             Rack[]
   lotRackPlacements LotRackPlacement[]
@@ -555,11 +556,36 @@ model Party {
   outboundOwnerSnapshots OutboundEvent[]    @relation("OutboundOwnerSnapshot")
   bills                  Bill[]
   supplierPayments       SupplierPayment[]
+  creditApprovals        PartyCreditApproval[]
 
   @@index([facilityId, phonePrimary])
   @@index([facilityId, partyType])
   @@index([parentArhtiId])
   @@map("parties")
+}
+
+/// A manager's standing pre-approval of credit for a party (0040): the gate releases a
+/// credit-billed truck of this party without a manager present while its exposure stays
+/// within maxOutstandingPkr (and validUntil has not passed). One live row per party
+/// (partial unique index in the migration); replacing or revoking keeps the history.
+model PartyCreditApproval {
+  id                String    @id @default(uuid()) @db.Uuid
+  facilityId        String    @map("facility_id") @db.Uuid
+  partyId           String    @map("party_id") @db.Uuid
+  maxOutstandingPkr Decimal   @map("max_outstanding_pkr") @db.Decimal(14, 2)
+  validUntil        DateTime? @map("valid_until") @db.Date
+  approvedBy        String    @map("approved_by") @db.Uuid
+  approvedAt        DateTime  @default(now()) @map("approved_at") @db.Timestamptz()
+  note              String?   @db.Text
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz()
+  revokedBy         String?   @map("revoked_by") @db.Uuid
+  revokeReason      String?   @map("revoke_reason") @db.Text
+
+  facility Facility @relation(fields: [facilityId], references: [id])
+  party    Party    @relation(fields: [partyId], references: [id])
+
+  @@index([facilityId, partyId], map: "party_credit_approvals_party_idx")
+  @@map("party_credit_approvals")
 }
 
 model Commodity {
@@ -1463,6 +1489,8 @@ model GatePass {
   creditAuthorizedAmountPkr Decimal?  @map("credit_authorized_amount_pkr") @db.Decimal(14, 2)
   /// A manager's reason for releasing despite a count or plate mismatch.
   overrideReason            String?   @map("override_reason") @db.Text
+  /// The standing credit approval(s) that carried the truck out without a manager at the gate (0040).
+  creditApprovalIds         String[]  @default([]) @map("credit_approval_ids") @db.Uuid
 
   facility         Facility        @relation(fields: [facilityId], references: [id])
   relatedLot       Lot?            @relation(fields: [relatedLotId], references: [id])
