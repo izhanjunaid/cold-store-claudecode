@@ -9,6 +9,8 @@ export const qk = {
     all: ['outbound'] as const,
     /** Every queue/list query — not the checkout previews, which must not refetch once the truck is dispatched. */
     lists: ['outbound', 'list'] as const,
+    /** The desk's day: per-collector totals and the cash waiting to be handed over. */
+    day: ['outbound', 'day'] as const,
     list: (filters: ListFilters) => ['outbound', 'list', filters] as const,
     preview: (id: string) => ['outbound', 'preview', id] as const,
   },

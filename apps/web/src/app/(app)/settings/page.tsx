@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
-import type { FacilityResponseType } from '@coldchain/shared';
+import { localIsoDate, type FacilityResponseType } from '@coldchain/shared';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -51,6 +51,8 @@ export default function SettingsPage() {
   const [surchargeEnabled, setSurchargeEnabled] = useState(false);
   const [surchargePctPerMonth, setSurchargePctPerMonth] = useState('2');
   const [surchargeGraceDays, setSurchargeGraceDays] = useState('30');
+  // The business day from which the cash the dispatch desk takes is tracked and handed over; null = not tracked.
+  const [cashTrackingFrom, setCashTrackingFrom] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -75,6 +77,7 @@ export default function SettingsPage() {
         setSurchargeEnabled(f.settings.late_payment_surcharge?.enabled ?? false);
         setSurchargePctPerMonth(String(f.settings.late_payment_surcharge?.pct_per_month ?? 2));
         setSurchargeGraceDays(String(f.settings.late_payment_surcharge?.grace_days ?? 30));
+        setCashTrackingFrom(f.settings.cash_tracking_from ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Load failed'))
       .finally(() => setLoading(false));
@@ -108,6 +111,7 @@ export default function SettingsPage() {
               pct_per_month: Math.min(100, Math.max(0, Number(surchargePctPerMonth) || 0)),
               grace_days: Math.max(0, Math.floor(Number(surchargeGraceDays) || 0)),
             },
+            cash_tracking_from: cashTrackingFrom,
           },
         },
       });
@@ -242,6 +246,29 @@ export default function SettingsPage() {
                   <Input type="number" min={0} value={surchargeGraceDays} onChange={(e) => setSurchargeGraceDays(e.target.value)} className="tabular-nums" />
                 </Field>
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Dispatch Desk Cash</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Every cash receipt the desk records belongs to whoever took it. With tracking on, a manager counts
+              that cash on the Dispatch Desk and records the handover; a difference is booked to Cash Short &amp; Over.
+              The owner&apos;s own cash is not tracked.
+            </p>
+            <label className="flex items-center gap-2.5 text-sm">
+              <Checkbox
+                checked={cashTrackingFrom != null}
+                onCheckedChange={(c) => setCashTrackingFrom(c ? (cashTrackingFrom ?? localIsoDate()) : null)}
+              />
+              Track the cash the desk takes and count it at handover
+            </label>
+            {cashTrackingFrom && (
+              <p className="text-xs text-muted-foreground">
+                Tracked from {cashTrackingFrom}. Earlier receipts are not part of any handover.
+              </p>
             )}
           </CardContent>
         </Card>

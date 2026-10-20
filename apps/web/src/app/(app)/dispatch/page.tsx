@@ -21,6 +21,7 @@ import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/layout/page-header';
 import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
 import { CancelWithdrawalDialog } from '@/components/outbound/cancel-withdrawal-dialog';
+import { CashTodayCard } from '@/components/dispatch/cash-today-card';
 import { CheckoutSheet, type CheckoutResult } from '@/components/dispatch/checkout-sheet';
 import { openDispatchNotePdf } from '@/components/dispatch/dispatch-pdf';
 import { openInvoicePdf } from '@/components/billing/invoice-pdf';
@@ -119,7 +120,10 @@ export default function DispatchDeskPage() {
   });
   const rows = (data?.data ?? []).filter((r) => r.stage !== 'LEFT' && r.stage !== 'CANCELLED');
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: qk.outbound.lists });
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: qk.outbound.lists });
+    queryClient.invalidateQueries({ queryKey: qk.outbound.day }); // cash may have just been taken
+  };
 
   async function afterCheckout(result: CheckoutResult) {
     // The queue first: rendering the note can take minutes and must not hold the row on "Weighed".
@@ -185,6 +189,8 @@ export default function DispatchDeskPage() {
           )}
         </CardContent>
       </Card>
+
+      {canQuery && <CashTodayCard />}
 
       <Card>
         <CardHeader>
