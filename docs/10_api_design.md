@@ -354,13 +354,13 @@ X-Facility-ID: <facility_uuid>
 | `HANDOVER_NOT_FOUND` / `HANDOVER_ALREADY_VOIDED` | 404 / 409 | Void of a handover that does not exist or was already voided |
 | `OUTBOUND_ALREADY_LEFT` | 409 | Cancel refused: a truck already carried this withdrawal out (the old gate allowed that before dispatch) |
 | `OUTBOUND_QUANTITY_STALE` | 409 | A FULL withdrawal no longer equals the lot balance; cancel and rebook |
-| `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization, unless every unpaid bill belongs to a party with a live standing credit approval that holds its exposure (then the guard releases it alone) |
+| `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization, unless every unpaid bill belongs to a party with a live standing credit approval that holds its exposure (then the guard releases it alone). The message names the balance for everyone but SECURITY, who reads "Payment pending — send the driver to the desk" |
 | `GATE_OUTWARD_INVOICE_NOT_FINAL` | 422 | A withdrawal on the truck is billed on a DRAFT invoice — finalize it first (credit cannot cover a draft) |
 | `GATE_OUTWARD_NOT_DISPATCHED` | 422 | The named withdrawal has not been dispatched |
 | `GATE_OUTWARD_ALREADY_USED` | 409 | The withdrawal already left on another truck |
 | `GATE_OUTWARD_PLATE_MISMATCH` | 422 | Truck plate ≠ the withdrawal's booked vehicle (or none booked); MANAGER may override with a reason |
 | `GATE_OUTWARD_COUNT_REQUIRED` | 422 | The guard's bag count is required when a withdrawal leaves |
-| `GATE_OUTWARD_COUNT_MISMATCH` | 422 | Count ≠ bags dispatched (never states the expected number); MANAGER may override with a reason |
+| `GATE_OUTWARD_COUNT_MISMATCH` | 422 | Count ≠ bags dispatched. The message is the fact only ("The bag count does not match the dispatch"), never the expected number; the page says what to do next (MANAGER may override with a reason, the guard recounts or calls one) |
 | `GATE_OUTWARD_UNMATCHED_LOAD` | 422 | A counted load no dispatched withdrawal accounts for; MANAGER may override with a reason |
 | `GATE_OVERRIDE_REQUIRES_MANAGER` | 403 | `override_reason` or `outbound_event_id` (naming a withdrawal) sent by someone below MANAGER |
 | `GATE_SELF_RELEASE` | 403 | The releaser booked or dispatched a withdrawal on this truck (MANAGER+ exempt) |
