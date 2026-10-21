@@ -1,5 +1,6 @@
 'use client';
 
+import { localIsoDate } from '@coldchain/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { useApiMutation } from '@/hooks/use-api-mutation';
@@ -83,7 +84,7 @@ export function PaymentForm({
   const [error, setError] = useState('');
 
   const [partyId, setPartyId] = useState(defaultPartyId);
-  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState(() => localIsoDate());
   const [amountPkr, setAmountPkr] = useState(
     defaultInvoiceBalance != null ? String(defaultInvoiceBalance) : '',
   );

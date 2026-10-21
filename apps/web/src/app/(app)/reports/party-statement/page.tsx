@@ -1,5 +1,6 @@
 'use client';
 
+import { addDays, localIsoDate } from '@coldchain/shared';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
@@ -13,9 +14,8 @@ import { PartyPicker } from '@/components/party/party-picker';
 import { PageHeader } from '@/components/layout/page-header';
 
 function defaultRange() {
-  const to = new Date();
-  const from = new Date(to.getTime() - 365 * 86_400_000);
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+  const to = localIsoDate();
+  return { from: addDays(to, -365), to };
 }
 
 export default function PartyStatementPickerPage() {

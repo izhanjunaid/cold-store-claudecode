@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Banknote, FileText } from 'lucide-react';
-import { assetAccountForPaymentMethod } from '@coldchain/shared';
+import { assetAccountForPaymentMethod, localIsoDate } from '@coldchain/shared';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -62,7 +62,7 @@ export default function LoanDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [repayModal, setRepayModal] = useState(false);
-  const [repayDate, setRepayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [repayDate, setRepayDate] = useState(() => localIsoDate());
   const [repayAmount, setRepayAmount] = useState('');
   const [repayMethod, setRepayMethod] = useState<'CASH' | 'BANK_TRANSFER'>('CASH');
   const [repayLoading, setRepayLoading] = useState(false);

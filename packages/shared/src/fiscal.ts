@@ -70,6 +70,12 @@ const businessClockFormat = new Intl.DateTimeFormat('en-US', {
   second: '2-digit',
 });
 
+/** The hour (0–23) on the facility's clock at instant `at` — never the container's `getHours()`, which is UTC. */
+export function businessHour(at: Date = new Date()): number {
+  const hour = businessClockFormat.formatToParts(at).find((p) => p.type === 'hour')?.value ?? '0';
+  return Number(hour) % 24;
+}
+
 /** The instant the facility's calendar day `iso` begins (midnight in Lahore). */
 export function businessDayStart(iso: IsoDate): Date {
   const utcMidnight = fromIsoDate(iso);

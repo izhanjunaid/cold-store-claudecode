@@ -1,5 +1,5 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
-import { MONEY_EPSILON, round2, sumMoney, toIsoDate, type SupplierStatementQueryType } from '@coldchain/shared';
+import { MONEY_EPSILON, businessDate, round2, sumMoney, toIsoDate, type SupplierStatementQueryType } from '@coldchain/shared';
 import { accountBalances, partyBalances, postedLinesWhere } from '../accounting/ledger';
 import { postedEntryNumber } from '../accounting/journal-entry.service';
 import { AP_CONTROL_ACCOUNTS, payableSupplier } from './supplier';
@@ -35,7 +35,7 @@ export class PayablesReportService {
   constructor(private prisma: PrismaClient) {}
 
   async aging(facilityId: string, book: Book) {
-    const today = toIsoDate(new Date());
+    const today = businessDate();
     const nonDocument: Prisma.JournalEntryLineWhereInput = {
       AND: [postedLinesWhere({ facilityId, book }), { journalEntry: { sourceTable: { notIn: DOCUMENT_SOURCES } } }],
       accountCode: { in: [...AP_CONTROL_ACCOUNTS] },

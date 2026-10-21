@@ -3,6 +3,7 @@ import {
   ACCOUNT_CLASSES,
   CLASS_LABEL,
   SECTION_LABEL,
+  businessDate,
   dayBefore,
   fromIsoDate,
   moneyEquals,
@@ -109,7 +110,7 @@ export class GlService {
    */
   async getTrialBalance(facilityId: string, query: TrialBalanceQueryType & { book_type: Book }) {
     const book = query.book_type;
-    const date_to = query.date_to ?? toIsoDate(new Date());
+    const date_to = query.date_to ?? businessDate();
     const [accounts, period, openingSums] = await Promise.all([
       this.prisma.chartOfAccounts.findMany({ where: { facilityId }, orderBy: { accountCode: 'asc' } }),
       accountBalances(this.prisma, {

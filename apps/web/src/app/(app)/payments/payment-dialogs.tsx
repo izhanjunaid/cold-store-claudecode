@@ -1,5 +1,6 @@
 'use client';
 
+import { localIsoDate } from '@coldchain/shared';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
@@ -15,7 +16,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localIsoDate();
 
 interface ChequeDialogProps<T> {
   paymentId: string | null;

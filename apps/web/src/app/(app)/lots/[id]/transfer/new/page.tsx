@@ -1,5 +1,6 @@
 'use client';
 
+import { localIsoDate } from '@coldchain/shared';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
@@ -37,7 +38,7 @@ export default function TransferNewPage() {
     to_party_id: '',
     quantity_bags: '',
     transfer_price_pkr: '',
-    effective_date: new Date().toISOString().slice(0, 10),
+    effective_date: localIsoDate(),
     notes: '',
   });
 

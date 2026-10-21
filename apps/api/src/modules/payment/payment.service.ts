@@ -10,7 +10,7 @@ import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recov
 import { generateReceiptNumber } from './receipt-number';
 import { refreshInvoiceSettlement } from '../invoice/invoice-settlement';
 import { partyStatement } from '../invoice/receivables';
-import { receiptAssetAccountForPaymentMethod, toIsoDate, round2 } from '@coldchain/shared';
+import { businessDate, receiptAssetAccountForPaymentMethod, toIsoDate, round2 } from '@coldchain/shared';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { lockRow } from '../../common/row-lock';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
@@ -353,7 +353,7 @@ export class PaymentService {
       if (existingTotal + newTotal > Number(payment.amountPkr) + 0.001) throw Errors.PAYMENT_OVER_ALLOCATED();
 
       // An advance is applied on the day it is applied — that is when 2010 becomes AR.
-      const appliedDate = new Date(`${appliedDateInput ?? toIsoDate(new Date())}T00:00:00.000Z`);
+      const appliedDate = new Date(`${appliedDateInput ?? businessDate()}T00:00:00.000Z`);
       if (payment.isAdvance && appliedDate < payment.paymentDate) {
         throw Errors.VALIDATION_ERROR('An advance cannot be applied before it was received', 'applied_date');
       }
@@ -449,7 +449,7 @@ export class PaymentService {
         select: { id: true, entryDate: true, entryType: true },
       });
 
-      const dishonourDate = new Date(`${dishonourDateInput ?? toIsoDate(new Date())}T00:00:00.000Z`);
+      const dishonourDate = new Date(`${dishonourDateInput ?? businessDate()}T00:00:00.000Z`);
       const latest = chain.reduce((d, e) => (e.entryDate > d ? e.entryDate : d), payment.paymentDate);
       if (dishonourDate < latest) {
         throw Errors.VALIDATION_ERROR(
@@ -500,7 +500,7 @@ export class PaymentService {
    * portion (JE-19, via applyLoanAllocation) both used it (phase/25).
    */
   async clear(facilityId: string, id: string, userId: string, clearDateInput?: string) {
-    const clearDate = new Date(`${clearDateInput ?? toIsoDate(new Date())}T00:00:00.000Z`);
+    const clearDate = new Date(`${clearDateInput ?? businessDate()}T00:00:00.000Z`);
     return this.prisma.$transaction(async (tx) => {
       if (!(await lockRow(tx, 'payments', id, facilityId))) throw Errors.PAYMENT_NOT_FOUND();
       const fullPayment = await tx.payment.findFirst({

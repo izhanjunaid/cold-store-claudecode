@@ -1,5 +1,6 @@
 'use client';
 
+import { localIsoDate } from '@coldchain/shared';
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { useApiMutation } from '@/hooks/use-api-mutation';
@@ -31,14 +32,14 @@ export interface IssueLoanDialogProps {
  * palette and its own search-a-party flow.
  */
 export function IssueLoanDialog({ open, onOpenChange, partyId, partyName, onSuccess }: IssueLoanDialogProps) {
-  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [issueDate, setIssueDate] = useState(() => localIsoDate());
   const [principal, setPrincipal] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK_TRANSFER'>('CASH');
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
     if (!open) return;
-    setIssueDate(new Date().toISOString().slice(0, 10));
+    setIssueDate(localIsoDate());
     setPrincipal('');
     setPaymentMethod('CASH');
     setNotes('');

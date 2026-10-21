@@ -1,4 +1,5 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
+import { businessDate } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { renderPlacementSlip } from '../pdf/pdf.service';
 
@@ -627,7 +628,7 @@ export class PlacementService {
       unplacedBags: Math.max(0, lot.currentBalanceBags - placedTotal),
       totalBags: lot.currentBalanceBags,
       operatorName: lot.createdByUser?.name ?? '',
-      generatedAt: new Date().toISOString().slice(0, 10),
+      generatedAt: businessDate(),
     });
 
     return { filename: `${lot.lotNumber}-placement.pdf`, pdf };
