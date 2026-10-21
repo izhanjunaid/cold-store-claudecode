@@ -15,7 +15,9 @@ vi.mock('@/lib/api-client', () => ({
   apiClientList: (...a: unknown[]) => apiClientList(...a),
 }));
 vi.mock('@/stores/auth.store', () => ({ useAuthStore: () => ({ user: { role: 'OWNER', permissions: [] } }) }));
-vi.mock('@/lib/permissions', () => ({ can: () => true }));
+// Every key by default; a test narrows it to a role's view.
+let allowed: (key: string) => boolean = () => true;
+vi.mock('@/lib/permissions', () => ({ can: (_user: unknown, key: string) => allowed(key) }));
 vi.mock('@/components/form', () => ({ useConfirm: () => vi.fn() }));
 vi.mock('@/hooks/use-api-mutation', () => ({ useApiMutation: () => ({ mutate: vi.fn(), isPending: false }) }));
 vi.mock('@/components/billing/record-payment-sheet', () => ({ RecordPaymentSheet: () => null }));
@@ -133,5 +135,47 @@ describe('PartyDetailPage — the credit limit tile also tells you about standin
     renderPage();
     await screen.findByText('No limit');
     expect(screen.queryByText(/pre-approv/i)).not.toBeInTheDocument();
+  });
+});
+
+/** Tabs and header figures follow the viewer's keys: no tab that would 403 into an empty list, no request that would. */
+describe('PartyDetailPage — tabs and figures follow the viewer’s keys', () => {
+  beforeEach(() => {
+    apiClient.mockReset();
+    apiClientList.mockReset();
+    approval = NO_APPROVAL;
+    allowed = () => true;
+    apiClient.mockImplementation((url: string) =>
+      Promise.resolve(url === '/v1/parties/p1' ? PARTY : url === '/v1/parties/p1/credit-approval' ? approval : { entries: [], total_debit_pkr: 0, total_credit_pkr: 0, closing_balance_pkr: 0 }),
+    );
+    apiClientList.mockResolvedValue({ data: [], meta: { page: 1, per_page: 100, total: 0 } });
+  });
+  const asked = () => [...apiClient.mock.calls, ...apiClientList.mock.calls].map(([u]) => String(u));
+
+  it('without billing.view or loans.view: no Invoices, Payments, Ledger or Peshgi tab, and no request for them', async () => {
+    allowed = (key) => key !== 'billing.view' && key !== 'loans.view';
+    renderPage();
+    expect(await screen.findByRole('tab', { name: 'Active Lots' })).toBeInTheDocument();
+    for (const name of ['Invoices', 'Payments', 'Ledger', 'Peshgi']) {
+      expect(screen.queryByRole('tab', { name })).not.toBeInTheDocument();
+    }
+    await waitFor(() => expect(asked().some((u) => u.startsWith('/v1/lots'))).toBe(true));
+    expect(asked().some((u) => u.includes('/ledger'))).toBe(false);
+    expect(asked().some((u) => u.startsWith('/v1/loans'))).toBe(false);
+  });
+
+  it('the header shows a dash, not an endless ellipsis, for a figure the viewer may not read', async () => {
+    allowed = (key) => key !== 'billing.view' && key !== 'loans.view';
+    renderPage();
+    await screen.findByRole('tab', { name: 'Active Lots' });
+    expect(screen.queryByText('…')).not.toBeInTheDocument();
+  });
+
+  it('with both keys, all five tabs are there and the ledger is asked for', async () => {
+    renderPage();
+    for (const name of ['Active Lots', 'Invoices', 'Payments', 'Ledger', 'Peshgi']) {
+      expect(await screen.findByRole('tab', { name })).toBeInTheDocument();
+    }
+    await waitFor(() => expect(asked().some((u) => u.includes('/ledger'))).toBe(true));
   });
 });

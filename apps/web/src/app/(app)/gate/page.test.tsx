@@ -152,7 +152,7 @@ describe('GatePassConsolePage — clear outward', () => {
   it('on a count mismatch a manager gives a reason and releases anyway', async () => {
     role = 'MANAGER';
     apiClient.mockRejectedValueOnce(
-      new ApiError('The bag count does not match the dispatch — recount, or call a manager', {
+      new ApiError('The bag count does not match the dispatch', {
         code: 'GATE_OUTWARD_COUNT_MISMATCH',
         status: 422,
       }),
@@ -227,7 +227,7 @@ describe('GatePassConsolePage — clear outward', () => {
 
   it('on a count mismatch a guard is told to recount and gets no override', async () => {
     apiClient.mockRejectedValueOnce(
-      new ApiError('The bag count does not match the dispatch — recount, or call a manager', {
+      new ApiError('The bag count does not match the dispatch', {
         code: 'GATE_OUTWARD_COUNT_MISMATCH',
         status: 422,
       }),
@@ -237,6 +237,8 @@ describe('GatePassConsolePage — clear outward', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
 
     expect(await within(dialog).findByText('Recount, or call a manager.')).toBeInTheDocument();
+    // Said once: the server states the fact, the page gives the guard their next step.
+    expect(within(dialog).getAllByText(/call a manager/i)).toHaveLength(1);
     expect(within(dialog).getByText(/does not match the dispatch/i)).toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/override reason/i)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: /release anyway/i })).not.toBeInTheDocument();

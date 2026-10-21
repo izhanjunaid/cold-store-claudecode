@@ -262,6 +262,9 @@ describe("the guard's own work is unchanged", () => {
     expect(wrongCount.statusCode, wrongCount.body).toBe(422);
     expect(json(wrongCount).error.code).toBe('GATE_OUTWARD_COUNT_MISMATCH');
     expect(wrongCount.body).not.toMatch(/\b50\b/);
+    // The message states the fact; what to do next is the gate page's to say, per role
+    // (a manager gets the override box, a guard is told to recount or call one).
+    expect(json(wrongCount).error.message).toBe('The bag count does not match the dispatch');
   });
 
   it('the right count releases the truck; the pass keeps the count they typed, and the quantity it was checked against stays hidden', async () => {

@@ -260,9 +260,11 @@ export default function OutboundEventDetailPage() {
                 {event.weight_variance_pct != null && (
                   <div>
                     <div className="text-xs uppercase tracking-wide text-muted-foreground">Variance</div>
+                    {/* (inbound − outbound) / inbound: positive means the produce lost weight in storage. */}
                     <div className={`mt-0.5 font-semibold ${Math.abs(event.weight_variance_pct) > 5 ? 'text-destructive' : 'text-foreground'}`}>
-                      {event.weight_variance_pct > 0 ? '+' : ''}
-                      {event.weight_variance_pct.toFixed(2)}%
+                      {event.weight_variance_pct === 0
+                        ? '0.00%'
+                        : `${Math.abs(event.weight_variance_pct).toFixed(2)}% ${event.weight_variance_pct > 0 ? 'lighter' : 'heavier'}`}
                     </div>
                   </div>
                 )}

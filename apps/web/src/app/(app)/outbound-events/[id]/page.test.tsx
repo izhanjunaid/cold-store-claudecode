@@ -137,6 +137,32 @@ describe('OutboundEventDetailPage — the gate guard counts blind', () => {
   });
 });
 
+// weight_variance_pct is (inbound − outbound) / inbound: positive means the produce lost weight.
+describe('OutboundEventDetailPage — the weight variance says which way it went', () => {
+  const setup = (pct: number) => {
+    push.mockReset();
+    apiClient.mockReset();
+    role = 'MANAGER';
+    permissions = [];
+    event = makeEvent({ weight_variance_pct: pct });
+    apiClient.mockImplementation((path: string) => Promise.resolve(path === `/v1/outbound-events/${EVENT_ID}` ? event : null));
+  };
+
+  it('a positive variance is weight lost in storage', async () => {
+    setup(2.5);
+    renderPage();
+    await loaded();
+    expect(screen.getByText('2.50% lighter')).toBeInTheDocument();
+  });
+
+  it('a negative variance is weight gained', async () => {
+    setup(-0.99);
+    renderPage();
+    await loaded();
+    expect(screen.getByText('0.99% heavier')).toBeInTheDocument();
+  });
+});
+
 describe('OutboundEventDetailPage — finalize gate', () => {
   beforeEach(() => {
     push.mockReset();

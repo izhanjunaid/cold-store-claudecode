@@ -70,8 +70,15 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Invoices', href: '/invoices', icon: ReceiptText, permission: 'billing.view' },
       { label: 'Payments', href: '/payments', icon: Banknote, permission: 'billing.view' },
       { label: 'Credit Notes', href: '/credit-notes', icon: ReceiptText, permission: 'billing.view' },
-      { label: 'Rate Plans', href: '/billing/rate-plans', icon: Tags },
-      { label: 'Service Charges', href: '/billing/service-charges', icon: CircleDollarSign },
+      // Readable by any login (reference data), but listed only for those who read billing or
+      // manage them: a guard who knows the rate per bag can turn an amount back into a count.
+      { label: 'Rate Plans', href: '/billing/rate-plans', icon: Tags, permission: ['billing.view', 'rate_plans.manage'] },
+      {
+        label: 'Service Charges',
+        href: '/billing/service-charges',
+        icon: CircleDollarSign,
+        permission: ['billing.view', 'service_charges.manage'],
+      },
     ],
   },
   {

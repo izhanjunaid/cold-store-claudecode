@@ -209,7 +209,8 @@ describe('matching the truck to its withdrawals', () => {
     const out = await release(pass, { declared_quantity: 50 });
     expect(out.statusCode).toBe(422);
     expect(code(out)).toBe('GATE_OUTWARD_BLOCKED');
-    expect(JSON.parse(out.body).error.message).toMatch(/Payment Pending/);
+    // A guard hears "Payment pending — send the driver to the desk" (no amount); others hear the balance.
+    expect(JSON.parse(out.body).error.message).toMatch(/payment pending/i);
   });
 
   it('a load dispatched days ago is still on the truck until it leaves; one dispatched before these rules is not matched', async () => {
@@ -457,6 +458,18 @@ describe('payment at the gate', () => {
     expect(data(ok).credit_authorized_by).toBeTruthy();
     // Nothing was billed, so the amount on credit is unknown — never a misleading Rs 0.
     expect(data<PassBody & { credit_authorized_amount_pkr: number | null }>(ok).credit_authorized_amount_pkr).toBeNull();
+  });
+
+  it('a guard refused for payment hears that it is pending, never how much; a manager hears the balance', async () => {
+    const ob = await dispatched(24, 'LHR-6900');
+    await finalizeInvoice(ob.invoiceId);
+    const pass = await arrive('LHR-6900');
+    const guard = await release(pass, { declared_quantity: 24 });
+    expect([guard.statusCode, code(guard)]).toEqual([422, 'GATE_OUTWARD_BLOCKED']);
+    expect(JSON.parse(guard.body).error.message).toBe('Payment pending — send the driver to the desk');
+    const manager = await release(pass, { declared_quantity: 24 }, managerToken);
+    expect([manager.statusCode, code(manager)]).toEqual([422, 'GATE_OUTWARD_BLOCKED']);
+    expect(JSON.parse(manager.body).error.message).toMatch(/^Payment Pending — balance \d+\.\d{2} PKR$/);
   });
 
   it('the amount a manager released on credit is on the pass for managers, and not for the guard', async () => {

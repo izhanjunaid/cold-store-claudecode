@@ -70,6 +70,17 @@ describe('navGroupsForUser', () => {
     expect(groups.every((g) => g.items.length > 0)).toBe(true);
   });
 
+  it('lists Rate Plans and Service Charges only for those who read billing or manage them — not the guard or the munshi', () => {
+    for (const role of ['SECURITY', 'OPERATOR'] as Role[]) {
+      expect(hrefs(role)).not.toContain('/billing/rate-plans');
+      expect(hrefs(role)).not.toContain('/billing/service-charges');
+    }
+    for (const role of ['ACCOUNTANT', 'MANAGER', 'OWNER'] as Role[]) {
+      expect(hrefs(role)).toContain('/billing/rate-plans');
+      expect(hrefs(role)).toContain('/billing/service-charges');
+    }
+  });
+
   it('reflects a granted permission (owner customization)', () => {
     // Grant an OPERATOR the accounting.view key → Accounting appears.
     const user = { role: 'OPERATOR' as Role, permissions: [...defaultPermissionsForRole('OPERATOR'), 'accounting.view'] };

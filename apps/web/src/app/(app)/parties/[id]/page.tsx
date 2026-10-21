@@ -138,6 +138,13 @@ export default function PartyDetailPage() {
   // `isOwner` check used to provide — otherwise the button shows to anyone
   // and only the API's 403 stops them.
   const canIssueLoan = can(user, 'loans.issue');
+  // The invoice/payment/ledger reads sit behind billing.view and loans behind loans.view while this
+  // page is open to any login: tabs and requests follow the keys, so nothing 403s into an empty list.
+  const canBilling = can(user, 'billing.view');
+  const canLoans = can(user, 'loans.view');
+  const visibleTabs = TABS.filter((tab) =>
+    tab === 'Invoices' || tab === 'Payments' || tab === 'Ledger' ? canBilling : tab === 'Peshgi' ? canLoans : true,
+  );
   // The same query the Standing credit card reads (one request): the credit tile names the gate
   // pre-approval too, so "No limit" never stands alone while a truck may leave on credit.
   const { data: creditApproval } = useQuery({
@@ -172,29 +179,31 @@ export default function PartyDetailPage() {
 
   // Outstanding, limit-used and active-peshgi answer "what does this party
   // owe me" on arrival, so both fetch eagerly rather than waiting on a tab
-  // click. /ledger sits behind billing.view while this page itself is
-  // reachable by any authenticated user — a failure here is expected for a
-  // lower-tier viewer, so it's caught silently and the header simply omits
-  // the figure rather than showing a broken zero.
+  // click — for a viewer who holds the key. Without it the request is not
+  // sent at all (it would only be refused) and the header shows a dash.
   const refreshHeaderStats = useCallback(() => {
-    apiClient<LedgerData>(`/v1/parties/${partyId}/ledger`)
-      .then((d) => {
-        setLedger(d);
-        setLedgerError(false);
-      })
-      .catch(() => setLedgerError(true));
-    if (hasMinRole(user?.role, 'MANAGER')) {
-      apiClient<LedgerData>(`/v1/parties/${partyId}/ledger?book_type=KATCHI`)
-        .then((d) => setKatchiOutstanding(d.closing_balance_pkr))
-        .catch(() => setKatchiOutstanding(0));
+    if (canBilling) {
+      apiClient<LedgerData>(`/v1/parties/${partyId}/ledger`)
+        .then((d) => {
+          setLedger(d);
+          setLedgerError(false);
+        })
+        .catch(() => setLedgerError(true));
+      if (hasMinRole(user?.role, 'MANAGER')) {
+        apiClient<LedgerData>(`/v1/parties/${partyId}/ledger?book_type=KATCHI`)
+          .then((d) => setKatchiOutstanding(d.closing_balance_pkr))
+          .catch(() => setKatchiOutstanding(0));
+      }
     }
-    apiClientList<LoanSummary>(`/v1/loans?party_id=${partyId}&page_size=100`)
-      .then((res) => {
-        setLoans(res.data);
-        setLoansError(false);
-      })
-      .catch(() => setLoansError(true));
-  }, [partyId, user?.role]);
+    if (canLoans) {
+      apiClientList<LoanSummary>(`/v1/loans?party_id=${partyId}&page_size=100`)
+        .then((res) => {
+          setLoans(res.data);
+          setLoansError(false);
+        })
+        .catch(() => setLoansError(true));
+    }
+  }, [partyId, user?.role, canBilling, canLoans]);
 
   useEffect(() => {
     refreshHeaderStats();
@@ -322,7 +331,7 @@ export default function PartyDetailPage() {
         <StatTile
           size="compact"
           label="Outstanding"
-          value={ledgerError ? '—' : exposure != null ? formatMoney(exposure) : '…'}
+          value={!canBilling || ledgerError ? '—' : exposure != null ? formatMoney(exposure) : '…'}
           tone={exposure != null && exposure > 0 && party.over_credit_limit ? 'negative' : 'default'}
         />
         <StatTile
@@ -335,8 +344,8 @@ export default function PartyDetailPage() {
         <StatTile
           size="compact"
           label="Active Peshgi"
-          value={loansError ? '—' : formatMoney(activeLoanBalance)}
-          caption={loansError ? undefined : `${activeLoans.length} active`}
+          value={!canLoans || loansError ? '—' : formatMoney(activeLoanBalance)}
+          caption={!canLoans || loansError ? undefined : `${activeLoans.length} active`}
         />
         <StatTile size="compact" label="Credit Terms" value={`${party.credit_terms_days} days`} />
       </div>
@@ -377,7 +386,7 @@ export default function PartyDetailPage() {
         <Tabs value={activeTab} onValueChange={(t) => { setActiveTab(t); loadTab(t); }}>
           <div className="border-b px-2">
             <TabsList className="h-auto bg-transparent p-0">
-              {TABS.map((tab) => (
+              {visibleTabs.map((tab) => (
                 <TabsTrigger
                   key={tab}
                   value={tab}

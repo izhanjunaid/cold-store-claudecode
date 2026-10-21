@@ -16,6 +16,7 @@ import {
   round2,
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
+import { isBlindRole } from '../../common/blind-count';
 import { lockRow } from '../../common/row-lock';
 import { roleAtLeast } from '../../plugins/auth';
 import { standingCreditCover, type ActiveApproval } from '../credit-approval/credit-approval.service';
@@ -467,7 +468,11 @@ export class GatePassService {
           throw Errors.GATE_OUTWARD_BLOCKED(
             unbilled != null
               ? `Withdrawal ${unbilled} has no valid bill — a manager must authorize this release on credit`
-              : `Payment Pending — balance ${outstanding.toFixed(2)} PKR` +
+              : // The guard is told payment is pending, never how much: an amount stands in for
+                // the blind count (common/blind-count.ts). Everyone else hears the balance.
+                (isBlindRole(userRole)
+                  ? 'Payment pending — send the driver to the desk'
+                  : `Payment Pending — balance ${outstanding.toFixed(2)} PKR`) +
                   (chequesPending ? ' (includes cheques not yet cleared)' : ''),
           );
         }

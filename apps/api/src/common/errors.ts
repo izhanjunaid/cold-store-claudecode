@@ -322,7 +322,8 @@ export const Errors = {
   GATE_OUTWARD_COUNT_MISMATCH: () =>
     new AppError(
       'GATE_OUTWARD_COUNT_MISMATCH',
-      'The bag count does not match the dispatch — recount, or call a manager',
+      // The fact only: what to do next depends on who is asking, and the gate page says it.
+      'The bag count does not match the dispatch',
       422,
       'declared_quantity',
     ),
