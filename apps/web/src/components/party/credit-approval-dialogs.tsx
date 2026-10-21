@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { useApiMutation } from '@/hooks/use-api-mutation';
 import { qk } from '@/lib/query-keys';
+import { formatMoney } from '@/lib/format';
 import { localIsoDate } from '@coldchain/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,24 +30,35 @@ interface DialogProps {
   partyName?: string;
 }
 
-/** Approve a party for credit up to a ceiling, optionally until a date. Replaces any approval it already has. */
+/**
+ * Approve a party for credit up to a ceiling, optionally until a date. Replaces any approval it already
+ * has. A first approval starts from the party's own credit limit (the warning threshold on its record),
+ * so the two do not drift apart by accident; the manager can still set a different ceiling.
+ */
 export function GrantCreditApprovalDialog({
   open,
   onOpenChange,
   partyId,
   partyName,
   current,
-}: DialogProps & { current?: CreditApproval | null }) {
+  creditLimitPkr,
+}: DialogProps & { current?: CreditApproval | null; creditLimitPkr?: number | null }) {
   const [max, setMax] = useState('');
   const [until, setUntil] = useState('');
   const [note, setNote] = useState('');
 
   useEffect(() => {
     if (!open) return;
-    setMax(current?.max_outstanding_pkr ? String(current.max_outstanding_pkr) : '');
+    setMax(
+      current?.max_outstanding_pkr
+        ? String(current.max_outstanding_pkr)
+        : creditLimitPkr
+          ? String(creditLimitPkr)
+          : '',
+    );
     setUntil(current?.valid_until ?? '');
     setNote(current?.note ?? '');
-  }, [open, current]);
+  }, [open, current, creditLimitPkr]);
 
   const grant = useApiMutation<CreditApproval, void>({
     mutationFn: () =>
@@ -90,6 +102,9 @@ export function GrantCreditApprovalDialog({
               onChange={(e) => setMax(e.target.value)}
               className="tabular-nums"
             />
+            {creditLimitPkr ? (
+              <p className="text-xs text-muted-foreground">This party&apos;s credit limit is {formatMoney(creditLimitPkr)}.</p>
+            ) : null}
           </div>
           <div className="space-y-1">
             <Label htmlFor="credit-until">Valid until</Label>

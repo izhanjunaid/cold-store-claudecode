@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'p1' }),
@@ -23,6 +24,18 @@ vi.mock('@/components/party/issue-loan-dialog', () => ({ IssueLoanDialog: () => 
 vi.mock('@/components/party/standing-credit-card', () => ({ StandingCreditCard: () => null }));
 
 import PartyDetailPage from './page';
+
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <PartyDetailPage />
+    </QueryClientProvider>,
+  );
+}
+
+const NO_APPROVAL = { approved: false, id: null, max_outstanding_pkr: null, valid_until: null, approved_by_name: null, approved_at: null, note: null };
+let approval: unknown = NO_APPROVAL;
 
 const PARTY = {
   id: 'p1',
@@ -49,10 +62,11 @@ const LOT = { id: 'l1', lot_number: 'LOT-0001', commodity_name: 'Potato', curren
  */
 describe('PartyDetailPage — the tabs list this party only, and say when there is more', () => {
   beforeEach(() => {
+    approval = NO_APPROVAL;
     apiClient.mockReset();
     apiClientList.mockReset();
     apiClient.mockImplementation((url: string) =>
-      Promise.resolve(url === '/v1/parties/p1' ? PARTY : { entries: [], total_debit_pkr: 0, total_credit_pkr: 0, closing_balance_pkr: 0 }),
+      Promise.resolve(url === '/v1/parties/p1' ? PARTY : url === '/v1/parties/p1/credit-approval' ? approval : { entries: [], total_debit_pkr: 0, total_credit_pkr: 0, closing_balance_pkr: 0 }),
     );
     apiClientList.mockImplementation((url: string) =>
       Promise.resolve(url.startsWith('/v1/lots') ? { data: [LOT], meta: { page: 1, per_page: 100, total: 130 } } : { data: [], meta: { page: 1, per_page: 100, total: 0 } }),
@@ -60,7 +74,7 @@ describe('PartyDetailPage — the tabs list this party only, and say when there 
   });
 
   it('asks for the party’s lots by the filter the endpoint takes', async () => {
-    render(<PartyDetailPage />);
+    renderPage();
     await waitFor(() => expect(apiClientList).toHaveBeenCalledWith(expect.stringMatching(/^\/v1\/lots\?/)));
     const url = apiClientList.mock.calls.map(([u]) => String(u)).find((u) => u.startsWith('/v1/lots'))!;
     expect(url).toContain('party_id=p1');
@@ -69,7 +83,7 @@ describe('PartyDetailPage — the tabs list this party only, and say when there 
   });
 
   it('links to the full, filtered list when the tab holds only the first rows', async () => {
-    render(<PartyDetailPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText(/Showing 1 of 130/)).toBeTruthy());
     expect(screen.getByRole('link', { name: 'View all' }).getAttribute('href')).toBe('/lots?status=ACTIVE&party_id=p1');
   });
@@ -82,9 +96,42 @@ describe('PartyDetailPage — the tabs list this party only, and say when there 
           : { data: [], meta: { page: 1, per_page: 100, total: 0 } },
       ),
     );
-    render(<PartyDetailPage />);
+    renderPage();
     const row = (await screen.findByText('LOT-0001')).closest('tr') as HTMLElement;
     expect(row).toHaveTextContent('—');
     expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+  });
+});
+
+/** The tile's own limit is a warning threshold; a standing approval is what lets a credit truck leave the gate. Both show. */
+describe('PartyDetailPage — the credit limit tile also tells you about standing credit at the gate', () => {
+  const LIVE = { approved: true, id: 'a1', max_outstanding_pkr: 500_000, valid_until: null, approved_by_name: 'Shahid Iqbal', approved_at: '2026-10-19T08:00:00Z', note: null };
+  beforeEach(() => {
+    apiClient.mockReset();
+    apiClientList.mockReset();
+    apiClient.mockImplementation((url: string) =>
+      Promise.resolve(url === '/v1/parties/p1' ? PARTY : url === '/v1/parties/p1/credit-approval' ? approval : { entries: [], total_debit_pkr: 0, total_credit_pkr: 0, closing_balance_pkr: 0 }),
+    );
+    apiClientList.mockResolvedValue({ data: [], meta: { page: 1, per_page: 100, total: 0 } });
+  });
+
+  it('shows the gate pre-approval and its ceiling to someone allowed to see it', async () => {
+    approval = LIVE;
+    renderPage();
+    expect(await screen.findByText(/Gate pre-approval: up to Rs\s?500,000/)).toBeInTheDocument();
+  });
+
+  it('says only that it is pre-approved when the ceiling is withheld (no parties.credit_terms)', async () => {
+    approval = { ...LIVE, max_outstanding_pkr: null };
+    renderPage();
+    expect(await screen.findByText('Pre-approved at the gate')).toBeInTheDocument();
+    expect(screen.queryByText(/500,000/)).not.toBeInTheDocument();
+  });
+
+  it('says nothing about the gate when there is no live approval', async () => {
+    approval = NO_APPROVAL;
+    renderPage();
+    await screen.findByText('No limit');
+    expect(screen.queryByText(/pre-approv/i)).not.toBeInTheDocument();
   });
 });

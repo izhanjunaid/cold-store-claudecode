@@ -21,7 +21,16 @@ import {
  * gate without a manager. Everyone sees the answer; the ceiling and the buttons belong to whoever holds
  * parties.credit_terms.
  */
-export function StandingCreditCard({ partyId, partyName }: { partyId: string; partyName?: string }) {
+export function StandingCreditCard({
+  partyId,
+  partyName,
+  creditLimitPkr,
+}: {
+  partyId: string;
+  partyName?: string;
+  /** The party's own credit limit: a first approval starts from it. */
+  creditLimitPkr?: number | null;
+}) {
   const user = useAuthStore((s) => s.user);
   const canManage = can(user, 'parties.credit_terms');
   const [grantOpen, setGrantOpen] = useState(false);
@@ -101,6 +110,7 @@ export function StandingCreditCard({ partyId, partyName }: { partyId: string; pa
             partyId={partyId}
             partyName={partyName}
             current={data}
+            creditLimitPkr={creditLimitPkr}
           />
           <RevokeCreditApprovalDialog open={revokeOpen} onOpenChange={setRevokeOpen} partyId={partyId} partyName={partyName} />
         </>

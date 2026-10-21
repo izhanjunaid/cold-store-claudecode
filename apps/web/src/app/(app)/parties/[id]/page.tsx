@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { Pencil, Plus, UserX } from 'lucide-react';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
@@ -22,6 +23,7 @@ import { qk } from '@/lib/query-keys';
 import { RecordPaymentSheet } from '@/components/billing/record-payment-sheet';
 import { IssueLoanDialog } from '@/components/party/issue-loan-dialog';
 import { StandingCreditCard } from '@/components/party/standing-credit-card';
+import type { CreditApproval } from '@/components/party/credit-approval-dialogs';
 
 import { formatDate, formatMoney, formatCount } from '@/lib/format';
 import { LotWithdrawAction } from '@/components/outbound/lot-withdraw-action';
@@ -136,6 +138,12 @@ export default function PartyDetailPage() {
   // `isOwner` check used to provide — otherwise the button shows to anyone
   // and only the API's 403 stops them.
   const canIssueLoan = can(user, 'loans.issue');
+  // The same query the Standing credit card reads (one request): the credit tile names the gate
+  // pre-approval too, so "No limit" never stands alone while a truck may leave on credit.
+  const { data: creditApproval } = useQuery({
+    queryKey: qk.parties.creditApproval(partyId),
+    queryFn: () => apiClient<CreditApproval>(`/v1/parties/${partyId}/credit-approval`),
+  });
 
   const [party, setParty] = useState<Party | null>(null);
   const [loading, setLoading] = useState(true);
@@ -277,6 +285,14 @@ export default function PartyDetailPage() {
   const exposure = ledger ? ledger.closing_balance_pkr + katchiOutstanding : null;
   const limitUsedPct =
     party.credit_limit_pkr && exposure != null ? Math.round((exposure / party.credit_limit_pkr) * 100) : null;
+  // The ceiling reaches only holders of parties.credit_terms; everyone else gets the fact alone.
+  const gateCaption = creditApproval?.approved
+    ? creditApproval.max_outstanding_pkr != null
+      ? `Gate pre-approval: up to ${formatMoney(creditApproval.max_outstanding_pkr)}`
+      : 'Pre-approved at the gate'
+    : null;
+  const limitCaption =
+    [limitUsedPct != null ? `${limitUsedPct}% used` : null, gateCaption].filter(Boolean).join(' · ') || undefined;
 
   return (
     <div>
@@ -313,7 +329,7 @@ export default function PartyDetailPage() {
           size="compact"
           label="Credit Limit"
           value={party.credit_limit_pkr ? formatMoney(party.credit_limit_pkr) : 'No limit'}
-          caption={limitUsedPct != null ? `${limitUsedPct}% used` : undefined}
+          caption={limitCaption}
           tone={party.over_credit_limit ? 'negative' : 'default'}
         />
         <StatTile
@@ -331,7 +347,7 @@ export default function PartyDetailPage() {
         </div>
       )}
 
-      <StandingCreditCard partyId={party.id} partyName={party.name} />
+      <StandingCreditCard partyId={party.id} partyName={party.name} creditLimitPkr={party.credit_limit_pkr} />
 
       <Card className="mb-4">
         <CardHeader>

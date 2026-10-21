@@ -34,11 +34,11 @@ const APPROVED = {
 let current: unknown = NONE;
 const posts = () => apiClient.mock.calls.filter(([, o]) => o?.method === 'POST');
 
-function renderCard() {
+function renderCard(props: { creditLimitPkr?: number | null } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <StandingCreditCard partyId="p1" partyName="Haji Sahib" />
+      <StandingCreditCard partyId="p1" partyName="Haji Sahib" {...props} />
     </QueryClientProvider>,
   );
 }
@@ -54,6 +54,22 @@ beforeEach(() => {
 });
 
 describe('StandingCreditCard', () => {
+  it("a first approval starts from the party's credit limit, and says so", async () => {
+    renderCard({ creditLimitPkr: 250_000 });
+    await screen.findByText('Not approved'); // the button is disabled while the card loads
+    fireEvent.click(screen.getByRole('button', { name: 'Approve credit' }));
+    expect(await screen.findByLabelText(/Most the party may owe/)).toHaveValue(250000);
+    expect(screen.getByText(/This party's credit limit is Rs\s?250,000/)).toBeInTheDocument();
+  });
+
+  it('with no credit limit set, the ceiling starts empty and no limit is mentioned', async () => {
+    renderCard({ creditLimitPkr: null });
+    await screen.findByText('Not approved'); // the button is disabled while the card loads
+    fireEvent.click(screen.getByRole('button', { name: 'Approve credit' }));
+    expect(await screen.findByLabelText(/Most the party may owe/)).toHaveValue(null);
+    expect(screen.queryByText(/credit limit is/)).not.toBeInTheDocument();
+  });
+
   it('says credit is not approved, and a manager can approve it', async () => {
     renderCard();
     expect(await screen.findByText('Not approved')).toBeInTheDocument();
