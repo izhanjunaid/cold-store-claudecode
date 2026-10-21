@@ -15,7 +15,7 @@ import { UrduText } from '@/components/ui/urdu-text';
 import { PageHeader } from '@/components/layout/page-header';
 import { LotLocationCard, LotMovementsTimeline } from '@/components/lot-location';
 
-import { formatDate, formatDateTime, formatCount } from '@/lib/format';
+import { formatDate, formatDateTime, formatCount, formatKg } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
 import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
@@ -34,7 +34,8 @@ interface Lot {
   rate_plan_name: string | null;
   quantity_bags: number;
   current_balance_bags: number;
-  accepted_weight_kg: number;
+  /** Null for the gate guard (weights stand in for the blind count). */
+  accepted_weight_kg: number | null;
   declared_weight_kg: number | null;
   weight_dispute_flag: boolean;
   weight_dispute_note: string | null;
@@ -271,9 +272,9 @@ export default function LotDetailPage() {
               label="Weight (Accepted / Declared)"
               value={
                 <>
-                  {lot.accepted_weight_kg.toLocaleString()} kg
+                  {formatKg(lot.accepted_weight_kg)}
                   {lot.declared_weight_kg != null && (
-                    <span className="text-muted-foreground"> / {lot.declared_weight_kg.toLocaleString()} kg</span>
+                    <span className="text-muted-foreground"> / {formatKg(lot.declared_weight_kg)}</span>
                   )}
                 </>
               }

@@ -7,12 +7,17 @@
  *
  * `declared_quantity` is deliberately NOT here: it is the guard's own count.
  *
- * A NEW field that carries a stock quantity (bags on a lot, a rack, a room, a withdrawal)
- * must be added to BLIND_KEYS, or the guard can read it. Stored weights and money can still
- * be turned into a rough bag count; this is a deterrent, not a vault (docs/07).
+ * Weights and the money owed on a truck go too: at about 20 kg a bag, or a known rate per bag,
+ * either turns straight back into the count (owner decision, 2026-10-21). The guard needs
+ * neither: they do not weigh and they do not collect.
+ *
+ * A NEW field that carries a stock quantity (bags on a lot, a rack, a room, a withdrawal), a
+ * weight, or an amount owed on something the guard checks must be added to BLIND_KEYS, or the
+ * guard can read it (docs/07).
  */
 
 export const BLIND_KEYS: ReadonlySet<string> = new Set([
+  // Stock quantities
   'quantity_bags',
   'current_balance_bags',
   'parent_current_balance_bags',
@@ -22,6 +27,15 @@ export const BLIND_KEYS: ReadonlySet<string> = new Set([
   'current_occupancy_bags',
   'available_capacity_bags',
   'authorized_quantity',
+  // Weights
+  'accepted_weight_kg',
+  'declared_weight_kg',
+  'outbound_weight_kg',
+  'prorated_inbound_weight_kg',
+  'weight_variance_pct',
+  // Money owed on a truck at the gate
+  'outstanding_pkr',
+  'credit_authorized_amount_pkr',
 ]);
 
 /** "Room A → R-1 ×20, R-2 ×30" → "Room A → R-1, R-2": the rack names stay, the counts go. */

@@ -353,7 +353,9 @@ describe('a withdrawal leaves on one truck only', () => {
       expect([p1, p2]).toContain(row.gatePassId);
       await cleanup();
     }
-  });
+    // Three full rounds of dispatch, pay, arrive and a racing release: on a loaded machine that
+    // outruns the 15 s default, and a test killed mid-round leaves its truck for the next test.
+  }, 45_000);
 });
 
 describe('a named withdrawal', () => {
@@ -456,6 +458,20 @@ describe('payment at the gate', () => {
     // Nothing was billed, so the amount on credit is unknown — never a misleading Rs 0.
     expect(data<PassBody & { credit_authorized_amount_pkr: number | null }>(ok).credit_authorized_amount_pkr).toBeNull();
   });
+
+  it('the amount a manager released on credit is on the pass for managers, and not for the guard', async () => {
+    const ob = await dispatched(22, 'LHR-6800');
+    await finalizeInvoice(ob.invoiceId);
+    const pass = await arrive('LHR-6800');
+    const ok = await release(pass, { declared_quantity: 22, credit_authorization: true }, managerToken);
+    expect(ok.statusCode, ok.body).toBe(200);
+    const read = async (token: string) =>
+      data<PassBody & { credit_authorized_amount_pkr: number | null }>(
+        await app.inject({ method: 'GET', url: `/v1/gate-passes/${pass}`, headers: authHeaders(token) }),
+      ).credit_authorized_amount_pkr;
+    expect(await read(managerToken)).toBeGreaterThan(0);
+    expect(await read(securityToken)).toBeNull();
+  });
 });
 
 describe('the guard and the count', () => {
@@ -483,15 +499,15 @@ describe('the guard and the count', () => {
 });
 
 describe('release preview on the active list (what the gate console shows before the guard taps)', () => {
-  const activeRelease = async (passId: string) => {
-    const res = await app.inject({ method: 'GET', url: '/v1/gate-passes?active=true&page_size=100', headers: authHeaders(securityToken) });
+  const activeRelease = async (passId: string, token = securityToken) => {
+    const res = await app.inject({ method: 'GET', url: '/v1/gate-passes?active=true&page_size=100', headers: authHeaders(token) });
     expect(res.statusCode).toBe(200);
     const row = (JSON.parse(res.body).data as { id: string; release: Record<string, unknown> }[]).find((r) => r.id === passId);
     expect(row, 'pass is on the active list').toBeDefined();
     return row!.release as {
       state: string;
       dispatch_notes: string[];
-      outstanding_pkr: number;
+      outstanding_pkr: number | null;
       cheque_pending: boolean;
       marka: string | null;
       owner_party_name: string | null;
@@ -520,13 +536,16 @@ describe('release preview on the active list (what the gate console shows before
     await finalizeInvoice(ob.invoiceId); // billed, unpaid
     const owed = await activeRelease(pass);
     expect(owed.state).toBe('PAYMENT_PENDING');
-    expect(owed.outstanding_pkr).toBeGreaterThan(0);
+    // The guard is told a payment is pending, never how much: an amount stands in for the bag count.
+    expect(owed.outstanding_pkr).toBeNull();
+    expect((await activeRelease(pass, managerToken)).outstanding_pkr).toBeGreaterThan(0);
     expect(owed.dispatch_notes).toHaveLength(1);
     expect((await release(pass, { declared_quantity: 30 })).statusCode).toBe(422);
 
     await pay(ob.invoiceId, 'CASH', true);
     const ready = await activeRelease(pass);
-    expect([ready.state, ready.outstanding_pkr]).toEqual(['READY', 0]);
+    expect([ready.state, ready.outstanding_pkr]).toEqual(['READY', null]);
+    expect((await activeRelease(pass, managerToken)).outstanding_pkr).toBe(0);
     expect((await release(pass, { declared_quantity: 30 })).statusCode).toBe(200);
   });
 
@@ -536,7 +555,8 @@ describe('release preview on the active list (what the gate console shows before
     const pass = await arrive('LHR-5501');
     const r = await activeRelease(pass);
     expect([r.state, r.cheque_pending]).toEqual(['PAYMENT_PENDING', true]);
-    expect(r.outstanding_pkr).toBeGreaterThan(0);
+    expect(r.outstanding_pkr).toBeNull();
+    expect((await activeRelease(pass, managerToken)).outstanding_pkr).toBeGreaterThan(0);
   });
 
   it('carries the owner and marka for the guard to check, and never a bag count', async () => {
@@ -547,6 +567,7 @@ describe('release preview on the active list (what the gate console shows before
     expect(r.state).toBe('READY');
     expect(r.owner_party_name).toBeTruthy();
     expect(Object.keys(r).sort()).toEqual(['cheque_pending', 'dispatch_notes', 'marka', 'outstanding_pkr', 'owner_party_name', 'state']);
+    expect(r.outstanding_pkr).toBeNull(); // the key stays (as null) so the page renders "not shown"
     // Nothing in the whole payload names the 20 bags that were dispatched.
     const res = await app.inject({ method: 'GET', url: '/v1/gate-passes?active=true', headers: authHeaders(securityToken) });
     expect(res.body).not.toMatch(/quantity_withdrawn|"quantity"/);

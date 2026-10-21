@@ -71,4 +71,27 @@ describe('redactBagCounts', () => {
       expect(BLIND_KEYS.has(key)).toBe(true);
     }
   });
+
+  it('also covers the weights and the money owed that stand in for a count', () => {
+    const out = redactBagCounts({
+      accepted_weight_kg: 2000,
+      declared_weight_kg: 2010,
+      outbound_weight_kg: 1950,
+      prorated_inbound_weight_kg: 1980,
+      weight_variance_pct: 1.5,
+      release: { state: 'PAYMENT_PENDING', outstanding_pkr: 12_000, cheque_pending: false },
+      credit_authorized_amount_pkr: 9_000,
+      total_pkr: 500, // not a guard-facing field; left alone
+    });
+    expect(out).toEqual({
+      accepted_weight_kg: null,
+      declared_weight_kg: null,
+      outbound_weight_kg: null,
+      prorated_inbound_weight_kg: null,
+      weight_variance_pct: null,
+      release: { state: 'PAYMENT_PENDING', outstanding_pkr: null, cheque_pending: false },
+      credit_authorized_amount_pkr: null,
+      total_pkr: 500,
+    });
+  });
 });

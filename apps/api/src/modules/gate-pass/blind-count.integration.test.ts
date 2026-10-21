@@ -227,6 +227,36 @@ describe('the guard reads no stock quantity', () => {
   });
 });
 
+// Weights stand in for a count (about 20 kg a bag), so they are hidden from the guard too. The
+// fields are named here, not read from BLIND_KEYS: a check built on the list it is checking
+// would pass whatever the list said.
+describe('the guard reads no weight', () => {
+  it('a lot: no inbound weights for SECURITY, the real ones for an operator', async () => {
+    const guard = json(await get(`/v1/lots/${lotId}`, securityToken)).data;
+    const operator = json(await get(`/v1/lots/${lotId}`, operatorToken)).data;
+    expect(guard).toHaveProperty('accepted_weight_kg', null);
+    expect(guard).toHaveProperty('declared_weight_kg', null);
+    expect(operator.accepted_weight_kg).toBeGreaterThan(0);
+  });
+
+  it('a withdrawal: no weights and no variance for SECURITY, the real ones for an operator', async () => {
+    const guard = json(await get(`/v1/outbound-events/${outboundId}`, securityToken)).data;
+    const operator = json(await get(`/v1/outbound-events/${outboundId}`, operatorToken)).data;
+    for (const key of ['outbound_weight_kg', 'prorated_inbound_weight_kg', 'weight_variance_pct']) {
+      expect(guard, key).toHaveProperty(key, null);
+    }
+    expect(operator.outbound_weight_kg).toBeGreaterThan(0);
+    expect(operator.prorated_inbound_weight_kg).toBeGreaterThan(0);
+    expect(operator.weight_variance_pct).not.toBeNull();
+  });
+
+  it("a lot's withdrawals list: no weights for SECURITY either", async () => {
+    const rows = json(await get(`/v1/lots/${lotId}/outbound-events`, securityToken)).data as Record<string, unknown>[];
+    const mine = rows.find((r) => r['vehicle_number'] === PLATE)!;
+    expect(mine['outbound_weight_kg']).toBeNull();
+  });
+});
+
 describe("the guard's own work is unchanged", () => {
   it('a wrong count is still refused, without saying what it should have been', () => {
     expect(wrongCount.statusCode, wrongCount.body).toBe(422);

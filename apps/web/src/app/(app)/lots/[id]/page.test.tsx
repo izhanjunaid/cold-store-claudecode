@@ -98,6 +98,15 @@ describe('LotDetailPage actions', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 
+  it('for the gate guard, whose weights arrive as null too, shows a dash for the weight and does not crash', async () => {
+    role = 'SECURITY';
+    permissions = ['gate_passes.log'];
+    lot = { ...LOT, quantity_bags: null, current_balance_bags: null, accepted_weight_kg: null } as unknown as typeof LOT;
+    await renderPage();
+    expect(screen.queryByText(/NaN|null kg/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/4,000/)).not.toBeInTheDocument();
+  });
+
   it('the guard has no Billing tab (the API refuses them the invoices); everyone else does', async () => {
     role = 'SECURITY';
     permissions = ['gate_passes.log'];

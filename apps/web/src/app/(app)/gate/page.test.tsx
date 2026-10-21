@@ -341,6 +341,14 @@ describe('Ready to leave', () => {
     expect(await screen.findByText(/Payment pending — Rs 4,500 \(cheque not cleared\)/)).toBeInTheDocument();
     expect(screen.getByText('Paid — ready to leave')).toBeInTheDocument();
   });
+
+  it('the guard gets no amount (the API sends null): the badge sends the driver to the desk instead', async () => {
+    listWith(READY, { ...OWES, release: { ...OWES.release, outstanding_pkr: null } });
+    render(<GatePassConsolePage />);
+    expect(await screen.findByText('Payment pending — send the driver to the desk (cheque not cleared)')).toBeInTheDocument();
+    expect(screen.queryByText(/Rs\s/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/NaN|null/)).not.toBeInTheDocument();
+  });
   it('a truck leaving on a standing credit approval is READY and says so — no amount, no ceiling', async () => {
     listWith({ ...READY, release: { ...READY.release, outstanding_pkr: 48_000, on_credit: true } });
     render(<GatePassConsolePage />);
