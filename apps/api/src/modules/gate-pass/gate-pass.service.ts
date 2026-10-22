@@ -22,6 +22,7 @@ import { roleAtLeast } from '../../plugins/auth';
 import { standingCreditCover, type ActiveApproval } from '../credit-approval/credit-approval.service';
 import { generateGatePassNumber } from './gate-pass-number';
 import { GatePassRepository } from './gate-pass.repository';
+import { openLoads } from './open-load';
 
 /** What the gate needs to know about a withdrawal leaving on a truck. */
 const releaseSelect = {
@@ -216,39 +217,10 @@ export class GatePassService {
    * dispatched under the current rules). Bag quantities are never part of it.
    */
   private async releasePreviews(facilityId: string, plates: string[]): Promise<Map<string, GateReleaseType>> {
-    const wanted = new Set(plates.map(normalizePlate).filter(Boolean));
     const result = new Map<string, GateReleaseType>();
-    if (wanted.size === 0) return result;
-
-    const open = await this.prisma.outboundEvent.findMany({
-      where: {
-        facilityId,
-        voidedAt: null,
-        gatePassId: null,
-        vehicleNumber: { not: null },
-        status: { in: ['PENDING', 'WEIGHED', 'DISPUTED', 'DISPATCHED'] },
-        gatePasses: { none: { status: 'CLEARED' } },
-      },
-      select: {
-        id: true,
-        dispatchNoteNumber: true,
-        status: true,
-        vehicleNumber: true,
-        finalizedAt: true,
-        lot: { select: { marka: true } },
-        ownerPartySnapshot: { select: { name: true } },
-        invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true, billingPartyId: true } },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
-    const byPlate = new Map<string, typeof open>();
-    for (const o of open) {
-      const key = normalizePlate(o.vehicleNumber ?? '');
-      if (!wanted.has(key)) continue;
-      // Dispatched before these rules (no finalized_at) may already have left untracked.
-      if (o.status === 'DISPATCHED' && !o.finalizedAt) continue;
-      byPlate.set(key, [...(byPlate.get(key) ?? []), o]);
-    }
+    // The same reading of a truck the dispatch desk uses (open-load.ts).
+    const byPlate = await openLoads(this.prisma, facilityId, plates);
+    if (byPlate.size === 0) return result;
 
     const invoiceIds = [...byPlate.values()].flat().flatMap((o) => (o.invoice ? [o.invoice.id] : []));
     const pending = await this.pendingChequeTotals(this.prisma as unknown as Prisma.TransactionClient, invoiceIds);
