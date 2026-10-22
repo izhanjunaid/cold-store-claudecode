@@ -1642,6 +1642,7 @@ describe('every JE sourceId resolves to a live row in its sourceTable (invariant
     supplier_payments: async (id) => (await prisma.supplierPayment.count({ where: { id } })) > 0,
     tax_remittances: async (id) => (await prisma.taxRemittance.count({ where: { id } })) > 0,
     cash_transfers: async (id) => (await prisma.cashTransfer.count({ where: { id } })) > 0,
+    cash_handovers: async (id) => (await prisma.cashHandover.count({ where: { id } })) > 0,
   };
 
   // Self-verifying (the point of this test over just checking today's known

@@ -1,5 +1,6 @@
 'use client';
 
+import { localIsoDate } from '@coldchain/shared';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
@@ -26,7 +27,7 @@ export default function ReceivablesAgingPage() {
   const router = useRouter();
   const canView = can(user, 'reports.financial');
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localIsoDate();
   const [asOfDate, setAsOfDate] = useState(today);
   const [partyId, setPartyId] = useState('');
   const [bookType, setBookType] = useState<'PACCI' | 'KATCHI'>('PACCI');

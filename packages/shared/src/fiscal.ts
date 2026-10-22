@@ -4,10 +4,12 @@
  * Accounting dates are calendar dates, not instants: `entry_date` is a Postgres DATE.
  * So everything here works on UTC-midnight `Date`s or `YYYY-MM-DD` strings and uses
  * UTC getters only — the answer must not depend on the server's or the browser's
- * time zone. The one exception is `localIsoDate`, which exists precisely to ask the
- * browser what day it is *for the person using it* (a form's "today" default); using
- * the UTC date there made every form default to yesterday between midnight and 05:00
- * Pakistan time (docs/25 L-39).
+ * time zone. Two deliberate exceptions ask what day it is somewhere in particular:
+ * `localIsoDate` asks the browser, *for the person using it* (a form's "today"
+ * default); using the UTC date there made every form default to yesterday between
+ * midnight and 05:00 Pakistan time (docs/25 L-39). `businessDate` asks the facility's
+ * clock, for server rules that turn on "today" (backdating windows, future dates, the
+ * gate's same-day matching) — never `setHours`, which reads the container's zone.
  */
 
 export type IsoDate = string; // YYYY-MM-DD
@@ -37,6 +39,56 @@ export function localIsoDate(d: Date = new Date()): IsoDate {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+/** The facility's clock. A single facility in Lahore today; a per-facility setting if that changes. */
+export const BUSINESS_TIME_ZONE = 'Asia/Karachi';
+
+const businessDateFormat = new Intl.DateTimeFormat('en-US', {
+  timeZone: BUSINESS_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/** The calendar date at the facility at instant `at` — the server's "today". */
+export function businessDate(at: Date = new Date()): IsoDate {
+  const parts = Object.fromEntries(
+    businessDateFormat.formatToParts(at).map((p) => [p.type, p.value]),
+  ) as Record<string, string>;
+  return `${parts['year']}-${parts['month']}-${parts['day']}`;
+}
+
+const businessClockFormat = new Intl.DateTimeFormat('en-US', {
+  timeZone: BUSINESS_TIME_ZONE,
+  hourCycle: 'h23',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+});
+
+/** The hour (0–23) on the facility's clock at instant `at` — never the container's `getHours()`, which is UTC. */
+export function businessHour(at: Date = new Date()): number {
+  const hour = businessClockFormat.formatToParts(at).find((p) => p.type === 'hour')?.value ?? '0';
+  return Number(hour) % 24;
+}
+
+/** The instant the facility's calendar day `iso` begins (midnight in Lahore). */
+export function businessDayStart(iso: IsoDate): Date {
+  const utcMidnight = fromIsoDate(iso);
+  const p = Object.fromEntries(
+    businessClockFormat.formatToParts(utcMidnight).map((x) => [x.type, x.value]),
+  ) as Record<string, string>;
+  // The facility's wall clock at UTC midnight, read as if it were UTC: the
+  // difference is the zone's offset on that day.
+  const wall = Date.UTC(
+    Number(p['year']), Number(p['month']) - 1, Number(p['day']),
+    Number(p['hour']), Number(p['minute']), Number(p['second']),
+  );
+  return new Date(utcMidnight.getTime() - (wall - utcMidnight.getTime()));
 }
 
 export function addDays(iso: IsoDate, days: number): IsoDate {

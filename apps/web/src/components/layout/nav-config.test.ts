@@ -39,6 +39,12 @@ describe('navGroupsForUser', () => {
     expect(items).not.toContain('/accounting');
   });
 
+  it('shows the dispatch desk to whoever can book withdrawals, not to the guard', () => {
+    expect(hrefs('OPERATOR')).toContain('/dispatch');
+    expect(hrefs('MANAGER')).toContain('/dispatch');
+    expect(hrefs('SECURITY')).not.toContain('/dispatch');
+  });
+
   it('shows gate to SECURITY but not dashboard', () => {
     const items = hrefs('SECURITY');
     expect(items).toContain('/gate');
@@ -62,6 +68,17 @@ describe('navGroupsForUser', () => {
     expect(groups.find((g) => g.label === 'Admin')).toBeUndefined();
     expect(groups.find((g) => g.label === 'Finance')).toBeUndefined();
     expect(groups.every((g) => g.items.length > 0)).toBe(true);
+  });
+
+  it('lists Rate Plans and Service Charges only for those who read billing or manage them — not the guard or the munshi', () => {
+    for (const role of ['SECURITY', 'OPERATOR'] as Role[]) {
+      expect(hrefs(role)).not.toContain('/billing/rate-plans');
+      expect(hrefs(role)).not.toContain('/billing/service-charges');
+    }
+    for (const role of ['ACCOUNTANT', 'MANAGER', 'OWNER'] as Role[]) {
+      expect(hrefs(role)).toContain('/billing/rate-plans');
+      expect(hrefs(role)).toContain('/billing/service-charges');
+    }
   });
 
   it('reflects a granted permission (owner customization)', () => {

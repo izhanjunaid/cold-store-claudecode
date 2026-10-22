@@ -24,7 +24,7 @@
 
 As of Phase 15, authorization is a **capability matrix the owner can edit**, not a
 hardcoded role hierarchy. The source of truth is the permission registry in
-`packages/shared/src/permissions.ts` (42 keys). Each key has a `defaultMinRole`
+`packages/shared/src/permissions.ts` (51 keys as of fast-dispatch Phase C1; the group list below predates some later keys — the file is authoritative). Each key has a `defaultMinRole`
 that **exactly reproduces the pre-Phase-15 `requireMinRole` threshold**, so with
 no customization the effective permissions are identical to the historical
 behaviour documented in the matrix below. The API enforces every key at the
@@ -36,20 +36,25 @@ caller's effective key list, and the web app gates nav/actions with `can(user, k
   defaults. OWNER always holds every key. Three keys are **alwaysOwner** (never
   delegable): `users.manage`, `settings.manage`, `permissions.manage`.
 - **Fixed rules outside the matrix** (deliberate audit controls, still seniority-based
-  via `roleAtLeast`): KATCHI book access (MANAGER read / OWNER write), backdating and
-  third-party release (MANAGER+), and gate-pass credit authorization (MANAGER+).
+  via `roleAtLeast`): KATCHI book access (MANAGER read / OWNER write), backdating,
+  future-dated inbound/outbound dates and third-party release (MANAGER+), and at the
+  gate: credit authorization, overriding a count/plate mismatch or an unmatched load
+  (with a stored reason), and exemption from the no-self-release rule (all MANAGER+).
+- **Standing credit approvals (Phase C1a).** A manager (`parties.credit_terms`) can pre-approve a party for credit: a ceiling on what it may owe in total (both books, from the ledger, plus every cheque of the party's not yet cleared — the ledger already counts those paid) and an optional last day, revocable, one live approval per party (a new one revokes the old; history is kept). A truck whose every unpaid bill belongs to a party with a live approval and headroom is READY at the gate and the guard can release it alone; the pass stores the approval ids and names the approving manager in `credit_authorized_by`. A manager ticking "Authorize on credit" still works and stays the recorded authority. A bill that is missing, voided or DRAFT is never covered. The ceiling is a rupee figure that could stand in for a bag count, so only holders of `parties.credit_terms` see it; the guard sees `on_credit: true` and nothing else.
+- **Cash handover (Phase C1c).** Every CASH receipt belongs to whoever recorded it (`payments.created_by`). With `cash_tracking_from` set (Settings → Dispatch Desk Cash, owner only), the CASH receipts recorded on or after that business day and not yet in a handover are that collector's "cash waiting". A holder of `cash_handovers.confirm` (MANAGER) counts it on the Dispatch Desk and records the handover: the figure shown is echoed back (a mismatch is refused with the new figure), a difference needs a reason and posts JE-28 to Cash Short & Over, a clean count posts nothing (every cash receipt already sits in 1010). Nobody counts their own cash (also a DB CHECK), the owner's own cash is not tracked, and a receipt is in at most one handover (UNIQUE). `GET /v1/dispatch/day` is for anyone who books withdrawals (`outbound.record`): they get their own row; holders of the key get every collector's. Cheques are listed by count and total, never counted as cash. A void reverses the difference entry and frees the receipts.
+- **Solo dispatch (Phase C1b).** The checkout (`dispatch-and-collect`) is normally a manager's job: `outbound.finalize` + `invoices.manage` (+ `payments.record` unless on credit). With the owner's `dispatch_solo_mode` setting on (Settings → Dispatch, `settings.manage`, default off), a caller who only holds `outbound.record` (the munshi) may finish a truck alone **only** when it is clean: PACCI book, a withdrawal dated today (its date ends the storage billed), no default charge priced by weight (the munshi typed the weight), every default charge kept, and either CASH in full or CREDIT for a party with a live standing credit approval whose ceiling still holds the bill (checked under a per-party lock after the bill is in the ledger). Discounts and skipped charges, cheques, transfers, wallets, KATCHI bills and anything over the ceiling are refused 403 `DISPATCH_NEEDS_MANAGER`. The munshi is deliberately **not** granted the three manager keys (they also unlock discounts, credit notes and dishonouring), and the checkout still stamps them as the finisher, so the no-self-release rule stops them releasing their own truck at the gate. Turn cash tracking on first: the cash the munshi takes is counted by a manager at handover.
   Reference-data GET routes remain authenticate-only so every role keeps the read
   access it has today.
 
 **Registry keys by group** (default minimum role in parentheses; the owner may grant/revoke per role):
 
-- **Parties**: `parties.manage`(OPERATOR), `parties.delete`(MANAGER)
+- **Parties**: `parties.manage`(OPERATOR), `parties.delete`(MANAGER), `parties.credit_terms`(MANAGER — set or change a credit limit / terms; `parties.manage` alone can only re-send the stored values)
 - **Commodities**: `commodities.manage`(MANAGER)
 - **Rooms & Racks**: `chambers.manage`(MANAGER), `chambers.log_temperature`(OPERATOR)
 - **Inbound & Lots**: `lots.manage`(OPERATOR), `lots.transfer_ownership`(MANAGER)
-- **Outbound**: `outbound.record`(OPERATOR), `outbound.finalize`(MANAGER)
+- **Outbound**: `outbound.record`(OPERATOR — book, weigh, cancel an undispatched withdrawal, read the dispatch queue), `outbound.finalize`(MANAGER — also dispatch & collect, which additionally needs `invoices.manage` and, unless on credit, `payments.record`; `outbound.record` holders may do the clean cash/approved-credit case when the owner enables solo dispatch)
 - **Gate Pass**: `gate_passes.log`(SECURITY), `gate_passes.link_lot`(OPERATOR)
-- **Billing**: `rate_plans.manage`(MANAGER), `service_charges.manage`(MANAGER), `billing.view`(ACCOUNTANT), `invoices.manage`(MANAGER), `invoices.write_off`(OWNER), `payments.record`(ACCOUNTANT)
+- **Billing**: `rate_plans.manage`(MANAGER), `service_charges.manage`(MANAGER), `billing.view`(ACCOUNTANT), `invoices.manage`(MANAGER), `invoices.write_off`(OWNER), `payments.record`(ACCOUNTANT), `cash_handovers.confirm`(MANAGER)
 - **Accounting**: `accounting.view`(ACCOUNTANT), `accounting.manage_accounts`(OWNER), `accounting.post_journal`(MANAGER), `accounting.period_lock`(MANAGER), `accounting.period_unlock`(OWNER)
 - **Fixed Assets**: `fixed_assets.manage`(OWNER)
 - **Payroll & HR**: `payroll.view`(ACCOUNTANT), `employees.manage`(MANAGER), `employees.terminate`(OWNER), `payroll.draft`(ACCOUNTANT), `payroll.finalize`(MANAGER), `payroll.remit`(OWNER)
@@ -174,6 +179,8 @@ The table below is the historical feature-level view; it now represents the
 
 *OPERATOR report access is limited to: Lot Listing, Chamber Occupancy, Today's Inbound/Outbound.*
 *SECURITY GUARD access is strictly limited to the Gate Pass interface.*
+
+**The guard counts blind.** The gate dialog asks for a count without showing the expected one, and the API enforces that for the SECURITY role: every JSON response sent to a guard has its stock quantities set to `null` (`quantity_bags`, `current_balance_bags`, `quantity_withdrawn_bags`, rack and room `bags` / `unplaced_bags` / `current_occupancy_bags` / `available_capacity_bags`, `authorized_quantity`; the `×N` rack counts in a gate pass location are stripped), by one hook (`plugins/blind-redaction.ts`, list in `common/blind-count.ts`). The guard's own `declared_quantity` is kept. Documents that carry a count inside text or a PDF are refused to the guard with `403 BLIND_ROLE_FORBIDDEN`: an invoice (`GET /v1/invoices/:id`, its PDF, `GET /v1/lots/:id/invoices`) and the placement slip; the gate receipt PDF the guard prints is rendered without the authorized quantity. It is a role check, not a permission key (SECURITY outranks VIEWER, so no key threshold can mean "everyone but the guard"). **Weights and money too (v0.8.0, owner decision):** a weight or an amount owed turns straight back into a count, and the guard neither weighs nor collects, so the same hook nulls `accepted_weight_kg`, `declared_weight_kg`, `outbound_weight_kg`, `prorated_inbound_weight_kg`, `weight_variance_pct`, the `weight_dispute_note` (it quotes the kilograms), the release preview's `outstanding_pkr` and a pass's `credit_authorized_amount_pkr`; a release refused for payment tells the guard only "Payment pending" and the gate page tells them to escalate (managers hear the balance), and Rate Plans / Service Charges are not in the guard's nav. What remains is the guard's own memory of rates and loads: a deterrent against copying the number, not a vault.
 
 ---
 

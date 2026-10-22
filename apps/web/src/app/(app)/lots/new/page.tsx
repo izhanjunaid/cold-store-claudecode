@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
+import { localIsoDate } from '@coldchain/shared';
 import { useRouter } from 'next/navigation';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -80,7 +81,9 @@ const DEFAULTS: LotFormValues = {
   vehicle_number: '',
   marka: '',
   quality_grade_inbound: '',
-  inbound_date: new Date().toISOString().slice(0, 10),
+  // Filled in when the form opens (localIsoDate): a module-level date would be the
+  // UTC date — yesterday before 05:00 in Lahore — and stale in a tab left open.
+  inbound_date: '',
   book_type: 'PACCI',
   notes: '',
 };
@@ -102,7 +105,7 @@ export default function LotCreatePage() {
 
   const form = useForm<LotFormValues>({
     resolver: zodResolver(lotSchema),
-    defaultValues: DEFAULTS,
+    defaultValues: { ...DEFAULTS, inbound_date: localIsoDate() },
     mode: 'onBlur',
   });
   const { control, handleSubmit, setValue, setError } = form;

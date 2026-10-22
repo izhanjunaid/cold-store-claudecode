@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
+import { openReservation } from '../outbound/reservation';
 import { receivableParty } from '../party/receivable-party';
 import { OwnershipTransferRepository, LOT_INCLUDE_SHAPE_TRANSFER } from './ownership-transfer.repository';
 import { mirrorTransferPlacements } from '../lot/placement.service';
@@ -102,6 +103,20 @@ export class OwnershipTransferService {
 
       const fromPartyId = parent.owner_party_id;
       const balance = parent.current_balance_bags;
+
+      // Bags booked on withdrawals that have not left yet belong to that booking.
+      // A FULL transfer would hand them to the new owner while the open withdrawal
+      // still releases them to the old one; a PARTIAL one could take bags the
+      // booking needs and leave its dispatch short. Dispatch or cancel those first.
+      const reserved = await openReservation(tx, input.facilityId, parent.id);
+      if (reserved.bags > 0) {
+        if (input.transferType === 'FULL') {
+          throw Errors.LOT_BALANCE_RESERVED(balance - reserved.bags, reserved.dispatchNotes, 'transfer_type');
+        }
+        if (input.quantityBags! > balance - reserved.bags) {
+          throw Errors.LOT_BALANCE_RESERVED(Math.max(0, balance - reserved.bags), reserved.dispatchNotes, 'quantity_bags');
+        }
+      }
 
       // Full load of parent (for output + child inheritance)
       const parentLot = await tx.lot.findUniqueOrThrow({

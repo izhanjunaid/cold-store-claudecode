@@ -5,7 +5,7 @@ import type {
   InvoiceSurchargesResponseType,
   AppliedSurchargeType,
 } from '@coldchain/shared';
-import { round2, toIsoDate } from '@coldchain/shared';
+import { businessDate, round2, toIsoDate } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { lockRow } from '../../common/row-lock';
 import { resolveFacilitySettings } from '../facility/facility.service';
@@ -55,7 +55,7 @@ export class SurchargeService {
 
   async listSuggestions(facilityId: string, asOfStr?: string): Promise<SurchargeSuggestionsResponseType> {
     const rule = await this.loadRule(facilityId, this.prisma);
-    const asOf = new Date(`${asOfStr ?? toIsoDate(new Date())}T00:00:00.000Z`);
+    const asOf = new Date(`${asOfStr ?? businessDate()}T00:00:00.000Z`);
     const base = {
       enabled: rule.enabled,
       pct_per_month: rule.pct_per_month,
@@ -118,7 +118,7 @@ export class SurchargeService {
       });
       if (inv.status !== 'FINALIZED' || inv.surchargeOfInvoiceId) throw Errors.SURCHARGE_NOT_ELIGIBLE();
 
-      const asOf = new Date(`${asOfStr ?? toIsoDate(new Date())}T00:00:00.000Z`);
+      const asOf = new Date(`${asOfStr ?? businessDate()}T00:00:00.000Z`);
       const alreadyCharged = (await this.monthsCharged(tx, facilityId, [invoiceId])).get(invoiceId) ?? 0;
       const c = computeSurcharge({
         rule,

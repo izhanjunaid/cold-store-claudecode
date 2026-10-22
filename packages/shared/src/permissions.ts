@@ -43,6 +43,7 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
   // Parties
   { key: 'parties.manage', group: 'Parties', label: 'Create & edit parties', description: 'Add or update farmers, traders, arhtis and buyers.', defaultMinRole: 'OPERATOR' },
   { key: 'parties.delete', group: 'Parties', label: 'Deactivate parties', description: 'Soft-delete a party record.', defaultMinRole: 'MANAGER' },
+  { key: 'parties.credit_terms', group: 'Parties', label: 'Set credit limit & terms', description: "Set or change a party's credit limit and payment terms.", defaultMinRole: 'MANAGER' },
 
   // Commodities
   { key: 'commodities.manage', group: 'Commodities', label: 'Manage commodities & varieties', description: 'Add or edit commodities and their varieties.', defaultMinRole: 'MANAGER' },
@@ -71,6 +72,7 @@ export const PERMISSION_REGISTRY: PermissionDef[] = [
   { key: 'invoices.write_off', group: 'Billing', label: 'Write off invoices (bad debt)', description: 'Write off an unpaid invoice as bad debt.', defaultMinRole: 'OWNER' },
   { key: 'invoices.void', group: 'Billing', label: 'Void invoices', description: 'Void a finalized, unpaid invoice (reverses its journal entry).', defaultMinRole: 'OWNER' },
   { key: 'payments.record', group: 'Billing', label: 'Record payments', description: 'Record, allocate and dishonour payments.', defaultMinRole: 'ACCOUNTANT' },
+  { key: 'cash_handovers.confirm', group: 'Billing', label: 'Count & confirm cash handovers', description: 'Count the cash a collector took at the dispatch desk, record the handover and any difference, see every collector\'s cash, and void a handover.', defaultMinRole: 'MANAGER' },
 
   // Accounting
   { key: 'accounting.view', group: 'Accounting', label: 'View accounting', description: 'View chart of accounts, journals, general ledger, statements and fixed-asset registers.', defaultMinRole: 'ACCOUNTANT' },

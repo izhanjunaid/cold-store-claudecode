@@ -28,6 +28,7 @@ export const JOURNAL_SOURCES = {
   supplier_payments: { label: 'Supplier payment', userReversible: false },
   tax_remittances: { label: 'Tax remittance', userReversible: false },
   cash_transfers: { label: 'Cash transfer', userReversible: false },
+  cash_handovers: { label: 'Cash handover difference', userReversible: false },
   owner_equity_movements: { label: 'Owner capital / drawings', userReversible: false },
 } as const;
 

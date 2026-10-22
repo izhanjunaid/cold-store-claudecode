@@ -905,7 +905,7 @@ describe('Party GET — over_credit_limit (credit exposure)', () => {
     const partyRes = await app.inject({
       method: 'POST',
       url: '/v1/parties',
-      headers: authHeaders(operatorToken),
+      headers: authHeaders(managerToken), // a credit limit needs parties.credit_terms
       payload: {
         name: 'Credit Check Party',
         party_type: 'FARMER',
@@ -977,7 +977,7 @@ describe('Party GET — over_credit_limit (credit exposure)', () => {
     const partyRes = await app.inject({
       method: 'POST',
       url: '/v1/parties',
-      headers: authHeaders(operatorToken),
+      headers: authHeaders(managerToken), // a credit limit needs parties.credit_terms
       payload: {
         name: 'Under Limit Party',
         party_type: 'FARMER',

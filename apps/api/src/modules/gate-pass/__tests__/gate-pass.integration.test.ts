@@ -252,12 +252,14 @@ describe('Phase 9 — Gate Pass (M10)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id },
+      payload: { declared_quantity: 100 },
     });
     expect(out.statusCode).toBe(200);
     const data = JSON.parse(out.body).data;
     expect(data.status).toBe('CLEARED');
     expect(data.cleared_at).toBeTruthy();
+    expect(data.cleared_by).toBeTruthy();
+    expect(data.credit_authorized_by).toBeNull();
     expect(data.turnaround_seconds).toBeGreaterThan(0);
     expect(data.related_outbound_id).toBe(ob.id);
   });
@@ -286,7 +288,7 @@ describe('Phase 9 — Gate Pass (M10)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id },
+      payload: { declared_quantity: 100 },
     });
     expect(out.statusCode).toBe(422);
     expect(JSON.parse(out.body).error.code).toBe('GATE_OUTWARD_BLOCKED');
@@ -315,10 +317,15 @@ describe('Phase 9 — Gate Pass (M10)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(managerToken),
-      payload: { outbound_event_id: ob.id, credit_authorization: true },
+      payload: { outbound_event_id: ob.id, credit_authorization: true, declared_quantity: 100 },
     });
     expect(out.statusCode).toBe(200);
-    expect(JSON.parse(out.body).data.status).toBe('CLEARED');
+    const data = JSON.parse(out.body).data;
+    expect(data.status).toBe('CLEARED');
+    // The authorization is on the record now: who, when, and how much left on credit.
+    expect(data.credit_authorized_by).toBe(data.cleared_by);
+    expect(data.credit_authorized_at).toBeTruthy();
+    expect(data.credit_authorized_amount_pkr).toBeGreaterThan(0);
   });
 
   it('rejects credit_authorization from SECURITY (MANAGER+ only)', async () => {
@@ -344,7 +351,7 @@ describe('Phase 9 — Gate Pass (M10)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id, credit_authorization: true },
+      payload: { credit_authorization: true, declared_quantity: 100 },
     });
     expect(out.statusCode).toBe(403);
     expect(JSON.parse(out.body).error.code).toBe('GATE_CREDIT_AUTH_REQUIRES_MANAGER');
@@ -449,34 +456,57 @@ describe('Gate-side quantity & commodity verification (Fix #1)', () => {
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id },
+      payload: { declared_quantity: 100 },
     });
     expect(out.statusCode).toBe(200);
     const data = JSON.parse(out.body).data;
-    expect(data.authorized_quantity).toBe(100);
+    // The guard is told nothing about the quantity it was checked against (blind count); a manager reads it.
+    expect(data.authorized_quantity).toBeNull();
+    const asManager = await app.inject({ method: 'GET', url: `/v1/gate-passes/${passId}`, headers: authHeaders(managerToken) });
+    expect(JSON.parse(asManager.body).data.authorized_quantity).toBe(100);
+    expect(data.outbound_ids).toEqual([ob.id]);
     expect(data.related_commodity_name).toBe('POTATO');
     expect(data.related_unit_label).toBe('Bags');
     // Owner snapshot chain (outbound → pass → format) surfaces on the pass.
     expect(data.owner_party_name).toBeTruthy();
   });
 
-  it('POST /outward honors a physical declared_quantity for mismatch detection', async () => {
+  it('POST /outward: a wrong physical count blocks the guard; a manager may release with a reason', async () => {
     await cleanup();
     const lot = await createLot(100);
     const ob = await createOutbound(lot.id, 'LHR-Q600');
     await finalizeAndPayInvoice(ob.invoice_id);
 
-    const out = await app.inject({
+    const blocked = await app.inject({
       method: 'POST',
       url: '/v1/gate-passes/outward',
       headers: authHeaders(securityToken),
-      payload: { vehicle_number: 'LHR-Q600', outbound_event_id: ob.id, declared_quantity: 90 },
+      payload: { vehicle_number: 'LHR-Q600', declared_quantity: 90 },
+    });
+    expect(blocked.statusCode).toBe(422);
+    const err = JSON.parse(blocked.body).error;
+    expect(err.code).toBe('GATE_OUTWARD_COUNT_MISMATCH');
+    // The count is blind: the error never tells the guard what it should have been.
+    expect(err.message).not.toContain('100');
+    expect(await prisma.gatePass.count({ where: { vehicleNumber: 'LHR-Q600' } })).toBe(0);
+
+    const out = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/outward',
+      headers: authHeaders(managerToken),
+      payload: {
+        vehicle_number: 'LHR-Q600',
+        outbound_event_id: ob.id,
+        declared_quantity: 90,
+        override_reason: '10 bags fell off at loading, sent back in',
+      },
     });
     expect(out.statusCode).toBe(201);
     const data = JSON.parse(out.body).data;
     expect(data.declared_quantity).toBe(90);
     expect(data.authorized_quantity).toBe(100);
     expect(data.quantity_mismatch_flag).toBe(true);
+    expect(data.override_reason).toBe('10 bags fell off at loading, sent back in');
   });
 
   it('outward clear raises quantity_mismatch_flag when physical declared_quantity != authorized', async () => {
@@ -493,11 +523,30 @@ describe('Gate-side quantity & commodity verification (Fix #1)', () => {
     });
     const passId = JSON.parse(inward.body).data.id;
 
-    const out = await app.inject({
+    const blocked = await app.inject({
       method: 'POST',
       url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { outbound_event_id: ob.id, declared_quantity: 95 }, // counted 95 vs authorized 100
+      payload: { declared_quantity: 95 }, // counted 95 vs authorized 100
+    });
+    expect(blocked.statusCode).toBe(422);
+    expect(JSON.parse(blocked.body).error.code).toBe('GATE_OUTWARD_COUNT_MISMATCH');
+
+    // A guard cannot override; a manager can, with a reason, and the flag stays raised.
+    const guardOverride = await app.inject({
+      method: 'POST',
+      url: `/v1/gate-passes/${passId}/outward`,
+      headers: authHeaders(securityToken),
+      payload: { declared_quantity: 95, override_reason: 'trust me' },
+    });
+    expect(guardOverride.statusCode).toBe(403);
+    expect(JSON.parse(guardOverride.body).error.code).toBe('GATE_OVERRIDE_REQUIRES_MANAGER');
+
+    const out = await app.inject({
+      method: 'POST',
+      url: `/v1/gate-passes/${passId}/outward`,
+      headers: authHeaders(managerToken),
+      payload: { outbound_event_id: ob.id, declared_quantity: 95, override_reason: 'recounted: 5 bags short-loaded' },
     });
     expect(out.statusCode).toBe(200);
     const data = JSON.parse(out.body).data;

@@ -21,6 +21,17 @@ export class OutboundRepository {
     });
   }
 
+  async findByIdTx(
+    tx: Prisma.TransactionClient,
+    facilityId: string,
+    id: string,
+  ): Promise<OutboundWithRelations | null> {
+    return tx.outboundEvent.findFirst({
+      where: { id, facilityId },
+      include: outboundInclude,
+    });
+  }
+
   async findByLot(facilityId: string, lotId: string): Promise<OutboundWithRelations[]> {
     return this.prisma.outboundEvent.findMany({
       where: { facilityId, lotId },

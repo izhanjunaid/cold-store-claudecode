@@ -22,6 +22,17 @@ import {
 
 export { DEFAULT_FY_START_MONTH };
 
+/** The month before the one `today` falls in — a month-close page's default. Pass `localIsoDate()`. */
+export function previousMonthOf(today: IsoDate | string): { year: number; month: number } {
+  const [y, m] = today.split('-').map(Number) as [number, number];
+  return m === 1 ? { year: y - 1, month: 12 } : { year: y, month: m - 1 };
+}
+
+/** 1 January of the year `today` falls in. Pass `localIsoDate()`. */
+export function yearStartOf(today: IsoDate | string): string {
+  return `${today.slice(0, 4)}-01-01`;
+}
+
 export type PresetKey = 'this_month' | 'last_month' | 'this_quarter' | 'ytd' | 'this_fy' | 'last_fy' | 'custom';
 
 export interface PeriodRange {

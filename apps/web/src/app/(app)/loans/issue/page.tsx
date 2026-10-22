@@ -1,5 +1,6 @@
 'use client';
 
+import { localIsoDate } from '@coldchain/shared';
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2 } from 'lucide-react';
@@ -34,7 +35,7 @@ export default function IssuePeshgiPage() {
   const [partyName, setPartyName] = useState('');
   const [principal, setPrincipal] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK_TRANSFER'>('CASH');
-  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [issueDate, setIssueDate] = useState(() => localIsoDate());
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

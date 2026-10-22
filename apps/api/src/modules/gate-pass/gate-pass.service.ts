@@ -1,5 +1,7 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import type {
+  GateReleaseStateType,
+  GateReleaseType,
   ClearOutwardRequestType,
   GatePassListQueryType,
   GatePassResponseType,
@@ -7,10 +9,46 @@ import type {
   LogInwardRequestType,
   LogOutwardRequestType,
 } from '@coldchain/shared';
+import {
+  addDays,
+  businessDayStart,
+  normalizePlate,
+  round2,
+} from '@coldchain/shared';
 import { Errors } from '../../common/errors';
+import { isBlindRole } from '../../common/blind-count';
+import { lockRow } from '../../common/row-lock';
 import { roleAtLeast } from '../../plugins/auth';
+import { standingCreditCover, type ActiveApproval } from '../credit-approval/credit-approval.service';
 import { generateGatePassNumber } from './gate-pass-number';
 import { GatePassRepository } from './gate-pass.repository';
+
+/** What the gate needs to know about a withdrawal leaving on a truck. */
+const releaseSelect = {
+  id: true,
+  dispatchNoteNumber: true,
+  status: true,
+  vehicleNumber: true,
+  quantityWithdrawnBags: true,
+  createdBy: true,
+  createdAt: true,
+  finalizedBy: true,
+  voidedAt: true,
+  gatePassId: true,
+  invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true, billingPartyId: true } },
+} satisfies Prisma.OutboundEventSelect;
+type ReleaseOutbound = Prisma.OutboundEventGetPayload<{ select: typeof releaseSelect }>;
+
+const dnOf = (o: { dispatchNoteNumber: string | null; id: string }) => o.dispatchNoteNumber ?? o.id.slice(0, 8);
+
+const emptyRelease = (): GateReleaseType => ({
+  state: 'NO_BOOKING',
+  dispatch_notes: [],
+  outstanding_pkr: 0,
+  cheque_pending: false,
+  marka: null,
+  owner_party_name: null,
+});
 
 export class GatePassService {
   constructor(
@@ -57,7 +95,7 @@ export class GatePassService {
     facilityId: string,
     userId: string,
     userRole: string,
-    body: LogOutwardRequestType & { credit_authorization?: boolean },
+    body: LogOutwardRequestType,
   ): Promise<GatePassResponseType> {
     return this.prisma.$transaction(async (tx) => {
       const passNumber = await generateGatePassNumber(tx, facilityId, new Date());
@@ -75,11 +113,13 @@ export class GatePassService {
           createdBy: userId,
         },
       });
-      // Auto-clear outward in same call (truck arriving at exit gate)
-      const cleared = await this.clearOutwardInternal(tx, facilityId, row.id, userRole, {
+      // Auto-clear outward in same call (truck arriving at exit gate) — through
+      // exactly the same checks as clearing a logged pass.
+      const cleared = await this.clearOutwardInternal(tx, facilityId, row.id, userId, userRole, {
         outbound_event_id: body.outbound_event_id,
         credit_authorization: body.credit_authorization,
         declared_quantity: body.declared_quantity,
+        override_reason: body.override_reason,
         notes: body.notes,
       });
       return cleared;
@@ -126,11 +166,12 @@ export class GatePassService {
   async clearOutward(
     facilityId: string,
     passId: string,
+    userId: string,
     userRole: string,
     body: ClearOutwardRequestType,
   ): Promise<GatePassResponseType> {
     return this.prisma.$transaction(async (tx) => {
-      return this.clearOutwardInternal(tx, facilityId, passId, userRole, body);
+      return this.clearOutwardInternal(tx, facilityId, passId, userId, userRole, body);
     });
   }
 
@@ -142,18 +183,23 @@ export class GatePassService {
     if (query.vehicle_number) {
       where.vehicleNumber = { contains: query.vehicle_number.toUpperCase(), mode: 'insensitive' };
     }
+    // Dates are the facility's calendar days, so "today" includes trucks logged
+    // between midnight and 05:00 in Lahore (still yesterday in UTC).
     if (query.date_from || query.date_to) {
       where.createdAt = {};
-      if (query.date_from) (where.createdAt as Prisma.DateTimeFilter).gte = new Date(query.date_from);
-      if (query.date_to) {
-        const to = new Date(query.date_to);
-        to.setUTCHours(23, 59, 59, 999);
-        (where.createdAt as Prisma.DateTimeFilter).lte = to;
-      }
+      if (query.date_from) (where.createdAt as Prisma.DateTimeFilter).gte = businessDayStart(query.date_from);
+      if (query.date_to) (where.createdAt as Prisma.DateTimeFilter).lt = businessDayStart(addDays(query.date_to, 1));
     }
     const [rows, total] = await this.repo.list(facilityId, where, query.page, query.page_size);
+    const data = rows.map((r) => formatGatePass(r));
+    if (query.active) {
+      const previews = await this.releasePreviews(facilityId, data.map((d) => d.vehicle_number));
+      data.forEach((d) => {
+        d.release = previews.get(normalizePlate(d.vehicle_number)) ?? emptyRelease();
+      });
+    }
     return {
-      data: rows.map((r) => formatGatePass(r)),
+      data,
       meta: { total, page: query.page, per_page: query.page_size },
     };
   }
@@ -162,6 +208,91 @@ export class GatePassService {
     const row = await this.repo.findById(facilityId, id);
     if (!row) throw Errors.GATE_PASS_NOT_FOUND();
     return formatGatePass(row);
+  }
+
+  /**
+   * For trucks at the gate: can each be released now? Read-only, and the same plate
+   * rule clearOutwardInternal then enforces (letters and digits, not left yet,
+   * dispatched under the current rules). Bag quantities are never part of it.
+   */
+  private async releasePreviews(facilityId: string, plates: string[]): Promise<Map<string, GateReleaseType>> {
+    const wanted = new Set(plates.map(normalizePlate).filter(Boolean));
+    const result = new Map<string, GateReleaseType>();
+    if (wanted.size === 0) return result;
+
+    const open = await this.prisma.outboundEvent.findMany({
+      where: {
+        facilityId,
+        voidedAt: null,
+        gatePassId: null,
+        vehicleNumber: { not: null },
+        status: { in: ['PENDING', 'WEIGHED', 'DISPUTED', 'DISPATCHED'] },
+        gatePasses: { none: { status: 'CLEARED' } },
+      },
+      select: {
+        id: true,
+        dispatchNoteNumber: true,
+        status: true,
+        vehicleNumber: true,
+        finalizedAt: true,
+        lot: { select: { marka: true } },
+        ownerPartySnapshot: { select: { name: true } },
+        invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true, billingPartyId: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    const byPlate = new Map<string, typeof open>();
+    for (const o of open) {
+      const key = normalizePlate(o.vehicleNumber ?? '');
+      if (!wanted.has(key)) continue;
+      // Dispatched before these rules (no finalized_at) may already have left untracked.
+      if (o.status === 'DISPATCHED' && !o.finalizedAt) continue;
+      byPlate.set(key, [...(byPlate.get(key) ?? []), o]);
+    }
+
+    const invoiceIds = [...byPlate.values()].flat().flatMap((o) => (o.invoice ? [o.invoice.id] : []));
+    const pending = await this.pendingChequeTotals(this.prisma as unknown as Prisma.TransactionClient, invoiceIds);
+
+    for (const [plate, list] of byPlate) {
+      let outstanding = 0;
+      let chequePending = false;
+      let state: GateReleaseStateType = 'READY';
+      const owing = new Set<string>(); // billing parties that still owe (standingCreditCover counts their uncleared cheques)
+      for (const o of list) {
+        if (o.status !== 'DISPATCHED') { state = 'NOT_DISPATCHED'; break; }
+        const inv = o.invoice;
+        if (inv?.status === 'DRAFT') { state = 'BILL_DRAFT'; continue; }
+        if (!inv || inv.status === 'VOID') { if (state === 'READY') state = 'PAYMENT_PENDING'; continue; }
+        const uncleared = pending.get(inv.id) ?? 0;
+        if (uncleared > 0.005) chequePending = true;
+        const owed = Math.max(0, Number(inv.totalPkr) - Number(inv.amountPaidPkr) + uncleared);
+        outstanding += owed;
+        if (owed > 0.01) owing.add(inv.billingPartyId);
+      }
+      outstanding = round2(outstanding);
+      // Money still owed holds the truck, unless every party that owes it holds a standing credit
+      // approval with headroom — the same helper the release uses, so READY here never meets a refusal there.
+      let onCredit = false;
+      if (state === 'READY' && outstanding > 0.01) {
+        const cover = await standingCreditCover(
+          this.prisma,
+          facilityId,
+          [...owing].map((partyId) => ({ partyId })),
+        );
+        if (cover.covered) onCredit = true;
+        else state = 'PAYMENT_PENDING';
+      }
+      result.set(plate, {
+        state,
+        dispatch_notes: list.map((o) => o.dispatchNoteNumber ?? o.id.slice(0, 8)),
+        outstanding_pkr: outstanding,
+        cheque_pending: chequePending,
+        marka: list.find((o) => o.lot.marka)?.lot.marka ?? null,
+        owner_party_name: list.find((o) => o.ownerPartySnapshot)?.ownerPartySnapshot?.name ?? null,
+        ...(onCredit ? { on_credit: true } : {}),
+      });
+    }
+    return result;
   }
 
   // ---------- internals ----------
@@ -192,6 +323,10 @@ export class GatePassService {
             ownerPartySnapshot: { select: { name: true } },
           },
         },
+        clearedOutbounds: {
+          select: { id: true, quantityWithdrawnBags: true, dispatchNoteNumber: true },
+          orderBy: { createdAt: 'asc' },
+        },
         party: { select: { id: true, name: true } },
       },
     });
@@ -199,136 +334,263 @@ export class GatePassService {
     return formatGatePass(row);
   }
 
+  /**
+   * Release a truck. Every withdrawal leaving on it must be dispatched, billed with
+   * a final invoice and paid (pending cheques do not count) — or released on a
+   * recorded MANAGER credit authorization — and the guard's blind bag count must
+   * match. A withdrawal leaves on exactly one truck, and the person who booked or
+   * dispatched it may not release it (MANAGER+ excepted). Checks run in this
+   * order so the first failure is the one the guard can act on.
+   */
   private async clearOutwardInternal(
     tx: Prisma.TransactionClient,
     facilityId: string,
     passId: string,
+    userId: string,
     userRole: string,
     body: ClearOutwardRequestType,
   ): Promise<GatePassResponseType> {
-    await tx.$queryRawUnsafe(
-      `SELECT id FROM gate_passes WHERE id = $1::uuid AND facility_id = $2::uuid FOR UPDATE`,
-      passId,
-      facilityId,
-    );
-    const pass = await tx.gatePass.findFirst({
-      where: { facilityId, id: passId },
-      include: {
-        relatedOutbound: {
-          select: {
-            id: true,
-            dispatchNoteNumber: true,
-            status: true,
-            vehicleNumber: true,
-            quantityWithdrawnBags: true,
-            invoice: {
-              select: { id: true, status: true, totalPkr: true, amountPaidPkr: true },
-            },
-          },
-        },
-      },
-    });
+    // 1. The pass.
+    if (!(await lockRow(tx, 'gate_passes', passId, facilityId))) throw Errors.GATE_PASS_NOT_FOUND();
+    const pass = await tx.gatePass.findFirst({ where: { facilityId, id: passId } });
     if (!pass) throw Errors.GATE_PASS_NOT_FOUND();
     if (pass.status === 'CLEARED' || pass.status === 'CANCELLED') {
       throw Errors.GATE_PASS_INVALID_STATE(`Pass is already ${pass.status}`);
     }
+    const isManager = roleAtLeast(userRole, 'MANAGER');
+    const overrideReason = body.override_reason?.trim() || null;
+    if (overrideReason && !isManager) throw Errors.GATE_OVERRIDE_REQUIRES_MANAGER();
+    let overrideUsed = false;
+    const declared = body.declared_quantity ?? null;
 
-    // Resolve outbound link (use body.outbound_event_id if provided, else existing)
-    let outboundId = body.outbound_event_id ?? pass.relatedOutboundId ?? null;
-    let outbound = pass.relatedOutbound ?? null;
-    if (body.outbound_event_id && body.outbound_event_id !== pass.relatedOutboundId) {
-      outbound = await tx.outboundEvent.findFirst({
-        where: { facilityId, id: body.outbound_event_id },
-        select: {
-          id: true,
-          dispatchNoteNumber: true,
-          status: true,
-          vehicleNumber: true,
-          quantityWithdrawnBags: true,
-          invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true } },
-        },
-      });
-      if (!outbound) throw Errors.GATE_OUTWARD_NO_OUTBOUND();
-      outboundId = outbound.id;
-    }
-
-    // Auto-match by vehicle number if no link yet
-    if (!outboundId) {
-      const today = new Date();
-      const dayStart = new Date(today);
-      dayStart.setUTCHours(0, 0, 0, 0);
-      const candidate = await tx.outboundEvent.findFirst({
-        where: {
-          facilityId,
-          vehicleNumber: pass.vehicleNumber,
-          status: 'DISPATCHED',
-          createdAt: { gte: dayStart },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          dispatchNoteNumber: true,
-          status: true,
-          vehicleNumber: true,
-          quantityWithdrawnBags: true,
-          invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true } },
-        },
-      });
-      if (candidate) {
-        outbound = candidate;
-        outboundId = candidate.id;
+    // 2. The withdrawals on this truck: the one named, or every dispatched
+    //    withdrawal booked on this plate that has not left yet.
+    let outbounds: ReleaseOutbound[];
+    // Naming one withdrawal skips matching the rest of the truck's load, so it is
+    // a manager's call: otherwise whoever booked an unpaid withdrawal could name a
+    // paid one on the same truck and drive both out.
+    if (body.outbound_event_id && !isManager) throw Errors.GATE_OVERRIDE_REQUIRES_MANAGER();
+    const explicitId = body.outbound_event_id ?? pass.relatedOutboundId ?? null;
+    if (explicitId) {
+      if (!(await lockRow(tx, 'outbound_events', explicitId, facilityId))) {
+        throw Errors.GATE_OUTWARD_NO_OUTBOUND();
       }
+      const ob = await tx.outboundEvent.findFirst({ where: { facilityId, id: explicitId }, select: releaseSelect });
+      if (!ob) throw Errors.GATE_OUTWARD_NO_OUTBOUND();
+      // 3. A named withdrawal must be ready to leave, unused, and booked on this truck.
+      if (ob.status !== 'DISPATCHED' || ob.voidedAt) throw Errors.GATE_OUTWARD_NOT_DISPATCHED(dnOf(ob));
+      if ((ob.gatePassId && ob.gatePassId !== pass.id) || (await this.clearedElsewhere(tx, ob.id, pass.id))) {
+        throw Errors.GATE_OUTWARD_ALREADY_USED(dnOf(ob));
+      }
+      // No plate on the booking counts as a mismatch: otherwise leaving it blank
+      // would be the way around this check.
+      const plateMatches =
+        ob.vehicleNumber != null && normalizePlate(ob.vehicleNumber) === normalizePlate(pass.vehicleNumber);
+      if (!plateMatches) {
+        if (!overrideReason) throw Errors.GATE_OUTWARD_PLATE_MISMATCH(dnOf(ob));
+        overrideUsed = true;
+      }
+      outbounds = [ob];
+    } else {
+      outbounds = await this.matchByPlate(tx, facilityId, pass);
     }
 
-    // Validate invoice paid OR credit_authorization (MANAGER+)
-    if (outbound) {
-      const inv = outbound.invoice;
-      if (!inv) {
-        if (!body.credit_authorization) {
+    // 4. Nothing booked on this truck: an empty or delivery truck leaves freely,
+    //    but a counted load that no withdrawal accounts for does not.
+    if (outbounds.length === 0) {
+      let unmatchedLoad = false;
+      if (declared != null && declared > 0) {
+        if (!overrideReason) throw Errors.GATE_OUTWARD_UNMATCHED_LOAD();
+        overrideUsed = true;
+        unmatchedLoad = true;
+      }
+      await tx.gatePass.update({
+        where: { id: passId },
+        data: {
+          status: 'CLEARED',
+          clearedAt: new Date(),
+          clearedBy: userId,
+          // An empty exit says nothing about the load, so it leaves the count the
+          // truck came in with (and its mismatch flag) as they were.
+          ...(unmatchedLoad ? { declaredQuantity: declared, quantityMismatchFlag: true } : {}),
+          ...(overrideUsed ? { overrideReason } : {}),
+          notes: body.notes ?? pass.notes,
+        },
+      });
+      return this.getByIdInternal(tx, facilityId, passId);
+    }
+
+    // 5. Whoever booked or dispatched a withdrawal does not also release it.
+    if (!isManager && outbounds.some((o) => o.createdBy === userId || o.finalizedBy === userId)) {
+      throw Errors.GATE_SELF_RELEASE();
+    }
+
+    // 6. Payment. A draft bill can still be edited, so nothing leaves on one —
+    //    not even on credit. A cheque is credit until it clears. A voided bill can
+    //    never be re-issued (one invoice per withdrawal), so the stock leaves on a
+    //    recorded credit authorization rather than being stranded.
+    const pending = await this.pendingChequeTotals(
+      tx,
+      outbounds.flatMap((o) => (o.invoice ? [o.invoice.id] : [])),
+    );
+    let outstanding = 0;
+    let unbilled: string | null = null;
+    let chequesPending = false;
+    const owing = new Set<string>(); // billing parties that still owe (standingCreditCover counts their uncleared cheques)
+    for (const o of outbounds) {
+      const inv = o.invoice;
+      if (inv?.status === 'DRAFT') throw Errors.GATE_OUTWARD_INVOICE_NOT_FINAL(dnOf(o));
+      if (!inv || inv.status === 'VOID') {
+        unbilled = unbilled ?? dnOf(o);
+        continue;
+      }
+      const uncleared = pending.get(inv.id) ?? 0;
+      if (uncleared > 0.005) chequesPending = true;
+      const owed = Math.max(0, Number(inv.totalPkr) - Number(inv.amountPaidPkr) + uncleared);
+      outstanding += owed;
+      if (owed > 0.01) owing.add(inv.billingPartyId);
+    }
+    outstanding = round2(outstanding);
+    const needsCredit = unbilled != null || outstanding > 0.01;
+    // The standing approvals that carried the truck out, when no manager did.
+    let standing: ActiveApproval[] = [];
+    if (needsCredit) {
+      if (body.credit_authorization) {
+        if (!isManager) throw Errors.GATE_CREDIT_AUTH_REQUIRES_MANAGER();
+      } else {
+        // Only a truck whose every bill exists can leave on a standing approval: an unbilled or
+        // voided withdrawal has no amount to cover and stays a manager's call.
+        const cover =
+          unbilled == null
+            ? await standingCreditCover(tx, facilityId, [...owing].map((partyId) => ({ partyId })))
+            : { covered: false, approvals: [] as ActiveApproval[] };
+        if (!cover.covered) {
           throw Errors.GATE_OUTWARD_BLOCKED(
-            'Outbound has no finalized invoice yet — settle billing first',
+            unbilled != null
+              ? `Withdrawal ${unbilled} has no valid bill — a manager must authorize this release on credit`
+              : // The guard is told payment is pending, never how much: an amount stands in for
+                // the blind count (common/blind-count.ts). The fact only; the gate page gives the
+                // guard their next step. Everyone else hears the balance.
+                (isBlindRole(userRole) ? 'Payment pending' : `Payment Pending — balance ${outstanding.toFixed(2)} PKR`) +
+                  (chequesPending ? ' (includes cheques not yet cleared)' : ''),
           );
         }
-        if (!roleAtLeast(userRole, 'MANAGER')) {
-          throw Errors.GATE_CREDIT_AUTH_REQUIRES_MANAGER();
-        }
-      } else {
-        const balanceDue = Number(inv.totalPkr) - Number(inv.amountPaidPkr);
-        const isPaid = balanceDue <= 0.01;
-        if (!isPaid) {
-          if (!body.credit_authorization) {
-            throw Errors.GATE_OUTWARD_BLOCKED(
-              `Payment Pending — invoice balance ${balanceDue.toFixed(2)} PKR`,
-            );
-          }
-          if (!roleAtLeast(userRole, 'MANAGER')) {
-            throw Errors.GATE_CREDIT_AUTH_REQUIRES_MANAGER();
-          }
-        }
+        standing = cover.approvals;
       }
     }
 
-    // Gate-side reconciliation: physically-counted bags/crates vs the authorized
-    // quantity on the linked outbound. A divergence raises the mismatch flag.
-    const authorizedQty = outbound?.quantityWithdrawnBags ?? null;
-    const declaredQty = body.declared_quantity ?? null;
-    const outwardMismatch =
-      declaredQty != null && authorizedQty != null && declaredQty !== authorizedQty;
+    // 7. The guard's count, checked blind against what was dispatched.
+    if (declared == null) throw Errors.GATE_OUTWARD_COUNT_REQUIRED();
+    const authorized = outbounds.reduce((sum, o) => sum + o.quantityWithdrawnBags, 0);
+    const countMismatch = declared !== authorized;
+    if (countMismatch) {
+      if (!overrideReason) throw Errors.GATE_OUTWARD_COUNT_MISMATCH();
+      overrideUsed = true;
+    }
 
+    // 8. Record it. Attaching is conditional, so a withdrawal another truck took
+    //    in the meantime fails here instead of leaving twice.
+    const ids = outbounds.map((o) => o.id);
+    const { count } = await tx.outboundEvent.updateMany({
+      where: { id: { in: ids }, OR: [{ gatePassId: null }, { gatePassId: pass.id }] },
+      data: { gatePassId: pass.id },
+    });
+    if (count !== ids.length) throw Errors.GATE_OUTWARD_ALREADY_USED(outbounds.map(dnOf).join(', '));
+
+    const now = new Date();
+    const first = [...outbounds].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0]!;
     await tx.gatePass.update({
       where: { id: passId },
       data: {
         status: 'CLEARED',
-        clearedAt: new Date(),
-        relatedOutboundId: outboundId,
-        ...(declaredQty != null
-          ? { declaredQuantity: declaredQty, quantityMismatchFlag: outwardMismatch }
+        clearedAt: now,
+        clearedBy: userId,
+        // Legacy single link, still written so an older release reads it.
+        relatedOutboundId: explicitId ?? first.id,
+        declaredQuantity: declared,
+        quantityMismatchFlag: countMismatch,
+        // The amount left on credit; unknown (null) when a withdrawal had no valid
+        // bill, so an unbilled release never reads as a Rs 0 one.
+        // On a standing approval the authority is the manager who approved the party, and the
+        // approval is named on the pass; otherwise it is the manager who released it.
+        ...(needsCredit
+          ? {
+              creditAuthorizedBy: standing.length > 0 ? standing[0]!.approvedBy : userId,
+              creditAuthorizedAt: now,
+              creditAuthorizedAmountPkr: unbilled != null ? null : outstanding,
+              ...(standing.length > 0 ? { creditApprovalIds: { set: standing.map((a) => a.id) } } : {}),
+            }
           : {}),
+        ...(overrideUsed ? { overrideReason } : {}),
         notes: body.notes ?? pass.notes,
       },
     });
 
     return this.getByIdInternal(tx, facilityId, passId);
+  }
+
+  /**
+   * Every dispatched withdrawal booked on this truck's plate that has not left
+   * yet, locked. Plates compare by letters and digits only. "Not left yet" is
+   * `gate_pass_id IS NULL`, with no date cutoff: a load dispatched days ago whose
+   * truck waited for a cheque to clear is still on the truck. Only withdrawals
+   * dispatched under these rules (finalized_at set) match by plate — one
+   * dispatched before them may already have left untracked, so it leaves only by
+   * a manager naming it.
+   */
+  private async matchByPlate(
+    tx: Prisma.TransactionClient,
+    facilityId: string,
+    pass: { id: string; vehicleNumber: string },
+  ): Promise<ReleaseOutbound[]> {
+    const plate = normalizePlate(pass.vehicleNumber);
+    if (!plate) return [];
+    const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT o.id FROM outbound_events o
+        WHERE o.facility_id = $1::uuid
+          AND o.status = 'DISPATCHED'
+          AND o.voided_at IS NULL
+          AND o.gate_pass_id IS NULL
+          AND o.finalized_at IS NOT NULL
+          AND o.vehicle_number IS NOT NULL
+          AND regexp_replace(upper(o.vehicle_number), '[^A-Z0-9]', '', 'g') = $2
+          AND NOT EXISTS (
+            SELECT 1 FROM gate_passes g
+             WHERE g.related_outbound_id = o.id AND g.status = 'CLEARED' AND g.id <> $3::uuid)
+        ORDER BY o.id
+        FOR UPDATE OF o`,
+      facilityId,
+      plate,
+      pass.id,
+    );
+    if (rows.length === 0) return [];
+    return tx.outboundEvent.findMany({
+      where: { facilityId, id: { in: rows.map((r) => r.id) } },
+      select: releaseSelect,
+      orderBy: { id: 'asc' },
+    });
+  }
+
+  /** A pass other than this one already released the withdrawal (legacy single link). */
+  private async clearedElsewhere(tx: Prisma.TransactionClient, outboundId: string, passId: string) {
+    const n = await tx.gatePass.count({
+      where: { relatedOutboundId: outboundId, status: 'CLEARED', id: { not: passId } },
+    });
+    return n > 0;
+  }
+
+  /** Per invoice: receipts allocated to it by cheques that have not cleared yet. */
+  private async pendingChequeTotals(
+    tx: Prisma.TransactionClient,
+    invoiceIds: string[],
+  ): Promise<Map<string, number>> {
+    if (invoiceIds.length === 0) return new Map();
+    const rows = await tx.paymentAllocation.groupBy({
+      by: ['invoiceId'],
+      where: { invoiceId: { in: invoiceIds }, voidedAt: null, payment: { clearanceStatus: 'PENDING' } },
+      _sum: { allocatedAmountPkr: true },
+    });
+    return new Map(rows.map((r) => [r.invoiceId!, Number(r._sum.allocatedAmountPkr ?? 0)]));
   }
 }
 
@@ -369,7 +631,7 @@ function formatGatePass(row: any): GatePassResponseType {
     related_marka: marka,
     related_location: location,
     declared_quantity: row.declaredQuantity ?? null,
-    authorized_quantity: row.relatedOutbound?.quantityWithdrawnBags ?? null,
+    authorized_quantity: authorizedQuantity(row),
     quantity_mismatch_flag: row.quantityMismatchFlag ?? false,
     party_id: row.partyId ?? null,
     party_name: row.party?.name ?? null,
@@ -379,5 +641,19 @@ function formatGatePass(row: any): GatePassResponseType {
     cleared_at: cleared ? cleared.toISOString() : null,
     turnaround_seconds: turnaround,
     created_by: row.createdBy,
+    cleared_by: row.clearedBy ?? null,
+    credit_authorized_by: row.creditAuthorizedBy ?? null,
+    credit_authorized_at: row.creditAuthorizedAt ? row.creditAuthorizedAt.toISOString() : null,
+    credit_authorized_amount_pkr:
+      row.creditAuthorizedAmountPkr != null ? Number(row.creditAuthorizedAmountPkr) : null,
+    override_reason: row.overrideReason ?? null,
+    outbound_ids: (row.clearedOutbounds ?? []).map((o: { id: string }) => o.id),
   };
+}
+
+/** Bags authorized to leave: every withdrawal the truck carried, else the legacy single link. */
+function authorizedQuantity(row: any): number | null {
+  const carried: { quantityWithdrawnBags: number }[] = row.clearedOutbounds ?? [];
+  if (carried.length > 0) return carried.reduce((sum, o) => sum + o.quantityWithdrawnBags, 0);
+  return row.relatedOutbound?.quantityWithdrawnBags ?? null;
 }

@@ -206,7 +206,11 @@ X-Facility-ID: <facility_uuid>
 | GET | `/outbound-events/:id` | Outbound event detail | All |
 | PATCH | `/outbound-events/:id/weight` | Record outbound weight | OPERATOR+ |
 | POST | `/outbound-events/:id/finalize` | Finalize and close (triggers invoice) | MANAGER+ |
-| GET | `/outbound-events/:id/dispatch-note` | Get dispatch note PDF URL | OPERATOR+ |
+| GET | `/outbound-events` | Dispatch queue: withdrawals with the stage each has reached (BOOKED, WEIGHED, DISPATCHED, PAID, LEFT); filters `status` (csv), `date_from/to` (business days), `search` (DN / plate / lot #). Carries bag counts, so it needs `outbound.record`, not the guard's `gate_passes.log` | OPERATOR+ |
+| GET | `/outbound-events/:id/checkout-preview` | The bill a WEIGHED withdrawal will carry (storage line, apply-at-dispatch service lines, GST, total), without writing it. Also returns `solo: { allowed, reason?, credit_available }` (booleans and a reason, never a ceiling): may the munshi finish this truck alone | OPERATOR+ (`outbound.record`) |
+| POST | `/outbound-events/:id/dispatch-and-collect` | Dispatch, finalize the bill and take the money in one transaction. Body `{ expected_total_pkr, payment: { mode: CASH/BANK_TRANSFER/CHEQUE/MOBILE_WALLET/CREDIT, reference_number?, cheque_date? }, skip_service_charge_ids?, picked_from?, notes? }`. Refused with 409 `DISPATCH_TOTAL_CHANGED` if the bill is no longer `expected_total_pkr`. The route needs `outbound.record`; the handler then needs `outbound.finalize`, `invoices.manage` and (unless CREDIT) `payments.record` (a missing key is named before anything is written), **or** the owner's `dispatch_solo_mode` setting on a PACCI lot, a withdrawal dated today and no default charge priced by weight: CASH in full, or CREDIT for a party with a live standing credit approval whose ceiling still holds this bill, with no `skip_service_charge_ids`. Anything else from a caller without the keys is 403 `DISPATCH_NEEDS_MANAGER` with the reason in the message, and nothing is written | OPERATOR+ (solo) / MANAGER+ |
+| POST | `/outbound-events/:id/cancel` | Cancel a withdrawal that has not left (PENDING/WEIGHED/DISPUTED); body `{ reason }`; frees its bags | OPERATOR+ (`outbound.record`) |
+| GET | `/outbound-events/:id/dispatch-note` | Get dispatch note PDF URL (409 for a cancelled withdrawal) | OPERATOR+ |
 
 **POST /outbound-events — Request**
 ```json
@@ -337,6 +341,31 @@ X-Facility-ID: <facility_uuid>
 | `SYSTEM_ACCOUNT_PROTECTED` | 409 | System accounts cannot be deleted or recoded |
 | `CREDIT_NOTE_EXCEEDS_INVOICE` | 422 | Credit note total exceeds original invoice |
 | `VALIDATION_ERROR` | 400 | Invalid input; field-level detail in error.field |
+| `LOT_BALANCE_RESERVED` | 409 | Bags are held by open withdrawals (message names their dispatch notes); dispatch or cancel them first |
+| `DATE_IN_FUTURE` | 422 | A date after today (Lahore calendar); MANAGER+ only |
+| `OUTBOUND_CANCELLED` | 409 | The withdrawal was cancelled |
+| `DISPATCH_TOTAL_CHANGED` | 409 | Dispatch & collect: the bill differs from the total the client reviewed; nothing was written — review the new bill |
+| `BLIND_ROLE_FORBIDDEN` | 403 | The gate role (SECURITY) asked for a document that shows stock quantities (an invoice, its PDF, a lot's invoices, the placement slip). On every other response the guard receives, stock quantities are `null` (docs/07) |
+| `CASH_TRACKING_OFF` | 409 | A handover was attempted while cash tracking is off (Settings → Dispatch Desk Cash) |
+| `HANDOVER_NOTHING_PENDING` | 409 | The collector has no cash waiting (already counted, or the owner's own cash, which is not tracked) |
+| `HANDOVER_EXPECTED_CHANGED` | 409 | The cash waiting changed since the manager looked; nothing was written — count again |
+| `DISPATCH_NEEDS_MANAGER` | 403 | Solo dispatch refused (switch off, KATCHI bill, a withdrawal not dated today, a default charge priced by weight, a charge left off, a mode other than cash/approved credit, no approval, or the bill would pass the approved ceiling); a manager must finish the truck |
+| `HANDOVER_SELF_CONFIRM` | 403 | Nobody counts their own cash |
+| `HANDOVER_SELF_VOID` | 403 | Nobody voids the count of their own cash (it would reverse a shortage booked against them) |
+| `HANDOVER_NOT_FOUND` / `HANDOVER_ALREADY_VOIDED` | 404 / 409 | Void of a handover that does not exist or was already voided |
+| `OUTBOUND_ALREADY_LEFT` | 409 | Cancel refused: a truck already carried this withdrawal out (the old gate allowed that before dispatch) |
+| `OUTBOUND_QUANTITY_STALE` | 409 | A FULL withdrawal no longer equals the lot balance; cancel and rebook |
+| `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization, unless every unpaid bill belongs to a party with a live standing credit approval that holds its exposure (then the guard releases it alone). The message names the balance for everyone but SECURITY, who reads only "Payment pending" |
+| `GATE_OUTWARD_INVOICE_NOT_FINAL` | 422 | A withdrawal on the truck is billed on a DRAFT invoice — finalize it first (credit cannot cover a draft) |
+| `GATE_OUTWARD_NOT_DISPATCHED` | 422 | The named withdrawal has not been dispatched |
+| `GATE_OUTWARD_ALREADY_USED` | 409 | The withdrawal already left on another truck |
+| `GATE_OUTWARD_PLATE_MISMATCH` | 422 | Truck plate ≠ the withdrawal's booked vehicle (or none booked); MANAGER may override with a reason |
+| `GATE_OUTWARD_COUNT_REQUIRED` | 422 | The guard's bag count is required when a withdrawal leaves |
+| `GATE_OUTWARD_COUNT_MISMATCH` | 422 | Count ≠ bags dispatched. The message is the fact only ("The bag count does not match the dispatch"), never the expected number; the page says what to do next (MANAGER may override with a reason, the guard recounts or calls one) |
+| `GATE_OUTWARD_UNMATCHED_LOAD` | 422 | A counted load no dispatched withdrawal accounts for; MANAGER may override with a reason |
+| `GATE_OVERRIDE_REQUIRES_MANAGER` | 403 | `override_reason` or `outbound_event_id` (naming a withdrawal) sent by someone below MANAGER |
+| `GATE_SELF_RELEASE` | 403 | The releaser booked or dispatched a withdrawal on this truck (MANAGER+ exempt) |
+| `CONSTRAINT_VIOLATION` | 409 | A database rule refused the change (e.g. a lot balance below zero) |
 | `INTERNAL_ERROR` | 500 | Unexpected server error |
 
 ---
@@ -520,6 +549,14 @@ X-Facility-ID: <facility_uuid>
 | GET | `/gate-passes` | List active vehicles | All |
 | PATCH | `/gate-passes/:id/link-lot` | Link to generated lot after weigh-in | OPERATOR+ |
 | POST | `/gate-passes/:id/outward` | Dispatch truck (Clear) | SECURITY+ |
+| GET | `/parties/:id/credit-approval` | Whether the party has a live standing credit approval (`approved`, `valid_until`, approver). The ceiling and note only for `parties.credit_terms` holders | authenticated |
+
+| POST | `/parties/:id/credit-approval` | Approve credit: `{ max_outstanding_pkr, valid_until?, note? }`; replaces (revokes) any live approval; refuses a past date | MANAGER+ (`parties.credit_terms`) |
+| POST | `/parties/:id/credit-approval/revoke` | `{ reason }`; the party's credit-billed trucks need a manager at the gate again | MANAGER+ (`parties.credit_terms`) |
+| GET | `/dispatch/day?date=` | The desk's business day per collector: withdrawals dispatched, cash / bank / cheques taken, credit billed, and (when tracking is on) the cash waiting to be handed over and since when. Own row only unless `cash_handovers.confirm` | OPERATOR+ (`outbound.record`) |
+| POST | `/cash-handovers` | Count a collector's waiting cash: `{ collector_id, expected_cash_pkr, counted_cash_pkr, variance_reason? }`. 409 `HANDOVER_EXPECTED_CHANGED` if the pool moved; a difference needs a reason and posts JE-28 | MANAGER+ (`cash_handovers.confirm`) |
+| POST | `/cash-handovers/:id/void` | `{ reason }`; reverses the difference entry and frees the receipts | MANAGER+ (`cash_handovers.confirm`) |
+| GET | `/cash-handovers?collector_id=&has_variance=` | Handover history | MANAGER+ (`cash_handovers.confirm`) |
 
 ### 4.19 Peshgi / Loans (`/loans`)
 

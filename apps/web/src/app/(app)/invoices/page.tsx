@@ -19,7 +19,10 @@ const FILTER_KEYS = ['status', 'date_from', 'date_to', 'party_id'] as const;
 export default function InvoiceListPage() {
   const router = useRouter();
   const { user } = useAuthStore();
+  // The page renders while the user loads; the list is asked for only once the user is known to
+  // hold billing.view, so no request goes out unauthenticated or to be refused.
   const canAccess = !user || can(user, 'billing.view');
+  const canQuery = !!user && can(user, 'billing.view');
   const canManage = can(user, 'invoices.manage');
   const canVoid = can(user, 'invoices.void');
 
@@ -35,7 +38,7 @@ export default function InvoiceListPage() {
     qk.invoices.list(params),
     '/v1/invoices',
     params,
-    { enabled: canAccess },
+    { enabled: canQuery },
   );
 
   const [payTarget, setPayTarget] = useState<InvoiceRow | null>(null);

@@ -78,3 +78,9 @@ export function formatCount(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return '—';
   return n.toLocaleString(numberLocale, { maximumFractionDigits: 0 });
 }
+
+/** "1,234.5 kg" — a weight, or a dash when it is not shown (the gate guard gets weights as null). */
+export function formatKg(n: number | null | undefined): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return '—';
+  return `${n.toLocaleString(numberLocale, { maximumFractionDigits: 2 })} kg`;
+}

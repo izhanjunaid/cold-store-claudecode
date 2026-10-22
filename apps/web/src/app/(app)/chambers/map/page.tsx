@@ -14,6 +14,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { PageHeader } from '@/components/layout/page-header';
 import { UrduText } from '@/components/ui/urdu-text';
 import { cn } from '@/lib/utils';
+import { formatCount } from '@/lib/format';
+import { capacityPct, formatCapacityPct } from '@/components/capacity-bar';
 
 interface Rack {
   id: string;
@@ -53,7 +55,9 @@ interface RackLot {
   bags: number;
 }
 
-function fillTier(pct: number) {
+function fillTier(pct: number | null) {
+  // Occupancy withheld from this role (the gate guard counts blind): neither empty nor full.
+  if (pct == null) return { bg: 'bg-secondary', text: 'text-muted-foreground', border: 'border-border', label: 'Not shown' };
   if (pct >= 90) return { bg: 'bg-red-500', text: 'text-white', border: 'border-red-700', label: 'Full' };
   if (pct >= 70) return { bg: 'bg-amber-400', text: 'text-gray-900', border: 'border-amber-600', label: 'Busy' };
   if (pct > 0) return { bg: 'bg-emerald-500', text: 'text-white', border: 'border-emerald-700', label: 'Open' };
@@ -115,7 +119,7 @@ export default function RoomMapPage() {
       ) : (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {chambers.map((c) => {
-            const pct = c.max_capacity_bags > 0 ? Math.round((c.current_occupancy_bags / c.max_capacity_bags) * 100) : 0;
+            const pct = capacityPct(c.current_occupancy_bags, c.max_capacity_bags);
             const tier = fillTier(pct);
             return (
               <button
@@ -134,9 +138,9 @@ export default function RoomMapPage() {
                   <div className="mt-0.5 text-xs opacity-90">{c.commodity_restriction_name ?? 'Multi'}</div>
                 </div>
                 <div>
-                  <div className="text-2xl font-bold leading-none tabular-nums">{pct}%</div>
+                  <div className="text-2xl font-bold leading-none tabular-nums">{formatCapacityPct(pct)}</div>
                   <div className="mt-1 text-xs opacity-90 tabular-nums">
-                    {c.current_occupancy_bags.toLocaleString()} / {c.max_capacity_bags.toLocaleString()} bags
+                    {formatCount(c.current_occupancy_bags)} / {c.max_capacity_bags.toLocaleString()} bags
                   </div>
                   <div className="mt-0.5 text-xs opacity-80">
                     {tier.label}
@@ -212,7 +216,7 @@ function RoomDrillDownDialog({
 
         {room && (
           <p className="text-sm text-muted-foreground">
-            {room.current_occupancy_bags.toLocaleString()} of {room.max_capacity_bags.toLocaleString()} bags
+            {formatCount(room.current_occupancy_bags)} of {room.max_capacity_bags.toLocaleString()} bags
             {room.last_temperature && <span className="ml-2">· {room.last_temperature.temperature_c}°C</span>}
           </p>
         )}
@@ -231,7 +235,7 @@ function RoomDrillDownDialog({
             {[...racks]
               .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
               .map((r) => {
-                const pct = r.max_capacity_bags > 0 ? Math.round((r.current_occupancy_bags / r.max_capacity_bags) * 100) : 0;
+                const pct = capacityPct(r.current_occupancy_bags, r.max_capacity_bags);
                 const tier = fillTier(pct);
                 return (
                   <button
@@ -245,13 +249,13 @@ function RoomDrillDownDialog({
                       rackId === r.id && 'ring-2 ring-ring ring-offset-1',
                     )}
                   >
-                    {r.name} · {pct}%
+                    {r.name} · {formatCapacityPct(pct)}
                   </button>
                 );
               })}
             {room != null && room.unplaced_bags > 0 && (
               <span className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 tabular-nums">
-                Unplaced · {room.unplaced_bags.toLocaleString()} bags
+                Unplaced · {formatCount(room.unplaced_bags)} bags
               </span>
             )}
           </div>
@@ -278,7 +282,7 @@ function RoomDrillDownDialog({
                   {lot.marka && (
                     <UrduText className="rounded bg-secondary px-2 py-0.5 text-xs font-semibold">{lot.marka}</UrduText>
                   )}
-                  <span className="ml-auto shrink-0 font-medium tabular-nums">{lot.bags.toLocaleString()} bags</span>
+                  <span className="ml-auto shrink-0 font-medium tabular-nums">{formatCount(lot.bags)} bags</span>
                 </li>
               ))}
             </ul>

@@ -8,9 +8,12 @@ import facilityScope from '../plugins/facility-scope';
 import authPlugin from '../plugins/auth';
 import permissionsPlugin from '../plugins/permissions';
 import mailPlugin from '../plugins/mail';
+import blindRedactionPlugin from '../plugins/blind-redaction';
 import type { MailConfig } from '../modules/mail/mail.service';
 import { authRoutes } from '../modules/auth/auth.controller';
 import { partyRoutes } from '../modules/party/party.controller';
+import { creditApprovalRoutes } from '../modules/credit-approval/credit-approval.controller';
+import { cashHandoverRoutes } from '../modules/cash-handover/cash-handover.controller';
 import { chamberRoutes } from '../modules/chamber/chamber.controller';
 import { commodityRoutes } from '../modules/commodity/commodity.controller';
 import { partnerRoutes } from '../modules/partners/partner.controller';
@@ -64,6 +67,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   await testApp.register(facilityScope);
   await testApp.register(authPlugin);
   await testApp.register(permissionsPlugin);
+  await testApp.register(blindRedactionPlugin);
   await testApp.register(mailPlugin, {
     transportFactory: (config) => ({
       sendMail: async (opts) => {
@@ -75,6 +79,8 @@ async function buildTestApp(): Promise<FastifyInstance> {
   testApp.get('/health', async () => ({ success: true, data: { status: 'ok' } }));
   await testApp.register(authRoutes);
   await testApp.register(partyRoutes);
+  await testApp.register(creditApprovalRoutes);
+  await testApp.register(cashHandoverRoutes);
   await testApp.register(chamberRoutes);
   await testApp.register(commodityRoutes);
   await testApp.register(partnerRoutes);

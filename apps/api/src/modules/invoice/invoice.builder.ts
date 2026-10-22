@@ -30,14 +30,24 @@ interface DraftInvoiceParams {
   createdBy: string;
 }
 
-// Shared by buildInvoiceFromOutbound (period = latest ownership -> outbound
-// date) and buildOwnershipTransferAccruedInvoice (period = latest ownership
-// -> transfer date). Both bill one STORAGE line for a fixed period; only how
-// the period and billing party are derived differs.
-async function createDraftInvoice(
+/** What a storage invoice would say, before anything is written. */
+export interface StorageInvoicePricing {
+  charge: ReturnType<typeof computeStorageCharge>;
+  subTotal: number;
+  gstRate: number;
+  gstAmount: number;
+  total: number;
+}
+
+/**
+ * The pricing half of a storage invoice: the STORAGE charge and the GST on it. Pure
+ * of writes, so the dispatch checkout's preview and the invoice it then builds are
+ * the same arithmetic and cannot disagree (as with computeTariffCharge).
+ */
+export async function priceStorageInvoice(
   tx: Prisma.TransactionClient,
   params: DraftInvoiceParams,
-): Promise<BuiltInvoice> {
+): Promise<StorageInvoicePricing> {
   // A supplier has no receivable, so a draft billed to one could never be finalized —
   // and a draft nothing can finalize stops its month from closing (docs/25 R-01).
   const billingParty = await tx.party.findUniqueOrThrow({
@@ -70,6 +80,18 @@ async function createDraftInvoice(
   const gstRate = settings.gst_registered && params.bookType === 'PACCI' ? settings.gst_default_rate : 0;
   const gstAmount = round2(subTotal * (gstRate / 100));
   const total = round2(subTotal + gstAmount);
+  return { charge, subTotal, gstRate, gstAmount, total };
+}
+
+// Shared by buildInvoiceFromOutbound (period = latest ownership -> outbound
+// date) and buildOwnershipTransferAccruedInvoice (period = latest ownership
+// -> transfer date). Both bill one STORAGE line for a fixed period; only how
+// the period and billing party are derived differs.
+async function createDraftInvoice(
+  tx: Prisma.TransactionClient,
+  params: DraftInvoiceParams,
+): Promise<BuiltInvoice> {
+  const { charge, subTotal, gstRate, gstAmount, total } = await priceStorageInvoice(tx, params);
 
   return tx.invoice.create({
     data: {
@@ -106,17 +128,11 @@ async function createDraftInvoice(
   });
 }
 
-export async function buildInvoiceFromOutbound(
+/** The billing inputs of a withdrawal: its lot's rate plan and billing party over the stay it ends. */
+async function outboundBillingParams(
   tx: Prisma.TransactionClient,
   outboundEventId: string,
-): Promise<BuiltInvoice> {
-  // Idempotent: return existing if already created
-  const existing = await tx.invoice.findFirst({
-    where: { outboundEventId },
-    include: builderInclude,
-  });
-  if (existing) return existing;
-
+): Promise<DraftInvoiceParams> {
   const outbound = await tx.outboundEvent.findUnique({
     where: { id: outboundEventId },
     include: {
@@ -137,7 +153,7 @@ export async function buildInvoiceFromOutbound(
   const periodStart = billingPeriodStart(lot);
   const periodEnd: Date = outbound.outboundDate;
 
-  return createDraftInvoice(tx, {
+  return {
     facilityId: outbound.facilityId,
     lotId: outbound.lotId,
     outboundEventId,
@@ -153,7 +169,31 @@ export async function buildInvoiceFromOutbound(
     tariff: ratePlan.tariff,
     seasonEndDate: ratePlan.seasonEndDate,
     createdBy: outbound.createdBy,
+  };
+}
+
+export async function buildInvoiceFromOutbound(
+  tx: Prisma.TransactionClient,
+  outboundEventId: string,
+): Promise<BuiltInvoice> {
+  // Idempotent: return existing if already created
+  const existing = await tx.invoice.findFirst({
+    where: { outboundEventId },
+    include: builderInclude,
   });
+  if (existing) return existing;
+
+  return createDraftInvoice(tx, await outboundBillingParams(tx, outboundEventId));
+}
+
+/** What the withdrawal's invoice will say, without creating it (the checkout's review step). */
+export async function previewInvoiceFromOutbound(
+  tx: Prisma.TransactionClient,
+  outboundEventId: string,
+) {
+  const params = await outboundBillingParams(tx, outboundEventId);
+  const pricing = await priceStorageInvoice(tx, params);
+  return { params, ...pricing };
 }
 
 interface TransferAccruedInvoiceParams {

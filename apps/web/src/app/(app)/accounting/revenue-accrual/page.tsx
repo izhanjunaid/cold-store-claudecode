@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { AlertTriangle } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { DEFAULT_FY_START_MONTH, fiscalYearStart, toIsoDate } from '@coldchain/shared';
+import { DEFAULT_FY_START_MONTH, fiscalYearStart, fromIsoDate, localIsoDate, toIsoDate } from '@coldchain/shared';
+import { previousMonthOf } from '@/lib/fiscal-period';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -50,11 +51,13 @@ interface Preview {
 }
 
 export default function RevenueAccrualPage() {
-  const now = new Date();
   // Default to the month just gone: this is a period-close task, and you close
-  // a period after it ends.
-  const [year, setYear] = useState(now.getUTCMonth() === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear());
-  const [month, setMonth] = useState(now.getUTCMonth() === 0 ? 12 : now.getUTCMonth());
+  // a period after it ends. The viewer's day, not the UTC one: on the 1st before
+  // 05:00 in Lahore the UTC month is still the old one.
+  const today = localIsoDate();
+  const lastMonth = previousMonthOf(today);
+  const [year, setYear] = useState(lastMonth.year);
+  const [month, setMonth] = useState(lastMonth.month);
   const [data, setData] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -65,7 +68,7 @@ export default function RevenueAccrualPage() {
   const facility = useFacility();
   const queryClient = useQueryClient();
   const fyMonth = facility.data?.settings?.fiscal_year_start_month ?? DEFAULT_FY_START_MONTH;
-  const thisFyStart = fiscalYearStart(now, fyMonth);
+  const thisFyStart = fiscalYearStart(fromIsoDate(today), fyMonth);
   const fyStarts = [-1, 0, 1].map((k) =>
     toIsoDate(new Date(Date.UTC(thisFyStart.getUTCFullYear() + k, thisFyStart.getUTCMonth(), 1))),
   );

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PrismaClient, Prisma } from '@coldchain/db';
-import type { NotificationSettingsType } from '@coldchain/shared';
+import { businessDate, businessHour, type NotificationSettingsType } from '@coldchain/shared';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { DigestService } from './digest.service';
 
@@ -21,8 +21,8 @@ function readState(raw: Prisma.JsonValue): NotificationsState {
 
 /**
  * Whether a facility's digest is due right now. Pure so the scheduling rule can
- * be unit-tested with a fixed clock: enabled, the local hour matches, and it
- * hasn't already gone out today.
+ * be unit-tested with a fixed clock: enabled, the hour in Lahore matches, and it
+ * hasn't already gone out today (Lahore's day).
  */
 export function isDigestDue(
   notifications: NotificationSettingsType | undefined,
@@ -30,9 +30,9 @@ export function isDigestDue(
   now: Date,
 ): boolean {
   if (!notifications?.daily_digest_enabled) return false;
-  if (now.getHours() !== notifications.digest_hour) return false;
-  const today = now.toISOString().slice(0, 10);
-  return state.last_digest_date !== today;
+  // The owner sets the hour on the facility's clock; the container's own clock is UTC.
+  if (businessHour(now) !== notifications.digest_hour) return false;
+  return state.last_digest_date !== businessDate(now);
 }
 
 async function persistLastDigestDate(prisma: PrismaClient, facilityId: string, date: string) {
@@ -62,7 +62,7 @@ export function startNotificationScheduler(app: FastifyInstance): NodeJS.Timeout
     try {
       const facilities = await app.prisma.facility.findMany({ select: { id: true, settings: true } });
       const now = new Date();
-      const today = now.toISOString().slice(0, 10);
+      const today = businessDate(now);
       for (const f of facilities) {
         try {
           const settings = resolveFacilitySettings(f.settings);

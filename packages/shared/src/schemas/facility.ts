@@ -86,6 +86,15 @@ export const FacilitySettings = z.object({
   payroll: PayrollSettings,
   email: EmailSettings,
   notifications: NotificationSettings,
+  // Cash handovers (fast-dispatch C1c): the business day from which the cash a collector takes is
+  // tracked and handed over; null = not tracked. Flat on purpose: settings merge shallowly.
+  cash_tracking_from: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable(),
+  // Solo dispatch (fast-dispatch C1b): when on, the munshi may finish a clean truck alone (cash in
+  // full, or credit a standing approval covers). Off by default; the owner switches it on.
+  dispatch_solo_mode: z.boolean(),
 });
 export type FacilitySettingsType = z.infer<typeof FacilitySettings>;
 
@@ -118,6 +127,8 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
     daily_digest_enabled: false,
     digest_hour: 8,
   },
+  cash_tracking_from: null,
+  dispatch_solo_mode: false,
 };
 
 export const UpdateFacilityRequest = z.object({

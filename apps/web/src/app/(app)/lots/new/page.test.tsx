@@ -1,3 +1,4 @@
+import { localIsoDate } from '@coldchain/shared';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -125,6 +126,11 @@ describe('LotCreatePage — Save & New', () => {
     expect(screen.getByLabelText(/^Quantity/)).toHaveValue(null);
     expect(screen.getByLabelText(/^Accepted weight/)).toHaveValue(null);
   }, 10_000); // Radix combobox popover + 6 reference-data fetches run past the 5s default in CI.
+
+  it('defaults the inbound date to the viewer\'s local day (the server checks dates against Lahore\'s)', async () => {
+    renderPage();
+    expect(await screen.findByLabelText(/^Inbound date/)).toHaveValue(localIsoDate());
+  });
 
   it(
     'default "Create Inbound Lot" submit still navigates to the lot detail page',

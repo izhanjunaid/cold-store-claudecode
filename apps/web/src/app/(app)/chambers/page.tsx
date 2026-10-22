@@ -10,7 +10,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
-import { CapacityBar, capacityPct } from '@/components/capacity-bar';
+import { CapacityBar, capacityPct, formatCapacityPct } from '@/components/capacity-bar';
+import { formatCount } from '@/lib/format';
 
 interface Chamber {
   id: string;
@@ -79,9 +80,9 @@ export default function RoomListPage() {
                   <div className="mb-3">
                     <div className="mb-1 flex justify-between text-xs text-muted-foreground">
                       <span className="tabular-nums">
-                        {chamber.current_occupancy_bags.toLocaleString()} / {chamber.max_capacity_bags.toLocaleString()} bags
+                        {formatCount(chamber.current_occupancy_bags)} / {chamber.max_capacity_bags.toLocaleString()} bags
                       </span>
-                      <span className="tabular-nums">{pct}%</span>
+                      <span className="tabular-nums">{formatCapacityPct(pct)}</span>
                     </div>
                     <CapacityBar occupied={chamber.current_occupancy_bags} capacity={chamber.max_capacity_bags} />
                   </div>

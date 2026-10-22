@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { presetRange, priorRange, describePeriod } from './fiscal-period';
+import { presetRange, priorRange, describePeriod, previousMonthOf, yearStartOf } from './fiscal-period';
 
 describe('presetRange', () => {
   it('this_month spans the calendar month', () => {
@@ -62,5 +62,19 @@ describe('describePeriod', () => {
   });
   it('formats a period line', () => {
     expect(describePeriod({ date_from: '2026-01-01', date_to: '2026-12-31' }, 'period')).toBe('For the period 1 January 2026 to 31 December 2026');
+  });
+});
+
+// Form defaults are built from the viewer's own today (localIsoDate()), never the UTC calendar:
+// at 00:00-05:00 in Lahore on the 1st of a month the UTC month is still the previous one.
+describe('defaults from the viewer’s today', () => {
+  it('previousMonthOf: the month before, across a year boundary', () => {
+    expect(previousMonthOf('2026-10-21')).toEqual({ year: 2026, month: 9 });
+    expect(previousMonthOf('2026-01-01')).toEqual({ year: 2025, month: 12 });
+  });
+
+  it('yearStartOf: 1 January of the same year', () => {
+    expect(yearStartOf('2026-10-21')).toBe('2026-01-01');
+    expect(yearStartOf('2027-01-01')).toBe('2027-01-01');
   });
 });

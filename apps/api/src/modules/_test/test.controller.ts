@@ -45,6 +45,9 @@ export async function testRoutes(app: FastifyInstance) {
         await app.prisma.partyLoan.deleteMany({ where: { facilityId: E2E_FACILITY_ID } });
 
         await app.prisma.gatePass.deleteMany({ where: { facilityId: E2E_FACILITY_ID } });
+        await app.prisma.cashHandoverPayment.deleteMany({ where: { handover: { facilityId: E2E_FACILITY_ID } } });
+        await app.prisma.cashHandover.deleteMany({ where: { facilityId: E2E_FACILITY_ID } });
+        await app.prisma.partyCreditApproval.deleteMany({ where: { facilityId: E2E_FACILITY_ID } });
 
         await app.prisma.creditNoteLineItem.deleteMany({
           where: { creditNote: { facilityId: E2E_FACILITY_ID } },

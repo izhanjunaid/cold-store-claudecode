@@ -6,6 +6,7 @@ import {
   CircleDollarSign,
   DoorOpen,
   HandCoins,
+  PackageMinus,
   LayoutDashboard,
   PlusCircle,
   ReceiptText,
@@ -57,6 +58,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Lots', href: '/lots', icon: Boxes },
       { label: 'Rooms', href: '/chambers', icon: Warehouse },
       { label: 'Commodities', href: '/commodities', icon: Sprout, permission: 'commodities.manage' },
+      { label: 'Dispatch Desk', href: '/dispatch', icon: PackageMinus, permission: 'outbound.record' },
       { label: 'Gate Pass', href: '/gate', icon: DoorOpen, permission: 'gate_passes.log' },
       // Quality (M6) has no UI yet — do not add a nav item until its page exists,
       // a link that 404s is worse than no link.
@@ -68,8 +70,15 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Invoices', href: '/invoices', icon: ReceiptText, permission: 'billing.view' },
       { label: 'Payments', href: '/payments', icon: Banknote, permission: 'billing.view' },
       { label: 'Credit Notes', href: '/credit-notes', icon: ReceiptText, permission: 'billing.view' },
-      { label: 'Rate Plans', href: '/billing/rate-plans', icon: Tags },
-      { label: 'Service Charges', href: '/billing/service-charges', icon: CircleDollarSign },
+      // Readable by any login (reference data), but listed only for those who read billing or
+      // manage them: a guard who knows the rate per bag can turn an amount back into a count.
+      { label: 'Rate Plans', href: '/billing/rate-plans', icon: Tags, permission: ['billing.view', 'rate_plans.manage'] },
+      {
+        label: 'Service Charges',
+        href: '/billing/service-charges',
+        icon: CircleDollarSign,
+        permission: ['billing.view', 'service_charges.manage'],
+      },
     ],
   },
   {
@@ -112,6 +121,7 @@ export const NAV_GROUPS: NavGroup[] = [
  */
 export const PALETTE_ACTIONS: NavItem[] = [
   { label: 'New Inbound', href: '/lots/new', icon: Boxes },
+  { label: 'New Dispatch', href: '/dispatch', icon: PackageMinus, permission: 'outbound.record' },
   { label: 'New Party', href: '/parties/new', icon: UserPlus },
   { label: 'Record Payment', href: '/payments/new', icon: Banknote, permission: 'billing.view' },
   {

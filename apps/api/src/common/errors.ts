@@ -111,6 +111,59 @@ export const Errors = {
     ),
   LOT_NOT_ACTIVE: () =>
     new AppError('LOT_NOT_ACTIVE', 'Lot must be ACTIVE to create a withdrawal', 409),
+  // Bags already booked on open (not yet dispatched) withdrawals of the lot.
+  LOT_BALANCE_RESERVED: (available: number, dispatchNotes: string[], field = 'quantity_withdrawn_bags') =>
+    new AppError(
+      'LOT_BALANCE_RESERVED',
+      `Only ${available} bag(s) of this lot are free — the rest are booked on open withdrawal(s) ${dispatchNotes.join(', ')}. Dispatch or cancel those first.`,
+      409,
+      field,
+    ),
+  DATE_IN_FUTURE: (field: string) =>
+    new AppError('DATE_IN_FUTURE', 'This date is after today; only a MANAGER or higher may enter a future date', 422, field),
+  OUTBOUND_CANCELLED: () =>
+    new AppError('OUTBOUND_CANCELLED', 'This withdrawal was cancelled', 409),
+  DISPATCH_TOTAL_CHANGED: (expected: number, actual: number) =>
+    new AppError(
+      'DISPATCH_TOTAL_CHANGED',
+      `The bill is now Rs ${actual.toFixed(2)}, not the Rs ${expected.toFixed(2)} shown — review it again before collecting`,
+      409,
+      'expected_total_pkr',
+    ),
+  // Solo dispatch (C1b): the checkout is a manager's job unless the owner has let the munshi finish a clean truck alone.
+  DISPATCH_NEEDS_MANAGER: (reason: string) =>
+    new AppError('DISPATCH_NEEDS_MANAGER', `A manager must finish this truck: ${reason}`, 403),
+  OUTBOUND_ALREADY_LEFT: () =>
+    new AppError(
+      'OUTBOUND_ALREADY_LEFT',
+      'This withdrawal already left the store on a truck — it cannot be cancelled, only dispatched',
+      409,
+    ),
+  OUTBOUND_QUANTITY_STALE: (balance: number, quantity: number) =>
+    new AppError(
+      'OUTBOUND_QUANTITY_STALE',
+      `This FULL withdrawal is for ${quantity} bag(s) but the lot now holds ${balance}. Cancel it and book a new one.`,
+      409,
+    ),
+  // Cash handovers (Phase C1c)
+  CASH_TRACKING_OFF: () =>
+    new AppError('CASH_TRACKING_OFF', 'Cash tracking is not switched on — the owner turns it on in Settings', 409),
+  HANDOVER_NOTHING_PENDING: () =>
+    new AppError('HANDOVER_NOTHING_PENDING', 'This collector has no cash waiting to be handed over', 409),
+  HANDOVER_EXPECTED_CHANGED: (expected: number, actual: number) =>
+    new AppError(
+      'HANDOVER_EXPECTED_CHANGED',
+      `The cash waiting from this collector is now Rs ${actual.toFixed(2)}, not the Rs ${expected.toFixed(2)} shown — count it again`,
+      409,
+      'expected_cash_pkr',
+    ),
+  HANDOVER_SELF_CONFIRM: () =>
+    new AppError('HANDOVER_SELF_CONFIRM', 'You cannot count your own cash — another manager must', 403),
+  HANDOVER_SELF_VOID: () =>
+    new AppError('HANDOVER_SELF_VOID', 'You cannot void the count of your own cash — another manager must', 403),
+  HANDOVER_NOT_FOUND: () => new AppError('HANDOVER_NOT_FOUND', 'Cash handover does not exist', 404),
+  HANDOVER_ALREADY_VOIDED: () =>
+    new AppError('HANDOVER_ALREADY_VOIDED', 'This handover has already been voided', 409),
   INVOICE_NOT_FOUND: () => new AppError('INVOICE_NOT_FOUND', 'Invoice does not exist', 404),
   INVOICE_LINE_NOT_FOUND: () =>
     new AppError('INVOICE_LINE_NOT_FOUND', 'Invoice line does not exist', 404),
@@ -242,6 +295,55 @@ export const Errors = {
     new AppError(
       'GATE_CREDIT_AUTH_REQUIRES_MANAGER',
       'Credit authorization can only be granted by MANAGER or higher',
+      403,
+    ),
+  GATE_OUTWARD_NOT_DISPATCHED: (dn: string) =>
+    new AppError('GATE_OUTWARD_NOT_DISPATCHED', `Withdrawal ${dn} has not been dispatched — it cannot leave yet`, 422),
+  GATE_OUTWARD_ALREADY_USED: (dn: string) =>
+    new AppError('GATE_OUTWARD_ALREADY_USED', `Withdrawal ${dn} already left on another truck`, 409),
+  GATE_OUTWARD_PLATE_MISMATCH: (dn: string) =>
+    new AppError(
+      'GATE_OUTWARD_PLATE_MISMATCH',
+      `This truck's number does not match the vehicle booked on withdrawal ${dn} — a MANAGER must give a reason to release it`,
+      422,
+    ),
+  GATE_OUTWARD_INVOICE_NOT_FINAL: (dn: string) =>
+    new AppError(
+      'GATE_OUTWARD_INVOICE_NOT_FINAL',
+      `The bill for withdrawal ${dn} is still a draft — finalize it before the truck leaves`,
+      422,
+    ),
+  GATE_OUTWARD_COUNT_REQUIRED: () =>
+    new AppError(
+      'GATE_OUTWARD_COUNT_REQUIRED',
+      'Count the bags on the truck and enter the number before releasing it',
+      422,
+      'declared_quantity',
+    ),
+  // Deliberately does not say what the count should have been: the guard's count is blind.
+  GATE_OUTWARD_COUNT_MISMATCH: () =>
+    new AppError(
+      'GATE_OUTWARD_COUNT_MISMATCH',
+      // The fact only: what to do next depends on who is asking, and the gate page says it.
+      'The bag count does not match the dispatch',
+      422,
+      'declared_quantity',
+    ),
+  GATE_OUTWARD_UNMATCHED_LOAD: () =>
+    new AppError(
+      'GATE_OUTWARD_UNMATCHED_LOAD',
+      'No dispatched withdrawal matches this loaded truck — check the vehicle number with the munshi, or call a manager',
+      422,
+    ),
+  // Documents whose bag counts sit inside text or a PDF cannot be redacted field by field, so the guard does not get them.
+  BLIND_ROLE_FORBIDDEN: () =>
+    new AppError('BLIND_ROLE_FORBIDDEN', 'This document shows stock quantities, which the gate role does not see', 403),
+  GATE_OVERRIDE_REQUIRES_MANAGER: () =>
+    new AppError('GATE_OVERRIDE_REQUIRES_MANAGER', 'Only a MANAGER or higher can override a gate check', 403),
+  GATE_SELF_RELEASE: () =>
+    new AppError(
+      'GATE_SELF_RELEASE',
+      'You booked or dispatched a withdrawal on this truck — someone else must release it',
       403,
     ),
   // Phase 11 — User management

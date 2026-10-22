@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeftRight, FileText, PackageMinus } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
+import { can } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -14,8 +15,9 @@ import { UrduText } from '@/components/ui/urdu-text';
 import { PageHeader } from '@/components/layout/page-header';
 import { LotLocationCard, LotMovementsTimeline } from '@/components/lot-location';
 
-import { formatDate, formatDateTime } from '@/lib/format';
+import { formatDate, formatDateTime, formatCount, formatKg } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
+import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
 interface Lot {
@@ -32,7 +34,8 @@ interface Lot {
   rate_plan_name: string | null;
   quantity_bags: number;
   current_balance_bags: number;
-  accepted_weight_kg: number;
+  /** Null for the gate guard (weights stand in for the blind count). */
+  accepted_weight_kg: number | null;
   declared_weight_kg: number | null;
   weight_dispute_flag: boolean;
   weight_dispute_note: string | null;
@@ -102,10 +105,14 @@ export default function LotDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(recentTransferId ? 'ownership' : 'overview');
   const [receiptLoading, setReceiptLoading] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const user = useAuthStore((s) => s.user);
-  const canTransfer = user?.role === 'OWNER' || user?.role === 'MANAGER';
-  const canWithdraw =
-    user?.role != null && ['OWNER', 'MANAGER', 'ACCOUNTANT', 'OPERATOR'].includes(user.role);
+  // Each action shows only with the permission key its API route checks.
+  const canTransfer = can(user, 'lots.transfer_ownership');
+  const canWithdraw = can(user, 'outbound.record');
+  // Rack placement and room moves (PUT /placements, POST /move) are lots.manage.
+  const canPlace = can(user, 'lots.manage');
+  const guardView = user?.role === 'SECURITY';
 
   const fetchLot = useCallback(async () => {
     setLoading(true);
@@ -180,18 +187,26 @@ export default function LotDetailPage() {
               </Button>
             )}
             {canWithdraw && canAct && (
-              <Button onClick={() => router.push(`/lots/${id}/withdraw`)}>
+              // Opens the drawer; /lots/:id/withdraw remains as the full-page deep link.
+              <Button onClick={() => setWithdrawOpen(true)}>
                 <PackageMinus className="h-4 w-4" aria-hidden />
                 New Withdrawal
               </Button>
             )}
-            <Button variant="outline" onClick={handlePrintReceipt} disabled={receiptLoading}>
-              <FileText className="h-4 w-4" aria-hidden />
-              {receiptLoading ? 'Preparing…' : 'Print Receipt'}
-            </Button>
+            {/* GET /v1/lots/:id/receipt is lots.manage. */}
+            {canPlace && (
+              <Button variant="outline" onClick={handlePrintReceipt} disabled={receiptLoading}>
+                <FileText className="h-4 w-4" aria-hidden />
+                {receiptLoading ? 'Preparing…' : 'Print Receipt'}
+              </Button>
+            )}
           </>
         }
       />
+
+      {canWithdraw && canAct && (
+        <WithdrawSheet open={withdrawOpen} onOpenChange={setWithdrawOpen} lotId={id} lotNumber={lot.lot_number} />
+      )}
 
       <div className="mb-4 flex items-center gap-2">
         <StatusBadge status={lot.status} />
@@ -248,8 +263,8 @@ export default function LotDetailPage() {
               label="Bags (Balance / Original)"
               value={
                 <>
-                  {lot.current_balance_bags.toLocaleString()}
-                  <span className="text-muted-foreground"> / {lot.quantity_bags.toLocaleString()}</span>
+                  {formatCount(lot.current_balance_bags)}
+                  <span className="text-muted-foreground"> / {formatCount(lot.quantity_bags)}</span>
                 </>
               }
             />
@@ -257,9 +272,9 @@ export default function LotDetailPage() {
               label="Weight (Accepted / Declared)"
               value={
                 <>
-                  {lot.accepted_weight_kg.toLocaleString()} kg
+                  {formatKg(lot.accepted_weight_kg)}
                   {lot.declared_weight_kg != null && (
-                    <span className="text-muted-foreground"> / {lot.declared_weight_kg.toLocaleString()} kg</span>
+                    <span className="text-muted-foreground"> / {formatKg(lot.declared_weight_kg)}</span>
                   )}
                 </>
               }
@@ -280,7 +295,7 @@ export default function LotDetailPage() {
         </CardContent>
       </Card>
 
-      <LotLocationCard lotId={id} canOperate={canWithdraw && canAct} />
+      <LotLocationCard lotId={id} canOperate={canPlace && canAct} />
 
       <Card>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -293,7 +308,11 @@ export default function LotDetailPage() {
                 ['inspections', 'Inspections'],
                 ['withdrawals', 'Withdrawals'],
                 ['billing', 'Billing'],
-              ] as const).map(([key, label]) => (
+              ] as const)
+                // The gate guard counts blind: the API refuses them a lot's invoices (BLIND_ROLE_FORBIDDEN),
+                // so the tab would only ever say "No invoices yet".
+                .filter(([key]) => !(guardView && key === 'billing'))
+                .map(([key, label]) => (
                 <TabsTrigger
                   key={key}
                   value={key}
@@ -344,7 +363,7 @@ export default function LotDetailPage() {
                         <TableCell className="font-medium">{EVENT_TYPE_LABELS[ev.event_type] ?? ev.event_type}</TableCell>
                         <TableCell className="text-muted-foreground">{ev.from_party_name ?? '—'}</TableCell>
                         <TableCell>{ev.to_party_name ?? '—'}</TableCell>
-                        <TableCell className="text-right tabular-nums">{ev.quantity_bags.toLocaleString()}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatCount(ev.quantity_bags)}</TableCell>
                         <TableCell className="text-right tabular-nums">{ev.transfer_price_pkr != null ? ev.transfer_price_pkr.toLocaleString() : '—'}</TableCell>
                         <TableCell>{formatDate(ev.effective_date)}</TableCell>
                         <TableCell className="text-muted-foreground">{ev.operator_name ?? '—'}</TableCell>
@@ -396,7 +415,7 @@ export default function LotDetailPage() {
                       <TableRow key={ev.id} className="cursor-pointer" onClick={() => router.push(`/outbound-events/${ev.id}`)}>
                         <TableCell className="font-mono">{ev.dispatch_note_number ?? '—'}</TableCell>
                         <TableCell>{ev.withdrawal_type}</TableCell>
-                        <TableCell className="text-right tabular-nums">{ev.quantity_withdrawn_bags.toLocaleString()}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatCount(ev.quantity_withdrawn_bags)}</TableCell>
                         <TableCell><StatusBadge status={ev.status} /></TableCell>
                         <TableCell>{formatDate(ev.outbound_date)}</TableCell>
                         <TableCell className="text-right">

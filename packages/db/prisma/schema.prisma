@@ -222,6 +222,7 @@ enum EntryType {
   OPENING_BALANCE
   OWNER_EQUITY
   CASH_TRANSFER
+  CASH_VARIANCE
   IMPAIRMENT
   BILL
   SUPPLIER_PAYMENT
@@ -386,6 +387,8 @@ model Facility {
   payrollRuns      PayrollRun[]
   partyLoans       PartyLoan[]
   gatePasses       GatePass[]
+  creditApprovals  PartyCreditApproval[]
+  cashHandovers    CashHandover[]
 
   racks             Rack[]
   lotRackPlacements LotRackPlacement[]
@@ -555,6 +558,7 @@ model Party {
   outboundOwnerSnapshots OutboundEvent[]    @relation("OutboundOwnerSnapshot")
   bills                  Bill[]
   supplierPayments       SupplierPayment[]
+  creditApprovals        PartyCreditApproval[]
 
   @@index([facilityId, phonePrimary])
   @@index([facilityId, partyType])
@@ -562,6 +566,72 @@ model Party {
   @@map("parties")
 }
 
+/// A manager's standing pre-approval of credit for a party (0040): the gate releases a
+/// credit-billed truck of this party without a manager present while its exposure stays
+/// within maxOutstandingPkr (and validUntil has not passed). One live row per party
+/// (partial unique index in the migration); replacing or revoking keeps the history.
+model PartyCreditApproval {
+  id                String    @id @default(uuid()) @db.Uuid
+  facilityId        String    @map("facility_id") @db.Uuid
+  partyId           String    @map("party_id") @db.Uuid
+  maxOutstandingPkr Decimal   @map("max_outstanding_pkr") @db.Decimal(14, 2)
+  validUntil        DateTime? @map("valid_until") @db.Date
+  approvedBy        String    @map("approved_by") @db.Uuid
+  approvedAt        DateTime  @default(now()) @map("approved_at") @db.Timestamptz()
+  note              String?   @db.Text
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz()
+  revokedBy         String?   @map("revoked_by") @db.Uuid
+  revokeReason      String?   @map("revoke_reason") @db.Text
+
+  facility Facility @relation(fields: [facilityId], references: [id])
+  party    Party    @relation(fields: [partyId], references: [id])
+
+  @@index([facilityId, partyId], map: "party_credit_approvals_party_idx")
+  @@map("party_credit_approvals")
+}
+
+/// A manager's count of the cash a collector took (0042): the CASH receipts not yet handed
+/// over, what was counted, and the difference with its reason. A difference posts JE-28
+/// (CASH_VARIANCE) to Cash Short & Over; a clean count posts nothing. Voiding frees the receipts.
+model CashHandover {
+  id              String    @id @default(uuid()) @db.Uuid
+  facilityId      String    @map("facility_id") @db.Uuid
+  handoverNumber  String    @map("handover_number") @db.VarChar(20)
+  businessDate    DateTime  @map("business_date") @db.Date
+  collectorId     String    @map("collector_id") @db.Uuid
+  confirmedBy     String    @map("confirmed_by") @db.Uuid
+  expectedCashPkr Decimal   @map("expected_cash_pkr") @db.Decimal(14, 2)
+  countedCashPkr  Decimal   @map("counted_cash_pkr") @db.Decimal(14, 2)
+  variancePkr     Decimal   @map("variance_pkr") @db.Decimal(14, 2)
+  varianceReason  String?   @map("variance_reason") @db.Text
+  journalEntryId  String?   @unique @map("journal_entry_id") @db.Uuid
+  voidedAt        DateTime? @map("voided_at") @db.Timestamptz()
+  voidedBy        String?   @map("voided_by") @db.Uuid
+  voidReason      String?   @map("void_reason") @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  facility     Facility              @relation(fields: [facilityId], references: [id])
+  journalEntry JournalEntry?         @relation(fields: [journalEntryId], references: [id])
+  payments     CashHandoverPayment[]
+
+  @@unique([facilityId, handoverNumber], map: "cash_handovers_number_key")
+  @@index([facilityId, businessDate], map: "cash_handovers_facility_date_idx")
+  @@index([collectorId], map: "cash_handovers_collector_idx")
+  @@map("cash_handovers")
+}
+
+/// One receipt in one handover. UNIQUE payment_id: cash is counted once.
+model CashHandoverPayment {
+  id         String @id @default(uuid()) @db.Uuid
+  handoverId String @map("handover_id") @db.Uuid
+  paymentId  String @unique @map("payment_id") @db.Uuid
+
+  handover CashHandover @relation(fields: [handoverId], references: [id], onDelete: Cascade)
+  payment  Payment      @relation(fields: [paymentId], references: [id])
+
+  @@index([handoverId], map: "cash_handover_payments_handover_idx")
+  @@map("cash_handover_payments")
+}
 model Commodity {
   id                      String  @id @default(uuid()) @db.Uuid
   name                    String  @unique @db.VarChar(100)
@@ -665,6 +735,8 @@ model ServiceCharge {
   unitPricePkr       Decimal         @map("unit_price_pkr") @db.Decimal(10, 2)
   revenueAccountCode String?         @map("revenue_account_code") @db.VarChar(10)
   isActive           Boolean         @default(true) @map("is_active")
+  /// Pre-added to the bill at dispatch (0039): loading/labour belong on every one.
+  applyAtDispatch    Boolean         @default(false) @map("apply_at_dispatch")
   createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz()
 
   facility     Facility          @relation(fields: [facilityId], references: [id])
@@ -767,12 +839,23 @@ model OutboundEvent {
   outboundDate          DateTime       @map("outbound_date") @db.Date
   receivingPartyId      String?        @map("receiving_party_id") @db.Uuid
   ownerPartyIdSnapshot  String?        @map("owner_party_id_snapshot") @db.Uuid
-  vehicleNumber         String?        @map("vehicle_number") @db.VarChar(20)
+  vehicleNumber         String?        @map("vehicle_number") @db.VarChar(30)
   dispatchNoteNumber    String?        @map("dispatch_note_number") @db.VarChar(30)
   status                OutboundStatus @default(PENDING)
   notes                 String?        @db.Text
   createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz()
   createdBy             String         @map("created_by") @db.Uuid
+  /// Who dispatched it, and when (0038). The gate will not let the person who
+  /// booked or dispatched a withdrawal also release its truck.
+  finalizedAt           DateTime?      @map("finalized_at") @db.Timestamptz()
+  finalizedBy           String?        @map("finalized_by") @db.Uuid
+  /// A cancelled withdrawal (status CANCELLED) follows the void convention (0038).
+  voidedAt              DateTime?      @map("voided_at") @db.Timestamptz()
+  voidedBy              String?        @map("voided_by") @db.Uuid
+  voidReason            String?        @map("void_reason") @db.Text
+  /// The truck visit that carried this withdrawal out (0038). One withdrawal
+  /// leaves on exactly one truck; one truck may carry several withdrawals.
+  gatePassId            String?        @map("gate_pass_id") @db.Uuid
 
   lot                Lot        @relation(fields: [lotId], references: [id])
   facility           Facility   @relation(fields: [facilityId], references: [id])
@@ -780,10 +863,12 @@ model OutboundEvent {
   ownerPartySnapshot Party?     @relation("OutboundOwnerSnapshot", fields: [ownerPartyIdSnapshot], references: [id])
   createdByUser      User       @relation("OutboundCreatedBy", fields: [createdBy], references: [id])
   invoice            Invoice?
-  gatePasses         GatePass[]
+  gatePasses         GatePass[] @relation("GatePassRelatedOutbound")
+  gatePass           GatePass?  @relation("OutboundGatePass", fields: [gatePassId], references: [id], onDelete: SetNull)
 
   @@unique([facilityId, dispatchNoteNumber])
   @@index([lotId])
+  @@index([gatePassId])
   @@index([facilityId, status])
   @@index([facilityId, outboundDate, status])
   @@map("outbound_events")
@@ -903,6 +988,7 @@ model Payment {
   journalEntry   JournalEntry?        @relation("PaymentJournalEntry", fields: [journalEntryId], references: [id])
   allocations    PaymentAllocation[]
   loanRepayments PartyLoanRepayment[] @relation("PartyLoanRepaymentPayment")
+  cashHandover   CashHandoverPayment?
 
   @@unique([facilityId, receiptNumber])
   @@index([facilityId, partyId])
@@ -1016,6 +1102,7 @@ model JournalEntry {
   supplierPayment         SupplierPayment?
   taxRemittance           TaxRemittance?
   cashTransfer            CashTransfer?
+  cashHandover            CashHandover?
   ownerEquityMovement     OwnerEquityMovement?
 
   @@unique([facilityId, entryNumber])
@@ -1440,12 +1527,24 @@ model GatePass {
   createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   clearedAt            DateTime?         @map("cleared_at") @db.Timestamptz()
   createdBy            String            @map("created_by") @db.Uuid
+  /// Who released the truck, and on whose credit authority (0038). User
+  /// references are SQL foreign keys kept as plain scalars.
+  clearedBy                 String?   @map("cleared_by") @db.Uuid
+  creditAuthorizedBy        String?   @map("credit_authorized_by") @db.Uuid
+  creditAuthorizedAt        DateTime? @map("credit_authorized_at") @db.Timestamptz()
+  creditAuthorizedAmountPkr Decimal?  @map("credit_authorized_amount_pkr") @db.Decimal(14, 2)
+  /// A manager's reason for releasing despite a count or plate mismatch.
+  overrideReason            String?   @map("override_reason") @db.Text
+  /// The standing credit approval(s) that carried the truck out without a manager at the gate (0040).
+  creditApprovalIds         String[]  @default([]) @map("credit_approval_ids") @db.Uuid
 
-  facility        Facility       @relation(fields: [facilityId], references: [id])
-  relatedLot      Lot?           @relation(fields: [relatedLotId], references: [id])
-  relatedOutbound OutboundEvent? @relation(fields: [relatedOutboundId], references: [id])
-  party           Party?         @relation("GatePassDepositor", fields: [partyId], references: [id])
-  createdByUser   User           @relation("GatePassCreatedBy", fields: [createdBy], references: [id])
+  facility         Facility        @relation(fields: [facilityId], references: [id])
+  relatedLot       Lot?            @relation(fields: [relatedLotId], references: [id])
+  /// Legacy single link, still written for rollback; clearedOutbounds is authoritative.
+  relatedOutbound  OutboundEvent?  @relation("GatePassRelatedOutbound", fields: [relatedOutboundId], references: [id])
+  clearedOutbounds OutboundEvent[] @relation("OutboundGatePass")
+  party            Party?          @relation("GatePassDepositor", fields: [partyId], references: [id])
+  createdByUser    User            @relation("GatePassCreatedBy", fields: [createdBy], references: [id])
 
   @@unique([facilityId, passNumber])
   @@index([facilityId, status])

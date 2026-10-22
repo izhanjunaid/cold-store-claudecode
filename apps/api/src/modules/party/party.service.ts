@@ -1,4 +1,4 @@
-import { defaultControlAccountForPartyType, type PartyType } from '@coldchain/shared';
+import { defaultControlAccountForPartyType, round2, type PartyType } from '@coldchain/shared';
 import { PartyRepository } from './party.repository';
 import { Errors } from '../../common/errors';
 interface PartyRecord {
@@ -76,6 +76,31 @@ function toResponse(party: PartyRecord, overCreditLimit?: boolean) {
   };
 }
 
+/** The credit terms a new party gets without anyone choosing them (CreatePartyRequest's default). */
+const DEFAULT_CREDIT_TERMS_DAYS = 30;
+
+/**
+ * A party's credit limit and terms are a control — the limit is what the dispatch
+ * desk and the gate weigh credit against — so setting or changing them needs
+ * parties.credit_terms (default MANAGER), not just parties.manage, which the munshi
+ * holds. Only a real change is refused: the edit form re-sends the stored values.
+ */
+function assertCreditTermsAllowed(
+  canSetCreditTerms: boolean,
+  next: { creditLimitPkr?: number | null; creditTermsDays?: number },
+  current: { creditLimitPkr: number | null; creditTermsDays: number },
+) {
+  if (canSetCreditTerms) return;
+  const limitChanged =
+    next.creditLimitPkr !== undefined &&
+    (next.creditLimitPkr == null ? null : round2(next.creditLimitPkr)) !==
+      (current.creditLimitPkr == null ? null : round2(current.creditLimitPkr));
+  const termsChanged = next.creditTermsDays !== undefined && next.creditTermsDays !== current.creditTermsDays;
+  if (limitChanged || termsChanged) {
+    throw Errors.FORBIDDEN('Missing permission: parties.credit_terms');
+  }
+}
+
 export class PartyService {
   constructor(private readonly repo: PartyRepository) {}
 
@@ -113,7 +138,11 @@ export class PartyService {
     return { ...toResponse(party as PartyRecord, overCreditLimit), can_change_type: canChangeType };
   }
 
-  async create(input: CreatePartyInput) {
+  async create(input: CreatePartyInput, canSetCreditTerms: boolean) {
+    assertCreditTermsAllowed(canSetCreditTerms, input, {
+      creditLimitPkr: null,
+      creditTermsDays: DEFAULT_CREDIT_TERMS_DAYS,
+    });
     const warnings: string[] = [];
 
     const existing = await this.repo.findByPhone(input.facilityId, input.phonePrimary);
@@ -151,9 +180,13 @@ export class PartyService {
     return { ...response, warnings: warnings.length > 0 ? warnings : undefined };
   }
 
-  async update(facilityId: string, id: string, input: UpdatePartyInput) {
+  async update(facilityId: string, id: string, input: UpdatePartyInput, canSetCreditTerms: boolean) {
     const party = await this.repo.findById(facilityId, id);
     if (!party) throw Errors.PARTY_NOT_FOUND();
+    assertCreditTermsAllowed(canSetCreditTerms, input, {
+      creditLimitPkr: party.creditLimitPkr == null ? null : party.creditLimitPkr.toNumber(),
+      creditTermsDays: party.creditTermsDays,
+    });
 
     if (input.parentArhtiId) {
       const arhti = await this.repo.findById(facilityId, input.parentArhtiId);

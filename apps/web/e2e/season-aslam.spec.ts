@@ -2,11 +2,12 @@
  * Muhammad Aslam's potato season — end-to-end UI walkthrough.
  *
  * Single farmer, single lot, three withdrawals spanning the season:
- *   1. Create party (OPERATOR)
+ *   1. Create party (MANAGER — setting a credit limit needs parties.credit_terms)
  *   2. Gate inward + lot creation + parchi (SECURITY + OPERATOR)
  *   3. Link gate pass to lot
  *   4. Withdrawal #1 — 200 bags, cash payment, gate cleared
- *   5. Withdrawal #2 — 200 bags, cheque payment, gate cleared
+ *   5. Withdrawal #2 — 200 bags, cheque payment, released on manager credit (an
+ *      uncleared cheque is not payment at the gate)
  *   6. Withdrawal #3 — 100 bags FULL, partial payment + manager credit override
  *   7. Ledger review
  *
@@ -60,8 +61,9 @@ test.describe('Muhammad Aslam — full potato season', () => {
     const refs = await getFacilityRefs(request, opHeaders);
 
     // ─────────────────────────────────────────────────────────────────────
-    await test.step('01 — create party Muhammad Aslam (OPERATOR)', async () => {
-      await loginAs('OPERATOR');
+    await test.step('01 — create party Muhammad Aslam (MANAGER)', async () => {
+      // A credit limit and terms need parties.credit_terms (MANAGER by default).
+      await loginAs('MANAGER');
       await page.goto('/parties/new');
       await expect(page.getByRole('heading', { name: /create.*party|new party/i })).toBeVisible({
         timeout: 15_000,
@@ -138,20 +140,12 @@ test.describe('Muhammad Aslam — full potato season', () => {
         timeout: 15_000,
       });
 
-      // Wait for the reference data to populate (commodity is a native select).
-      await expect(page.locator(`select[name="commodity_id"] option[value="${refs.commodityId}"]`)).toHaveCount(1, {
-        timeout: 15_000,
-      });
-
-      // Owner is now a type-ahead Combobox (large party list).
+      // Owner, commodity, room and rate plan are type-ahead Comboboxes (phase/16).
       await pickCombobox(page, 'combobox-owner_party_id', aslam.name);
-      await page.locator('select[name="commodity_id"]').selectOption(refs.commodityId);
-      // Wait for chambers + rate plans to filter after commodity selection
-      await expect(page.locator(`select[name="chamber_id"] option[value="${refs.chamberId}"]`)).toHaveCount(1, {
-        timeout: 5_000,
-      });
-      await page.locator('select[name="chamber_id"]').selectOption(refs.chamberId);
-      await page.locator('select[name="rate_plan_id"]').selectOption(refs.seasonalRatePlanId);
+      await pickCombobox(page, 'combobox-commodity_id', refs.commodityName);
+      // Rooms and rate plans filter by the commodity just picked.
+      await pickCombobox(page, 'combobox-chamber_id', refs.chamberName);
+      await pickCombobox(page, 'combobox-rate_plan_id', refs.seasonalRatePlanName);
       await page.locator('input[name="quantity_bags"]').fill('500');
       await page.locator('input[name="accepted_weight_kg"]').fill('49850');
       await page.locator('input[name="declared_weight_kg"]').fill('50000');
@@ -261,7 +255,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
         await page.locator('input[type="number"]').first().fill(String(opts.bags));
       }
       await page.locator('input[type="date"]').fill(todayISO());
-      await page.locator('input[placeholder="Optional"]').first().fill(opts.vehicle);
+      await page.locator('input[name="vehicle_number"]').fill(opts.vehicle);
       await shot(page, `${opts.shotPrefix}-a-withdraw-form.png`);
 
       await Promise.all([
@@ -398,8 +392,14 @@ test.describe('Muhammad Aslam — full potato season', () => {
         .locator('li')
         .filter({ hasText: opts.vehicle })
         .first();
-      await row.getByRole('button', { name: /clear outward/i }).click();
+      // A paid truck is listed first under "Ready to leave" with a Release button; a truck that
+      // still owes (or has no bill) is only in the inside list with Clear Outward. Both open the
+      // same dialog.
+      await row.getByRole('button', { name: /^(release|clear outward)$/i }).click();
       await expect(page.getByRole('heading', { name: /clear outward/i })).toBeVisible();
+
+      // The guard counts the bags on the truck (blind: the dialog never shows the expected number).
+      await page.getByLabel(/bags counted/i).fill(String(opts.bags));
 
       if (opts.creditAuthorize) {
         await page.getByLabel(/authorize on credit/i).check();
@@ -445,6 +445,8 @@ test.describe('Muhammad Aslam — full potato season', () => {
         paymentMethod: 'CHEQUE',
         payFull: true,
         paymentRef: 'MCB-7788231',
+        // The cheque is recorded but not yet cleared, so it is credit at the gate.
+        creditAuthorize: true,
         shotPrefix: '06',
       });
       invoice2Total = r.invoiceTotal;
@@ -490,7 +492,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
       await page.goto(`/parties/${partyId}`);
       await expect(page.getByText(aslam.name).first()).toBeVisible({ timeout: 10_000 });
       await page.getByRole('tab', { name: /^ledger$/i }).click();
-      await expect(page.getByText(/outstanding/i)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(/outstanding/i).first()).toBeVisible({ timeout: 15_000 });
       await shot(page, '08-ledger.png');
 
       const ledger = await (

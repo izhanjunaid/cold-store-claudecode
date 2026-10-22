@@ -5,6 +5,15 @@
 export type ListFilters = Record<string, string | number | boolean | undefined>;
 
 export const qk = {
+  outbound: {
+    all: ['outbound'] as const,
+    /** Every queue/list query — not the checkout previews, which must not refetch once the truck is dispatched. */
+    lists: ['outbound', 'list'] as const,
+    /** The desk's day: per-collector totals and the cash waiting to be handed over. */
+    day: ['outbound', 'day'] as const,
+    list: (filters: ListFilters) => ['outbound', 'list', filters] as const,
+    preview: (id: string) => ['outbound', 'preview', id] as const,
+  },
   lots: {
     all: ['lots'] as const,
     list: (filters: ListFilters) => ['lots', 'list', filters] as const,
@@ -19,6 +28,7 @@ export const qk = {
     search: (query: string) => ['parties', 'search', query] as const,
     detail: (id: string) => ['parties', 'detail', id] as const,
     ledger: (id: string) => ['parties', 'ledger', id] as const,
+    creditApproval: (id: string) => ['parties', 'credit-approval', id] as const,
   },
   invoices: {
     all: ['invoices'] as const,

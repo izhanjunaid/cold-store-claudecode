@@ -10,7 +10,7 @@ import { buildJE19PeshgiRecovered } from '../peshgi/templates/je-19-peshgi-recov
 import { generateReceiptNumber } from './receipt-number';
 import { refreshInvoiceSettlement } from '../invoice/invoice-settlement';
 import { partyStatement } from '../invoice/receivables';
-import { receiptAssetAccountForPaymentMethod, toIsoDate, round2 } from '@coldchain/shared';
+import { businessDate, receiptAssetAccountForPaymentMethod, toIsoDate, round2 } from '@coldchain/shared';
 import { assertKatchiWriteAllowed } from '../accounting/book-gate';
 import { lockRow } from '../../common/row-lock';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
@@ -82,6 +82,25 @@ function formatPayment(p: PaymentWithRelations) {
   };
 }
 
+/** Everything needed to record one receipt (see PaymentService.record). */
+export interface RecordPaymentParams {
+  facilityId: string;
+  createdBy: string;
+  partyId: string;
+  paymentDate: string;
+  amountPkr: number;
+  paymentMethod: string;
+  referenceNumber?: string;
+  taxWithheldPkr?: number;
+  isAdvance?: boolean;
+  chequeDate?: string;
+  /** Only for a receipt that settles nothing yet; otherwise the documents decide. */
+  bookType?: BookType;
+  notes?: string;
+  allocations?: AllocationInput[];
+  role: string;
+}
+
 export class PaymentService {
   constructor(
     private prisma: PrismaClient,
@@ -89,185 +108,172 @@ export class PaymentService {
     private journalEntry: JournalEntryService,
   ) {}
 
-  async record(params: {
-    facilityId: string;
-    createdBy: string;
-    partyId: string;
-    paymentDate: string;
-    amountPkr: number;
-    paymentMethod: string;
-    referenceNumber?: string;
-    taxWithheldPkr?: number;
-    isAdvance?: boolean;
-    chequeDate?: string;
-    /** Only for a receipt that settles nothing yet; otherwise the documents decide. */
-    bookType?: BookType;
-    notes?: string;
-    allocations?: AllocationInput[];
-    role: string;
-  }) {
-    return this.prisma.$transaction(async (tx) => {
-      const party = await tx.party.findFirst({
-        where: { id: params.partyId, facilityId: params.facilityId },
-      });
-      if (!party) throw Errors.PARTY_NOT_FOUND();
-      const customer = receivableParty(party);
+  async record(params: RecordPaymentParams) {
+    return this.prisma.$transaction((tx) => this.recordInTransaction(tx, params));
+  }
 
-      const isAdvance = params.isAdvance ?? false;
-      const allocations = isAdvance ? [] : (params.allocations ?? []);
+  /** Record a receipt inside the caller's transaction (the dispatch-and-collect checkout takes the money with the dispatch). */
+  async recordInTransaction(tx: Prisma.TransactionClient, params: RecordPaymentParams) {
+    const party = await tx.party.findFirst({
+      where: { id: params.partyId, facilityId: params.facilityId },
+    });
+    if (!party) throw Errors.PARTY_NOT_FOUND();
+    const customer = receivableParty(party);
 
-      const allocTotal = allocations.reduce((s, a) => s + a.allocated_amount_pkr, 0);
-      if (allocTotal > params.amountPkr + 0.001) {
-        throw Errors.PAYMENT_OVER_ALLOCATED();
-      }
+    const isAdvance = params.isAdvance ?? false;
+    const allocations = isAdvance ? [] : (params.allocations ?? []);
 
-      // Pre-validate each allocation (row-locking targets). A receipt belongs to the
-      // book of the documents it settles, never to what the request says (docs/25 R-04).
-      const books = new Set<BookType>();
-      for (const alloc of allocations) {
-        books.add(
-          alloc.target === 'INVOICE'
-            ? await validateInvoiceAllocation(tx, params.facilityId, params.partyId, alloc)
-            : await validateLoanAllocation(tx, params.facilityId, params.partyId, alloc),
+    const allocTotal = allocations.reduce((s, a) => s + a.allocated_amount_pkr, 0);
+    if (allocTotal > params.amountPkr + 0.001) {
+      throw Errors.PAYMENT_OVER_ALLOCATED();
+    }
+
+    // Pre-validate each allocation (row-locking targets). A receipt belongs to the
+    // book of the documents it settles, never to what the request says (docs/25 R-04).
+    const books = new Set<BookType>();
+    for (const alloc of allocations) {
+      books.add(
+        alloc.target === 'INVOICE'
+          ? await validateInvoiceAllocation(tx, params.facilityId, params.partyId, alloc)
+          : await validateLoanAllocation(tx, params.facilityId, params.partyId, alloc),
+      );
+    }
+    if (books.size > 1) {
+      throw Errors.VALIDATION_ERROR('One receipt settles documents of one book only; record a receipt per book', 'allocations');
+    }
+    const bookType: BookType = [...books][0] ?? params.bookType ?? 'PACCI';
+    if (params.bookType && params.bookType !== bookType) {
+      throw Errors.VALIDATION_ERROR(`The documents this receipt settles are on the ${bookType} book`, 'book_type');
+    }
+    assertKatchiWriteAllowed(params.role, bookType);
+
+    // A cheque is not bank funds the moment it's handed over — it can still
+    // bounce. It starts PENDING and posts to 1025 (clearing), not 1020;
+    // POST /v1/payments/:id/clear moves it once the bank actually
+    // processes it (phase/25, docs/09 §2).
+    // s.153 withholding is refused on two shapes, on tax grounds rather
+    // than for convenience — and refusing them is what keeps JE-06 a
+    // two-case template instead of three.
+    //
+    //  - An advance credits 2010, not AR. A deduction certificate is issued
+    //    against an invoice for services rendered; there is no invoice yet.
+    //  - A peshgi recovery is repayment of a loan, not a payment for
+    //    services, so s.153 does not reach it.
+    const taxWithheldPkr = round2(params.taxWithheldPkr ?? 0);
+    if (taxWithheldPkr > 0) {
+      if (isAdvance) {
+        throw Errors.VALIDATION_ERROR(
+          'Tax cannot be withheld on an advance receipt — a deduction certificate is issued against an invoice, and an advance has none yet. Record the receipt, then apply it.',
+          'tax_withheld_pkr',
         );
       }
-      if (books.size > 1) {
-        throw Errors.VALIDATION_ERROR('One receipt settles documents of one book only; record a receipt per book', 'allocations');
+      if (allocations.some((a) => a.target === 'LOAN')) {
+        throw Errors.VALIDATION_ERROR(
+          'Tax cannot be withheld on a peshgi recovery — repaying a loan is not a payment for services, so s.153 does not reach it. Record the recovery separately.',
+          'tax_withheld_pkr',
+        );
       }
-      const bookType: BookType = [...books][0] ?? params.bookType ?? 'PACCI';
-      if (params.bookType && params.bookType !== bookType) {
-        throw Errors.VALIDATION_ERROR(`The documents this receipt settles are on the ${bookType} book`, 'book_type');
+      if (taxWithheldPkr > params.amountPkr + 0.005) {
+        throw Errors.VALIDATION_ERROR(
+          'The tax withheld cannot exceed the amount settling the invoice.',
+          'tax_withheld_pkr',
+        );
       }
-      assertKatchiWriteAllowed(params.role, bookType);
+    }
 
-      // A cheque is not bank funds the moment it's handed over — it can still
-      // bounce. It starts PENDING and posts to 1025 (clearing), not 1020;
-      // POST /v1/payments/:id/clear moves it once the bank actually
-      // processes it (phase/25, docs/09 §2).
-      // s.153 withholding is refused on two shapes, on tax grounds rather
-      // than for convenience — and refusing them is what keeps JE-06 a
-      // two-case template instead of three.
-      //
-      //  - An advance credits 2010, not AR. A deduction certificate is issued
-      //    against an invoice for services rendered; there is no invoice yet.
-      //  - A peshgi recovery is repayment of a loan, not a payment for
-      //    services, so s.153 does not reach it.
-      const taxWithheldPkr = round2(params.taxWithheldPkr ?? 0);
-      if (taxWithheldPkr > 0) {
-        if (isAdvance) {
-          throw Errors.VALIDATION_ERROR(
-            'Tax cannot be withheld on an advance receipt — a deduction certificate is issued against an invoice, and an advance has none yet. Record the receipt, then apply it.',
-            'tax_withheld_pkr',
-          );
-        }
-        if (allocations.some((a) => a.target === 'LOAN')) {
-          throw Errors.VALIDATION_ERROR(
-            'Tax cannot be withheld on a peshgi recovery — repaying a loan is not a payment for services, so s.153 does not reach it. Record the recovery separately.',
-            'tax_withheld_pkr',
-          );
-        }
-        if (taxWithheldPkr > params.amountPkr + 0.005) {
-          throw Errors.VALIDATION_ERROR(
-            'The tax withheld cannot exceed the amount settling the invoice.',
-            'tax_withheld_pkr',
-          );
-        }
-      }
+    const clearanceStatus = params.paymentMethod === 'CHEQUE' ? 'PENDING' : 'NA';
+    const assetAccountCode = receiptAssetAccountForPaymentMethod(params.paymentMethod);
 
-      const clearanceStatus = params.paymentMethod === 'CHEQUE' ? 'PENDING' : 'NA';
-      const assetAccountCode = receiptAssetAccountForPaymentMethod(params.paymentMethod);
+    const paymentDateValue = new Date(params.paymentDate);
+    const payment = await this.repo.create(tx, {
+      facilityId: params.facilityId,
+      partyId: params.partyId,
+      receiptNumber: await generateReceiptNumber(tx, params.facilityId, paymentDateValue),
+      paymentDate: paymentDateValue,
+      amountPkr: params.amountPkr,
+      taxWithheldPkr,
+      paymentMethod: params.paymentMethod as any,
+      referenceNumber: params.referenceNumber ?? null,
+      isAdvance,
+      status: derivePaymentStatus({ isAdvance, clearanceStatus, amountPkr: params.amountPkr, allocatedPkr: allocTotal }),
+      clearanceStatus: clearanceStatus as any,
+      chequeDate: params.chequeDate ? new Date(params.chequeDate) : null,
+      bookType,
+      assetAccountCode,
+      notes: params.notes ?? null,
+      createdBy: params.createdBy,
+      allocations: {
+        create: allocations.map((a) =>
+          a.target === 'INVOICE'
+            ? { invoiceId: a.invoice_id, allocatedAmountPkr: a.allocated_amount_pkr }
+            : { loanId: a.loan_id, allocatedAmountPkr: a.allocated_amount_pkr },
+        ),
+      },
+    });
 
-      const paymentDateValue = new Date(params.paymentDate);
-      const payment = await this.repo.create(tx, {
-        facilityId: params.facilityId,
-        partyId: params.partyId,
-        receiptNumber: await generateReceiptNumber(tx, params.facilityId, paymentDateValue),
-        paymentDate: paymentDateValue,
-        amountPkr: params.amountPkr,
-        taxWithheldPkr,
-        paymentMethod: params.paymentMethod as any,
-        referenceNumber: params.referenceNumber ?? null,
-        isAdvance,
-        status: derivePaymentStatus({ isAdvance, clearanceStatus, amountPkr: params.amountPkr, allocatedPkr: allocTotal }),
-        clearanceStatus: clearanceStatus as any,
-        chequeDate: params.chequeDate ? new Date(params.chequeDate) : null,
-        bookType,
-        assetAccountCode,
-        notes: params.notes ?? null,
-        createdBy: params.createdBy,
-        allocations: {
-          create: allocations.map((a) =>
-            a.target === 'INVOICE'
-              ? { invoiceId: a.invoice_id, allocatedAmountPkr: a.allocated_amount_pkr }
-              : { loanId: a.loan_id, allocatedAmountPkr: a.allocated_amount_pkr },
-          ),
-        },
-      });
-
-      // Apply each allocation: invoice increments amount_paid; loan decrements balance + posts JE-19.
-      for (const alloc of allocations) {
-        if (alloc.target === 'INVOICE') {
-          await refreshInvoiceSettlement(tx, alloc.invoice_id);
-        } else {
-          await this.applyLoanAllocation(
-            tx,
-            params.facilityId,
-            params.createdBy,
-            payment.id,
-            assetAccountCode,
-            new Date(params.paymentDate),
-            alloc,
-          );
-        }
-      }
-
-      // Post JE-02 (regular) or JE-03 (advance) for the cash receipt — but only for the
-      // invoice+unallocated portion. Loan allocations book their cash receipt via JE-19
-      // inside applyLoanAllocation above; without this scaling we'd double-debit cash.
-      const loanAllocTotal = allocations
-        .filter((a) => a.target === 'LOAN')
-        .reduce((s, a) => s + a.allocated_amount_pkr, 0);
-      const cashReceiptAmount = round2(Number(payment.amountPkr) - loanAllocTotal);
-
-      if (cashReceiptAmount > 0.005) {
-        const draft = isAdvance
-          ? buildJE03AdvanceReceived({
-              paymentId: payment.id,
-              paymentDate: payment.paymentDate,
-              amountPkr: cashReceiptAmount,
-              paymentMethod: payment.paymentMethod,
-              referenceNumber: payment.referenceNumber,
-              bookType,
-              party: customer,
-              assetAccountCode,
-            })
-          : buildJE02PaymentReceived({
-              paymentId: payment.id,
-              paymentDate: payment.paymentDate,
-              amountPkr: cashReceiptAmount,
-              taxWithheldPkr,
-              paymentMethod: payment.paymentMethod,
-              referenceNumber: payment.referenceNumber,
-              bookType,
-              party: customer,
-              assetAccountCode,
-            });
-
-        const posted = await this.journalEntry.postInTransaction(
+    // Apply each allocation: invoice increments amount_paid; loan decrements balance + posts JE-19.
+    for (const alloc of allocations) {
+      if (alloc.target === 'INVOICE') {
+        await refreshInvoiceSettlement(tx, alloc.invoice_id);
+      } else {
+        await this.applyLoanAllocation(
           tx,
           params.facilityId,
           params.createdBy,
-          draft,
-          { postingStatus: 'POSTED' },
+          payment.id,
+          assetAccountCode,
+          new Date(params.paymentDate),
+          alloc,
         );
-        await tx.payment.update({
-          where: { id: payment.id },
-          data: { journalEntryId: posted.id },
-        });
       }
+    }
 
-      return formatPayment(await this.refreshStatus(tx, payment.id));
-    });
+    // Post JE-02 (regular) or JE-03 (advance) for the cash receipt — but only for the
+    // invoice+unallocated portion. Loan allocations book their cash receipt via JE-19
+    // inside applyLoanAllocation above; without this scaling we'd double-debit cash.
+    const loanAllocTotal = allocations
+      .filter((a) => a.target === 'LOAN')
+      .reduce((s, a) => s + a.allocated_amount_pkr, 0);
+    const cashReceiptAmount = round2(Number(payment.amountPkr) - loanAllocTotal);
+
+    if (cashReceiptAmount > 0.005) {
+      const draft = isAdvance
+        ? buildJE03AdvanceReceived({
+            paymentId: payment.id,
+            paymentDate: payment.paymentDate,
+            amountPkr: cashReceiptAmount,
+            paymentMethod: payment.paymentMethod,
+            referenceNumber: payment.referenceNumber,
+            bookType,
+            party: customer,
+            assetAccountCode,
+          })
+        : buildJE02PaymentReceived({
+            paymentId: payment.id,
+            paymentDate: payment.paymentDate,
+            amountPkr: cashReceiptAmount,
+            taxWithheldPkr,
+            paymentMethod: payment.paymentMethod,
+            referenceNumber: payment.referenceNumber,
+            bookType,
+            party: customer,
+            assetAccountCode,
+          });
+
+      const posted = await this.journalEntry.postInTransaction(
+        tx,
+        params.facilityId,
+        params.createdBy,
+        draft,
+        { postingStatus: 'POSTED' },
+      );
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: { journalEntryId: posted.id },
+      });
+    }
+
+    return formatPayment(await this.refreshStatus(tx, payment.id));
   }
 
   async list(
@@ -347,7 +353,7 @@ export class PaymentService {
       if (existingTotal + newTotal > Number(payment.amountPkr) + 0.001) throw Errors.PAYMENT_OVER_ALLOCATED();
 
       // An advance is applied on the day it is applied — that is when 2010 becomes AR.
-      const appliedDate = new Date(`${appliedDateInput ?? toIsoDate(new Date())}T00:00:00.000Z`);
+      const appliedDate = new Date(`${appliedDateInput ?? businessDate()}T00:00:00.000Z`);
       if (payment.isAdvance && appliedDate < payment.paymentDate) {
         throw Errors.VALIDATION_ERROR('An advance cannot be applied before it was received', 'applied_date');
       }
@@ -443,7 +449,7 @@ export class PaymentService {
         select: { id: true, entryDate: true, entryType: true },
       });
 
-      const dishonourDate = new Date(`${dishonourDateInput ?? toIsoDate(new Date())}T00:00:00.000Z`);
+      const dishonourDate = new Date(`${dishonourDateInput ?? businessDate()}T00:00:00.000Z`);
       const latest = chain.reduce((d, e) => (e.entryDate > d ? e.entryDate : d), payment.paymentDate);
       if (dishonourDate < latest) {
         throw Errors.VALIDATION_ERROR(
@@ -494,7 +500,7 @@ export class PaymentService {
    * portion (JE-19, via applyLoanAllocation) both used it (phase/25).
    */
   async clear(facilityId: string, id: string, userId: string, clearDateInput?: string) {
-    const clearDate = new Date(`${clearDateInput ?? toIsoDate(new Date())}T00:00:00.000Z`);
+    const clearDate = new Date(`${clearDateInput ?? businessDate()}T00:00:00.000Z`);
     return this.prisma.$transaction(async (tx) => {
       if (!(await lockRow(tx, 'payments', id, facilityId))) throw Errors.PAYMENT_NOT_FOUND();
       const fullPayment = await tx.payment.findFirst({

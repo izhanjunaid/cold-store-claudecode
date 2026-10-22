@@ -17,10 +17,10 @@ import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
-import { CapacityBar, capacityPct } from '@/components/capacity-bar';
+import { CapacityBar, capacityPct, formatCapacityPct } from '@/components/capacity-bar';
 import { UrduText } from '@/components/ui/urdu-text';
 import { cn } from '@/lib/utils';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatCount } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
 
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
@@ -171,15 +171,15 @@ export default function RoomDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="mb-4 text-center">
-              <span className="text-4xl font-bold tabular-nums">{pct}%</span>
+              <span className="text-4xl font-bold tabular-nums">{formatCapacityPct(pct)}</span>
               <p className="mt-1 text-sm text-muted-foreground tabular-nums">
-                {chamber.current_occupancy_bags.toLocaleString()} / {chamber.max_capacity_bags.toLocaleString()} bags
+                {formatCount(chamber.current_occupancy_bags)} / {chamber.max_capacity_bags.toLocaleString()} bags
               </p>
             </div>
             <CapacityBar occupied={chamber.current_occupancy_bags} capacity={chamber.max_capacity_bags} heightClass="h-3" />
             {chamber.unplaced_bags > 0 && (
               <p className="mt-3 text-center text-xs text-amber-700">
-                {chamber.unplaced_bags.toLocaleString()} bags in this room are not assigned to a rack yet.
+                {formatCount(chamber.unplaced_bags)} bags in this room are not assigned to a rack yet.
               </p>
             )}
           </CardContent>
@@ -239,7 +239,7 @@ export default function RoomDetailPage() {
                       </div>
                       <CapacityBar occupied={rack.current_occupancy_bags} capacity={rack.max_capacity_bags} className="mb-1.5" />
                       <p className="text-xs text-muted-foreground tabular-nums">
-                        {rack.current_occupancy_bags.toLocaleString()} / {rack.max_capacity_bags.toLocaleString()} bags · {rackPct}%
+                        {formatCount(rack.current_occupancy_bags)} / {rack.max_capacity_bags.toLocaleString()} bags · {formatCapacityPct(rackPct)}
                       </p>
                       {!rack.is_active && <p className="mt-1 text-[10px] uppercase text-muted-foreground">Inactive</p>}
                     </button>
@@ -344,7 +344,7 @@ function RackLotsDialog({
           <DialogTitle>
             Rack {rack.name}
             <span className="ml-2 text-sm font-normal text-muted-foreground tabular-nums">
-              {rack.current_occupancy_bags.toLocaleString()} / {rack.max_capacity_bags.toLocaleString()} bags
+              {formatCount(rack.current_occupancy_bags)} / {rack.max_capacity_bags.toLocaleString()} bags
             </span>
           </DialogTitle>
         </DialogHeader>
@@ -367,7 +367,7 @@ function RackLotsDialog({
                       {l.marka}
                     </UrduText>
                   )}
-                  <span className="ml-auto shrink-0 font-medium tabular-nums">{l.bags.toLocaleString()} bags</span>
+                  <span className="ml-auto shrink-0 font-medium tabular-nums">{formatCount(l.bags)} bags</span>
                 </li>
               ))}
             </ul>

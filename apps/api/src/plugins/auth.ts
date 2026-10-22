@@ -3,6 +3,7 @@ import fp from 'fastify-plugin';
 import { verifyAccessToken, type JwtPayload } from '../common/jwt';
 import { Errors } from '../common/errors';
 import { requestContext } from '../common/request-context';
+import { isBlindRole } from '../common/blind-count';
 
 async function authPlugin(app: FastifyInstance) {
   app.decorateRequest('user', null);
@@ -30,6 +31,11 @@ async function authPlugin(app: FastifyInstance) {
     } catch {
       throw Errors.AUTH_INVALID();
     }
+  });
+
+  // Put after `authenticate` in a route's preHandler: refuses the gate guard (who counts bags blind).
+  app.decorate('forbidBlindRole', async (request: FastifyRequest) => {
+    if (isBlindRole(request.user?.role)) throw Errors.BLIND_ROLE_FORBIDDEN();
   });
 }
 
@@ -59,5 +65,6 @@ declare module 'fastify' {
   }
   interface FastifyInstance {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    forbidBlindRole: (request: FastifyRequest) => Promise<void>;
   }
 }

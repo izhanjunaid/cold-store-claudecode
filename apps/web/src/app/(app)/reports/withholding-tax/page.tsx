@@ -1,5 +1,7 @@
 'use client';
 
+import { localIsoDate } from '@coldchain/shared';
+import { yearStartOf } from '@/lib/fiscal-period';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -43,8 +45,8 @@ interface Report {
   total_outstanding_pkr: number;
 }
 
-const startOfYear = () => `${new Date().getUTCFullYear()}-01-01`;
-const today = () => new Date().toISOString().slice(0, 10);
+const startOfYear = () => yearStartOf(localIsoDate());
+const today = () => localIsoDate();
 
 export default function WithholdingTaxPage() {
   const canRemit = useCan('payroll.remit');

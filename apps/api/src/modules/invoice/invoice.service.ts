@@ -214,56 +214,94 @@ export class InvoiceService {
     userId: string,
     body: FinalizeInvoiceRequestType,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      if (!(await lockRow(tx, 'invoices', invoiceId, facilityId))) throw Errors.INVOICE_NOT_FOUND();
-      const inv = await tx.invoice.findUniqueOrThrow({
-        where: { id: invoiceId },
-        include: {
-          billingParty: { select: RECEIVABLE_PARTY_SELECT },
-          lot: { select: { id: true, lotNumber: true, commodity: { select: { revenueAccountCode: true } } } },
-          lineItems: { orderBy: { sortOrder: 'asc' }, include: REVENUE_LINE_INCLUDE },
-        },
-      });
-      if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
-      // JE-01 posts revenue lines only; a reduction is a discount (docs/25 R-07).
-      if (inv.lineItems.some((l) => Number(l.amountPkr) <= 0)) {
-        throw Errors.VALIDATION_ERROR('Remove the negative adjustment and give the reduction as a discount', 'line_items');
-      }
-      if (body.notes) {
-        await tx.invoice.update({ where: { id: invoiceId }, data: { notes: body.notes } });
-      }
-      // Number from the invoice's own date, not the wall clock at finalize: a backdated
-      // invoice belongs to its own month's sequence, matching the period it posts to.
-      const invoiceNumber = await generateInvoiceNumber(tx, facilityId, inv.invoiceDate);
-      const updated = await this.repo.finalize(tx, invoiceId, invoiceNumber, userId);
-
-      // JE-01 posts atomically with finalize, so the GL always agrees with the invoice.
-      const posted = await this.journalEntry.postInTransaction(
-        tx,
-        facilityId,
-        userId,
-        buildJE01InvoiceFinalized({
-          invoiceId: inv.id,
-          invoiceNumber,
-          invoiceDate: inv.invoiceDate,
-          totalPkr: Number(inv.totalPkr),
-          gstAmountPkr: Number(inv.gstAmountPkr),
-          discountAmountPkr: Number(inv.discountAmountPkr),
-          bookType: inv.bookType,
-          billingParty: receivableParty(inv.billingParty),
-          lot: { id: inv.lot.id, lotNumber: inv.lot.lotNumber },
-          lines: inv.lineItems.map((l) => ({
-            revenueAccountCode: revenueAccountForLine(l, inv.lot.commodity),
-            amountPkr: Number(l.amountPkr),
-          })),
-        }),
-      );
-      await tx.invoice.update({ where: { id: invoiceId }, data: { journalEntryId: posted.id } });
-
-      return formatInvoice(updated);
-    });
+    return this.prisma.$transaction((tx) => this.finalizeInTransaction(tx, facilityId, invoiceId, userId, body));
   }
 
+  /** Finalize inside the caller's transaction (the dispatch-and-collect checkout runs it with the dispatch and the receipt). */
+  async finalizeInTransaction(
+    tx: Prisma.TransactionClient,
+    facilityId: string,
+    invoiceId: string,
+    userId: string,
+    body: FinalizeInvoiceRequestType,
+  ) {
+    if (!(await lockRow(tx, 'invoices', invoiceId, facilityId))) throw Errors.INVOICE_NOT_FOUND();
+    const inv = await tx.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      include: {
+        billingParty: { select: RECEIVABLE_PARTY_SELECT },
+        lot: { select: { id: true, lotNumber: true, commodity: { select: { revenueAccountCode: true } } } },
+        lineItems: { orderBy: { sortOrder: 'asc' }, include: REVENUE_LINE_INCLUDE },
+      },
+    });
+    if (inv.status !== 'DRAFT') throw Errors.INVOICE_ALREADY_FINALIZED();
+    // JE-01 posts revenue lines only; a reduction is a discount (docs/25 R-07).
+    if (inv.lineItems.some((l) => Number(l.amountPkr) <= 0)) {
+      throw Errors.VALIDATION_ERROR('Remove the negative adjustment and give the reduction as a discount', 'line_items');
+    }
+    if (body.notes) {
+      await tx.invoice.update({ where: { id: invoiceId }, data: { notes: body.notes } });
+    }
+    // Number from the invoice's own date, not the wall clock at finalize: a backdated
+    // invoice belongs to its own month's sequence, matching the period it posts to.
+    const invoiceNumber = await generateInvoiceNumber(tx, facilityId, inv.invoiceDate);
+    const updated = await this.repo.finalize(tx, invoiceId, invoiceNumber, userId);
+
+    // JE-01 posts atomically with finalize, so the GL always agrees with the invoice.
+    const posted = await this.journalEntry.postInTransaction(
+      tx,
+      facilityId,
+      userId,
+      buildJE01InvoiceFinalized({
+        invoiceId: inv.id,
+        invoiceNumber,
+        invoiceDate: inv.invoiceDate,
+        totalPkr: Number(inv.totalPkr),
+        gstAmountPkr: Number(inv.gstAmountPkr),
+        discountAmountPkr: Number(inv.discountAmountPkr),
+        bookType: inv.bookType,
+        billingParty: receivableParty(inv.billingParty),
+        lot: { id: inv.lot.id, lotNumber: inv.lot.lotNumber },
+        lines: inv.lineItems.map((l) => ({
+          revenueAccountCode: revenueAccountForLine(l, inv.lot.commodity),
+          amountPkr: Number(l.amountPkr),
+        })),
+      }),
+    );
+    await tx.invoice.update({ where: { id: invoiceId }, data: { journalEntryId: posted.id } });
+
+    return formatInvoice(updated);
+  }
+
+  /**
+   * Add catalog service lines to a DRAFT invoice inside the caller's transaction and
+   * return its new total. The dispatch checkout pre-adds the charges marked
+   * apply_at_dispatch, so a forgotten loading charge is a deliberate omission, not a
+   * default — a finalized bill can only be corrected downward.
+   */
+  async addServiceLinesInTransaction(
+    tx: Prisma.TransactionClient,
+    invoiceId: string,
+    lines: { serviceChargeId: string; description: string; quantity: number; unitPricePkr: number }[],
+  ): Promise<number> {
+    const existing = await tx.invoiceLineItem.findMany({ where: { invoiceId }, select: { sortOrder: true } });
+    let sort = existing.reduce((m, l) => Math.max(m, l.sortOrder), 0);
+    for (const l of lines) {
+      sort += 1;
+      await this.repo.addLine(tx, invoiceId, {
+        lineType: 'SERVICE',
+        description: l.description,
+        quantity: l.quantity,
+        unitPricePkr: l.unitPricePkr,
+        serviceChargeId: l.serviceChargeId,
+        amountPkr: round2(l.quantity * l.unitPricePkr),
+        sortOrder: sort,
+      });
+    }
+    await this.repo.recomputeTotals(tx, invoiceId);
+    const updated = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { totalPkr: true } });
+    return Number(updated.totalPkr);
+  }
   /**
    * Void a finalized, unpaid invoice: post a full reversal of its JE-01 and set
    * status VOID. Only allowed when nothing downstream has consumed the invoice

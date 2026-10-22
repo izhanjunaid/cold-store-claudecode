@@ -1,5 +1,6 @@
 'use client';
 
+import { localIsoDate } from '@coldchain/shared';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { SeasonalSummaryResponseType } from '@coldchain/shared';
@@ -15,10 +16,9 @@ import { StatTile } from '@/components/stat-tile';
 import { formatCount, formatMoney } from '@/lib/format';
 
 function defaultPeriod() {
-  const today = new Date();
-  const start = new Date(today);
+  const start = new Date();
   start.setMonth(start.getMonth() - 6);
-  return { from: start.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10) };
+  return { from: localIsoDate(start), to: localIsoDate() };
 }
 
 export default function SeasonalSummaryPage() {

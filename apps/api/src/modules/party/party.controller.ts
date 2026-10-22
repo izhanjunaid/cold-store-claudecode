@@ -45,7 +45,7 @@ export async function partyRoutes(app: FastifyInstance) {
         creditTermsDays: body.credit_terms_days,
         notes: body.notes,
         createdBy: request.user!.userId,
-      });
+      }, (await app.ensurePermissions(request)).has('parties.credit_terms'));
       return sendSuccess(reply.status(201), result);
     },
   });
@@ -84,7 +84,7 @@ export async function partyRoutes(app: FastifyInstance) {
         creditLimitPkr: body.credit_limit_pkr,
         creditTermsDays: body.credit_terms_days,
         notes: body.notes,
-      });
+      }, (await app.ensurePermissions(request)).has('parties.credit_terms'));
       return sendSuccess(reply, result);
     },
   });

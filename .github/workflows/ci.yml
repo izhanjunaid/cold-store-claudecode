@@ -89,6 +89,11 @@ jobs:
         # allowlist of files still holding literals may only shrink.
         run: node scripts/check-account-literals.mjs
 
+      - name: Guardrail — the business day, not the UTC day (CLAUDE.md)
+        # The container runs in UTC; between midnight and 05:00 in Lahore the UTC date is
+        # still yesterday. "Today" is businessDate() on the server, localIsoDate() in forms.
+        run: node scripts/check-business-date.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 

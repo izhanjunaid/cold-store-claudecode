@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
+import { addDays, businessDate } from '@coldchain/shared';
 import type { FastifyInstance } from 'fastify';
 
 // Mock PDF rendering so tests don't require Chromium
@@ -180,6 +181,45 @@ describe('Weight dispute threshold is absolute kilograms (weight_dispute_thresho
     });
     expect(res.statusCode).toBe(422);
     expect(JSON.parse(res.body).error.code).toBe('WEIGHT_DISPUTE_UNRESOLVED');
+  });
+});
+
+describe('Future inbound date (fast-dispatch Phase 0)', () => {
+  // A forward-dated intake shortens the billed stay, so below MANAGER the inbound
+  // date may not be after today — today on the facility's calendar, not UTC's.
+  const tomorrow = addDays(businessDate(), 1);
+
+  it('OPERATOR cannot date an intake after today → 422 DATE_IN_FUTURE', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: lotPayload({ inbound_date: tomorrow }),
+    });
+    expect(res.statusCode).toBe(422);
+    const err = JSON.parse(res.body).error;
+    expect(err.code).toBe('DATE_IN_FUTURE');
+    expect(err.field).toBe('inbound_date');
+  });
+
+  it("OPERATOR can date an intake today (the facility's today)", async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: lotPayload({ inbound_date: businessDate() }),
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it('MANAGER may enter a future inbound date', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(managerToken),
+      payload: lotPayload({ inbound_date: tomorrow }),
+    });
+    expect(res.statusCode).toBe(201);
   });
 });
 

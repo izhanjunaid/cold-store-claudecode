@@ -49,6 +49,10 @@ export interface FacilityRefs {
   varietyId?: string;
   chamberId: string;
   seasonalRatePlanId: string;
+  // Labels, for picking them in the intake form's search comboboxes.
+  commodityName: string;
+  chamberName: string;
+  seasonalRatePlanName: string;
 }
 
 export async function getFacilityRefs(
@@ -85,13 +89,20 @@ export async function getFacilityRefs(
     commodityId: potato.id,
     chamberId: chamber.id,
     seasonalRatePlanId: seasonal.id,
+    commodityName: potato.name,
+    chamberName: chamber.name,
+    seasonalRatePlanName: seasonal.name,
   };
 }
 
+/** The facility's calendar date (Lahore) at an instant — what the server calls the business date. */
+const lahoreDate = (at: Date) => at.toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+
 export function isoDaysAgo(days: number): string {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return lahoreDate(new Date(Date.now() - days * 24 * 60 * 60 * 1000));
 }
 
+/** Today at the facility: between midnight and 05:00 in Lahore the UTC date is still yesterday. */
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  return lahoreDate(new Date());
 }

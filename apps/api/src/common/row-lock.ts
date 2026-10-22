@@ -18,7 +18,13 @@ export type LockableTable =
   | 'supplier_payments'
   | 'tax_remittances'
   | 'cash_transfers'
-  | 'owner_equity_movements';
+  | 'owner_equity_movements'
+  | 'cash_handovers'
+  // Stock leaves under these (fast-dispatch Phase 0): a withdrawal, the lot it
+  // draws on, and the truck it leaves on.
+  | 'outbound_events'
+  | 'lots'
+  | 'gate_passes';
 
 /**
  * Lock one row of `table` for the rest of the transaction. Returns false when the

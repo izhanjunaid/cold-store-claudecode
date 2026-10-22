@@ -17,6 +17,8 @@ import permissionsPlugin from './plugins/permissions';
 import mailPlugin from './plugins/mail';
 import { authRoutes } from './modules/auth/auth.controller';
 import { partyRoutes } from './modules/party/party.controller';
+import { creditApprovalRoutes } from './modules/credit-approval/credit-approval.controller';
+import { cashHandoverRoutes } from './modules/cash-handover/cash-handover.controller';
 import { chamberRoutes } from './modules/chamber/chamber.controller';
 import { commodityRoutes } from './modules/commodity/commodity.controller';
 import { partnerRoutes } from './modules/partners/partner.controller';
@@ -44,6 +46,7 @@ import { auditRoutes } from './modules/audit/audit.controller';
 import { notificationRoutes } from './modules/notifications/notifications.controller';
 import { systemRoutes } from './modules/system/system.controller';
 import { testRoutes } from './modules/_test/test.controller';
+import blindRedactionPlugin from './plugins/blind-redaction';
 
 export async function buildApp() {
   const app = Fastify({
@@ -65,7 +68,9 @@ export async function buildApp() {
   await app.register(helmet);
   await app.register(sensible);
   await app.register(rateLimit, {
-    max: 100,
+    // 100/min per client by default. RATE_LIMIT_MAX exists for the e2e walkthroughs, which drive a
+    // whole season from one address faster than any person could.
+    max: Number(process.env['RATE_LIMIT_MAX']) || 100,
     timeWindow: '1 minute',
   });
 
@@ -75,6 +80,7 @@ export async function buildApp() {
   await app.register(authPlugin);
   await app.register(permissionsPlugin);
   await app.register(mailPlugin);
+  await app.register(blindRedactionPlugin); // the gate guard counts bags blind (common/blind-count.ts)
 
   // OpenAPI / Swagger
   await app.register(swagger, {
@@ -108,6 +114,8 @@ export async function buildApp() {
   // Routes
   await app.register(authRoutes);
   await app.register(partyRoutes);
+  await app.register(creditApprovalRoutes);
+  await app.register(cashHandoverRoutes);
   await app.register(chamberRoutes);
   await app.register(commodityRoutes);
   await app.register(partnerRoutes);
