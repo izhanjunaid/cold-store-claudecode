@@ -93,6 +93,22 @@ default charge priced at zero no longer blocks every checkout.
 - Client boxes track `:stable`, which is still **v0.6.2**. Promoting v0.8.0 also ships the v0.7.0
   storage tariffs, whose setup screen the client found confusing; promote only when the owner says so.
 
+## Known limits (left on purpose in v0.8.0)
+
+From the pre-merge review, judged too small or too rare to hold the release; each is a follow-up:
+- A manager's override reason waives every gate check it meets on that release (plate, unmatched
+  load, count), not only the one shown. The mismatch flag and the reason are still stored on the pass.
+- The checkout preview rounds the subtotal before GST while the built bill sums it unrounded; on an
+  exact half-paisa boundary the desk can keep answering "the total changed". The withdrawal page's
+  normal finalize and payment still work.
+- A standalone receipt that deadlocks with a desk checkout on the numbering locks gets a plain error
+  (nothing is written); submitting again works.
+- A standing approval revoked at the very moment a truck is released can still let that one truck out.
+- The gate's "Ready to leave" poll reads every withdrawal dispatched before v0.8.0 and skips them in
+  code, so its cost grows with history.
+- Until C3, solo dispatch refuses any truck while a default charge priced by weight is active, because
+  the munshi types the weight.
+
 ## Still to build
 
 C2: a multi-lot truck basket and load slip (one checkout for several bills). C3: the blind inline
