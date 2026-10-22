@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const apiClient = vi.fn();
@@ -56,11 +56,12 @@ const posts = () => apiClient.mock.calls.filter(([, o]) => o?.method === 'POST')
 
 function renderCard() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
+  render(
     <QueryClientProvider client={client}>
       <CashTodayCard />
     </QueryClientProvider>,
   );
+  return client;
 }
 
 beforeEach(() => {
@@ -137,6 +138,24 @@ describe('CashTodayCard', () => {
       counted_cash_pkr: 61000,
       variance_reason: 'Torn note discarded',
     });
+  });
+
+  it('when a truck is paid while the manager counts, the typed count is cleared and the dialog says why', async () => {
+    const client = renderCard();
+    fireEvent.click(await screen.findByRole('button', { name: 'Count cash' }));
+    fireEvent.change(await screen.findByLabelText(/Cash counted/), { target: { value: '61500' } });
+    // The card refetches (every 15 s) and the collector has taken another Rs 10,000.
+    day = { ...day, rows: [ME, { ...MUNSHI, pending_cash_pkr: 71_500, pending_receipts: 4 }] };
+    await act(() => client.refetchQueries());
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(within(dialog).getByLabelText(/Cash counted/)).toHaveValue(null));
+    expect(within(dialog).getByText(/changed while you were counting/i)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Short by/)).not.toBeInTheDocument();
+    // Counted again against the new figure, it is sent as shown.
+    fireEvent.change(within(dialog).getByLabelText(/Cash counted/), { target: { value: '71500' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Record handover' }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]![1].body).toEqual({ collector_id: 'munshi', expected_cash_pkr: 71500, counted_cash_pkr: 71500 });
   });
 
   it('when the cash waiting changed meanwhile, shows the refusal and the new figure', async () => {

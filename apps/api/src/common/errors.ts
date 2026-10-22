@@ -159,6 +159,8 @@ export const Errors = {
     ),
   HANDOVER_SELF_CONFIRM: () =>
     new AppError('HANDOVER_SELF_CONFIRM', 'You cannot count your own cash — another manager must', 403),
+  HANDOVER_SELF_VOID: () =>
+    new AppError('HANDOVER_SELF_VOID', 'You cannot void the count of your own cash — another manager must', 403),
   HANDOVER_NOT_FOUND: () => new AppError('HANDOVER_NOT_FOUND', 'Cash handover does not exist', 404),
   HANDOVER_ALREADY_VOIDED: () =>
     new AppError('HANDOVER_ALREADY_VOIDED', 'This handover has already been voided', 409),

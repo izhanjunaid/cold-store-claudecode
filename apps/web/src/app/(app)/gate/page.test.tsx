@@ -244,16 +244,26 @@ describe('GatePassConsolePage — clear outward', () => {
     expect(within(dialog).queryByRole('button', { name: /release anyway/i })).not.toBeInTheDocument();
   });
 
-  it('shows the server message when payment is pending', async () => {
-    apiClient.mockRejectedValueOnce(
-      new ApiError('Payment Pending — balance 4500.00 PKR', { code: 'GATE_OUTWARD_BLOCKED', status: 422 }),
-    );
+  it('shows the server message when payment is pending, with one next step for the guard', async () => {
+    // What the API really tells the guard: the fact, no amount (managers hear the balance).
+    apiClient.mockRejectedValueOnce(new ApiError('Payment pending', { code: 'GATE_OUTWARD_BLOCKED', status: 422 }));
     const dialog = await openClearOutward();
     enterCount(dialog, '137');
     fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
 
-    expect(await within(dialog).findByText(/balance 4500\.00 PKR/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/escalate to manager/i)).toBeInTheDocument();
+    expect(await within(dialog).findByText('Payment pending')).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/escalate to manager|send the driver|call a manager/i)).toHaveLength(1);
+    expect(within(dialog).queryByText(/Rs\s|PKR/)).not.toBeInTheDocument();
+  });
+
+  it('after a refused release, Cancel closes the dialog', async () => {
+    apiClient.mockRejectedValueOnce(new ApiError('Payment pending', { code: 'GATE_OUTWARD_BLOCKED', status: 422 }));
+    const dialog = await openClearOutward();
+    enterCount(dialog, '20');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+    await within(dialog).findByText('Payment pending');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
   it('shows the server message for a release the gate cannot override', async () => {
@@ -344,10 +354,10 @@ describe('Ready to leave', () => {
     expect(screen.getByText('Paid — ready to leave')).toBeInTheDocument();
   });
 
-  it('the guard gets no amount (the API sends null): the badge sends the driver to the desk instead', async () => {
+  it('the guard gets no amount (the API sends null): the badge states the fact without one', async () => {
     listWith(READY, { ...OWES, release: { ...OWES.release, outstanding_pkr: null } });
     render(<GatePassConsolePage />);
-    expect(await screen.findByText('Payment pending — send the driver to the desk (cheque not cleared)')).toBeInTheDocument();
+    expect(await screen.findByText('Payment pending (cheque not cleared)')).toBeInTheDocument();
     expect(screen.queryByText(/Rs\s/)).not.toBeInTheDocument();
     expect(screen.queryByText(/NaN|null/)).not.toBeInTheDocument();
   });

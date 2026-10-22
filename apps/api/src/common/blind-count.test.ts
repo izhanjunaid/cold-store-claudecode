@@ -79,6 +79,7 @@ describe('redactBagCounts', () => {
       outbound_weight_kg: 1950,
       prorated_inbound_weight_kg: 1980,
       weight_variance_pct: 1.5,
+      weight_dispute_note: 'Declared 2,010 kg, kanta 2,000 kg',
       release: { state: 'PAYMENT_PENDING', outstanding_pkr: 12_000, cheque_pending: false },
       credit_authorized_amount_pkr: 9_000,
       total_pkr: 500, // not a guard-facing field; left alone
@@ -89,6 +90,7 @@ describe('redactBagCounts', () => {
       outbound_weight_kg: null,
       prorated_inbound_weight_kg: null,
       weight_variance_pct: null,
+      weight_dispute_note: null,
       release: { state: 'PAYMENT_PENDING', outstanding_pkr: null, cheque_pending: false },
       credit_authorized_amount_pkr: null,
       total_pkr: 500,

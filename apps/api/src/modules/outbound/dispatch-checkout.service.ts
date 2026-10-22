@@ -4,6 +4,7 @@ import {
   businessDate,
   businessDayStart,
   round2,
+  toIsoDate,
   type DispatchAndCollectRequestType,
   type OutboundListQueryType,
 } from '@coldchain/shared';
@@ -163,11 +164,11 @@ export class DispatchCheckoutService {
 
     // Whether the munshi may finish this truck alone, as booleans and a reason: never the party's
     // ceiling or exposure. Credit is offered only if this bill fits under the approved ceiling.
-    const verdict = await this.soloVerdict(this.prisma, facilityId, ob.lot);
+    const verdict = await this.soloVerdict(this.prisma, facilityId, ob.lot, ob.outboundDate);
     const creditAvailable =
       verdict.allowed &&
       verdict.creditApproved &&
-      (await standingCreditCover(this.prisma, facilityId, [{ partyId: ob.lot.billingPartyId, uncleared: total }])).covered;
+      (await standingCreditCover(this.prisma, facilityId, [{ partyId: ob.lot.billingPartyId, unbilled: total }])).covered;
 
     return {
       outbound_id: id,
@@ -247,11 +248,11 @@ export class DispatchCheckoutService {
 
     const ob = await this.prisma.outboundEvent.findFirst({
       where: { id, facilityId: caller.facilityId },
-      select: { lot: { select: { bookType: true, billingPartyId: true } } },
+      select: { outboundDate: true, lot: { select: { bookType: true, billingPartyId: true } } },
     });
     if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
 
-    const verdict = await this.soloVerdict(this.prisma, caller.facilityId, ob.lot);
+    const verdict = await this.soloVerdict(this.prisma, caller.facilityId, ob.lot, ob.outboundDate);
     if (!verdict.allowed) return refuse(verdict.reason);
     if ((body.skip_service_charge_ids ?? []).length > 0) return refuse('leaving a charge off the bill is a manager decision');
     if (body.payment.mode === 'CREDIT') {
@@ -263,7 +264,9 @@ export class DispatchCheckoutService {
   }
 
   /**
-   * May the munshi finish this truck alone? Needs the owner's switch and a PACCI lot. `creditApproved`
+   * May the munshi finish this truck alone? Needs the owner's switch, a PACCI lot, a withdrawal dated
+   * today (its date ends the storage billed) and no default charge priced by weight (the munshi typed
+   * the weight). `creditApproved`
    * says the billing party holds a live standing approval; whether the bill fits under its ceiling
    * is checked at the checkout, under a lock, once the bill is in the ledger.
    */
@@ -271,6 +274,7 @@ export class DispatchCheckoutService {
     db: PrismaClient | Prisma.TransactionClient,
     facilityId: string,
     lot: { bookType: string; billingPartyId: string },
+    outboundDate: Date,
   ): Promise<{ allowed: true; creditApproved: boolean } | { allowed: false; reason: string; creditApproved: false }> {
     const facility = await db.facility.findUnique({ where: { id: facilityId }, select: { settings: true } });
     if (!resolveFacilitySettings(facility?.settings ?? null).dispatch_solo_mode) {
@@ -278,6 +282,15 @@ export class DispatchCheckoutService {
     }
     if (lot.bookType !== 'PACCI') {
       return { allowed: false, reason: 'a KATCHI-book bill is a manager decision', creditApproved: false };
+    }
+    if (toIsoDate(outboundDate) !== businessDate()) {
+      return { allowed: false, reason: 'a withdrawal not dated today is a manager decision', creditApproved: false };
+    }
+    const byWeight = await db.serviceCharge.count({
+      where: { facilityId, isActive: true, applyAtDispatch: true, unitType: 'PER_TON', unitPricePkr: { gt: 0 } },
+    });
+    if (byWeight > 0) {
+      return { allowed: false, reason: 'a charge priced by the weight is a manager decision', creditApproved: false };
     }
     const approval = await findActiveApproval(db, facilityId, lot.billingPartyId);
     return { allowed: true, creditApproved: approval != null };
@@ -336,7 +349,7 @@ export class DispatchCheckoutService {
     // The bill is in the ledger now, so the party's exposure includes it: it must still sit under the ceiling.
     if (solo && body.payment.mode === 'CREDIT') {
       const bill = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { billingPartyId: true } });
-      const cover = await standingCreditCover(tx, facilityId, [{ partyId: bill.billingPartyId, uncleared: 0 }]);
+      const cover = await standingCreditCover(tx, facilityId, [{ partyId: bill.billingPartyId }]);
       if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('this bill would take the party past its approved credit');
     }
 
@@ -371,7 +384,8 @@ export class DispatchCheckoutService {
       where: { facilityId, isActive: true, applyAtDispatch: true },
       orderBy: { name: 'asc' },
     });
-    return charges.map((c) => {
+    // A charge priced at nothing adds no line: a zero line would be refused at finalize.
+    return charges.filter((c) => Number(c.unitPricePkr) > 0).map((c) => {
       const unitPricePkr = Number(c.unitPricePkr);
       const quantity =
         c.unitType === 'FLAT' ? 1 : c.unitType === 'PER_BAG' ? load.bags : tonnes(load.weightKg ?? 0);

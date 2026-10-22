@@ -35,18 +35,31 @@ export async function findActiveApproval(db: Db, facilityId: string, partyId: st
   };
 }
 
-/** What a truck still owes, per billing party, that a standing approval would have to cover. */
+/** A party that still owes on a truck (or on a bill at the desk), which a standing approval would have to cover. */
 export type PartyCreditNeed = {
   partyId: string;
-  /** Cheques recorded but not cleared: owed at the gate, though the ledger already counts them paid. */
-  uncleared: number;
+  /** A bill not in the ledger yet (the checkout preview's draft), added to the exposure. */
+  unbilled?: number;
 };
 
 /**
+ * Every cheque the party has paid its bills with that has not cleared, on either book. The ledger
+ * already counts these paid, so they are added back: until it clears, a cheque is still owed.
+ */
+async function unclearedCheques(db: Db, facilityId: string, partyId: string): Promise<number> {
+  const sum = await db.paymentAllocation.aggregate({
+    where: { voidedAt: null, invoice: { facilityId, billingPartyId: partyId }, payment: { clearanceStatus: 'PENDING' } },
+    _sum: { allocatedAmountPkr: true },
+  });
+  return Number(sum._sum.allocatedAmountPkr ?? 0);
+}
+
+/**
  * Does a standing approval cover every party that still owes on a truck? Each party needs a
- * live approval whose ceiling holds its whole exposure (both books, from the ledger — the
- * truck's own finalized bills are already in it) plus its uncleared cheques. One helper for the
- * gate preview and the release, so the guard is never shown READY for a truck the release then refuses.
+ * live approval whose ceiling holds its whole exposure — both books, from the ledger (the
+ * truck's own finalized bills are already in it), plus every cheque of the party's not yet
+ * cleared, plus any bill not posted yet. One helper for the gate preview, the release and the
+ * solo checkout, so the guard is never shown READY for a truck the release then refuses.
  */
 export async function standingCreditCover(
   db: Db,
@@ -59,7 +72,10 @@ export async function standingCreditCover(
     const approval = await findActiveApproval(db, facilityId, need.partyId);
     if (!approval) return { covered: false, approvals: [] };
     const exposure = await creditExposure(db, facilityId, need.partyId);
-    if (round2(exposure + need.uncleared) > approval.maxOutstandingPkr + 0.005) return { covered: false, approvals: [] };
+    const uncleared = await unclearedCheques(db, facilityId, need.partyId);
+    if (round2(exposure + uncleared + (need.unbilled ?? 0)) > approval.maxOutstandingPkr + 0.005) {
+      return { covered: false, approvals: [] };
+    }
     approvals.push(approval);
   }
   return { covered: true, approvals };

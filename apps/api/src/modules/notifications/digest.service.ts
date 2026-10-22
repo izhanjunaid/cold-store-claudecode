@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@coldchain/db';
+import { BUSINESS_TIME_ZONE } from '@coldchain/shared';
 import { getDashboard } from '../reporting/reports/dashboard';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import type { MailService } from '../mail/mail.service';
@@ -6,6 +7,10 @@ import { mailConfigFromSettings } from '../mail/mail.service';
 
 const fmtPkr = (n: number) => `PKR ${Math.round(n).toLocaleString('en-PK')}`;
 const fmtNum = (n: number) => n.toLocaleString('en-PK');
+
+/** The day the digest is about, on the facility's clock (the container's is UTC). */
+export const digestDateLabel = (now: Date = new Date()) =>
+  now.toLocaleDateString('en-GB', { dateStyle: 'full', timeZone: BUSINESS_TIME_ZONE });
 
 export interface DigestResult {
   sent: boolean;
@@ -57,7 +62,7 @@ export class DigestService {
       hasContent: hasReceivables || hasStorageAlerts || hasAgingLots || hasUnbilled,
       context: {
         facilityName: facility.name,
-        date: new Date().toLocaleDateString('en-GB', { dateStyle: 'full' }),
+        date: digestDateLabel(),
         activeLots: fmtNum(dashboard.active_lots),
         totalBags: fmtNum(dashboard.total_bags),
         occupancyPct: dashboard.occupancy_pct,

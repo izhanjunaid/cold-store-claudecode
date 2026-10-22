@@ -466,7 +466,8 @@ describe('payment at the gate', () => {
     const pass = await arrive('LHR-6900');
     const guard = await release(pass, { declared_quantity: 24 });
     expect([guard.statusCode, code(guard)]).toEqual([422, 'GATE_OUTWARD_BLOCKED']);
-    expect(JSON.parse(guard.body).error.message).toBe('Payment pending — send the driver to the desk');
+    // The fact only, and no amount: the gate page gives the guard the next step (escalate).
+    expect(JSON.parse(guard.body).error.message).toBe('Payment pending');
     const manager = await release(pass, { declared_quantity: 24 }, managerToken);
     expect([manager.statusCode, code(manager)]).toEqual([422, 'GATE_OUTWARD_BLOCKED']);
     expect(JSON.parse(manager.body).error.message).toMatch(/^Payment Pending — balance \d+\.\d{2} PKR$/);

@@ -257,7 +257,7 @@ export class GatePassService {
       let outstanding = 0;
       let chequePending = false;
       let state: GateReleaseStateType = 'READY';
-      const owing = new Map<string, number>(); // billing party -> its uncleared cheques, for parties that still owe
+      const owing = new Set<string>(); // billing parties that still owe (standingCreditCover counts their uncleared cheques)
       for (const o of list) {
         if (o.status !== 'DISPATCHED') { state = 'NOT_DISPATCHED'; break; }
         const inv = o.invoice;
@@ -267,7 +267,7 @@ export class GatePassService {
         if (uncleared > 0.005) chequePending = true;
         const owed = Math.max(0, Number(inv.totalPkr) - Number(inv.amountPaidPkr) + uncleared);
         outstanding += owed;
-        if (owed > 0.01) owing.set(inv.billingPartyId, (owing.get(inv.billingPartyId) ?? 0) + uncleared);
+        if (owed > 0.01) owing.add(inv.billingPartyId);
       }
       outstanding = round2(outstanding);
       // Money still owed holds the truck, unless every party that owes it holds a standing credit
@@ -277,7 +277,7 @@ export class GatePassService {
         const cover = await standingCreditCover(
           this.prisma,
           facilityId,
-          [...owing].map(([partyId, uncleared]) => ({ partyId, uncleared })),
+          [...owing].map((partyId) => ({ partyId })),
         );
         if (cover.covered) onCredit = true;
         else state = 'PAYMENT_PENDING';
@@ -436,7 +436,7 @@ export class GatePassService {
     let outstanding = 0;
     let unbilled: string | null = null;
     let chequesPending = false;
-    const owing = new Map<string, number>(); // billing party -> its uncleared cheques, for parties that still owe
+    const owing = new Set<string>(); // billing parties that still owe (standingCreditCover counts their uncleared cheques)
     for (const o of outbounds) {
       const inv = o.invoice;
       if (inv?.status === 'DRAFT') throw Errors.GATE_OUTWARD_INVOICE_NOT_FINAL(dnOf(o));
@@ -448,7 +448,7 @@ export class GatePassService {
       if (uncleared > 0.005) chequesPending = true;
       const owed = Math.max(0, Number(inv.totalPkr) - Number(inv.amountPaidPkr) + uncleared);
       outstanding += owed;
-      if (owed > 0.01) owing.set(inv.billingPartyId, (owing.get(inv.billingPartyId) ?? 0) + uncleared);
+      if (owed > 0.01) owing.add(inv.billingPartyId);
     }
     outstanding = round2(outstanding);
     const needsCredit = unbilled != null || outstanding > 0.01;
@@ -462,17 +462,16 @@ export class GatePassService {
         // voided withdrawal has no amount to cover and stays a manager's call.
         const cover =
           unbilled == null
-            ? await standingCreditCover(tx, facilityId, [...owing].map(([partyId, uncleared]) => ({ partyId, uncleared })))
+            ? await standingCreditCover(tx, facilityId, [...owing].map((partyId) => ({ partyId })))
             : { covered: false, approvals: [] as ActiveApproval[] };
         if (!cover.covered) {
           throw Errors.GATE_OUTWARD_BLOCKED(
             unbilled != null
               ? `Withdrawal ${unbilled} has no valid bill — a manager must authorize this release on credit`
               : // The guard is told payment is pending, never how much: an amount stands in for
-                // the blind count (common/blind-count.ts). Everyone else hears the balance.
-                (isBlindRole(userRole)
-                  ? 'Payment pending — send the driver to the desk'
-                  : `Payment Pending — balance ${outstanding.toFixed(2)} PKR`) +
+                // the blind count (common/blind-count.ts). The fact only; the gate page gives the
+                // guard their next step. Everyone else hears the balance.
+                (isBlindRole(userRole) ? 'Payment pending' : `Payment Pending — balance ${outstanding.toFixed(2)} PKR`) +
                   (chequesPending ? ' (includes cheques not yet cleared)' : ''),
           );
         }

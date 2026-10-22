@@ -68,9 +68,10 @@ function releaseLabel(r: NonNullable<GatePass['release']>): { text: string; tone
       return { text: r.on_credit ? 'Credit approved — ready to leave' : 'Paid — ready to leave', tone: 'success' };
     case 'PAYMENT_PENDING':
       return {
-        text: `Payment pending — ${
-          r.outstanding_pkr == null ? 'send the driver to the desk' : `Rs ${r.outstanding_pkr.toLocaleString()}`
-        }${r.cheque_pending ? ' (cheque not cleared)' : ''}`,
+        // The guard gets no amount (null): the fact only.
+        text: `Payment pending${r.outstanding_pkr == null ? '' : ` — Rs ${r.outstanding_pkr.toLocaleString()}`}${
+          r.cheque_pending ? ' (cheque not cleared)' : ''
+        }`,
         tone: 'danger',
       };
     case 'BILL_DRAFT':

@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 import { formatMoney } from '@/lib/format';
 import { DEFAULT_BANK_ACCOUNT_CODE, localIsoDate } from '@coldchain/shared';
+import { previousMonthOf } from '@/lib/fiscal-period';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -51,10 +52,10 @@ interface SettlementResult {
 
 export default function GstSettlementPage() {
   const canPost = useCan('accounting.post_journal');
-  const now = new Date();
+  const lastMonth = previousMonthOf(localIsoDate()); // the viewer's day, not the UTC one
   // A return is filed after its period ends, so default to the month just gone.
-  const [year, setYear] = useState(now.getUTCMonth() === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear());
-  const [month, setMonth] = useState(now.getUTCMonth() === 0 ? 12 : now.getUTCMonth());
+  const [year, setYear] = useState(lastMonth.year);
+  const [month, setMonth] = useState(lastMonth.month);
   const [paymentDate, setPaymentDate] = useState(() => localIsoDate());
   const [bankAccount, setBankAccount] = useState<string>(DEFAULT_BANK_ACCOUNT_CODE);
   // Any active cash, bank or wallet account — the same rule the server checks (docs/25 L-20).

@@ -33,6 +33,8 @@ export const BLIND_KEYS: ReadonlySet<string> = new Set([
   'outbound_weight_kg',
   'prorated_inbound_weight_kg',
   'weight_variance_pct',
+  // Required when declared and accepted weights differ, so it quotes the kilograms.
+  'weight_dispute_note',
   // Money owed on a truck at the gate
   'outstanding_pkr',
   'credit_authorized_amount_pkr',

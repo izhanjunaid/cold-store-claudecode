@@ -41,29 +41,37 @@ manager's call). Optional rack picks. The gate gets **Ready to leave**: a releas
 **The guard counts blind.** A global `preSerialization` hook nulls every stock quantity sent to
 SECURITY (`BLIND_KEYS` in `apps/api/src/common/blind-count.ts`); invoices and the placement slip
 answer `403 BLIND_ROLE_FORBIDDEN`; the gate receipt the guard prints carries no quantity. Since v0.8.0
-the hook also nulls **weights** (accepted, declared, outbound, prorated, variance) and the **money
-owed at the gate** (`outstanding_pkr`, `credit_authorized_amount_pkr`); a guard refused for payment
-reads "Payment pending — send the driver to the desk". Everyone else keeps every figure.
+the hook also nulls **weights** (accepted, declared, outbound, prorated, variance, and the weight-dispute
+note, which quotes the kilograms) and the **money owed at the gate** (`outstanding_pkr`,
+`credit_authorized_amount_pkr`); a guard refused for payment reads only "Payment pending", and the gate
+page tells them to escalate. Everyone else keeps every figure.
 
 **Phase C1 — standing credit, cash handover, solo dispatch** (migrations `0040`–`0042`).
 - *Standing credit:* a manager (`parties.credit_terms`) pre-approves a party up to a ceiling on its
-  total exposure (both books, uncleared cheques counted), optionally until a date. A truck whose every
+  total exposure (both books, plus every cheque of the party's not yet cleared), optionally until a date. A truck whose every
   unpaid bill is covered is READY at the gate and the guard releases it alone; the pass records the
   approval and names the approving manager. One helper, `standingCreditCover()`, decides for the gate
   preview, the release and the solo checkout.
 - *Cash handover:* with cash tracking on, each collector's cash receipts are "cash waiting"; a manager
   (`cash_handovers.confirm`, new) counts it on the desk. A difference needs a reason and posts JE-28 to
-  **6105 Cash Short & Over**. Nobody counts their own cash; the owner's cash is not tracked.
+  **6105 Cash Short & Over**. Nobody counts, or voids the count of, their own cash; the owner's cash is
+  not tracked. The desk's cash card also shows each collector's bank and wallet takings.
 - *Solo dispatch:* with the owner's switch on, a munshi (`outbound.record` only) may finish a PACCI truck
-  on cash in full or approved credit, with every charge kept; anything else is
+  dated today, on cash in full or approved credit, with every charge kept and none priced by weight
+  (the munshi types the weight; the blind weigh-out with a tolerance band is C3); anything else is
   `403 DISPATCH_NEEDS_MANAGER`. The munshi is never given the manager keys.
 
 **Release round (v0.8.0).** "Today" is the facility's day everywhere: twelve web form defaults and ten
-API defaults had used the UTC date (wrong between midnight and 05:00 in Lahore), and the digest
-scheduler compared the owner's hour with the container's UTC hour; `scripts/check-business-date.mjs`
+API defaults had used the UTC date (wrong between midnight and 05:00 in Lahore), and so had gate-pass
+numbers, the lot page's days in storage, the digest's date line and four month/year form defaults; the
+digest scheduler compared the owner's hour with the container's UTC hour. `scripts/check-business-date.mjs`
 now fails CI on a new UTC "today". The party's credit-limit tile names a live gate pre-approval, and a
 first approval starts from the party's credit limit. Party tabs, the invoices list and the nav follow
-permissions (no tab that 403s into an empty list). The desk's cash card shows bank and wallet takings.
+permissions (no tab that 403s into an empty list). From the pre-merge review: a party's other uncleared
+cheques now count against its standing approval (they were counted only on the truck at the gate); the
+solo checkout needs a truck dated today and no weight-priced charge; nobody voids the count of their own
+cash; a count typed while another receipt arrives is cleared rather than booked as a shortage; and a
+default charge priced at zero no longer blocks every checkout.
 
 ## Switches (all **off** until the owner turns them on)
 
@@ -79,6 +87,9 @@ permissions (no tab that 403s into an empty list). The desk's cash card shows ba
   `syncChartOfAccounts()`, and warns (never fails) if any lot is already below zero.
 - New permission keys get their default roles: `parties.credit_terms` (MANAGER), `cash_handovers.confirm`
   (MANAGER) — 51 keys in all.
+- **Re-check Settings → Notifications → digest hour.** It was compared with the container's UTC clock, so
+  "8" sent the digest at 13:00 in Lahore; it now means 08:00 in Lahore. An owner who set a smaller hour to
+  compensate will get the email 5 hours earlier than before.
 - Client boxes track `:stable`, which is still **v0.6.2**. Promoting v0.8.0 also ships the v0.7.0
   storage tariffs, whose setup screen the client found confusing; promote only when the owner says so.
 

@@ -352,6 +352,17 @@ describe('voiding a handover', () => {
     expect((await hand(managerId, total, total)).statusCode).toBe(201); // recount succeeds
   });
 
+  it('nobody voids the count of their own cash: a shortage stays booked until another manager voids it', async () => {
+    await setTracking(businessDate());
+    const total = await dispatchedBy(managerToken, 20, 'LHR-8021');
+    const h = json(await hand(managerId, total, total - 100, { variance_reason: 'Short by one note' })).data;
+    const own = await call('POST', `/v1/cash-handovers/${h.id}/void`, managerToken, { reason: 'Recounted, it was fine' });
+    expect([own.statusCode, code(own)]).toEqual([403, 'HANDOVER_SELF_VOID']);
+    expect((await prisma.cashHandover.findUniqueOrThrow({ where: { id: h.id } })).voidedAt).toBeNull();
+    const other = await call('POST', `/v1/cash-handovers/${h.id}/void`, ownerToken, { reason: 'Counted the wrong drawer' });
+    expect(other.statusCode, other.body).toBe(200);
+  });
+
   it('lists handovers, filterable to those with a difference', async () => {
     await setTracking(businessDate());
     const a = await dispatchedBy(managerToken, 20, 'LHR-8021');

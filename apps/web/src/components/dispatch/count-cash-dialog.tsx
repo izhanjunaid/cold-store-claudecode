@@ -40,14 +40,31 @@ export function CountCashDialog({
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The figure the count was started against. The card refetches while the dialog is open; if the
+  // collector took more cash meanwhile, a count typed against the old figure must not be sent
+  // against the new one (it would book a false shortage), so it is cleared and the manager told.
+  const [startedAt, setStartedAt] = useState(expected);
+  const [changed, setChanged] = useState(false);
 
   useEffect(() => {
     if (open) {
       setCounted('');
       setReason('');
       setError(null);
+      setStartedAt(collector.pending_cash_pkr ?? 0);
+      setChanged(false);
     }
+    // Reset on opening, or on another collector — not on every refetch of this one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, collector.user_id]);
+
+  useEffect(() => {
+    if (!open || expected === startedAt) return;
+    setCounted('');
+    setReason('');
+    setStartedAt(expected);
+    setChanged(true);
+  }, [open, expected, startedAt]);
 
   const countedNum = counted.trim() === '' ? null : Number(counted);
   const valid = countedNum != null && Number.isFinite(countedNum) && countedNum >= 0;
@@ -98,6 +115,11 @@ export function CountCashDialog({
             <span className="text-sm text-muted-foreground">The receipts say</span>
             <span className="text-lg font-semibold tabular-nums">{formatMoney(expected)}</span>
           </div>
+          {changed && (
+            <p role="status" className="text-sm font-medium text-amber-700">
+              The cash waiting changed while you were counting (another receipt came in). Count it again.
+            </p>
+          )}
           <div className="space-y-1">
             <Label htmlFor="counted-cash">Cash counted (PKR)</Label>
             <Input

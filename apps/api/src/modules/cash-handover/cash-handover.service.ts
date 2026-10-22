@@ -287,10 +287,12 @@ export class CashHandoverService {
       if (!(await lockRow(tx, 'cash_handovers', id, facilityId))) throw Errors.HANDOVER_NOT_FOUND();
       const handover = await tx.cashHandover.findFirstOrThrow({ where: { id, facilityId } });
       if (handover.voidedAt) throw Errors.HANDOVER_ALREADY_VOIDED();
+      // Voiding reverses a shortage booked against the collector: never theirs to undo.
+      if (handover.collectorId === userId) throw Errors.HANDOVER_SELF_VOID();
       if (handover.journalEntryId) {
         await this.journal.reverseInTransaction(tx, facilityId, userId, handover.journalEntryId, {
           reason: `cash handover voided — ${reason}`,
-          // The default is the UTC date; the day this happened is the facility's.
+          // Dated the facility day it happened (the reversal's own default since v0.8.0, stated here anyway).
           date: fromIsoDate(businessDate()),
         });
       }

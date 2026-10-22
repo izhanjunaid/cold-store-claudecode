@@ -249,6 +249,35 @@ describe('at the gate', () => {
     expect((await prisma.gatePass.findUniqueOrThrow({ where: { id: t.passId } })).status).not.toBe('CLEARED');
   });
 
+  it('the party’s other cheques that have not cleared count against the ceiling, not only this truck’s', async () => {
+    // An older bill settled by a cheque still in clearing: the ledger already counts it paid.
+    const older = await creditTruck(40, 'LHR-7010');
+    const olderInvoice = await prisma.invoice.findFirstOrThrow({ where: { outboundEventId: older.id } });
+    const cheque = await call('POST', '/v1/payments', ownerToken, {
+      party_id: partyId,
+      payment_date: businessDate(),
+      amount_pkr: older.total,
+      payment_method: 'CHEQUE',
+      reference_number: 'MCB-7010',
+      cheque_date: businessDate(),
+      allocations: [{ invoice_id: olderInvoice.id, allocated_amount_pkr: older.total }],
+    });
+    expect(cheque.statusCode, cheque.body).toBe(201);
+
+    // A ceiling that holds the new bill alone, but not the new bill plus the cheque if it bounces.
+    const t = await creditTruck(20, 'LHR-7011');
+    await grant(Math.ceil(t.total) + 1);
+    expect((await previewOf('LHR-7011')).state).toBe('PAYMENT_PENDING');
+    const res = await release(t.passId, 20);
+    expect([res.statusCode, code(res)]).toEqual([422, 'GATE_OUTWARD_BLOCKED']);
+
+    // Once the cheque clears, the same ceiling holds and the truck may leave.
+    const cleared = await call('POST', `/v1/payments/${json(cheque).data.id}/clear`, ownerToken, { clear_date: businessDate() });
+    expect(cleared.statusCode, cleared.body).toBe(200);
+    expect((await previewOf('LHR-7011')).state).toBe('READY');
+    expect((await release(t.passId, 20)).statusCode).toBe(200);
+  });
+
   it('a lapsed approval holds the truck', async () => {
     await grant(5_000_000);
     await prisma.partyCreditApproval.updateMany({ where: { partyId, revokedAt: null }, data: { validUntil: new Date(addDays(businessDate(), -1)) } });

@@ -11,6 +11,8 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 import { formatDate, formatMoney } from '@/lib/format';
+import { yearStartOf } from '@/lib/fiscal-period';
+import { localIsoDate } from '@coldchain/shared';
 
 interface Statement {
   party_name: string;
@@ -29,7 +31,7 @@ interface Statement {
   open_bills: Array<{ id: string; bill_number: string | null; bill_date: string; due_date: string | null; total_pkr: number; open_pkr: number }>;
 }
 
-const startOfYear = () => `${new Date().getUTCFullYear()}-01-01`;
+const startOfYear = () => yearStartOf(localIsoDate());
 
 /** A supplier's account as the ledger has it: every line, a running balance, and the bills still open. */
 export default function SupplierStatementPage() {

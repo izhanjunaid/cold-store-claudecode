@@ -85,7 +85,7 @@ async function createLot(quantity: number, token = operatorToken, extra: Record<
 }
 
 /** A booked-and-weighed FULL withdrawal of a fresh lot: ready for the checkout. */
-async function weighed(quantity: number, opts: { lotExtra?: Record<string, unknown>; lotToken?: string; plate?: string } = {}) {
+async function weighed(quantity: number, opts: { lotExtra?: Record<string, unknown>; lotToken?: string; plate?: string; date?: string } = {}) {
   const lotId = await createLot(quantity, opts.lotToken ?? operatorToken, opts.lotExtra);
   const create = await app.inject({
     method: 'POST',
@@ -95,7 +95,7 @@ async function weighed(quantity: number, opts: { lotExtra?: Record<string, unkno
       lot_id: lotId,
       withdrawal_type: 'FULL',
       quantity_withdrawn_bags: quantity,
-      outbound_date: '2026-09-01',
+      outbound_date: opts.date ?? '2026-09-01',
       vehicle_number: opts.plate ?? 'LHR-9001',
     },
   });
@@ -266,6 +266,27 @@ describe('dispatch & collect', () => {
     expect(res.statusCode, res.body).toBe(200);
     const inv = await prisma.invoice.findFirstOrThrow({ where: { outboundEventId: id }, include: { lineItems: true } });
     expect(inv.lineItems.some((l) => l.serviceChargeId === loadingChargeId)).toBe(false);
+  });
+
+  it('a default charge priced at zero adds no line, and does not block the checkout', async () => {
+    const free = await app.inject({
+      method: 'POST',
+      url: '/v1/service-charges',
+      headers: authHeaders(managerToken),
+      payload: { name: `Free-gate-${Date.now()}`, unit_type: 'FLAT', unit_price_pkr: 0, apply_at_dispatch: true },
+    });
+    expect(free.statusCode, free.body).toBe(201);
+    const freeId = data<{ id: string }>(free).id;
+    try {
+      const { id } = await weighed(20);
+      const p = data(await preview(id));
+      expect((p.service_lines as { service_charge_id: string }[]).some((l) => l.service_charge_id === freeId)).toBe(false);
+      const res = await checkout(id, cash(p.total_pkr));
+      expect(res.statusCode, res.body).toBe(200);
+    } finally {
+      await prisma.invoiceLineItem.deleteMany({ where: { serviceChargeId: freeId } });
+      await prisma.serviceCharge.delete({ where: { id: freeId } });
+    }
   });
 
   it('refuses a total that is not the one reviewed, and writes nothing', async () => {
@@ -471,12 +492,14 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
     expect(await prisma.journalEntry.count({ where: { facilityId: TEST_FACILITY_ID } })).toBe(0);
   };
   const refusedAsManagerJob = (r: Res) => expect([r.statusCode, code(r)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+  // A truck the munshi may finish alone is booked today: the date sets the storage billed.
+  const today = (quantity: number, opts: Parameters<typeof weighed>[1] = {}) => weighed(quantity, { ...opts, date: businessDate() });
 
   afterAll(() => setSolo(false));
 
   it('switch off: the munshi is told a manager must finish it, and nothing is written', async () => {
     await setSolo(false);
-    const { id, lotId } = await weighed(30);
+    const { id, lotId } = await today(30);
     const total = data(await preview(id)).total_pkr as number;
     refusedAsManagerJob(await checkout(id, cash(total), operatorToken));
     await untouched(lotId, id, 30);
@@ -485,7 +508,7 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
 
   it('switch on: the munshi takes cash in full alone — dispatched, billed, paid, with their own name on it', async () => {
     await setSolo(true);
-    const { id } = await weighed(30);
+    const { id } = await today(30);
     const p = data(await preview(id, operatorToken));
     expect(p.solo).toMatchObject({ allowed: true, credit_available: false });
     const res = await checkout(id, cash(p.total_pkr), operatorToken);
@@ -502,7 +525,7 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
 
   it('switch on: everything but cash or approved credit still needs a manager, and each refusal writes nothing', async () => {
     await setSolo(true);
-    const { id, lotId } = await weighed(30);
+    const { id, lotId } = await today(30);
     const total = data(await preview(id)).total_pkr as number;
     refusedAsManagerJob(await checkout(id, cash(total, { skip_service_charge_ids: [loadingChargeId] }), operatorToken));
     refusedAsManagerJob(await checkout(id, { expected_total_pkr: total, payment: { mode: 'CHEQUE', cheque_date: businessDate() } }, operatorToken));
@@ -515,9 +538,42 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
     expect(skipped.statusCode, skipped.body).toBe(200);
   });
 
+it('switch on: a truck dated before today is a manager decision — its date sets the storage billed', async () => {
+    await setSolo(true);
+    const { id, lotId } = await weighed(30); // booked for 2026-09-01
+    const p = data(await preview(id, operatorToken));
+    expect(p.solo).toMatchObject({ allowed: false, credit_available: false });
+    expect(p.solo.reason).toMatch(/dated/);
+    refusedAsManagerJob(await checkout(id, cash(p.total_pkr), operatorToken));
+    await untouched(lotId, id, 30);
+    await nothingWritten();
+  });
+
+  it('switch on: a charge priced by the weight the munshi typed is a manager decision', async () => {
+    await setSolo(true);
+    const perTon = await app.inject({
+      method: 'POST',
+      url: '/v1/service-charges',
+      headers: authHeaders(managerToken),
+      payload: { name: `Weighbridge-${Date.now()}`, unit_type: 'PER_TON', unit_price_pkr: 50, apply_at_dispatch: true },
+    });
+    expect(perTon.statusCode, perTon.body).toBe(201);
+    try {
+      const { id, lotId } = await today(30);
+      const p = data(await preview(id, operatorToken));
+      expect(p.solo).toMatchObject({ allowed: false, credit_available: false });
+      expect(p.solo.reason).toMatch(/weight/);
+      refusedAsManagerJob(await checkout(id, cash(p.total_pkr), operatorToken));
+      await untouched(lotId, id, 30);
+      await nothingWritten();
+    } finally {
+      await prisma.serviceCharge.delete({ where: { id: data<{ id: string }>(perTon).id } });
+    }
+  });
+
   it('switch on: a KATCHI-book truck is a manager decision', async () => {
     await setSolo(true);
-    const { id, lotId } = await weighed(30, { lotToken: ownerToken, lotExtra: { book_type: 'KATCHI' } });
+    const { id, lotId } = await today(30, { lotToken: ownerToken, lotExtra: { book_type: 'KATCHI' } });
     const p = data(await preview(id, operatorToken));
     expect(p.solo).toMatchObject({ allowed: false, credit_available: false });
     refusedAsManagerJob(await checkout(id, cash(p.total_pkr), operatorToken));
@@ -528,7 +584,7 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
   it('on credit: a standing approval that covers the bill lets the munshi finish it; the gate then agrees', async () => {
     await setSolo(true);
     await approve(1_000_000);
-    const { id } = await weighed(30);
+    const { id } = await today(30);
     const p = data(await preview(id, operatorToken));
     expect(p.solo.credit_available).toBe(true);
     const res = await checkout(id, credit(p.total_pkr), operatorToken);
@@ -540,7 +596,7 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
 
   it('on credit: a ceiling the bill would pass, a lapsed or a revoked approval each send it to a manager', async () => {
     await setSolo(true);
-    const { id, lotId } = await weighed(30);
+    const { id, lotId } = await today(30);
     const total = data(await preview(id)).total_pkr as number;
 
     await approve(Math.floor(total) - 1); // one rupee short of this bill
@@ -572,8 +628,8 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
 
   it('two credit dispatches that each fit the ceiling but not together: one goes, the other is refused', async () => {
     await setSolo(true);
-    const a = await weighed(40, { plate: 'LHR-9101' });
-    const b = await weighed(40, { plate: 'LHR-9102' });
+    const a = await today(40, { plate: 'LHR-9101' });
+    const b = await today(40, { plate: 'LHR-9102' });
     const total = data(await preview(a.id)).total_pkr as number;
     await approve(Math.round(total * 1.5)); // room for one bill, not two
     const [ra, rb] = await Promise.all([

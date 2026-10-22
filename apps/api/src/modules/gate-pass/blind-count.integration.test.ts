@@ -109,6 +109,9 @@ beforeAll(async () => {
       chamber_id: CHAMBER_A,
       quantity_bags: 200,
       accepted_weight_kg: 4000,
+      // Past the dispute threshold, so a note is required — and a real one quotes the weights.
+      declared_weight_kg: 4120,
+      weight_dispute_note: 'Declared 4,120 kg, kanta 4,000 kg: six bags wet',
       inbound_date: '2026-04-10',
       placements: [
         { rack_id: RACK_A1, bags: 120 },
@@ -236,7 +239,15 @@ describe('the guard reads no weight', () => {
     const operator = json(await get(`/v1/lots/${lotId}`, operatorToken)).data;
     expect(guard).toHaveProperty('accepted_weight_kg', null);
     expect(guard).toHaveProperty('declared_weight_kg', null);
-    expect(operator.accepted_weight_kg).toBeGreaterThan(0);
+    expect(operator.accepted_weight_kg).toBe(4000);
+    expect(operator.declared_weight_kg).toBe(4120);
+  });
+
+  it('a lot: the weight-dispute note (which quotes the kilograms) is withheld from SECURITY too', async () => {
+    const guard = json(await get(`/v1/lots/${lotId}`, securityToken)).data;
+    const operator = json(await get(`/v1/lots/${lotId}`, operatorToken)).data;
+    expect(guard).toHaveProperty('weight_dispute_note', null);
+    expect(operator.weight_dispute_note).toMatch(/4,120 kg/);
   });
 
   it('a withdrawal: no weights and no variance for SECURITY, the real ones for an operator', async () => {
