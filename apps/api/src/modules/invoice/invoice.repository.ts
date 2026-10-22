@@ -1,21 +1,8 @@
-import { round2 } from '@coldchain/shared';
 import type { PrismaClient, Prisma, InvoiceStatus } from '@coldchain/db';
-import { Errors } from '../../common/errors';
 import { SETTLEMENT_INCLUDE } from './invoice-settlement';
+import { invoiceTotals } from './invoice-totals';
 
-export function computeDiscountAmount(
-  subTotal: number,
-  discountType: 'PERCENT' | 'FIXED' | null,
-  discountValue: number | null,
-): number {
-  if (!discountType || discountValue == null) return 0;
-  const amount =
-    discountType === 'PERCENT'
-      ? round2(subTotal * (discountValue / 100))
-      : discountValue;
-  if (amount > subTotal) throw Errors.INVOICE_DISCOUNT_EXCEEDS_SUBTOTAL();
-  return amount;
-}
+export { computeDiscountAmount } from './invoice-totals';
 
 const invoiceInclude = {
   lot: { select: { lotNumber: true } },
@@ -112,18 +99,14 @@ export class InvoiceRepository {
 
   async recomputeTotals(tx: Prisma.TransactionClient, invoiceId: string): Promise<void> {
     const lines = await tx.invoiceLineItem.findMany({ where: { invoiceId } });
-    const subTotal = lines.reduce((sum, l) => sum + Number(l.amountPkr), 0);
     const invoice = await tx.invoice.findUnique({ where: { id: invoiceId } });
-    // KATCHI never carries sales tax (docs/25 R-06), whatever rate an older row holds.
-    const gstRate = invoice?.bookType === 'KATCHI' ? 0 : Number(invoice?.gstRate ?? 0);
-    const discount = computeDiscountAmount(
-      subTotal,
-      (invoice?.discountType as 'PERCENT' | 'FIXED' | null) ?? null,
-      invoice?.discountValue != null ? Number(invoice.discountValue) : null,
-    );
-    // GST applies to the post-discount taxable value
-    const gstAmount = round2((subTotal - discount) * (gstRate / 100));
-    const total = round2(subTotal - discount + gstAmount);
+    const { subTotal, discount, gst: gstAmount, total } = invoiceTotals({
+      lineAmounts: lines.map((l) => Number(l.amountPkr)),
+      gstRate: Number(invoice?.gstRate ?? 0),
+      bookType: invoice?.bookType ?? 'PACCI',
+      discountType: (invoice?.discountType as 'PERCENT' | 'FIXED' | null) ?? null,
+      discountValue: invoice?.discountValue != null ? Number(invoice.discountValue) : null,
+    });
 
     await tx.invoice.update({
       where: { id: invoiceId },

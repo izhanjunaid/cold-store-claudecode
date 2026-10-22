@@ -13,6 +13,7 @@ import { advisoryXactLock } from '../../common/advisory-lock';
 import { findActiveApproval, standingCreditCover } from '../credit-approval/credit-approval.service';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { previewInvoiceFromOutbound } from '../invoice/invoice.builder';
+import { invoiceTotals } from '../invoice/invoice-totals';
 import type { InvoiceService } from '../invoice/invoice.service';
 import type { PaymentService } from '../payment/payment.service';
 import type { OutboundService } from './outbound.service';
@@ -156,11 +157,17 @@ export class DispatchCheckoutService {
       bags: ob.quantityWithdrawnBags,
       weightKg: ob.outboundWeightKg == null ? null : Number(ob.outboundWeightKg),
     });
-    const serviceTotal = round2(defaults.reduce((s, l) => s + l.amountPkr, 0));
-    const subTotal = round2(priced.subTotal + serviceTotal);
-    // The same arithmetic InvoiceRepository.recomputeTotals applies to the built bill.
-    const gstAmount = round2(subTotal * (priced.gstRate / 100));
-    const total = round2(subTotal + gstAmount);
+    // The same function InvoiceRepository.recomputeTotals prices the built bill with, over the
+    // same lines (storage first, then the default charges), so what is reviewed is what posts.
+    const {
+      subTotal,
+      gst: gstAmount,
+      total,
+    } = invoiceTotals({
+      lineAmounts: [priced.charge.amountPkr, ...defaults.map((l) => l.amountPkr)],
+      gstRate: priced.gstRate,
+      bookType: priced.params.bookType,
+    });
 
     // Whether the munshi may finish this truck alone, as booleans and a reason: never the party's
     // ceiling or exposure. Credit is offered only if this bill fits under the approved ceiling.
