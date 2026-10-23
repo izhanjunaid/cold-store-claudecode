@@ -6,6 +6,7 @@ import {
   CancelOutboundRequest,
   OutboundListQuery,
   DispatchAndCollectRequest,
+  TruckDispatchRequest,
 } from '@coldchain/shared';
 import { OutboundService } from './outbound.service';
 import { OutboundRepository } from './outbound.repository';
@@ -156,6 +157,47 @@ export async function outboundRoutes(app: FastifyInstance) {
         },
         id,
         body,
+      );
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // The whole truck (C2): a truck is its plate, as at the gate. Same rules as the single
+  // checkout — outbound.record for the route, then the manager keys or the solo door.
+  app.route({
+    method: 'GET',
+    url: '/v1/dispatch/trucks',
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
+    handler: async (request, reply) => sendSuccess(reply, await checkout.trucks(request.user!.facilityId)),
+  });
+
+  app.route({
+    method: 'GET',
+    url: '/v1/dispatch/trucks/:id/checkout-preview',
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
+    schema: { params: IdParam },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      return sendSuccess(reply, await checkout.truckPreview(request.user!.facilityId, id));
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/dispatch/trucks/:id/dispatch-and-collect',
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
+    schema: { params: IdParam, body: TruckDispatchRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const result = await checkout.truckDispatchAndCollect(
+        {
+          facilityId: request.user!.facilityId,
+          userId: request.user!.userId,
+          role: request.user!.role,
+          permissions: await app.ensurePermissions(request),
+        },
+        id,
+        request.body as z.infer<typeof TruckDispatchRequest>,
       );
       return sendSuccess(reply, result);
     },

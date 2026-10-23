@@ -131,6 +131,25 @@ export const Errors = {
       409,
       'expected_total_pkr',
     ),
+  // Whole-truck checkout (C2).
+  TRUCK_NOT_READY: (dispatchNotes: string[]) =>
+    new AppError(
+      'TRUCK_NOT_READY',
+      `Not everything on this truck is weighed: ${dispatchNotes.join(', ')} — weigh or cancel it first`,
+      409,
+    ),
+  TRUCK_LOAD_CHANGED: (missing: string[], extra: string[]) =>
+    new AppError(
+      'TRUCK_LOAD_CHANGED',
+      `The truck's load changed since it was reviewed${missing.length ? ` — not in the review: ${missing.join(', ')}` : ''}${
+        extra.length ? ` — no longer on this truck: ${extra.join(', ')}` : ''
+      } — review it again`,
+      409,
+    ),
+  TRUCK_TOO_MANY_LINES: (max: number) =>
+    new AppError('TRUCK_TOO_MANY_LINES', `One truck checkout takes at most ${max} lines`, 422, 'lines'),
+  TRUCK_PAYMENTS_MISMATCH: (detail: string) =>
+    new AppError('TRUCK_PAYMENTS_MISMATCH', `One payment row is needed for each party and book on the truck: ${detail}`, 422, 'payments'),
   // Solo dispatch (C1b): the checkout is a manager's job unless the owner has let the munshi finish a clean truck alone.
   DISPATCH_NEEDS_MANAGER: (reason: string) =>
     new AppError('DISPATCH_NEEDS_MANAGER', `A manager must finish this truck: ${reason}`, 403),
