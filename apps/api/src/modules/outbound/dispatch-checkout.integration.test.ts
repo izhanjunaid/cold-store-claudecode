@@ -228,6 +228,9 @@ describe('dispatch & collect', () => {
     const res = await checkout(id, cash(total, { payment: { mode: 'CASH' } }));
     expect(res.statusCode, res.body).toBe(200);
     const body = data(res);
+    // The one-truck answer keeps its shape when the checkout is cut into lines (C2).
+    expect(Object.keys(body).sort()).toEqual(['invoice', 'outbound', 'payment']);
+    expect(Object.keys(body.payment).sort()).toEqual(['id', 'receipt_number']);
     expect(body.outbound.status).toBe('DISPATCHED');
     expect(body.invoice.status).toBe('FINALIZED');
     expect(body.invoice.total_pkr).toBeCloseTo(total, 2);
@@ -356,6 +359,8 @@ describe('dispatch & collect', () => {
     const res = await checkout(id, cash(total - 50));
     expect([res.statusCode, code(res)]).toEqual([409, 'DISPATCH_TOTAL_CHANGED']);
     expect(JSON.parse(res.body).error.field).toBe('expected_total_pkr');
+    // One withdrawal: the message names no dispatch note (a truck's names the line).
+    expect(JSON.parse(res.body).error.message).toMatch(/^The bill is now Rs \d+\.\d{2}, not the Rs \d+\.\d{2} shown/);
     await untouched(lotId, id, 100);
     expect(await prisma.payment.count({ where: { partyId } })).toBe(0);
     expect(await prisma.journalEntry.count({ where: { facilityId: TEST_FACILITY_ID } })).toBe(0);
@@ -421,6 +426,8 @@ describe('dispatch & collect', () => {
     expect((await prisma.lot.findUniqueOrThrow({ where: { id: lotId } })).currentBalanceBags).toBe(50);
   });
 
+  // Three rounds of two racing checkouts outran the 15 s default on a loaded machine (under 3 s
+  // alone); the assertions are unchanged.
   it('two checkouts of one withdrawal: one takes the money, the other is refused — one bill, one receipt', async () => {
     for (let round = 0; round < 3; round++) {
       const { id } = await weighed(40);
@@ -434,7 +441,7 @@ describe('dispatch & collect', () => {
       expect(await prisma.paymentAllocation.count({ where: { invoiceId: inv.id } })).toBe(1);
       await cleanup();
     }
-  });
+  }, 45_000);
 
   it('needs the money keys: the route wants outbound.finalize; a missing invoices.manage / payments.record is named before any write', async () => {
     const { id, lotId } = await weighed(30);

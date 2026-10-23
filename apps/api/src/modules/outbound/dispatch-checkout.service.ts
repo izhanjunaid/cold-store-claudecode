@@ -1,4 +1,4 @@
-import type { PrismaClient, Prisma } from '@coldchain/db';
+import type { PrismaClient, Prisma, BookType } from '@coldchain/db';
 import {
   addDays,
   businessDate,
@@ -10,6 +10,7 @@ import {
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
+import { lockRow } from '../../common/row-lock';
 import { findActiveApproval, standingCreditCover } from '../credit-approval/credit-approval.service';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { previewInvoiceFromOutbound } from '../invoice/invoice.builder';
@@ -43,6 +44,16 @@ function stageOf(o: {
 
 /** A tonne is 1000 kg; quantities on a bill carry three decimals. */
 const tonnes = (kg: number) => Math.round((kg / 1000) * 1000) / 1000;
+
+/** One withdrawal in a checkout, with what the reviewer saw for it. */
+interface CheckoutLine {
+  outboundId: string;
+  /** The total its bill showed when it was reviewed: this posts, or nothing does. */
+  expectedTotal: number;
+  skipIds?: string[];
+  pickedFrom?: { rackId: string; bags: number }[];
+  notes?: string;
+}
 
 /** The caller, as the checkout needs to know them: identity plus the keys they hold. */
 export interface CheckoutCaller {
@@ -312,29 +323,102 @@ export class DispatchCheckoutService {
   ) {
     const { facilityId, userId, role } = caller;
 
-    const { outbound, invoiceId } = await this.outbound.finalizeInTransaction(
-      tx,
-      facilityId,
-      id,
-      body.notes,
-      body.picked_from?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
-      userId,
-    );
+    const locked = (await this.lockLoad(tx, facilityId, [id])).get(id);
+    if (!locked) throw Errors.OUTBOUND_NOT_FOUND();
     // Two solo credit dispatches for one party must not both pass the ceiling: take the party's
     // credit lock now (after the outbound/lot locks, the order everything else uses) so the second
     // one sees the first one's bill in the ledger. (The document-number locks taken further down
     // happen to serialise two checkouts too, so the race test passes without this lock; it is here
     // so the ceiling does not depend on that.)
-    if (solo && body.payment.mode === 'CREDIT') {
-      const bill = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { billingPartyId: true } });
-      await advisoryXactLock(tx, `${facilityId}:party-credit:${bill.billingPartyId}`);
+    const soloCredit = solo && body.payment.mode === 'CREDIT';
+    if (soloCredit) await advisoryXactLock(tx, `${facilityId}:party-credit:${locked.billingPartyId}`);
+
+    const done = await this.dispatchLine(tx, caller, {
+      outboundId: id,
+      expectedTotal: body.expected_total_pkr,
+      skipIds: body.skip_service_charge_ids,
+      pickedFrom: body.picked_from?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
+      notes: body.notes,
+    });
+
+    // The bill is in the ledger now, so the party's exposure includes it: it must still sit under the ceiling.
+    if (soloCredit) {
+      const cover = await standingCreditCover(tx, facilityId, [{ partyId: done.billingPartyId }]);
+      if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('this bill would take the party past its approved credit');
     }
 
-    const ob = await tx.outboundEvent.findUniqueOrThrow({
-      where: { id },
-      select: { quantityWithdrawnBags: true, outboundWeightKg: true },
+    let payment: { id: string; receipt_number: string | null } | null = null;
+    if (body.payment.mode !== 'CREDIT' && done.total > 0.005) {
+      const recorded = await this.payments.recordInTransaction(tx, {
+        facilityId,
+        createdBy: userId,
+        role,
+        partyId: done.billingPartyId,
+        paymentDate: businessDate(),
+        amountPkr: done.total,
+        paymentMethod: body.payment.mode,
+        referenceNumber: body.payment.reference_number,
+        chequeDate: body.payment.cheque_date,
+        allocations: [{ target: 'INVOICE', invoice_id: done.invoiceId, allocated_amount_pkr: done.total }],
+      });
+      payment = { id: recorded.id, receipt_number: recorded.receipt_number ?? null };
+    }
+
+    return { outbound: done.outbound, invoice: done.invoice, payment };
+  }
+
+  /**
+   * Lock a checkout's withdrawals, then the lots they draw on — each set in id order, so two
+   * checkouts that share lots (two trucks each taking part of the same lots) queue instead of
+   * deadlocking. The per-line steps lock the same rows again, which a transaction already holding
+   * them passes straight through. Lock order everywhere: gate_passes → outbound_events → lots.
+   */
+  private async lockLoad(
+    tx: Prisma.TransactionClient,
+    facilityId: string,
+    outboundIds: string[],
+  ): Promise<Map<string, { lotId: string; billingPartyId: string; bookType: BookType }>> {
+    for (const id of [...outboundIds].sort()) {
+      if (!(await lockRow(tx, 'outbound_events', id, facilityId))) throw Errors.OUTBOUND_NOT_FOUND();
+    }
+    const rows = await tx.outboundEvent.findMany({
+      where: { facilityId, id: { in: outboundIds } },
+      select: { id: true, lotId: true, lot: { select: { billingPartyId: true, bookType: true } } },
     });
-    const skip = new Set(body.skip_service_charge_ids ?? []);
+    for (const lotId of [...new Set(rows.map((r) => r.lotId))].sort()) {
+      if (!(await lockRow(tx, 'lots', lotId, facilityId))) throw Errors.LOT_NOT_FOUND();
+    }
+    return new Map(
+      rows.map((r) => [r.id, { lotId: r.lotId, billingPartyId: r.lot.billingPartyId, bookType: r.lot.bookType }]),
+    );
+  }
+
+  /**
+   * One withdrawal of a checkout: dispatch it (the lot moves), give its bill the default service
+   * charges, check its total is the one reviewed, and finalize the bill (JE-01). Credit and money
+   * are the caller's: a truck settles each party once, over all of its bills. `nameLine` puts the
+   * dispatch note in a changed-total refusal, for a truck of several lines.
+   */
+  private async dispatchLine(
+    tx: Prisma.TransactionClient,
+    caller: CheckoutCaller,
+    line: CheckoutLine,
+    opts: { nameLine?: boolean } = {},
+  ) {
+    const { facilityId, userId } = caller;
+    const { outbound, invoiceId } = await this.outbound.finalizeInTransaction(
+      tx,
+      facilityId,
+      line.outboundId,
+      line.notes,
+      line.pickedFrom,
+      userId,
+    );
+    const ob = await tx.outboundEvent.findUniqueOrThrow({
+      where: { id: line.outboundId },
+      select: { quantityWithdrawnBags: true, outboundWeightKg: true, dispatchNoteNumber: true },
+    });
+    const skip = new Set(line.skipIds ?? []);
     const lines = (
       await this.defaultServiceLines(tx, facilityId, {
         bags: ob.quantityWithdrawnBags,
@@ -347,38 +431,28 @@ export class DispatchCheckoutService {
         : Number((await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { totalPkr: true } })).totalPkr);
 
     // What was reviewed is what posts.
-    if (Math.abs(total - body.expected_total_pkr) > 0.005) {
-      throw Errors.DISPATCH_TOTAL_CHANGED(body.expected_total_pkr, total);
+    if (Math.abs(total - line.expectedTotal) > 0.005) {
+      throw Errors.DISPATCH_TOTAL_CHANGED(
+        line.expectedTotal,
+        total,
+        opts.nameLine ? (ob.dispatchNoteNumber ?? undefined) : undefined,
+      );
     }
 
     const invoice = await this.invoices.finalizeInTransaction(tx, facilityId, invoiceId, userId, {});
-
-    // The bill is in the ledger now, so the party's exposure includes it: it must still sit under the ceiling.
-    if (solo && body.payment.mode === 'CREDIT') {
-      const bill = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { billingPartyId: true } });
-      const cover = await standingCreditCover(tx, facilityId, [{ partyId: bill.billingPartyId }]);
-      if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('this bill would take the party past its approved credit');
-    }
-
-    let payment: { id: string; receipt_number: string | null } | null = null;
-    if (body.payment.mode !== 'CREDIT' && total > 0.005) {
-      const inv = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { billingPartyId: true } });
-      const recorded = await this.payments.recordInTransaction(tx, {
-        facilityId,
-        createdBy: userId,
-        role,
-        partyId: inv.billingPartyId,
-        paymentDate: businessDate(),
-        amountPkr: total,
-        paymentMethod: body.payment.mode,
-        referenceNumber: body.payment.reference_number,
-        chequeDate: body.payment.cheque_date,
-        allocations: [{ target: 'INVOICE', invoice_id: invoiceId, allocated_amount_pkr: total }],
-      });
-      payment = { id: recorded.id, receipt_number: recorded.receipt_number ?? null };
-    }
-
-    return { outbound, invoice, payment };
+    const bill = await tx.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      select: { billingPartyId: true, bookType: true },
+    });
+    return {
+      outbound,
+      invoice,
+      invoiceId,
+      total,
+      billingPartyId: bill.billingPartyId,
+      bookType: bill.bookType,
+      dispatchNoteNumber: ob.dispatchNoteNumber,
+    };
   }
 
   /** The service charges marked apply_at_dispatch, priced for this withdrawal. */
