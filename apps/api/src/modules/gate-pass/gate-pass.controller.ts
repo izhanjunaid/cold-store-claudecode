@@ -148,6 +148,7 @@ export async function gatePassRoutes(app: FastifyInstance) {
           status: pass.status,
           relatedLotNumber: pass.related_lot_number ?? null,
           relatedDispatchNoteNumber: pass.related_dispatch_note_number ?? null,
+          withdrawals: pass.withdrawals ?? [],
           commodityName: pass.related_commodity_name ?? null,
           marka: pass.related_marka ?? null,
           unitLabel: pass.related_unit_label ?? null,

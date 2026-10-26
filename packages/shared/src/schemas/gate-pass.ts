@@ -123,6 +123,16 @@ export const GatePassResponse = z.object({
   override_reason: z.string().nullable().optional(),
   // Every withdrawal that left on this truck (a truck may carry several lots).
   outbound_ids: z.array(z.string().uuid()).optional(),
+  /** The same withdrawals as the receipt names them: dispatch note, marka, owner — never a count. */
+  withdrawals: z
+    .array(
+      z.object({
+        dispatch_note_number: z.string().nullable(),
+        marka: z.string().nullable(),
+        owner_party_name: z.string().nullable(),
+      }),
+    )
+    .optional(),
   /** Only on the active list (?active=true). */
   release: GateRelease.optional(),
 });

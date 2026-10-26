@@ -620,6 +620,14 @@ function formatGatePass(row: any): GatePassResponseType {
       row.creditAuthorizedAmountPkr != null ? Number(row.creditAuthorizedAmountPkr) : null,
     override_reason: row.overrideReason ?? null,
     outbound_ids: (row.clearedOutbounds ?? []).map((o: { id: string }) => o.id),
+    // Every withdrawal the truck carried, for the receipt — names and marks only, never a count.
+    withdrawals: (row.clearedOutbounds ?? []).map(
+      (o: { dispatchNoteNumber: string | null; lot?: { marka: string | null }; ownerPartySnapshot?: { name: string } | null }) => ({
+        dispatch_note_number: o.dispatchNoteNumber,
+        marka: o.lot?.marka ?? null,
+        owner_party_name: o.ownerPartySnapshot?.name ?? null,
+      }),
+    ),
   };
 }
 

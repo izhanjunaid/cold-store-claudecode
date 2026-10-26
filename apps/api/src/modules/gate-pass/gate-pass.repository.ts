@@ -36,7 +36,13 @@ const gatePassInclude = {
     },
   },
   clearedOutbounds: {
-    select: { id: true, quantityWithdrawnBags: true, dispatchNoteNumber: true },
+    select: {
+      id: true,
+      quantityWithdrawnBags: true,
+      dispatchNoteNumber: true,
+      lot: { select: { marka: true } },
+      ownerPartySnapshot: { select: { name: true } },
+    },
     orderBy: { createdAt: 'asc' },
   },
   party: { select: { id: true, name: true } },

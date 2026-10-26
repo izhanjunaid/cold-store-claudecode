@@ -11,11 +11,13 @@ import { PrismaClient } from '@coldchain/db';
 import { addDays, businessDate } from '@coldchain/shared';
 import type { FastifyInstance } from 'fastify';
 
-vi.mock('../pdf/pdf.service', () => ({
+// The HTML renderers are real (the load slip's content is asserted); only the Chromium steps are mocked.
+vi.mock('../pdf/pdf.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../pdf/pdf.service')>()),
   renderDispatchNote: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 dn\n')),
-  renderDispatchNoteHtml: vi.fn().mockReturnValue('<html>dn</html>'),
   renderInvoice: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 inv\n')),
-  renderInvoiceHtml: vi.fn().mockReturnValue('<html>inv</html>'),
+  renderLoadSlip: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 slip\n')),
+  renderGatePassReceipt: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 gp\n')),
 }));
 
 // Each case books, weighs, previews and checks out a whole truck (some then release it at the
@@ -375,6 +377,62 @@ describe('the munshi alone (solo switch on)', () => {
     const res = await checkoutTruck(pass, requestFrom(p, () => 'CREDIT'), operatorToken);
     expect([res.statusCode, code(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
     await nothingWritten([o1, o2]);
+  });
+});
+
+describe('the load slip and the gate receipt', () => {
+  /** A checked-out truck: party A's lot paid in cash, party B's on credit by the manager. */
+  async function checkedOut(plate: string) {
+    const pass = await arrive(plate);
+    const oa = await onTruck(await lot(partyA, 20, operatorToken, { marka: 'AH' }), plate, 20);
+    const ob = await onTruck(await lot(partyB, 15, operatorToken, { marka: 'GH' }), plate, 15);
+    const p = await truckPreview(pass);
+    const res = await checkoutTruck(pass, requestFrom(p, (g) => (g.billing_party.id === partyA ? 'CASH' : 'CREDIT')));
+    expect(res.statusCode, res.body).toBe(200);
+    return { pass, oa, ob, receipt: data(res).payments[0].receipt_number as string };
+  }
+  const slipHtml = async (pass: string, token = managerToken) => {
+    const res = await call('GET', `/v1/dispatch/trucks/${pass}/load-slip?format=html`, token);
+    expect(res.statusCode, res.body).toBe(200);
+    return res.body;
+  };
+
+  it('lists every line, bill and receipt on the truck, and who let the rest go on credit — before and after it leaves', async () => {
+    const t = await checkedOut('LHR-9600');
+    const invoices = await prisma.invoice.findMany({ where: { outboundEventId: { in: [t.oa, t.ob] } } });
+    const dns = (await prisma.outboundEvent.findMany({ where: { id: { in: [t.oa, t.ob] } } })).map((o) => o.dispatchNoteNumber!);
+    const manager = await prisma.user.findFirstOrThrow({ where: { email: 'manager@coldchain.pk' } });
+
+    const html = await slipHtml(t.pass);
+    for (const s of [...dns, ...invoices.map((i) => i.invoiceNumber!), t.receipt, 'AH', 'GH', manager.name]) expect(html).toContain(s);
+
+    // Party B is on credit: the truck leaves on a manager's authorization at the gate.
+    const released = await call('POST', `/v1/gate-passes/${t.pass}/outward`, managerToken, { declared_quantity: 35, credit_authorization: true });
+    expect(released.statusCode, released.body).toBe(200);
+    const after = await slipHtml(t.pass);
+    for (const s of [...dns, t.receipt]) expect(after).toContain(s);
+
+    const pdf = await call('GET', `/v1/dispatch/trucks/${t.pass}/load-slip`, managerToken);
+    expect([pdf.statusCode, pdf.headers['content-type']]).toEqual([200, 'application/pdf']);
+  });
+
+  it('is never the guard\'s', async () => {
+    const t = await checkedOut('LHR-9700');
+    expect((await call('GET', `/v1/dispatch/trucks/${t.pass}/load-slip?format=html`, securityToken)).statusCode).toBe(403);
+  });
+
+  it('the gate receipt names every withdrawal on the truck — dispatch note, marka, owner — and no count', async () => {
+    const t = await checkedOut('LHR-9800');
+    const released = await call('POST', `/v1/gate-passes/${t.pass}/outward`, managerToken, { declared_quantity: 35, credit_authorization: true });
+    expect(released.statusCode, released.body).toBe(200);
+    const guard = data(await call('GET', `/v1/gate-passes/${t.pass}/receipt?format=json`, securityToken));
+    expect(guard.withdrawals).toHaveLength(2);
+    expect(guard.withdrawals.map((w: { marka: string }) => w.marka).sort()).toEqual(['AH', 'GH']);
+    for (const w of guard.withdrawals) {
+      expect(Object.keys(w).sort()).toEqual(['dispatch_note_number', 'marka', 'owner_party_name']);
+      expect(w.dispatch_note_number).toMatch(/^DN-/);
+    }
+    expect(guard.authorized_quantity).toBeNull();
   });
 });
 

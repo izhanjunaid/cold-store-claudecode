@@ -11,6 +11,8 @@ import {
 import { OutboundService } from './outbound.service';
 import { OutboundRepository } from './outbound.repository';
 import { DispatchCheckoutService } from './dispatch-checkout.service';
+import { buildLoadSlip } from './load-slip';
+import { renderLoadSlip, renderLoadSlipHtml } from '../pdf/pdf.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { InvoiceRepository } from '../invoice/invoice.repository';
 import { PaymentService } from '../payment/payment.service';
@@ -200,6 +202,26 @@ export async function outboundRoutes(app: FastifyInstance) {
         request.body as z.infer<typeof TruckDispatchRequest>,
       );
       return sendSuccess(reply, result);
+    },
+  });
+
+  // GET /v1/dispatch/trucks/:id/load-slip?format=pdf|html — the driver's slip: lots, bills,
+  // receipts and credit. It carries counts and money, so never the guard's (the redaction hook
+  // does not see a PDF).
+  app.route({
+    method: 'GET',
+    url: '/v1/dispatch/trucks/:id/load-slip',
+    preHandler: [app.authenticate, app.forbidBlindRole, app.requirePermission('outbound.record')],
+    schema: { params: IdParam, querystring: z.object({ format: z.enum(['pdf', 'html']).default('pdf') }) },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const { format } = request.query as { format: 'pdf' | 'html' };
+      const slip = await buildLoadSlip(app.prisma, request.user!.facilityId, id, request.user!.userId);
+      if (format === 'html') return reply.header('content-type', 'text/html; charset=utf-8').send(renderLoadSlipHtml(slip));
+      return reply
+        .header('content-type', 'application/pdf')
+        .header('content-disposition', `inline; filename="load-slip-${slip.passNumber}.pdf"`)
+        .send(await renderLoadSlip(slip));
     },
   });
 

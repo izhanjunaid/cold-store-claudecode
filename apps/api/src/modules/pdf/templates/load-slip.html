@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Load Slip — {{vehicleNumber}}</title>
+  <style>
+    /* Urdu font is bundled in the container and mapped via fontconfig (offline; no web fonts). */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10px; color: #111; background: #fff; padding: 6mm; }
+    .header { text-align: center; border-bottom: 2px solid #117a65; padding-bottom: 3mm; margin-bottom: 4mm; }
+    .header h1 { font-size: 16px; color: #117a65; font-weight: 700; }
+    .header .ur { font-family: 'Noto Nastaliq Urdu', serif; font-size: 12px; color: #117a65; }
+    .header .sub { font-size: 10px; color: #555; margin-top: 1mm; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 1mm 4mm; margin-bottom: 4mm; }
+    .meta .label { color: #555; }
+    .section-title { font-size: 11px; font-weight: 700; color: #117a65; margin: 3mm 0 1.5mm; border-bottom: 1px solid #ccc; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #e5e5e5; padding: 1mm 1.5mm; text-align: left; vertical-align: top; }
+    th { background: #f3f6f5; font-weight: 600; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    tr { page-break-inside: avoid; }
+    .totals td { font-weight: 700; border-top: 1px solid #999; }
+    .left-badge { display: inline-block; padding: 0.5mm 2mm; background: #7d6608; color: #fff; font-weight: 700; border-radius: 2px; }
+    .signatures { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6mm; margin-top: 10mm; text-align: center; }
+    .signatures div { border-top: 1px solid #333; padding-top: 1mm; color: #555; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>{{facilityName}} — Load Slip</h1>
+    <div class="ur">لوڈ پرچی</div>
+    <div class="sub">{{facilityCity}}</div>
+  </div>
+
+  <div class="meta">
+    <div><span class="label">Truck / گاڑی:</span> <strong>{{vehicleNumber}}</strong> {{#if left}}<span class="left-badge">LEFT</span>{{/if}}</div>
+    <div><span class="label">Gate pass:</span> {{passNumber}}</div>
+    <div><span class="label">Driver / ڈرائیور:</span> {{#if driverName}}{{driverName}}{{else}}—{{/if}}</div>
+    <div><span class="label">Arrived:</span> {{arrivedAt}}</div>
+    <div><span class="label">Printed:</span> {{printedAt}}</div>
+    <div><span class="label">Printed by:</span> {{printedBy}}</div>
+  </div>
+
+  <div class="section-title">Lots on this truck</div>
+  <table>
+    <thead>
+      <tr><th>Dispatch note</th><th>Lot</th><th>Marka</th><th>Owner</th><th>Billed to</th><th class="num">Bags</th><th>Bill</th><th class="num">Total</th><th class="num">Paid</th></tr>
+    </thead>
+    <tbody>
+      {{#each lines}}
+      <tr>
+        <td>{{dispatchNoteNumber}}</td>
+        <td>{{lotNumber}}{{#if commodityName}}<br /><span style="color:#555">{{commodityName}}</span>{{/if}}</td>
+        <td>{{#if marka}}{{marka}}{{else}}—{{/if}}</td>
+        <td>{{#if ownerName}}{{ownerName}}{{else}}—{{/if}}</td>
+        <td>{{billingPartyName}}</td>
+        <td class="num">{{bags}}</td>
+        <td>{{#if invoiceNumber}}{{invoiceNumber}}{{else}}not billed ({{status}}){{/if}}</td>
+        <td class="num">{{money totalPkr}}</td>
+        <td class="num">{{money paidPkr}}</td>
+      </tr>
+      {{/each}}
+      <tr class="totals"><td colspan="5">Total</td><td class="num">{{totalBags}}</td><td></td><td class="num">{{money totalBilledPkr}}</td><td class="num">{{money totalReceivedPkr}}</td></tr>
+    </tbody>
+  </table>
+
+  {{#if receipts.length}}
+  <div class="section-title">Money received / وصولی</div>
+  <table>
+    <thead><tr><th>Receipt</th><th>From</th><th>Mode</th><th>Taken by</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+      {{#each receipts}}
+      <tr><td>{{receiptNumber}}</td><td>{{partyName}}</td><td>{{mode}}</td><td>{{collectedBy}}</td><td class="num">{{money amountPkr}}</td></tr>
+      {{/each}}
+    </tbody>
+  </table>
+  {{/if}}
+
+  {{#if credit.length}}
+  <div class="section-title">Released on credit / ادھار</div>
+  <table>
+    <thead><tr><th>Party</th><th>Authorized by</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+      {{#each credit}}
+      <tr><td>{{partyName}}</td><td>{{authorizedBy}}{{#if standing}} (standing approval){{/if}}</td><td class="num">{{money amountPkr}}</td></tr>
+      {{/each}}
+      <tr class="totals"><td colspan="2">On credit</td><td class="num">{{money totalCreditPkr}}</td></tr>
+    </tbody>
+  </table>
+  {{/if}}
+
+  <div class="signatures">
+    <div>Munshi</div>
+    <div>Driver / ڈرائیور</div>
+    <div>Party's representative</div>
+  </div>
+</body>
+</html>
