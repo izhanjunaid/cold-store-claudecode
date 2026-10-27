@@ -43,6 +43,8 @@ export interface WithdrawFormProps {
   onCancel: () => void;
   /** Plates of trucks inside the store; one tap fills the vehicle field with a plate the gate will match exactly. */
   plateSuggestions?: string[];
+  /** Booking onto a truck already chosen (the desk's "Add a lot"): its plate, filled in and fixed. */
+  fixedPlate?: string;
 }
 
 /**
@@ -50,7 +52,7 @@ export interface WithdrawFormProps {
  * `/lots/[id]/withdraw` (kept as the deep link) and the drawer opened from lot
  * rows (`WithdrawSheet`) — the same split as `/payments/new` and `PaymentForm`.
  */
-export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, plateSuggestions }: WithdrawFormProps) {
+export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, plateSuggestions, fixedPlate }: WithdrawFormProps) {
   const user = useAuthStore((s) => s.user);
 
   const [lot, setLot] = useState<Lot | null>(null);
@@ -67,7 +69,7 @@ export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, pla
     outbound_date: localIsoDate(),
     receiving_party_id: '',
     third_party_release: false,
-    vehicle_number: '',
+    vehicle_number: fixedPlate ? MASKS.vehicle(fixedPlate) : '',
     notes: '',
   });
 
@@ -296,10 +298,11 @@ export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, pla
               maxLength={20}
               autoComplete="off"
               value={form.vehicle_number}
+              readOnly={!!fixedPlate}
               onChange={(e) => setForm({ ...form, vehicle_number: MASKS.vehicle(e.target.value) })}
               placeholder={MASK_PLACEHOLDER.vehicle}
             />
-            {plateSuggestions && plateSuggestions.length > 0 && (
+            {!fixedPlate && plateSuggestions && plateSuggestions.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5" aria-label="Trucks inside">
                 <span className="text-xs text-muted-foreground">Inside:</span>
                 {plateSuggestions.map((plate) => (
