@@ -20,6 +20,9 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: v
 
 import { TruckCheckoutSheet } from './truck-checkout-sheet';
 
+// The first test also pays for the sheet's module warm-up: 4.2 s of the default 5 s on a loaded box.
+vi.setConfig({ testTimeout: 15_000 });
+
 const bill = (id: string, party: { id: string; name: string }, storage: number, service = 0) => ({
   outbound_id: id,
   dispatch_note_number: `DN-${id}`,
