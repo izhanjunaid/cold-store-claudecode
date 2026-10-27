@@ -73,6 +73,41 @@ solo checkout needs a truck dated today and no weight-priced charge; nobody void
 cash; a count typed while another receipt arrives is cleared rather than booked as a shortage; and a
 default charge priced at zero no longer blocks every checkout.
 
+## C2 — a truck carrying several lots (after v0.8.0; not yet released)
+
+Owner decisions (2026-10-23): **weighing stays lot by lot** (a whole-truck kanta weight split across
+lots belongs to C3); **a truck may carry lots billed to different parties**, and its checkout takes one
+payment per (billing party, book), each with its own receipt.
+
+- *The truck is its plate.* A truck's load is every open withdrawal whose normalized plate matches an
+  ARRIVED/WEIGHING gate pass, read by one helper (`gate-pass/open-load.ts` `openLoads`) that the gate's
+  "Ready to leave" preview and the desk both call, so they always show the same lines. Nothing links a
+  withdrawal to a pass at booking (still on the list below); a lot booked with a mistyped plate is on no
+  truck and stays a single row. Two passes inside with the same plate are one truck (the newest pass).
+- *The desk.* Each truck inside is a card with its lots (`GET /v1/dispatch/trucks`). "Add a lot" books
+  onto that truck with the plate fixed. "Check out truck" (two or more lots still to check out, none left
+  to weigh) opens one sheet: every lot's bill as the server priced it, and one payment row per party and
+  book. A row on such a truck says "Check out with the truck" instead of its own button; a one-lot truck
+  is checked out from its row as before.
+- *One transaction, all or nothing* (`POST /v1/dispatch/trucks/:passId/dispatch-and-collect`, at most 20
+  lots). It locks every withdrawal (sorted), then every lot (sorted), then dispatches each line exactly as
+  the single checkout does (one invoice and JE-01 per lot), then records **one receipt (JE-02) per
+  (party, book)** allocated across that group's bills. A changed bill (`DISPATCH_TOTAL_CHANGED`, naming
+  its dispatch note), a lot still to weigh (`TRUCK_NOT_READY`), a lot added or removed since the review
+  (`TRUCK_LOAD_CHANGED`) or payments that do not match the groups (`TRUCK_PAYMENTS_MISMATCH`) refuse the
+  whole truck. Accounting is unchanged: no combined invoice and no new posting or reversal path.
+- *Solo on a truck:* every line must pass the single checkout's solo rules, nothing may be left off, and
+  each group is cash in full or credit its standing approval covers **after all of that party's bills on
+  the truck** are in the ledger.
+- *Load slip* (`GET /v1/dispatch/trucks/:passId/load-slip`, A5): every lot with its dispatch note, bags,
+  bill and balance; each receipt and who took it; credit per party with who authorized it (the standing
+  approval's approver, else the manager who finalized); totals and signature lines; Lahore times. It is
+  refused to the gate guard (`BLIND_ROLE_FORBIDDEN`). After the truck leaves it still reads its lines,
+  from the withdrawals stamped with the pass.
+- *Gate receipt:* lists every withdrawal on the truck (dispatch note, marka, owner), still with no counts.
+- Two v0.8.0 known limits are fixed: the preview and the bill now share one pricing function
+  (`invoice/invoice-totals.ts`), and the gate preview reads only open loads in SQL.
+
 ## Switches (all **off** until the owner turns them on)
 
 | Where | Setting | Effect |
@@ -98,20 +133,19 @@ default charge priced at zero no longer blocks every checkout.
 From the pre-merge review, judged too small or too rare to hold the release; each is a follow-up:
 - A manager's override reason waives every gate check it meets on that release (plate, unmatched
   load, count), not only the one shown. The mismatch flag and the reason are still stored on the pass.
-- The checkout preview rounds the subtotal before GST while the built bill sums it unrounded; on an
-  exact half-paisa boundary the desk can keep answering "the total changed". The withdrawal page's
-  normal finalize and payment still work.
+- ~~The checkout preview rounds the subtotal before GST while the built bill sums it unrounded; on an
+  exact half-paisa boundary the desk can keep answering "the total changed".~~ Fixed in C2: both use
+  `invoiceTotals`.
 - A standalone receipt that deadlocks with a desk checkout on the numbering locks gets a plain error
   (nothing is written); submitting again works.
 - A standing approval revoked at the very moment a truck is released can still let that one truck out.
-- The gate's "Ready to leave" poll reads every withdrawal dispatched before v0.8.0 and skips them in
-  code, so its cost grows with history.
+- ~~The gate's "Ready to leave" poll reads every withdrawal dispatched before v0.8.0 and skips them in
+  code, so its cost grows with history.~~ Fixed in C2: `openLoads` filters them out in SQL.
 - Until C3, solo dispatch refuses any truck while a default charge priced by weight is active, because
   the munshi types the weight.
 
 ## Still to build
 
-C2: a multi-lot truck basket and load slip (one checkout for several bills). C3: the blind inline
-weigh-out with a tolerance band that grows with storage time, and QR codes on the parchi and dispatch
+C2 is built (above). C3: the blind inline weigh-out (and a whole-truck kanta weight split across lots) with a tolerance band that grows with storage time, and QR codes on the parchi and dispatch
 note. Also: a manager approval queue with reason codes; persisted gate count attempts and linking the
 gate pass at booking (Phase 0's residual gaps); a dispatch-note search replacing the gate's raw ID box.
