@@ -95,7 +95,6 @@ const ROWS = [
   row({ id: 'ob-left', dispatch_note_number: 'DN-LEFT', status: 'DISPATCHED', stage: 'LEFT', vehicle_number: 'LHR-4444' }),
 ];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let trucks: any[] = [];
 const truck = (over: Record<string, unknown>) => ({
   gate_pass_id: 'pass-1',

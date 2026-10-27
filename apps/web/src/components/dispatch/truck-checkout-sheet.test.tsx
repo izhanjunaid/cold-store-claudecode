@@ -43,7 +43,6 @@ const bill = (id: string, party: { id: string; name: string }, storage: number, 
 const A = { id: 'pa', name: 'Haji Sahib' };
 const B = { id: 'pb', name: 'Bashir' };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let preview: any;
 const posts = () => apiClient.mock.calls.filter(([, o]) => o?.method === 'POST');
 
