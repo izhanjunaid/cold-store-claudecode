@@ -8,10 +8,13 @@
  *   3. SECURITY on /gate: one Release for the truck, the bag count is the sum of both lots.
  *   4. The load slip lists both withdrawals before and after the truck leaves.
  *
+ * Then a full truck (20 lots, the most one checkout takes): its load slip, printed the way the API
+ * prints it, must fit on two A5 pages.
+ *
  * The load-slip PDF is stubbed in the page (rendering needs Chromium); its HTML is read at the API.
  */
 import { test, expect, API_URL, resetFacility } from './fixtures';
-import { authHeaders, getFacilityRefs, isoDaysAgo } from './helpers/season-helpers';
+import { authHeaders, getFacilityRefs, isoDaysAgo, todayISO } from './helpers/season-helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -138,4 +141,70 @@ test('a two-lot truck: booked from its card, checked out in one step, released o
   const slip = await (await request.get(`${API_URL}/v1/dispatch/trucks/${passId}/load-slip?format=html`, { headers: mgr })).text();
   for (const lot of lots) expect(slip).toContain(lot.lot_number);
   expect((await request.get(`${API_URL}/v1/dispatch/trucks/${passId}/load-slip?format=html`, { headers: sec })).status()).toBe(403);
+});
+
+test('a full truck’s load slip fits on two A5 pages', async ({ page, request }) => {
+  test.setTimeout(300_000);
+  const op = await authHeaders('OPERATOR');
+  const mgr = await authHeaders('MANAGER');
+  const sec = await authHeaders('SECURITY');
+  const refs = await getFacilityRefs(request, op);
+  const tag = Date.now().toString(36).slice(-5).toUpperCase();
+  const truck = plate();
+
+  // A long name, as a mandi party's often is: the slip's columns must still hold a full truck.
+  const party = await request.post(`${API_URL}/v1/parties`, {
+    headers: op,
+    data: { name: `Haji Muhammad Aslam Arain ${tag}`, party_type: 'FARMER', phone_primary: `0315${Math.floor(Math.random() * 9_000_000 + 1_000_000)}` },
+  });
+  expect(party.ok(), await party.text()).toBeTruthy();
+  const partyId = (await party.json()).data.id as string;
+  const inward = await request.post(`${API_URL}/v1/gate-passes/inward`, { headers: sec, data: { vehicle_number: truck } });
+  expect(inward.ok(), await inward.text()).toBeTruthy();
+  const passId = (await inward.json()).data.id as string;
+
+  for (let i = 1; i <= 20; i++) {
+    const lotRes = await request.post(`${API_URL}/v1/lots`, {
+      headers: op,
+      data: {
+        owner_party_id: partyId,
+        commodity_id: refs.commodityId,
+        rate_plan_id: refs.seasonalRatePlanId,
+        chamber_id: refs.chamberId,
+        quantity_bags: 5,
+        accepted_weight_kg: 100,
+        inbound_date: isoDaysAgo(60),
+        marka: `AHA-${i}`,
+      },
+    });
+    expect(lotRes.ok(), await lotRes.text()).toBeTruthy();
+    const book = await request.post(`${API_URL}/v1/outbound-events`, {
+      headers: op,
+      data: { lot_id: (await lotRes.json()).data.id, withdrawal_type: 'PARTIAL', quantity_withdrawn_bags: 4, outbound_date: todayISO(), vehicle_number: truck },
+    });
+    expect(book.ok(), await book.text()).toBeTruthy();
+    const weigh = await request.patch(`${API_URL}/v1/outbound-events/${(await book.json()).data.id}/weight`, { headers: op, data: { outbound_weight_kg: 78 } });
+    expect(weigh.ok(), await weigh.text()).toBeTruthy();
+  }
+
+  const preview = (await (await request.get(`${API_URL}/v1/dispatch/trucks/${passId}/checkout-preview`, { headers: mgr })).json()).data as {
+    lines: { outbound_id: string; total_pkr: number }[];
+    groups: { billing_party: { id: string }; book_type: string }[];
+  };
+  const out = await request.post(`${API_URL}/v1/dispatch/trucks/${passId}/dispatch-and-collect`, {
+    headers: mgr,
+    data: {
+      lines: preview.lines.map((l) => ({ outbound_id: l.outbound_id, expected_total_pkr: l.total_pkr })),
+      payments: preview.groups.map((g) => ({ billing_party_id: g.billing_party.id, book_type: g.book_type, mode: 'CASH' })),
+    },
+  });
+  expect(out.ok(), await out.text()).toBeTruthy();
+
+  // Printed the way the API prints it (pdf.service htmlToA5Pdf: A5, backgrounds, 10 mm margins).
+  const html = await (await request.get(`${API_URL}/v1/dispatch/trucks/${passId}/load-slip?format=html`, { headers: mgr })).text();
+  await page.setContent(html);
+  const pdf = await page.pdf({ format: 'A5', printBackground: true, margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' } });
+  const pages = (pdf.toString('latin1').match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length;
+  console.log(`load slip: 20 lots on ${pages} A5 page(s)`);
+  expect(pages).toBeLessThanOrEqual(2);
 });
