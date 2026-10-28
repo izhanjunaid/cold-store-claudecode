@@ -309,6 +309,26 @@ describe('Dispatch Desk — trucks with several lots', () => {
     expect(within(card).getByRole('button', { name: 'Check out truck' })).toBeDisabled();
   });
 
+  it('a truck held by a lot still to weigh says which, and each lot on the card opens its withdrawal', async () => {
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: false, lines: [TWO_LINES[0], { ...TWO_LINES[1], status: 'PENDING', stage: 'BOOKED' }] })];
+    renderPage();
+    const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
+    expect(within(card).getByText(/Weigh or cancel DN-SECOND first/)).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: 'DN-SECOND' }));
+    expect(push).toHaveBeenCalledWith('/outbound-events/ob-second');
+  });
+
+  it('a truck carrying more lots than one checkout takes: each keeps its own Dispatch & Collect', async () => {
+    const many = Array.from({ length: 21 }, (_, i) => ({ ...TWO_LINES[1], outbound_id: `ob-m${i}`, dispatch_note_number: `DN-M${i}` }));
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: true, lines: [TWO_LINES[0], ...many] })];
+    renderPage();
+    const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
+    expect(within(card).queryByRole('button', { name: 'Check out truck' })).not.toBeInTheDocument();
+    expect(within(card).getByText(/one by one/)).toBeInTheDocument();
+    const weighed = screen.getByText('DN-WEIGHED', { selector: 'td' }).closest('tr') as HTMLElement;
+    expect(within(weighed).getByRole('button', { name: /Dispatch & Collect/ })).toBeInTheDocument();
+  });
+
   it('"Add a lot" books the next lot onto that truck: the drawer opens with its plate fixed', async () => {
     trucks = [truck({ vehicle_number: 'LHR-2222', lines: [TWO_LINES[0]] })];
     renderPage();

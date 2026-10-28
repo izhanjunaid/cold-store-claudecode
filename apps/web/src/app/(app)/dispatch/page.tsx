@@ -25,7 +25,7 @@ import { CancelWithdrawalDialog } from '@/components/outbound/cancel-withdrawal-
 import { CashTodayCard } from '@/components/dispatch/cash-today-card';
 import { CheckoutSheet, type CheckoutResult } from '@/components/dispatch/checkout-sheet';
 import { TruckCheckoutSheet, type TruckResult } from '@/components/dispatch/truck-checkout-sheet';
-import { TrucksPanel, linesToCheckOut, type TruckInside } from '@/components/dispatch/trucks-panel';
+import { TrucksPanel, checkedOutWhole, type TruckInside } from '@/components/dispatch/trucks-panel';
 import { openDispatchNotePdf, openLoadSlipPdf } from '@/components/dispatch/dispatch-pdf';
 import { openInvoicePdf } from '@/components/billing/invoice-pdf';
 
@@ -110,10 +110,9 @@ export default function DispatchDeskPage() {
     refetchInterval: 15_000,
   });
   const plates = [...new Set(trucks.map((t) => t.vehicle_number))];
-  // A lot on a truck carrying several is checked out with that truck, not on its own.
-  const multiLotPlates = new Set(
-    trucks.filter((t) => linesToCheckOut(t).length >= 2).map((t) => normalizePlate(t.vehicle_number)),
-  );
+  // A lot on a truck carrying several is checked out with that truck, not on its own (unless the
+  // truck carries more than one checkout takes).
+  const multiLotPlates = new Set(trucks.filter(checkedOutWhole).map((t) => normalizePlate(t.vehicle_number)));
 
   const params = {
     status: 'PENDING,WEIGHED,DISPUTED,DISPATCHED',
@@ -234,6 +233,7 @@ export default function DispatchDeskPage() {
         }}
         onCheckout={setTruckCheckoutId}
         onSlip={printSlip}
+        onOpen={(id) => router.push(`/outbound-events/${id}`)}
       />
 
       {canQuery && <CashTodayCard />}
