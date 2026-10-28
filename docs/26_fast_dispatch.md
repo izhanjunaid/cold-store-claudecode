@@ -89,24 +89,41 @@ payment per (billing party, book), each with its own receipt.
   to weigh) opens one sheet: every lot's bill as the server priced it, and one payment row per party and
   book. A row on such a truck says "Check out with the truck" instead of its own button; a one-lot truck
   is checked out from its row as before.
+  - Each lot on a card opens its withdrawal. The card names what holds the truck ("Weigh or cancel DN-… first"), so a lot left unweighed, even from days ago and no longer in the queue, can still be dealt with.
+  - A truck of more than 20 open lots keeps its rows' own buttons, since one checkout takes at most 20.
 - *One transaction, all or nothing* (`POST /v1/dispatch/trucks/:passId/dispatch-and-collect`, at most 20
-  lots). It locks every withdrawal (sorted), then every lot (sorted), then dispatches each line exactly as
-  the single checkout does (one invoice and JE-01 per lot), then records **one receipt (JE-02) per
-  (party, book)** allocated across that group's bills. A changed bill (`DISPATCH_TOTAL_CHANGED`, naming
-  its dispatch note), a lot still to weigh (`TRUCK_NOT_READY`), a lot added or removed since the review
-  (`TRUCK_LOAD_CHANGED`) or payments that do not match the groups (`TRUCK_PAYMENTS_MISMATCH`) refuse the
-  whole truck. Accounting is unchanged: no combined invoice and no new posting or reversal path.
+  lots). It locks the pass, then every withdrawal (sorted), then every lot (sorted), and only then checks
+  the load again. It then dispatches each line exactly as the single checkout does (one invoice and JE-01
+  per lot), and records **one receipt (JE-02) per (party, book)** allocated across that group's bills.
+  - These refuse the whole truck:
+    - a changed bill (`DISPATCH_TOTAL_CHANGED`, naming its dispatch note);
+    - a lot still to weigh (`TRUCK_NOT_READY`);
+    - a lot added or removed since the review, or checked out on its own meanwhile (`TRUCK_LOAD_CHANGED`, naming dispatch notes);
+    - payments that do not match the groups (`TRUCK_PAYMENTS_MISMATCH`).
+  - A truck sent twice (a retry, or two clicks at once) is answered "This truck was already checked out" (`OUTBOUND_ALREADY_FINALIZED`). The desk treats that as done and offers the slip.
+  - Accounting is unchanged: no combined invoice and no new posting or reversal path.
 - *Solo on a truck:* every line must pass the single checkout's solo rules, nothing may be left off, and
   each group is cash in full or credit its standing approval covers **after all of that party's bills on
   the truck** are in the ledger.
-- *Load slip* (`GET /v1/dispatch/trucks/:passId/load-slip`, A5): every lot with its dispatch note, bags,
-  bill and balance; each receipt and who took it; credit per party with who authorized it (the standing
-  approval's approver, else the manager who finalized); totals and signature lines; Lahore times. It is
-  refused to the gate guard (`BLIND_ROLE_FORBIDDEN`). After the truck leaves it still reads its lines,
-  from the withdrawals stamped with the pass.
-- *Gate receipt:* lists every withdrawal on the truck (dispatch note, marka, owner), still with no counts.
+- *Load slip* (`GET /v1/dispatch/trucks/:passId/load-slip`, A5). It prints:
+  - every lot with its dispatch note, bags, bill and balance;
+  - each receipt and who took it;
+  - credit per party, with who authorized it;
+  - totals, signature lines and Lahore times.
+  - **Who authorized the credit:**
+    - Once the truck has left, the gate's own record: the standing approval it went out on, else the manager who authorized it there.
+    - While it is inside, the approval's approver only when that approval covers what the party owes; otherwise whoever dispatched the bill.
+  - A full truck (20 lots) prints on two A5 pages.
+  - The slip opens in its own tab at once. Chrome blocks a tab opened after a slow render, so the tab opens first and the PDF fills it.
+  - It is refused to the gate guard (`BLIND_ROLE_FORBIDDEN`).
+  - After the truck leaves it still reads its lines, from the withdrawals stamped with the pass.
+- *At the gate:* the receipt lists every withdrawal on the truck (dispatch note, marka, owner), still with no counts. So does the guard's Ready-to-leave card, since a truck may carry several owners' lots, each with its own marka.
 - Two v0.8.0 known limits are fixed: the preview and the bill now share one pricing function
   (`invoice/invoice-totals.ts`), and the gate preview reads only open loads in SQL.
+- Left for later. The full list, with the reviewer's minors, is in PROGRESS.md.
+  - **Every other PDF button opens its tab only after the PDF arrives:** invoices, the gate receipt's Print, the parchi, statements, payroll. Chrome blocks that when a render takes more than about five seconds, as it did for the guard's Print in the C2 browser check. The slip's fix (open the tab first: `components/dispatch/dispatch-pdf.ts`) applies to each.
+  - **The truck routes are not blind to the guard,** like the single desk routes. That only matters if the owner ever grants the guard `outbound.record`.
+  - **The slip shows receipts, payment modes and KATCHI bills to whoever can book (the munshi).** That's the owner's call.
 
 ## Switches (all **off** until the owner turns them on)
 

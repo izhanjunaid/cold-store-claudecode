@@ -355,7 +355,8 @@ X-Facility-ID: <facility_uuid>
 | `HANDOVER_EXPECTED_CHANGED` | 409 | The cash waiting changed since the manager looked; nothing was written — count again |
 | `DISPATCH_NEEDS_MANAGER` | 403 | Solo dispatch refused (switch off, KATCHI bill, a withdrawal not dated today, a default charge priced by weight, a charge left off, a mode other than cash/approved credit, no approval, or the bill would pass the approved ceiling); a manager must finish the truck |
 | `TRUCK_NOT_READY` | 409 | Truck checkout: a line is still PENDING or DISPUTED (message names its dispatch notes); weigh or cancel it first — no partial trucks |
-| `TRUCK_LOAD_CHANGED` | 409 | Truck checkout: the lines sent are not the truck's weighed lines now (the message names the dispatch notes missing from the review and those no longer on the truck); nothing was written — review the truck again |
+| `TRUCK_LOAD_CHANGED` | 409 | Truck checkout: the lines sent are not the truck's weighed lines now (the message names, by dispatch note, those missing from the review and those no longer weighed on the truck — e.g. one checked out on its own meanwhile); nothing was written — review the truck again |
+| `OUTBOUND_ALREADY_FINALIZED` | 409 | The withdrawal is already dispatched; on a truck checkout, everything the request asked for already is ("This truck was already checked out") — a retry or a double submit. The desk treats it as done and offers the load slip |
 | `TRUCK_TOO_MANY_LINES` | 422 | Truck checkout: more than 20 lines |
 | `TRUCK_PAYMENTS_MISMATCH` | 422 | Truck checkout: the payments are not exactly one per (billing party, book) group on the truck |
 | `HANDOVER_SELF_CONFIRM` | 403 | Nobody counts their own cash |
@@ -554,7 +555,7 @@ X-Facility-ID: <facility_uuid>
 | Method | Endpoint | Description | Role |
 |---|---|---|---|
 | POST | `/gate-passes/inward` | Log arriving truck | SECURITY+ |
-| GET | `/gate-passes` | List active vehicles | All |
+| GET | `/gate-passes` | List active vehicles. With `?active=true` each pass carries `release`: whether the truck can leave now (`state`), its dispatch notes, and `withdrawals[]` — dispatch note, marka and owner of each withdrawal on it (a truck may carry several owners' lots), never a count | All |
 | PATCH | `/gate-passes/:id/link-lot` | Link to generated lot after weigh-in | OPERATOR+ |
 | POST | `/gate-passes/:id/outward` | Dispatch truck (Clear) | SECURITY+ |
 | GET | `/parties/:id/credit-approval` | Whether the party has a live standing credit approval (`approved`, `valid_until`, approver). The ceiling and note only for `parties.credit_terms` holders | authenticated |

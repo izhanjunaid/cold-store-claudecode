@@ -1,6 +1,66 @@
 # ColdChain — Build Progress
 
 ## Current Status
+- **Fast dispatch C2: a truck carrying several lots, checked out in one step, with a load slip.**
+  - **Where it stands:** on `feat/dispatch-c2-truck-basket`, cut from `main` at `3a1fd64` and worked 2026-10-23 → 29. No migration. Pushed; **not merged, no PR.** Release notes are `docs/26_fast_dispatch.md` "C2"; the plan is `~/.claude/plans/eager-greeting-lightning.md`.
+  - **Owner decisions (2026-10-23):** weighing stays lot by lot. A truck may carry lots billed to different parties: one payment row and one receipt per (party, book).
+  - **The desk:** each truck inside is a card with its lots.
+    - "Add a lot" books onto it with the plate fixed.
+    - "Check out truck" dispatches and bills every weighed lot. It takes the money once per (party, book), all in one transaction, with one invoice and JE-01 per lot as before.
+    - The load slip opens for the driver.
+    - Each lot on a card opens its withdrawal, and the card names what holds the truck.
+  - **The gate:** the guard's Ready-to-leave card and receipt list every withdrawal (dispatch note, marka, owner), never a count.
+  - **v0.8.0 limits fixed:** preview and bill share `invoiceTotals` (B-minor-4); the gate preview reads open loads in SQL (B-minor-8).
+  - **Verified (2026-10-29), final run on the code head `ffddc2b`:**
+    - guardrails 5/5, typecheck 8/8, build 5/5;
+    - api 284 unit + 969 integration (4 skipped) on a fresh database, web 385 unit;
+    - migration repair (42 migrations);
+    - e2e: truck 2/2 (10 clicks; a full 20-lot slip on two A5 pages), slip pop-up 1/1, desk 3/3 (6 clicks), solo 3/3, season 1/1.
+  - **Browser pass:** a Haiku subagent in the owner's Chrome ran the desk flow (two payment groups, Rs 39,000 checkout) and the guard's release. Every write was confirmed at the API, 20/20. It found two defects, both fixed: the slip tab was blocked as a pop-up, and the guard's card showed one marka for three.
+  - **Final review (Opus):** 0 Critical. Fixed with failing-first tests:
+    - a truck sent twice was refused as a "changed load" naming UUIDs; it is now "already checked out", and the load is checked again under the locks;
+    - the deadlock test could not fail; it now counts the checkout runs, and a lock-order mutation failed it 3 runs out of 3;
+    - the slip named any live approval's approver as the credit authority; now it names the approver only when the approval covers the debt, or the gate's own record after release;
+    - a stale unweighed lot dead-ended the desk.
+    - From the browser check: the slip ran to 3 A5 pages (now 2), the slip tab opens before the slow render, and the guard's card shows each withdrawal's marka.
+  - **Rulings made while building** (the full ledger was deleted at the end; these are its decisions):
+    - *Owner-facing:*
+      - the truck = its normalized plate, with no booking-time link: a mistyped plate is a lot on no truck;
+      - one truck per plate (the newest pass);
+      - no partial trucks: every open lot must be weighed or cancelled first;
+      - no idempotency key: a re-sent truck answers "already checked out", which the desk treats as done;
+      - the slip shows bag counts and is refused to the guard;
+      - a truck of more than 20 lots is checked out lot by lot.
+    - *Implementation:*
+      - `priceStorageInvoice` also uses `invoiceTotals`;
+      - the slip re-reads its lines (commodity is not in `OpenLoadLine`);
+      - open-load raw SQL runs outside a transaction (RLS-safe: facility-filtered);
+      - `soloVerdict` is reused as is;
+      - the single route's response is pinned by characterization tests;
+      - the truck routes live in `outbound.controller.ts`;
+      - a pass no longer inside answers `GATE_PASS_INVALID_STATE`;
+      - the receipt field is named `withdrawals`;
+      - the truck sheet reuses `MODES` rather than a shared fields component;
+      - "Check out truck" needs two or more lots still to check out;
+      - `OUTBOUND_ALREADY_FINALIZED` takes an optional message;
+      - the pop-up test is its own spec file (Playwright launch options).
+    - *Test timing on this 8 GB box (no assertion changed):*
+      - the race test and the truck suite get 45 s;
+      - two desk tests wait 5 s for the lot search;
+      - the truck sheet's tests get 15 s.
+  - **Declined by the reviewer, ruled to stand** (consistent with the existing desk, or by design):
+    - the truck JSON routes are not blind to the guard, which matters only if the owner grants the guard `outbound.record`;
+    - the slip shows receipts, modes and KATCHI bills to whoever can book (the munshi): **owner's call**;
+    - a dispatched but unreleased lot stays on a returning truck's plate; the card now opens it;
+    - two passes with one plate are one truck.
+  - **Deferred minors:**
+    - the release response (`POST /outward`) returns `withdrawals` with null marka and owner (GET and the receipt are right);
+    - "Add a lot" masks a fixed plate at 20 characters while a pass takes 30;
+    - test gaps: the changed-total case's rollback order, the KATCHI case's error code, no passing solo-credit truck case;
+    - plan deviations with no user effect: 60 s truck timeout, the line-count check runs first, `amount_pkr`;
+    - SECURITY briefly sees the empty desk shell before "no permission" (this predates C2).
+  - **Left for the owner:** every other PDF button (invoices, the gate receipt's Print, the parchi, statements, payroll) still opens its tab after the render, which Chrome blocks on a slow box. The slip's fix applies to each.
+  - **Dev box (2026-10-27):** the memory storm was the CodeRabbit extension diffing against its stored base branch `phase/00-foundation` (789 files). Its base was repointed to `main`, and local `main` fast-forwarded to `origin/main`.
 - **Fast dispatch → `main` as v0.8.0: the release round** on `feat/fast-dispatch-release` (cut from `feat/dispatch-phase-c1`, 2026-10-21). The owner asked to fix what the C1 verification found and anything left, then PR, squash-merge and release; release notes are `docs/26_fast_dispatch.md`. Owner decisions: hide weights and money from the guard; tag v0.8.0 but **do not promote** (`:stable` stays v0.6.2, which also keeps the v0.7.0 tariffs off the client box); one squash-merged PR.
   - **"Today" is the facility's day everywhere.** 12 web form defaults and 10 API defaults used the UTC date. The visible one: reversing at night an entry posted that night was refused. The digest scheduler read the container's UTC hour. Fixed with `businessDate()` / `localIsoDate()` / new `businessHour()`, plus `scripts/check-business-date.mjs` as a CI guardrail. The e2e date helpers now return the Lahore date.
   - **The guard sees no weights and no money owed.** `BLIND_KEYS` gains the five weight fields, `weight_dispute_note`, `outstanding_pkr` and `credit_authorized_amount_pkr`; a release refused for payment tells the guard only "Payment pending" (the gate page says escalate); Rate Plans and Service Charges leave the guard's (and the munshi's) nav.
@@ -56,7 +116,7 @@
 - **Phase 25's two carried-over browser verifications are now done** (2026-08-23, in Phase 29's click-through): the Payments detail "Cheque Clearing" card marks a PENDING cheque cleared and posts JE-24 (DR `1020` / CR `1025`), and the P&L's "Other Expense" section renders `6110` below operating profit. Both had sat unverified since phase/24 because the Chrome extension disconnected twice.
 - **Previously — Phase 24's five phases** are all shipped and pushed: `phase/24-statements-extensible` (6 commits, `c78e373`→`8cc2dc7`) sits cleanly on top of the already-pushed `phase/23-coa-hardening` with no stray ancestor commits, so it's a clean standalone PR. The live browser verification for Phase 4 (header creation) did not complete: the Chrome extension disconnected mid-session, confirmed via `tabs_context_mcp` reporting "Browser extension is not connected," not a page-level hang — nothing was created (verified 84 accounts unchanged, submit was never clickable before the disconnect). Substituted API-level end-to-end coverage (create HEADER+section → create DETAIL → post JE → GET balance-sheet → assert placement) plus a web unit test asserting the exact POST body, per operator decision. A live click-through is still open if useful later.
 - **Blockers**: None. Field caveat (unchanged): the F-2a installer/updater changes are verified against a scratch postgres:16 container but should be exercised once on a real box before the next client rollout. Pre-existing peshgi produce-deduction repayments recorded before the phase/19 fix (if any) carry no journal entry and need a one-time manual adjusting JE.
-- **Last Updated**: 2026-09-25
+- **Last Updated**: 2026-10-29
 - **Deferred (still remaining)**: Phase 6 (Quality & Spoilage) remains skipped per Phase 11 scope decision. Rooms & Racks: partial inter-room split (child-lot move) deferred — inter-room moves are whole-lot in v1. **`docs/20_audit_backlog.md` is the live register of all 40 phase/20 audit findings** — read it before assuming any audit item is or isn't done.
 
 ## Audit Remediation (Phase 20, 2026-07-25)
