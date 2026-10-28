@@ -2,7 +2,10 @@
 
 ## Current Status
 - **Fast dispatch C2: a truck carrying several lots, checked out in one step, with a load slip.**
-  - **Where it stands:** on `feat/dispatch-c2-truck-basket`, cut from `main` at `3a1fd64` and worked 2026-10-23 → 29. No migration. Pushed; **not merged, no PR.** Release notes are `docs/26_fast_dispatch.md` "C2"; the plan is `~/.claude/plans/eager-greeting-lightning.md`.
+  - **Where it stands:** built on `feat/dispatch-c2-truck-basket`, cut from `main` at `3a1fd64` and worked 2026-10-23 → 29. No migration.
+    - **Landed through PR #44**, squash-merged into `main` once `build-and-test` passed. Under the owner's rule of 2026-10-29, a PR or merge is mine to decide after careful consideration.
+    - **Not tagged or promoted:** `:stable` is still v0.6.2, and releasing is the owner's call.
+    - Release notes are `docs/26_fast_dispatch.md` "C2"; the plan is `~/.claude/plans/eager-greeting-lightning.md`.
   - **Owner decisions (2026-10-23):** weighing stays lot by lot. A truck may carry lots billed to different parties: one payment row and one receipt per (party, book).
   - **The desk:** each truck inside is a card with its lots.
     - "Add a lot" books onto it with the plate fixed.
