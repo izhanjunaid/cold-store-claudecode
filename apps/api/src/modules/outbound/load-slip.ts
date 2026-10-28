@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@coldchain/db';
 import { BUSINESS_TIME_ZONE, normalizePlate, round2, sumMoney } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
-import { findActiveApproval } from '../credit-approval/credit-approval.service';
+import { standingCreditCover } from '../credit-approval/credit-approval.service';
 import { openLoads } from '../gate-pass/open-load';
 import type { LoadSlipData } from '../pdf/pdf.service';
 
@@ -23,7 +23,16 @@ export async function buildLoadSlip(
 ): Promise<LoadSlipData> {
   const pass = await db.gatePass.findFirst({
     where: { id: passId, facilityId },
-    select: { id: true, passNumber: true, vehicleNumber: true, driverName: true, createdAt: true, status: true },
+    select: {
+      id: true,
+      passNumber: true,
+      vehicleNumber: true,
+      driverName: true,
+      createdAt: true,
+      status: true,
+      creditAuthorizedBy: true,
+      creditApprovalIds: true,
+    },
   });
   if (!pass) throw Errors.GATE_PASS_NOT_FOUND();
   if (pass.status === 'CANCELLED') throw Errors.GATE_PASS_INVALID_STATE('This gate pass was cancelled');
@@ -70,17 +79,33 @@ export async function buildLoadSlip(
     receipts.set(a.payment.id, r);
   }
 
-  // What each party still owes on these bills, and who let it leave owing: the manager behind a
-  // live standing approval, else whoever dispatched the bill (a manager — the solo door takes no credit without an approval).
+  // What each party still owes on these bills, and who let it leave owing. Once the truck has left,
+  // the gate's own record: the standing approval it went out on, else the manager who authorized the
+  // credit there. While it is inside: the party's standing approval when it covers what the party owes,
+  // else whoever dispatched the bill (a manager — the solo door takes no credit an approval does not cover).
+  const wentOutOn =
+    pass.status === 'CLEARED' && pass.creditApprovalIds.length > 0
+      ? await db.partyCreditApproval.findMany({ where: { id: { in: pass.creditApprovalIds } }, select: { partyId: true, approvedBy: true } })
+      : [];
   const credit: LoadSlipData['credit'] = [];
   for (const party of new Map(lines.map((l) => [l.lot.billingParty.id, l.lot.billingParty])).values()) {
     const own = lines.filter((l) => l.lot.billingParty.id === party.id && l.invoice);
     const owed = sumMoney(own.map((l) => Number(l.invoice!.totalPkr) - Number(l.invoice!.amountPaidPkr)));
     if (owed <= 0.005) continue;
-    const approval = await findActiveApproval(db, facilityId, party.id);
-    const authorizerId = approval?.approvedBy ?? own.find((l) => l.finalizedBy)?.finalizedBy ?? null;
+    const dispatchedBy = own.find((l) => l.finalizedBy)?.finalizedBy ?? null;
+    let authorizerId: string | null;
+    let standing: boolean;
+    if (pass.status === 'CLEARED') {
+      const approval = wentOutOn.find((a) => a.partyId === party.id);
+      authorizerId = approval?.approvedBy ?? pass.creditAuthorizedBy ?? dispatchedBy;
+      standing = approval != null;
+    } else {
+      const cover = await standingCreditCover(db, facilityId, [{ partyId: party.id }]);
+      authorizerId = cover.covered ? cover.approvals[0]!.approvedBy : dispatchedBy;
+      standing = cover.covered;
+    }
     const authorizer = authorizerId ? await db.user.findUnique({ where: { id: authorizerId }, select: { name: true } }) : null;
-    credit.push({ partyName: party.name, amountPkr: owed, authorizedBy: authorizer?.name ?? '—', standing: approval != null });
+    credit.push({ partyName: party.name, amountPkr: owed, authorizedBy: authorizer?.name ?? '—', standing });
   }
 
   const facility = await db.facility.findUniqueOrThrow({ where: { id: facilityId }, select: { name: true, city: true } });

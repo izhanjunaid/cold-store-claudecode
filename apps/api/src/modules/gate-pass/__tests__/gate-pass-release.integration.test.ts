@@ -526,6 +526,7 @@ describe('release preview on the active list (what the gate console shows before
       cheque_pending: boolean;
       marka: string | null;
       owner_party_name: string | null;
+      withdrawals?: Record<string, unknown>[];
     };
   };
 
@@ -581,7 +582,9 @@ describe('release preview on the active list (what the gate console shows before
     const r = await activeRelease(pass);
     expect(r.state).toBe('READY');
     expect(r.owner_party_name).toBeTruthy();
-    expect(Object.keys(r).sort()).toEqual(['cheque_pending', 'dispatch_notes', 'marka', 'outstanding_pkr', 'owner_party_name', 'state']);
+    expect(Object.keys(r).sort()).toEqual(['cheque_pending', 'dispatch_notes', 'marka', 'outstanding_pkr', 'owner_party_name', 'state', 'withdrawals']);
+    // Each withdrawal is named as the receipt names it — dispatch note, marka, owner — never with a count.
+    for (const w of r.withdrawals ?? []) expect(Object.keys(w).sort()).toEqual(['dispatch_note_number', 'marka', 'owner_party_name']);
     expect(r.outstanding_pkr).toBeNull(); // the key stays (as null) so the page renders "not shown"
     // Nothing in the whole payload names the 20 bags that were dispatched.
     const res = await app.inject({ method: 'GET', url: '/v1/gate-passes?active=true', headers: authHeaders(securityToken) });

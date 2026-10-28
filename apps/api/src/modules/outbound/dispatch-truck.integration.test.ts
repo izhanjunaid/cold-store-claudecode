@@ -10,6 +10,7 @@ import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } 
 import { PrismaClient } from '@coldchain/db';
 import { addDays, businessDate } from '@coldchain/shared';
 import type { FastifyInstance } from 'fastify';
+import { DispatchCheckoutService } from './dispatch-checkout.service';
 
 // The HTML renderers are real (the load slip's content is asserted); only the Chromium steps are mocked.
 vi.mock('../pdf/pdf.service', async (importOriginal) => ({
@@ -315,9 +316,44 @@ describe('races', () => {
     const req = requestFrom(await truckPreview(pass));
     const [a, b] = await Promise.all([checkoutTruck(pass, req), checkoutTruck(pass, req)]);
     expect([a.statusCode, b.statusCode].sort()).toEqual([200, 409]);
+    // The loser is told the truck went: the desk treats that as done and offers the slip.
+    expect(code([a, b].find((r) => r.statusCode === 409)!)).toBe('OUTBOUND_ALREADY_FINALIZED');
     expect(await prisma.invoice.count({ where: { outboundEventId: { in: [o1, o2] } } })).toBe(2);
     expect(await prisma.payment.count({ where: { facilityId: TEST_FACILITY_ID } })).toBe(1);
   }, 45_000);
+
+  it('the same truck sent again after it went: "already checked out", and nothing is billed twice', async () => {
+    const pass = await arrive('LHR-8860');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-8860', 20);
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-8860', 10);
+    const req = requestFrom(await truckPreview(pass));
+    const first = await checkoutTruck(pass, req);
+    expect(first.statusCode, first.body).toBe(200);
+    const again = await checkoutTruck(pass, req);
+    expect([again.statusCode, code(again)]).toEqual([409, 'OUTBOUND_ALREADY_FINALIZED']);
+    expect(await prisma.invoice.count({ where: { outboundEventId: { in: [o1, o2] } } })).toBe(2);
+    expect(await prisma.payment.count({ where: { facilityId: TEST_FACILITY_ID } })).toBe(1);
+  });
+
+  it('a line checked out on its own meanwhile: the truck is refused naming that dispatch note, and the rest is not dispatched', async () => {
+    const pass = await arrive('LHR-8850');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-8850', 20);
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-8850', 10);
+    const req = requestFrom(await truckPreview(pass));
+    const single = data(await call('GET', `/v1/outbound-events/${o1}/checkout-preview`, managerToken));
+    const alone = await call('POST', `/v1/outbound-events/${o1}/dispatch-and-collect`, managerToken, {
+      expected_total_pkr: single.total_pkr,
+      payment: { mode: 'CASH' },
+    });
+    expect(alone.statusCode, alone.body).toBe(200);
+
+    const res = await checkoutTruck(pass, req);
+    expect([res.statusCode, code(res)]).toEqual([409, 'TRUCK_LOAD_CHANGED']);
+    const dn1 = (await prisma.outboundEvent.findUniqueOrThrow({ where: { id: o1 } })).dispatchNoteNumber!;
+    expect(JSON.parse(res.body).error.message).toContain(dn1);
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: o2 } })).status).toBe('WEIGHED');
+    expect(await prisma.invoice.count({ where: { outboundEventId: o2 } })).toBe(0);
+  });
 
   it('two trucks each taking part of the same two lots, at once: both go, and each lot loses exactly what both took', async () => {
     const l1 = await lot(partyA, 100);
@@ -329,8 +365,20 @@ describe('races', () => {
       await onTruck(l2, plate, 25, { type: 'PARTIAL' });
     }
     const [reqX, reqY] = [requestFrom(await truckPreview(passX)), requestFrom(await truckPreview(passY))];
-    const [x, y] = await Promise.all([checkoutTruck(passX, reqX), checkoutTruck(passY, reqY)]);
+    // A deadlock would still end in two 200s — the checkout retries one — so count the runs: a third
+    // run means the two trucks' locks crossed and Postgres had to kill one.
+    const runs = vi.spyOn(DispatchCheckoutService.prototype as unknown as { runTruck: () => Promise<unknown> }, 'runTruck');
+    let truckRuns = -1;
+    let both: Res[] = [];
+    try {
+      both = await Promise.all([checkoutTruck(passX, reqX), checkoutTruck(passY, reqY)]);
+      truckRuns = runs.mock.calls.length;
+    } finally {
+      runs.mockRestore(); // also clears the calls, hence the count taken above
+    }
+    const [x, y] = both as [Res, Res];
     expect([x.statusCode, y.statusCode], `${x.body} / ${y.body}`).toEqual([200, 200]);
+    expect(truckRuns).toBe(2);
     expect((await prisma.lot.findUniqueOrThrow({ where: { id: l1 } })).currentBalanceBags).toBe(40);
     expect((await prisma.lot.findUniqueOrThrow({ where: { id: l2 } })).currentBalanceBags).toBe(50);
   }, 45_000);
@@ -414,6 +462,57 @@ describe('the load slip and the gate receipt', () => {
 
     const pdf = await call('GET', `/v1/dispatch/trucks/${t.pass}/load-slip`, managerToken);
     expect([pdf.statusCode, pdf.headers['content-type']]).toEqual([200, 'application/pdf']);
+  });
+
+  /** The slip's "Released on credit" part, where it names who let the money go owing. */
+  const creditPart = async (pass: string) => {
+    const html = await slipHtml(pass);
+    return html.slice(html.indexOf('Released on credit'));
+  };
+  const userName = async (email: string) => (await prisma.user.findFirstOrThrow({ where: { email } })).name;
+
+  it('credit a standing approval does not cover is the manager\'s who checked it out — before and after the truck leaves', async () => {
+    // The owner approves party B with a ceiling far below its bill; the manager puts it on credit regardless.
+    const approve = await call('POST', `/v1/parties/${partyB}/credit-approval`, ownerToken, { max_outstanding_pkr: 1 });
+    expect(approve.statusCode, approve.body).toBe(201);
+    const t = await checkedOut('LHR-9650');
+    const owner = await userName((await loginAsRole(app, 'OWNER')).user.email);
+    const manager = await userName('manager@coldchain.pk');
+
+    const inside = await creditPart(t.pass);
+    expect(inside).toContain(manager);
+    expect(inside).not.toContain(owner);
+    expect(inside).not.toContain('standing approval');
+
+    // At the gate the manager authorizes the credit (the approval does not cover it): the pass records them.
+    const released = await call('POST', `/v1/gate-passes/${t.pass}/outward`, managerToken, { declared_quantity: 35, credit_authorization: true });
+    expect(released.statusCode, released.body).toBe(200);
+    const after = await creditPart(t.pass);
+    expect(after).toContain(manager);
+    expect(after).not.toContain(owner);
+    expect(after).not.toContain('standing approval');
+  });
+
+  it('credit a standing approval covers is its approver\'s — before, and after the guard lets the truck go on it', async () => {
+    const approve = await call('POST', `/v1/parties/${partyB}/credit-approval`, ownerToken, { max_outstanding_pkr: 1_000_000 });
+    expect(approve.statusCode, approve.body).toBe(201);
+    const t = await checkedOut('LHR-9660');
+    const owner = await userName((await loginAsRole(app, 'OWNER')).user.email);
+
+    expect(await creditPart(t.pass)).toContain(`${owner} (standing approval)`);
+    const released = await call('POST', `/v1/gate-passes/${t.pass}/outward`, securityToken, { declared_quantity: 35 });
+    expect(released.statusCode, released.body).toBe(200);
+    expect(await creditPart(t.pass)).toContain(`${owner} (standing approval)`);
+  });
+
+  it('the guard\'s Ready-to-leave preview names every withdrawal on a two-owner truck — dispatch note, marka, owner — and no count', async () => {
+    const t = await checkedOut('LHR-9860');
+    type W = { dispatch_note_number: string | null; marka: string | null; owner_party_name: string | null };
+    const active = data<{ id: string; release?: { withdrawals?: W[] } }[]>(await call('GET', '/v1/gate-passes?active=true', securityToken));
+    const withdrawals = active.find((g) => g.id === t.pass)?.release?.withdrawals ?? [];
+    expect(withdrawals.map((w) => w.marka).sort()).toEqual(['AH', 'GH']);
+    expect(new Set(withdrawals.map((w) => w.owner_party_name)).size).toBe(2);
+    for (const w of withdrawals) expect(Object.keys(w).sort()).toEqual(['dispatch_note_number', 'marka', 'owner_party_name']);
   });
 
   it('is never the guard\'s', async () => {

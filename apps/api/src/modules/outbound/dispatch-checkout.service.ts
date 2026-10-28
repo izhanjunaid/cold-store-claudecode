@@ -385,10 +385,11 @@ export class DispatchCheckoutService {
   ) {
     const { facilityId, userId, role } = caller;
     // The truck first (gate_passes → outbound_events → lots), so the gate cannot release it mid-checkout;
-    // then the load again, now that nothing on it can move.
+    // then its lines and their lots; only then the load again, now that nothing on it can move — a line
+    // checked out on its own meanwhile, or this truck sent twice, shows up here as what it is.
     if (!(await lockRow(tx, 'gate_passes', passId, facilityId))) throw Errors.GATE_PASS_NOT_FOUND();
-    checkTruckRequest((await this.truckLoad(tx, facilityId, passId)).lines, body);
     await this.lockLoad(tx, facilityId, body.lines.map((l) => l.outbound_id));
+    checkTruckRequest((await this.truckLoad(tx, facilityId, passId)).lines, body);
     // Solo credit: each party's credit lock, in party order, before any of its bills post.
     const creditParties = solo
       ? [...new Set(body.payments.filter((p) => p.mode === 'CREDIT').map((p) => p.billing_party_id))].sort()
@@ -750,13 +751,21 @@ function groupBills(bills: { outbound_id: string; billing_party: { id: string; n
 
 /** The request covers exactly the truck's weighed lines, with one payment row per (party, book) among them. */
 function checkTruckRequest(lines: OpenLoadLine[], body: TruckDispatchRequestType) {
+  const onTruck = new Map(lines.map((l) => [l.id, l]));
+  const asked = new Set(body.lines.map((l) => l.outbound_id));
+  // Sent again after it went (a retry, or the second of two at once): everything asked for is
+  // already dispatched. The desk treats that as done and offers the slip.
+  if (asked.size > 0 && [...asked].every((id) => onTruck.get(id)?.status === 'DISPATCHED')) {
+    throw Errors.OUTBOUND_ALREADY_FINALIZED('This truck was already checked out');
+  }
+
   const notReady = lines.filter((l) => NOT_READY.has(l.status));
   if (notReady.length > 0) throw Errors.TRUCK_NOT_READY(notReady.map(dnOf));
 
   const weighed = new Map(lines.filter((l) => l.status === 'WEIGHED').map((l) => [l.id, l]));
-  const asked = new Set(body.lines.map((l) => l.outbound_id));
   const missing = [...weighed.values()].filter((l) => !asked.has(l.id)).map(dnOf);
-  const extra = [...asked].filter((id) => !weighed.has(id)).map((id) => id.slice(0, 8));
+  // A line asked for that is no longer weighed on this truck, by its dispatch note while the truck still carries it.
+  const extra = [...asked].filter((id) => !weighed.has(id)).map((id) => (onTruck.has(id) ? dnOf(onTruck.get(id)!) : id.slice(0, 8)));
   if (missing.length > 0 || extra.length > 0 || asked.size !== body.lines.length) {
     throw Errors.TRUCK_LOAD_CHANGED(missing, extra);
   }

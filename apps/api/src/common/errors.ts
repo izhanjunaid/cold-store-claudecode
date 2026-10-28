@@ -93,8 +93,8 @@ export const Errors = {
     new AppError('ACCOUNT_LOCKED', 'Account is temporarily locked due to failed login attempts', 423),
   OUTBOUND_NOT_FOUND: () =>
     new AppError('OUTBOUND_NOT_FOUND', 'Outbound event does not exist', 404),
-  OUTBOUND_ALREADY_FINALIZED: () =>
-    new AppError('OUTBOUND_ALREADY_FINALIZED', 'Outbound event is already dispatched', 409),
+  OUTBOUND_ALREADY_FINALIZED: (message = 'Outbound event is already dispatched') =>
+    new AppError('OUTBOUND_ALREADY_FINALIZED', message, 409),
   OUTBOUND_WEIGHT_REQUIRED: () =>
     new AppError('OUTBOUND_WEIGHT_REQUIRED', 'Outbound weight must be recorded before finalizing', 422),
   OUTBOUND_OWNER_MISMATCH: () =>

@@ -257,6 +257,11 @@ export class GatePassService {
       result.set(plate, {
         state,
         dispatch_notes: list.map((o) => o.dispatchNoteNumber ?? o.id.slice(0, 8)),
+        withdrawals: list.map((o) => ({
+          dispatch_note_number: dnOf(o),
+          marka: o.lot.marka,
+          owner_party_name: o.ownerPartySnapshot?.name ?? null,
+        })),
         outstanding_pkr: outstanding,
         cheque_pending: chequePending,
         marka: list.find((o) => o.lot.marka)?.lot.marka ?? null,
