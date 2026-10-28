@@ -17,12 +17,12 @@ describe('opening a slip or note in a new tab', () => {
 
   it('opens the tab while the click still counts, and fills it when the PDF arrives', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
-    let arrive!: (r: unknown) => void;
-    vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise((r) => (arrive = r)) as Promise<Response>);
+    let arrive!: (r: Response) => void;
+    vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise<Response>((r) => (arrive = r)));
 
     const done = openLoadSlipPdf('pass-1');
     expect(open).toHaveBeenCalledTimes(1); // before the PDF is back
-    arrive({ ok: true, blob: async () => new Blob(['%PDF-1.4']) });
+    arrive({ ok: true, blob: async () => new Blob(['%PDF-1.4']) } as Response);
     await done;
 
     expect(tab.location.href).toBe('blob:slip');
