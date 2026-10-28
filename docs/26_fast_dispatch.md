@@ -113,6 +113,8 @@ payment per (billing party, book), each with its own receipt.
   - **Who authorized the credit:**
     - Once the truck has left, the gate's own record: the standing approval it went out on, else the manager who authorized it there.
     - While it is inside, the approval's approver only when that approval covers what the party owes; otherwise whoever dispatched the bill.
+  - An uncleared cheque counts as still owed, as at the gate, and its receipt reads "CHEQUE (not cleared)".
+  - Each bill stays with the party it was billed to, even if the lot changes hands later.
   - A full truck (20 lots) prints on two A5 pages.
   - The slip opens in its own tab at once. Chrome blocks a tab opened after a slow render, so the tab opens first and the PDF fills it.
   - It is refused to the gate guard (`BLIND_ROLE_FORBIDDEN`).

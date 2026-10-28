@@ -505,6 +505,40 @@ describe('the load slip and the gate receipt', () => {
     expect(await creditPart(t.pass)).toContain(`${owner} (standing approval)`);
   });
 
+  const partyName = async (id: string) => (await prisma.party.findUniqueOrThrow({ where: { id } })).name;
+
+  it('a party that paid by a cheque not yet cleared still owes it on the slip — named with who let the truck go', async () => {
+    const pass = await arrive('LHR-9670');
+    await onTruck(await lot(partyA, 20, operatorToken, { marka: 'AH' }), 'LHR-9670', 20);
+    await onTruck(await lot(partyB, 15, operatorToken, { marka: 'GH' }), 'LHR-9670', 15);
+    const req = requestFrom(await truckPreview(pass));
+    req.payments = req.payments.map((x: { billing_party_id: string }) =>
+      x.billing_party_id === partyB ? { ...x, mode: 'CHEQUE', reference_number: 'CHQ-9670', cheque_date: businessDate() } : x,
+    );
+    const res = await checkoutTruck(pass, req);
+    expect(res.statusCode, res.body).toBe(200);
+
+    // The gate counts an uncleared cheque as owed (standingCreditCover, the release); so does the slip.
+    const html = await slipHtml(pass);
+    expect(html).toContain('CHEQUE (not cleared)');
+    expect(html).toContain('Released on credit');
+    const credit = await creditPart(pass);
+    expect(credit).toContain(await partyName(partyB));
+    expect(credit).toContain(await userName('manager@coldchain.pk'));
+  });
+
+  it('a bill stays with the party it was billed to, even when the lot is billed to someone else after the truck went', async () => {
+    const t = await checkedOut('LHR-9680'); // party A paid cash, party B on credit
+    // What a full transfer of the rest of B's lot does to the lot: billed to A from now on. B's bill stays B's.
+    const lotB = (await prisma.outboundEvent.findUniqueOrThrow({ where: { id: t.ob } })).lotId;
+    await prisma.lot.update({ where: { id: lotB }, data: { billingPartyId: partyA } });
+
+    const credit = await creditPart(t.pass);
+    expect(credit).toContain(await partyName(partyB));
+    expect(credit).not.toContain(await partyName(partyA));
+    expect(await slipHtml(t.pass)).not.toContain('billed to');
+  });
+
   it('the guard\'s Ready-to-leave preview names every withdrawal on a two-owner truck — dispatch note, marka, owner — and no count', async () => {
     const t = await checkedOut('LHR-9860');
     type W = { dispatch_note_number: string | null; marka: string | null; owner_party_name: string | null };

@@ -26,6 +26,9 @@
     - the slip named any live approval's approver as the credit authority; now it names the approver only when the approval covers the debt, or the gate's own record after release;
     - a stale unweighed lot dead-ended the desk.
     - From the browser check: the slip ran to 3 A5 pages (now 2), the slip tab opens before the slow render, and the guard's card shows each withdrawal's marka.
+  - **PR #44 review (Codex bot), 2 medium findings, both fixed with failing-first tests:**
+    - the slip counted a party that paid by an uncleared cheque as paid, so it named no credit and no authorizer, while the gate counts that cheque as owed;
+    - a bill followed the lot's *current* billing party after a later transfer, instead of the party it was billed to.
   - **Rulings made while building** (the full ledger was deleted at the end; these are its decisions):
     - *Owner-facing:*
       - the truck = its normalized plate, with no booking-time link: a mistyped plate is a lot on no truck;

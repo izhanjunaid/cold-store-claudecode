@@ -51,32 +51,51 @@ export async function buildLoadSlip(
       finalizedBy: true,
       lot: { select: { lotNumber: true, marka: true, commodity: { select: { name: true } }, billingParty: { select: { id: true, name: true } } } },
       ownerPartySnapshot: { select: { name: true } },
-      invoice: { select: { id: true, invoiceNumber: true, totalPkr: true, amountPaidPkr: true } },
+      invoice: {
+        select: { id: true, invoiceNumber: true, totalPkr: true, amountPaidPkr: true, billingParty: { select: { id: true, name: true } } },
+      },
     },
     orderBy: { createdAt: 'asc' },
   });
+  // Who a line is billed to: its bill's party once it has one (the lot may change hands later), else the lot's.
+  const billedTo = (l: (typeof lines)[number]) => l.invoice?.billingParty ?? l.lot.billingParty;
 
   const invoiceIds = lines.flatMap((l) => (l.invoice ? [l.invoice.id] : []));
   const allocations = await db.paymentAllocation.findMany({
     where: { invoiceId: { in: invoiceIds }, voidedAt: null },
     select: {
+      invoiceId: true,
       allocatedAmountPkr: true,
       payment: {
-        select: { id: true, receiptNumber: true, paymentMethod: true, party: { select: { name: true } }, createdByUser: { select: { name: true } } },
+        select: {
+          id: true,
+          receiptNumber: true,
+          paymentMethod: true,
+          clearanceStatus: true,
+          party: { select: { name: true } },
+          createdByUser: { select: { name: true } },
+        },
       },
     },
   });
   const receipts = new Map<string, LoadSlipData['receipts'][number]>();
+  // A cheque not yet cleared is still owed (the gate's rule, standingCreditCover's too), though the
+  // ledger already counts it paid: it is added back to what the party owes below.
+  const unclearedByInvoice = new Map<string, number>();
   for (const a of allocations) {
+    const uncleared = a.payment.clearanceStatus === 'PENDING';
     const r = receipts.get(a.payment.id) ?? {
       receiptNumber: a.payment.receiptNumber ?? '—',
-      mode: a.payment.paymentMethod,
+      mode: uncleared ? `${a.payment.paymentMethod} (not cleared)` : a.payment.paymentMethod,
       partyName: a.payment.party.name,
       collectedBy: a.payment.createdByUser.name,
       amountPkr: 0,
     };
     r.amountPkr = round2(r.amountPkr + Number(a.allocatedAmountPkr));
     receipts.set(a.payment.id, r);
+    if (uncleared && a.invoiceId) {
+      unclearedByInvoice.set(a.invoiceId, round2((unclearedByInvoice.get(a.invoiceId) ?? 0) + Number(a.allocatedAmountPkr)));
+    }
   }
 
   // What each party still owes on these bills, and who let it leave owing. Once the truck has left,
@@ -88,9 +107,11 @@ export async function buildLoadSlip(
       ? await db.partyCreditApproval.findMany({ where: { id: { in: pass.creditApprovalIds } }, select: { partyId: true, approvedBy: true } })
       : [];
   const credit: LoadSlipData['credit'] = [];
-  for (const party of new Map(lines.map((l) => [l.lot.billingParty.id, l.lot.billingParty])).values()) {
-    const own = lines.filter((l) => l.lot.billingParty.id === party.id && l.invoice);
-    const owed = sumMoney(own.map((l) => Number(l.invoice!.totalPkr) - Number(l.invoice!.amountPaidPkr)));
+  for (const party of new Map(lines.map((l) => [billedTo(l).id, billedTo(l)])).values()) {
+    const own = lines.filter((l) => billedTo(l).id === party.id && l.invoice);
+    const owed = sumMoney(
+      own.map((l) => Number(l.invoice!.totalPkr) - Number(l.invoice!.amountPaidPkr) + (unclearedByInvoice.get(l.invoice!.id) ?? 0)),
+    );
     if (owed <= 0.005) continue;
     const dispatchedBy = own.find((l) => l.finalizedBy)?.finalizedBy ?? null;
     let authorizerId: string | null;
@@ -126,7 +147,7 @@ export async function buildLoadSlip(
       marka: l.lot.marka,
       commodityName: l.lot.commodity?.name ?? null,
       ownerName: l.ownerPartySnapshot?.name ?? null,
-      billingPartyName: l.lot.billingParty.name,
+      billingPartyName: billedTo(l).name,
       bags: l.quantityWithdrawnBags,
       status: l.status,
       invoiceNumber: l.invoice?.invoiceNumber ?? null,
