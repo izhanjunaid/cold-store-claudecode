@@ -1,18 +1,25 @@
-import type { PrismaClient, Prisma } from '@coldchain/db';
+import type { PrismaClient, Prisma, BookType } from '@coldchain/db';
 import {
   addDays,
   businessDate,
   businessDayStart,
+  normalizePlate,
   round2,
+  sumMoney,
   toIsoDate,
+  TRUCK_MAX_LINES,
   type DispatchAndCollectRequestType,
   type OutboundListQueryType,
+  type TruckDispatchRequestType,
 } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
 import { advisoryXactLock } from '../../common/advisory-lock';
+import { lockRow } from '../../common/row-lock';
 import { findActiveApproval, standingCreditCover } from '../credit-approval/credit-approval.service';
+import { openLoads, type OpenLoadLine } from '../gate-pass/open-load';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { previewInvoiceFromOutbound } from '../invoice/invoice.builder';
+import { invoiceTotals } from '../invoice/invoice-totals';
 import type { InvoiceService } from '../invoice/invoice.service';
 import type { PaymentService } from '../payment/payment.service';
 import type { OutboundService } from './outbound.service';
@@ -42,6 +49,16 @@ function stageOf(o: {
 
 /** A tonne is 1000 kg; quantities on a bill carry three decimals. */
 const tonnes = (kg: number) => Math.round((kg / 1000) * 1000) / 1000;
+
+/** One withdrawal in a checkout, with what the reviewer saw for it. */
+interface CheckoutLine {
+  outboundId: string;
+  /** The total its bill showed when it was reviewed: this posts, or nothing does. */
+  expectedTotal: number;
+  skipIds?: string[];
+  pickedFrom?: { rackId: string; bags: number }[];
+  notes?: string;
+}
 
 /** The caller, as the checkout needs to know them: identity plus the keys they hold. */
 export interface CheckoutCaller {
@@ -140,6 +157,24 @@ export class DispatchCheckoutService {
 
   /** The bill a weighed withdrawal will carry, before anything is written. */
   async preview(facilityId: string, id: string) {
+    const { bill, lot, outboundDate } = await this.priceLine(facilityId, id);
+    // Whether the munshi may finish this truck alone, as booleans and a reason: never the party's
+    // ceiling or exposure. Credit is offered only if this bill fits under the approved ceiling.
+    const verdict = await this.soloVerdict(this.prisma, facilityId, lot, outboundDate);
+    const creditAvailable =
+      verdict.allowed &&
+      verdict.creditApproved &&
+      (await standingCreditCover(this.prisma, facilityId, [{ partyId: lot.billingPartyId, unbilled: bill.total_pkr }])).covered;
+    return {
+      ...bill,
+      solo: verdict.allowed
+        ? { allowed: true, credit_available: creditAvailable }
+        : { allowed: false, reason: verdict.reason, credit_available: false },
+    };
+  }
+
+  /** One weighed withdrawal's bill, priced as it will post: the review step of both checkouts. */
+  private async priceLine(facilityId: string, id: string) {
     const ob = await this.prisma.outboundEvent.findFirst({
       where: { id, facilityId },
       include: {
@@ -156,21 +191,19 @@ export class DispatchCheckoutService {
       bags: ob.quantityWithdrawnBags,
       weightKg: ob.outboundWeightKg == null ? null : Number(ob.outboundWeightKg),
     });
-    const serviceTotal = round2(defaults.reduce((s, l) => s + l.amountPkr, 0));
-    const subTotal = round2(priced.subTotal + serviceTotal);
-    // The same arithmetic InvoiceRepository.recomputeTotals applies to the built bill.
-    const gstAmount = round2(subTotal * (priced.gstRate / 100));
-    const total = round2(subTotal + gstAmount);
+    // The same function InvoiceRepository.recomputeTotals prices the built bill with, over the
+    // same lines (storage first, then the default charges), so what is reviewed is what posts.
+    const {
+      subTotal,
+      gst: gstAmount,
+      total,
+    } = invoiceTotals({
+      lineAmounts: [priced.charge.amountPkr, ...defaults.map((l) => l.amountPkr)],
+      gstRate: priced.gstRate,
+      bookType: priced.params.bookType,
+    });
 
-    // Whether the munshi may finish this truck alone, as booleans and a reason: never the party's
-    // ceiling or exposure. Credit is offered only if this bill fits under the approved ceiling.
-    const verdict = await this.soloVerdict(this.prisma, facilityId, ob.lot, ob.outboundDate);
-    const creditAvailable =
-      verdict.allowed &&
-      verdict.creditApproved &&
-      (await standingCreditCover(this.prisma, facilityId, [{ partyId: ob.lot.billingPartyId, unbilled: total }])).covered;
-
-    return {
+    const bill = {
       outbound_id: id,
       dispatch_note_number: ob.dispatchNoteNumber,
       lot_number: ob.lot.lotNumber,
@@ -198,10 +231,221 @@ export class DispatchCheckoutService {
       gst_rate: priced.gstRate,
       gst_amount_pkr: gstAmount,
       total_pkr: total,
-      solo: verdict.allowed
-        ? { allowed: true, credit_available: creditAvailable }
-        : { allowed: false, reason: verdict.reason, credit_available: false },
     };
+    return { bill, lot: ob.lot, outboundDate: ob.outboundDate };
+  }
+
+  /** The trucks inside the gate, one per plate (its newest pass), each with what is on it. */
+  async trucks(facilityId: string) {
+    const passes = await this.prisma.gatePass.findMany({
+      where: { facilityId, status: { in: ['ARRIVED', 'WEIGHING'] } },
+      select: { id: true, passNumber: true, vehicleNumber: true, driverName: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const byPlate = new Map<string, (typeof passes)[number]>();
+    for (const p of passes) {
+      const plate = normalizePlate(p.vehicleNumber);
+      if (plate && !byPlate.has(plate)) byPlate.set(plate, p);
+    }
+    const loads = await openLoads(this.prisma, facilityId, [...byPlate.keys()]);
+    return [...byPlate.entries()]
+      .map(([plate, pass]) => {
+        const lines = loads.get(plate) ?? [];
+        return {
+          gate_pass_id: pass.id,
+          pass_number: pass.passNumber,
+          vehicle_number: pass.vehicleNumber,
+          driver_name: pass.driverName,
+          arrived_at: pass.createdAt.toISOString(),
+          ready: lines.some((l) => l.status === 'WEIGHED') && !lines.some((l) => NOT_READY.has(l.status)),
+          lines: lines.map(truckLine),
+        };
+      })
+      .sort((a, b) => a.arrived_at.localeCompare(b.arrived_at));
+  }
+
+  /** A whole truck's review: each weighed line's bill, the payment groups, and whether the munshi may finish it. */
+  async truckPreview(facilityId: string, passId: string) {
+    const { pass, lines } = await this.truckLoad(this.prisma, facilityId, passId);
+    const priced = [];
+    for (const l of lines.filter((x) => x.status === 'WEIGHED')) priced.push(await this.priceLine(facilityId, l.id));
+
+    let solo: { allowed: true } | { allowed: false; reason: string } =
+      priced.length > 0 ? { allowed: true } : { allowed: false, reason: 'nothing on this truck is weighed' };
+    const approved = new Set<string>();
+    for (const p of priced) {
+      const verdict = await this.soloVerdict(this.prisma, facilityId, p.lot, p.outboundDate);
+      if (!verdict.allowed) {
+        solo = { allowed: false, reason: `${p.bill.dispatch_note_number ?? p.bill.outbound_id}: ${verdict.reason}` };
+        break;
+      }
+      if (verdict.creditApproved) approved.add(p.lot.billingPartyId);
+    }
+
+    const groups = [];
+    for (const g of groupBills(priced.map((p) => p.bill))) {
+      // Credit is offered only if every bill of the party on this truck fits under its ceiling together.
+      const creditAvailable =
+        solo.allowed &&
+        approved.has(g.billing_party.id) &&
+        (await standingCreditCover(this.prisma, facilityId, [{ partyId: g.billing_party.id, unbilled: g.total_pkr }])).covered;
+      groups.push({ ...g, credit_available: creditAvailable });
+    }
+
+    return {
+      gate_pass_id: pass.id,
+      pass_number: pass.passNumber,
+      vehicle_number: pass.vehicleNumber,
+      lines: priced.map((p) => p.bill),
+      not_ready: lines.filter((l) => NOT_READY.has(l.status)).map(dnOf),
+      groups,
+      total_pkr: sumMoney(priced.map((p) => p.bill.total_pkr)),
+      solo,
+    };
+  }
+
+  /**
+   * Check out a whole truck — every weighed line dispatched and billed, one receipt per
+   * (party, book) — or nothing. The load and the payment rows are checked before anything is
+   * written, and again under the locks.
+   */
+  async truckDispatchAndCollect(caller: CheckoutCaller, passId: string, body: TruckDispatchRequestType) {
+    if (body.lines.length > TRUCK_MAX_LINES) throw Errors.TRUCK_TOO_MANY_LINES(TRUCK_MAX_LINES);
+    const { lines } = await this.truckLoad(this.prisma, caller.facilityId, passId);
+    checkTruckRequest(lines, body);
+    const solo = await this.authorizeTruck(caller, lines, body);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.prisma.$transaction((tx) => this.runTruck(tx, caller, passId, body, solo), {
+          timeout: 60_000,
+          maxWait: 10_000,
+        });
+      } catch (e) {
+        if (attempt < 1 && isDeadlock(e)) continue;
+        throw e;
+      }
+    }
+  }
+
+  /** A truck inside the gate and what is on it: the gate's own reading (open-load.ts). */
+  private async truckLoad(db: PrismaClient | Prisma.TransactionClient, facilityId: string, passId: string) {
+    const pass = await db.gatePass.findFirst({
+      where: { id: passId, facilityId },
+      select: { id: true, passNumber: true, vehicleNumber: true, status: true },
+    });
+    if (!pass) throw Errors.GATE_PASS_NOT_FOUND();
+    if (pass.status !== 'ARRIVED' && pass.status !== 'WEIGHING') {
+      throw Errors.GATE_PASS_INVALID_STATE('This truck is no longer inside the gate');
+    }
+    const lines = (await openLoads(db, facilityId, [pass.vehicleNumber])).get(normalizePlate(pass.vehicleNumber)) ?? [];
+    return { pass, lines };
+  }
+
+  /** The truck's version of authorize(): the manager keys, or the solo door for every line and every payment. */
+  private async authorizeTruck(caller: CheckoutCaller, lines: OpenLoadLine[], body: TruckDispatchRequestType) {
+    const need = ['outbound.finalize', 'invoices.manage'];
+    if (body.payments.some((p) => p.mode !== 'CREDIT')) need.push('payments.record');
+    const missing = need.find((key) => !caller.permissions.has(key));
+    if (!missing) return false;
+
+    const refuse = (reason: string): never => {
+      if (caller.permissions.has('outbound.finalize')) throw Errors.FORBIDDEN(`Missing permission: ${missing}`);
+      throw Errors.DISPATCH_NEEDS_MANAGER(reason);
+    };
+    const approved = new Set<string>();
+    for (const l of lines.filter((x) => x.status === 'WEIGHED')) {
+      const verdict = await this.soloVerdict(
+        this.prisma,
+        caller.facilityId,
+        { bookType: l.lot.bookType, billingPartyId: l.lot.billingParty.id },
+        l.outboundDate,
+      );
+      if (!verdict.allowed) return refuse(`${dnOf(l)}: ${verdict.reason}`);
+      if (verdict.creditApproved) approved.add(l.lot.billingParty.id);
+    }
+    if (body.lines.some((l) => (l.skip_service_charge_ids ?? []).length > 0)) {
+      return refuse('leaving a charge off the bill is a manager decision');
+    }
+    for (const p of body.payments) {
+      if (p.mode === 'CREDIT') {
+        if (!approved.has(p.billing_party_id)) return refuse('a party on this truck has no standing credit approval');
+      } else if (p.mode !== 'CASH') {
+        return refuse('only cash or approved credit can be taken without a manager');
+      }
+    }
+    return true;
+  }
+
+  private async runTruck(
+    tx: Prisma.TransactionClient,
+    caller: CheckoutCaller,
+    passId: string,
+    body: TruckDispatchRequestType,
+    solo: boolean,
+  ) {
+    const { facilityId, userId, role } = caller;
+    // The truck first (gate_passes → outbound_events → lots), so the gate cannot release it mid-checkout;
+    // then its lines and their lots; only then the load again, now that nothing on it can move — a line
+    // checked out on its own meanwhile, or this truck sent twice, shows up here as what it is.
+    if (!(await lockRow(tx, 'gate_passes', passId, facilityId))) throw Errors.GATE_PASS_NOT_FOUND();
+    await this.lockLoad(tx, facilityId, body.lines.map((l) => l.outbound_id));
+    checkTruckRequest((await this.truckLoad(tx, facilityId, passId)).lines, body);
+    // Solo credit: each party's credit lock, in party order, before any of its bills post.
+    const creditParties = solo
+      ? [...new Set(body.payments.filter((p) => p.mode === 'CREDIT').map((p) => p.billing_party_id))].sort()
+      : [];
+    for (const partyId of creditParties) await advisoryXactLock(tx, `${facilityId}:party-credit:${partyId}`);
+
+    const done = [];
+    for (const line of [...body.lines].sort((a, b) => a.outbound_id.localeCompare(b.outbound_id))) {
+      done.push(
+        await this.dispatchLine(
+          tx,
+          caller,
+          {
+            outboundId: line.outbound_id,
+            expectedTotal: line.expected_total_pkr,
+            skipIds: line.skip_service_charge_ids,
+            pickedFrom: line.picked_from?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
+            notes: body.notes,
+          },
+          { nameLine: true },
+        ),
+      );
+    }
+    // Every bill is in the ledger: each solo credit party must still sit under its ceiling with all of them.
+    for (const partyId of creditParties) {
+      const cover = await standingCreditCover(tx, facilityId, [{ partyId }]);
+      if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('these bills would take a party past its approved credit');
+    }
+
+    const payments = [];
+    for (const p of body.payments) {
+      if (p.mode === 'CREDIT') continue;
+      const bills = done.filter((d) => d.billingPartyId === p.billing_party_id && d.bookType === p.book_type);
+      const amount = sumMoney(bills.map((b) => b.total));
+      if (amount <= 0.005) continue;
+      const recorded = await this.payments.recordInTransaction(tx, {
+        facilityId,
+        createdBy: userId,
+        role,
+        partyId: p.billing_party_id,
+        paymentDate: businessDate(),
+        amountPkr: amount,
+        paymentMethod: p.mode,
+        referenceNumber: p.reference_number,
+        chequeDate: p.cheque_date,
+        allocations: bills.map((b) => ({ target: 'INVOICE' as const, invoice_id: b.invoiceId, allocated_amount_pkr: b.total })),
+      });
+      payments.push({
+        id: recorded.id,
+        receipt_number: recorded.receipt_number ?? null,
+        billing_party_id: p.billing_party_id,
+        book_type: p.book_type,
+        amount_pkr: amount,
+      });
+    }
+    return { gate_pass_id: passId, lines: done.map((d) => ({ outbound: d.outbound, invoice: d.invoice })), payments };
   }
 
   /**
@@ -305,29 +549,102 @@ export class DispatchCheckoutService {
   ) {
     const { facilityId, userId, role } = caller;
 
-    const { outbound, invoiceId } = await this.outbound.finalizeInTransaction(
-      tx,
-      facilityId,
-      id,
-      body.notes,
-      body.picked_from?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
-      userId,
-    );
+    const locked = (await this.lockLoad(tx, facilityId, [id])).get(id);
+    if (!locked) throw Errors.OUTBOUND_NOT_FOUND();
     // Two solo credit dispatches for one party must not both pass the ceiling: take the party's
     // credit lock now (after the outbound/lot locks, the order everything else uses) so the second
     // one sees the first one's bill in the ledger. (The document-number locks taken further down
     // happen to serialise two checkouts too, so the race test passes without this lock; it is here
     // so the ceiling does not depend on that.)
-    if (solo && body.payment.mode === 'CREDIT') {
-      const bill = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { billingPartyId: true } });
-      await advisoryXactLock(tx, `${facilityId}:party-credit:${bill.billingPartyId}`);
+    const soloCredit = solo && body.payment.mode === 'CREDIT';
+    if (soloCredit) await advisoryXactLock(tx, `${facilityId}:party-credit:${locked.billingPartyId}`);
+
+    const done = await this.dispatchLine(tx, caller, {
+      outboundId: id,
+      expectedTotal: body.expected_total_pkr,
+      skipIds: body.skip_service_charge_ids,
+      pickedFrom: body.picked_from?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
+      notes: body.notes,
+    });
+
+    // The bill is in the ledger now, so the party's exposure includes it: it must still sit under the ceiling.
+    if (soloCredit) {
+      const cover = await standingCreditCover(tx, facilityId, [{ partyId: done.billingPartyId }]);
+      if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('this bill would take the party past its approved credit');
     }
 
-    const ob = await tx.outboundEvent.findUniqueOrThrow({
-      where: { id },
-      select: { quantityWithdrawnBags: true, outboundWeightKg: true },
+    let payment: { id: string; receipt_number: string | null } | null = null;
+    if (body.payment.mode !== 'CREDIT' && done.total > 0.005) {
+      const recorded = await this.payments.recordInTransaction(tx, {
+        facilityId,
+        createdBy: userId,
+        role,
+        partyId: done.billingPartyId,
+        paymentDate: businessDate(),
+        amountPkr: done.total,
+        paymentMethod: body.payment.mode,
+        referenceNumber: body.payment.reference_number,
+        chequeDate: body.payment.cheque_date,
+        allocations: [{ target: 'INVOICE', invoice_id: done.invoiceId, allocated_amount_pkr: done.total }],
+      });
+      payment = { id: recorded.id, receipt_number: recorded.receipt_number ?? null };
+    }
+
+    return { outbound: done.outbound, invoice: done.invoice, payment };
+  }
+
+  /**
+   * Lock a checkout's withdrawals, then the lots they draw on — each set in id order, so two
+   * checkouts that share lots (two trucks each taking part of the same lots) queue instead of
+   * deadlocking. The per-line steps lock the same rows again, which a transaction already holding
+   * them passes straight through. Lock order everywhere: gate_passes → outbound_events → lots.
+   */
+  private async lockLoad(
+    tx: Prisma.TransactionClient,
+    facilityId: string,
+    outboundIds: string[],
+  ): Promise<Map<string, { lotId: string; billingPartyId: string; bookType: BookType }>> {
+    for (const id of [...outboundIds].sort()) {
+      if (!(await lockRow(tx, 'outbound_events', id, facilityId))) throw Errors.OUTBOUND_NOT_FOUND();
+    }
+    const rows = await tx.outboundEvent.findMany({
+      where: { facilityId, id: { in: outboundIds } },
+      select: { id: true, lotId: true, lot: { select: { billingPartyId: true, bookType: true } } },
     });
-    const skip = new Set(body.skip_service_charge_ids ?? []);
+    for (const lotId of [...new Set(rows.map((r) => r.lotId))].sort()) {
+      if (!(await lockRow(tx, 'lots', lotId, facilityId))) throw Errors.LOT_NOT_FOUND();
+    }
+    return new Map(
+      rows.map((r) => [r.id, { lotId: r.lotId, billingPartyId: r.lot.billingPartyId, bookType: r.lot.bookType }]),
+    );
+  }
+
+  /**
+   * One withdrawal of a checkout: dispatch it (the lot moves), give its bill the default service
+   * charges, check its total is the one reviewed, and finalize the bill (JE-01). Credit and money
+   * are the caller's: a truck settles each party once, over all of its bills. `nameLine` puts the
+   * dispatch note in a changed-total refusal, for a truck of several lines.
+   */
+  private async dispatchLine(
+    tx: Prisma.TransactionClient,
+    caller: CheckoutCaller,
+    line: CheckoutLine,
+    opts: { nameLine?: boolean } = {},
+  ) {
+    const { facilityId, userId } = caller;
+    const { outbound, invoiceId } = await this.outbound.finalizeInTransaction(
+      tx,
+      facilityId,
+      line.outboundId,
+      line.notes,
+      line.pickedFrom,
+      userId,
+    );
+    const ob = await tx.outboundEvent.findUniqueOrThrow({
+      where: { id: line.outboundId },
+      select: { quantityWithdrawnBags: true, outboundWeightKg: true, dispatchNoteNumber: true },
+    });
+    const skip = new Set(line.skipIds ?? []);
     const lines = (
       await this.defaultServiceLines(tx, facilityId, {
         bags: ob.quantityWithdrawnBags,
@@ -340,38 +657,28 @@ export class DispatchCheckoutService {
         : Number((await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { totalPkr: true } })).totalPkr);
 
     // What was reviewed is what posts.
-    if (Math.abs(total - body.expected_total_pkr) > 0.005) {
-      throw Errors.DISPATCH_TOTAL_CHANGED(body.expected_total_pkr, total);
+    if (Math.abs(total - line.expectedTotal) > 0.005) {
+      throw Errors.DISPATCH_TOTAL_CHANGED(
+        line.expectedTotal,
+        total,
+        opts.nameLine ? (ob.dispatchNoteNumber ?? undefined) : undefined,
+      );
     }
 
     const invoice = await this.invoices.finalizeInTransaction(tx, facilityId, invoiceId, userId, {});
-
-    // The bill is in the ledger now, so the party's exposure includes it: it must still sit under the ceiling.
-    if (solo && body.payment.mode === 'CREDIT') {
-      const bill = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { billingPartyId: true } });
-      const cover = await standingCreditCover(tx, facilityId, [{ partyId: bill.billingPartyId }]);
-      if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('this bill would take the party past its approved credit');
-    }
-
-    let payment: { id: string; receipt_number: string | null } | null = null;
-    if (body.payment.mode !== 'CREDIT' && total > 0.005) {
-      const inv = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId }, select: { billingPartyId: true } });
-      const recorded = await this.payments.recordInTransaction(tx, {
-        facilityId,
-        createdBy: userId,
-        role,
-        partyId: inv.billingPartyId,
-        paymentDate: businessDate(),
-        amountPkr: total,
-        paymentMethod: body.payment.mode,
-        referenceNumber: body.payment.reference_number,
-        chequeDate: body.payment.cheque_date,
-        allocations: [{ target: 'INVOICE', invoice_id: invoiceId, allocated_amount_pkr: total }],
-      });
-      payment = { id: recorded.id, receipt_number: recorded.receipt_number ?? null };
-    }
-
-    return { outbound, invoice, payment };
+    const bill = await tx.invoice.findUniqueOrThrow({
+      where: { id: invoiceId },
+      select: { billingPartyId: true, bookType: true },
+    });
+    return {
+      outbound,
+      invoice,
+      invoiceId,
+      total,
+      billingPartyId: bill.billingPartyId,
+      bookType: bill.bookType,
+      dispatchNoteNumber: ob.dispatchNoteNumber,
+    };
   }
 
   /** The service charges marked apply_at_dispatch, priced for this withdrawal. */
@@ -398,6 +705,76 @@ export class DispatchCheckoutService {
       };
     });
   }
+}
+
+/** A line on a truck that is not weighed yet: the truck waits for it (no partial trucks). */
+const NOT_READY = new Set(['PENDING', 'DISPUTED']);
+
+const dnOf = (l: { dispatchNoteNumber: string | null; id: string }) => l.dispatchNoteNumber ?? l.id.slice(0, 8);
+
+function truckLine(l: OpenLoadLine) {
+  return {
+    outbound_id: l.id,
+    dispatch_note_number: l.dispatchNoteNumber,
+    status: l.status,
+    stage: stageOf({ status: l.status, gatePassId: null, invoice: l.invoice }),
+    lot_id: l.lot.id,
+    lot_number: l.lot.lotNumber,
+    marka: l.lot.marka,
+    book_type: l.lot.bookType,
+    billing_party: l.lot.billingParty,
+    owner_party_name: l.ownerPartySnapshot?.name ?? null,
+    quantity_withdrawn_bags: l.quantityWithdrawnBags,
+    outbound_weight_kg: l.outboundWeightKg == null ? null : Number(l.outboundWeightKg),
+    invoice: l.invoice && {
+      id: l.invoice.id,
+      invoice_number: l.invoice.invoiceNumber,
+      status: l.invoice.status,
+      total_pkr: Number(l.invoice.totalPkr),
+      balance_due_pkr: round2(Number(l.invoice.totalPkr) - Number(l.invoice.amountPaidPkr)),
+    },
+  };
+}
+
+/** A truck's bills by who pays and on which book: one payment row, and one receipt, per group. */
+function groupBills(bills: { outbound_id: string; billing_party: { id: string; name: string }; book_type: string; total_pkr: number }[]) {
+  const groups = new Map<string, { billing_party: { id: string; name: string }; book_type: string; outbound_ids: string[]; total_pkr: number }>();
+  for (const b of bills) {
+    const key = `${b.billing_party.id}:${b.book_type}`;
+    const g = groups.get(key) ?? { billing_party: b.billing_party, book_type: b.book_type, outbound_ids: [], total_pkr: 0 };
+    g.outbound_ids.push(b.outbound_id);
+    g.total_pkr = round2(g.total_pkr + b.total_pkr);
+    groups.set(key, g);
+  }
+  return [...groups.values()];
+}
+
+/** The request covers exactly the truck's weighed lines, with one payment row per (party, book) among them. */
+function checkTruckRequest(lines: OpenLoadLine[], body: TruckDispatchRequestType) {
+  const onTruck = new Map(lines.map((l) => [l.id, l]));
+  const asked = new Set(body.lines.map((l) => l.outbound_id));
+  // Sent again after it went (a retry, or the second of two at once): everything asked for is
+  // already dispatched. The desk treats that as done and offers the slip.
+  if (asked.size > 0 && [...asked].every((id) => onTruck.get(id)?.status === 'DISPATCHED')) {
+    throw Errors.OUTBOUND_ALREADY_FINALIZED('This truck was already checked out');
+  }
+
+  const notReady = lines.filter((l) => NOT_READY.has(l.status));
+  if (notReady.length > 0) throw Errors.TRUCK_NOT_READY(notReady.map(dnOf));
+
+  const weighed = new Map(lines.filter((l) => l.status === 'WEIGHED').map((l) => [l.id, l]));
+  const missing = [...weighed.values()].filter((l) => !asked.has(l.id)).map(dnOf);
+  // A line asked for that is no longer weighed on this truck, by its dispatch note while the truck still carries it.
+  const extra = [...asked].filter((id) => !weighed.has(id)).map((id) => (onTruck.has(id) ? dnOf(onTruck.get(id)!) : id.slice(0, 8)));
+  if (missing.length > 0 || extra.length > 0 || asked.size !== body.lines.length) {
+    throw Errors.TRUCK_LOAD_CHANGED(missing, extra);
+  }
+
+  const needed = new Set([...weighed.values()].map((l) => `${l.lot.billingParty.id}:${l.lot.bookType}`));
+  const given = body.payments.map((p) => `${p.billing_party_id}:${p.book_type}`);
+  if (new Set(given).size !== given.length) throw Errors.TRUCK_PAYMENTS_MISMATCH('a party and book is paid twice');
+  if (given.some((k) => !needed.has(k))) throw Errors.TRUCK_PAYMENTS_MISMATCH('a payment row is for a party or book not on this truck');
+  if ([...needed].some((k) => !given.includes(k))) throw Errors.TRUCK_PAYMENTS_MISMATCH('a party on this truck has no payment row');
 }
 
 function isDeadlock(e: unknown): boolean {

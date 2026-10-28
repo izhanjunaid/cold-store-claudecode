@@ -109,3 +109,45 @@ export const DispatchAndCollectRequest = z
     path: ['payment', 'cheque_date'],
   });
 export type DispatchAndCollectRequestType = z.infer<typeof DispatchAndCollectRequest>;
+
+/** Most lines one truck checkout takes (the original D3 design: about 20). */
+export const TRUCK_MAX_LINES = 20;
+
+/**
+ * POST /v1/dispatch/trucks/:passId/dispatch-and-collect — check out every weighed withdrawal on a
+ * truck in one transaction: each line its own bill (the total it showed is what posts), and one
+ * payment row per (billing party, book) on the truck. The line cap is checked by the service so
+ * the refusal is TRUCK_TOO_MANY_LINES, not a bare validation error.
+ */
+export const TruckDispatchRequest = z.object({
+  lines: z
+    .array(
+      z.object({
+        outbound_id: z.string().uuid(),
+        expected_total_pkr: z.number().nonnegative(),
+        picked_from: z
+          .array(z.object({ rack_id: z.string().uuid(), bags: z.number().int().positive() }))
+          .optional(),
+        skip_service_charge_ids: z.array(z.string().uuid()).optional(),
+      }),
+    )
+    .min(1),
+  payments: z
+    .array(
+      z
+        .object({
+          billing_party_id: z.string().uuid(),
+          book_type: z.enum(['PACCI', 'KATCHI']),
+          mode: DispatchPaymentMode,
+          reference_number: z.string().trim().max(100).optional(),
+          cheque_date: dateOnly.optional(),
+        })
+        .refine((p) => p.mode !== 'CHEQUE' || !!p.cheque_date, {
+          message: 'A cheque needs its date',
+          path: ['cheque_date'],
+        }),
+    )
+    .min(1),
+  notes: z.string().optional(),
+});
+export type TruckDispatchRequestType = z.infer<typeof TruckDispatchRequest>;

@@ -49,6 +49,8 @@ interface GatePass {
     cheque_pending: boolean;
     marka: string | null;
     owner_party_name: string | null;
+    /** Each withdrawal on the truck: a truck may carry several owners' lots, each with its own marka. */
+    withdrawals?: { dispatch_note_number: string | null; marka: string | null; owner_party_name: string | null }[];
     /** READY on a standing credit approval rather than payment. A flag only: no amount or ceiling. */
     on_credit?: boolean;
   };
@@ -290,11 +292,24 @@ export default function GatePassConsolePage() {
                 <li key={p.id} className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50/50 p-3">
                   <div className="flex-1">
                     <span className="font-mono text-lg font-bold">{p.vehicle_number}</span>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {p.release!.owner_party_name ?? '—'}
-                      {p.release!.marka && <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 font-semibold">Marka: {p.release!.marka}</span>}
-                      <span className="ml-2">{p.release!.dispatch_notes.join(', ')}</span>
-                    </div>
+                    {p.release!.withdrawals?.length ? (
+                      // One line per withdrawal: the guard matches each owner's bags by their marka.
+                      <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
+                        {p.release!.withdrawals.map((w, i) => (
+                          <li key={w.dispatch_note_number ?? i}>
+                            <span className="font-mono">{w.dispatch_note_number ?? '—'}</span>
+                            {w.marka && <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 font-semibold">Marka: {w.marka}</span>}
+                            <span className="ml-2">{w.owner_party_name ?? '—'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        {p.release!.owner_party_name ?? '—'}
+                        {p.release!.marka && <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 font-semibold">Marka: {p.release!.marka}</span>}
+                        <span className="ml-2">{p.release!.dispatch_notes.join(', ')}</span>
+                      </div>
+                    )}
                   </div>
                   <Button size="sm" className="h-10 px-5" onClick={() => openOutward(p)}>
                     Release

@@ -347,6 +347,26 @@ describe('Ready to leave', () => {
     expect(within(card).queryByText('LHR-8888')).not.toBeInTheDocument();
   });
 
+  it('a truck carrying several owners\' lots lists each withdrawal with its own marka and owner', async () => {
+    listWith({
+      ...READY,
+      release: {
+        ...READY.release,
+        dispatch_notes: ['DN-260101-0009', 'DN-260101-0011'],
+        withdrawals: [
+          { dispatch_note_number: 'DN-260101-0009', marka: 'AH', owner_party_name: 'Haji Sahib' },
+          { dispatch_note_number: 'DN-260101-0011', marka: 'BF', owner_party_name: 'Bashir' },
+        ],
+      },
+    });
+    render(<GatePassConsolePage />);
+    const card = (await screen.findByText('Ready to leave')).closest('div[class*="border-green"]') as HTMLElement;
+    expect(within(card).getByText(/Marka: AH/)).toBeInTheDocument();
+    expect(within(card).getByText(/Marka: BF/)).toBeInTheDocument();
+    expect(within(card).getByText(/Bashir/)).toBeInTheDocument();
+    expect(within(card).getByText(/DN-260101-0011/)).toBeInTheDocument();
+  });
+
   it('tells the guard why a truck cannot leave yet', async () => {
     listWith(READY, OWES);
     render(<GatePassConsolePage />);

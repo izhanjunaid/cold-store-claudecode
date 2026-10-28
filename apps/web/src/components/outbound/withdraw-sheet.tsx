@@ -12,6 +12,8 @@ export interface WithdrawSheetProps {
   lotNumber?: string;
   /** Trucks inside, offered as one-tap plates in the form. */
   plateSuggestions?: string[];
+  /** Book onto this truck: the plate is filled in and fixed. */
+  fixedPlate?: string;
   /** Called after booking instead of opening the withdrawal's page (the dispatch desk stays put). */
   onBooked?: (outboundId: string) => void;
 }
@@ -25,7 +27,7 @@ export interface WithdrawSheetProps {
  * After booking it goes to the withdrawal's page: weighing still happens there
  * until the dispatch desk replaces that step.
  */
-export function WithdrawSheet({ open, onOpenChange, lotId, lotNumber, plateSuggestions, onBooked }: WithdrawSheetProps) {
+export function WithdrawSheet({ open, onOpenChange, lotId, lotNumber, plateSuggestions, fixedPlate, onBooked }: WithdrawSheetProps) {
   const router = useRouter();
 
   return (
@@ -41,6 +43,7 @@ export function WithdrawSheet({ open, onOpenChange, lotId, lotNumber, plateSugge
             lotId={lotId}
             variant="sheet"
             plateSuggestions={plateSuggestions}
+            fixedPlate={fixedPlate}
             onCreated={(id) => {
               onOpenChange(false);
               if (onBooked) onBooked(id);

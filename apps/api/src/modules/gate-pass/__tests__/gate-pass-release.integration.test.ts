@@ -11,6 +11,7 @@ import { withGuardsDisabled } from '../../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
 import type { FastifyInstance } from 'fastify';
+import { openLoads } from '../open-load';
 
 vi.mock('../../pdf/pdf.service', () => ({
   renderStorageReceipt: vi.fn().mockResolvedValue(Buffer.from('%PDF-1.4 mock\n')),
@@ -525,6 +526,7 @@ describe('release preview on the active list (what the gate console shows before
       cheque_pending: boolean;
       marka: string | null;
       owner_party_name: string | null;
+      withdrawals?: Record<string, unknown>[];
     };
   };
 
@@ -580,7 +582,9 @@ describe('release preview on the active list (what the gate console shows before
     const r = await activeRelease(pass);
     expect(r.state).toBe('READY');
     expect(r.owner_party_name).toBeTruthy();
-    expect(Object.keys(r).sort()).toEqual(['cheque_pending', 'dispatch_notes', 'marka', 'outstanding_pkr', 'owner_party_name', 'state']);
+    expect(Object.keys(r).sort()).toEqual(['cheque_pending', 'dispatch_notes', 'marka', 'outstanding_pkr', 'owner_party_name', 'state', 'withdrawals']);
+    // Each withdrawal is named as the receipt names it — dispatch note, marka, owner — never with a count.
+    for (const w of r.withdrawals ?? []) expect(Object.keys(w).sort()).toEqual(['dispatch_note_number', 'marka', 'owner_party_name']);
     expect(r.outstanding_pkr).toBeNull(); // the key stays (as null) so the page renders "not shown"
     // Nothing in the whole payload names the 20 bags that were dispatched.
     const res = await app.inject({ method: 'GET', url: '/v1/gate-passes?active=true', headers: authHeaders(securityToken) });
@@ -603,5 +607,64 @@ describe('release preview on the active list (what the gate console shows before
     expect((await activeRelease(next)).state).toBe('NO_BOOKING');
     const byId = await app.inject({ method: 'GET', url: `/v1/gate-passes/${next}`, headers: authHeaders(securityToken) });
     expect(data(byId)).not.toHaveProperty('release');
+  });
+});
+
+// One reading of what is on a truck, shared by the gate's Ready-to-leave preview and the dispatch desk.
+describe('the open load on a truck (openLoads)', () => {
+  const book = async (quantity: number, plate: string) => {
+    const lotId = await createLot(quantity);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(operatorToken),
+      payload: { lot_id: lotId, withdrawal_type: 'FULL', quantity_withdrawn_bags: quantity, outbound_date: '2026-09-01', vehicle_number: plate },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    return data<{ id: string }>(res).id;
+  };
+
+  it('holds what is booked or dispatched on the plate and has not left — however the plate was typed — and nothing else', async () => {
+    const sent = await dispatched(20, 'LHR-6950');
+    const booked = await book(15, 'lhr 6950');
+    // Dispatched before these rules (no finalized_at): it may have left untracked, so it is on no truck.
+    const legacy = await dispatched(10, 'LHR-6950');
+    await prisma.outboundEvent.update({ where: { id: legacy.id }, data: { finalizedAt: null } });
+    const otherTruck = await dispatched(12, 'LHR-6951');
+
+    const loads = await openLoads(prisma, TEST_FACILITY_ID, ['LHR 6950']);
+    expect([...loads.keys()]).toEqual(['LHR6950']);
+    const ids = loads.get('LHR6950')!.map((l) => l.id);
+    expect(ids.sort()).toEqual([sent.id, booked].sort());
+    expect(ids).not.toContain(legacy.id);
+    expect(ids).not.toContain(otherTruck.id);
+    // Each line carries what the desk and the gate read: its stage, party, book and bill.
+    const line = loads.get('LHR6950')!.find((l) => l.id === sent.id)!;
+    expect(line).toMatchObject({ status: 'DISPATCHED', quantityWithdrawnBags: 20, lot: { bookType: 'PACCI' } });
+    expect(line.lot.billingParty.id).toBe(partyId);
+    expect(line.invoice?.id).toBe(sent.invoiceId);
+  });
+
+  it('a line leaves the load when its truck leaves the gate, or when it is cancelled', async () => {
+    const ob = await dispatched(20, 'LHR-6960');
+    await pay(ob.invoiceId);
+    const cancelled = await book(5, 'LHR-6960');
+    const cancel = await app.inject({
+      method: 'POST',
+      url: `/v1/outbound-events/${cancelled}/cancel`,
+      headers: authHeaders(operatorToken),
+      payload: { reason: 'Party changed its mind' },
+    });
+    expect(cancel.statusCode, cancel.body).toBe(200);
+    expect((await openLoads(prisma, TEST_FACILITY_ID, ['LHR-6960'])).get('LHR6960')!.map((l) => l.id)).toEqual([ob.id]);
+
+    const pass = await arrive('LHR-6960');
+    expect((await release(pass, { declared_quantity: 20 })).statusCode).toBe(200);
+    expect((await openLoads(prisma, TEST_FACILITY_ID, ['LHR-6960'])).has('LHR6960')).toBe(false);
+  });
+
+  it('no plates asked, nothing read', async () => {
+    expect((await openLoads(prisma, TEST_FACILITY_ID, [])).size).toBe(0);
+    expect((await openLoads(prisma, TEST_FACILITY_ID, ['  -- '])).size).toBe(0);
   });
 });

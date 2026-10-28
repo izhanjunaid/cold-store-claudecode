@@ -50,11 +50,17 @@ vi.mock('@/components/dispatch/checkout-sheet', () => ({
   ),
 }));
 vi.mock('@/components/outbound/withdraw-sheet', () => ({
-  WithdrawSheet: ({ lotId, plateSuggestions }: { lotId: string; plateSuggestions?: string[] }) => (
-    <div data-testid="withdraw" data-lot={lotId} data-plates={(plateSuggestions ?? []).join(',')} />
+  WithdrawSheet: ({ lotId, plateSuggestions, fixedPlate }: { lotId: string; plateSuggestions?: string[]; fixedPlate?: string }) => (
+    <div data-testid="withdraw" data-lot={lotId} data-plates={(plateSuggestions ?? []).join(',')} data-fixed={fixedPlate ?? ''} />
   ),
 }));
-vi.mock('@/components/dispatch/dispatch-pdf', () => ({ openDispatchNotePdf: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('@/components/dispatch/truck-checkout-sheet', () => ({
+  TruckCheckoutSheet: ({ passId }: { passId: string }) => <div data-testid="truck-checkout" data-pass={passId} />,
+}));
+vi.mock('@/components/dispatch/dispatch-pdf', () => ({
+  openDispatchNotePdf: vi.fn().mockResolvedValue(undefined),
+  openLoadSlipPdf: vi.fn().mockResolvedValue(undefined),
+}));
 import { openDispatchNotePdf } from '@/components/dispatch/dispatch-pdf';
 vi.mock('@/components/billing/invoice-pdf', () => ({ openInvoicePdf: vi.fn().mockResolvedValue(undefined) }));
 
@@ -89,6 +95,18 @@ const ROWS = [
   row({ id: 'ob-left', dispatch_note_number: 'DN-LEFT', status: 'DISPATCHED', stage: 'LEFT', vehicle_number: 'LHR-4444' }),
 ];
 
+let trucks: any[] = [];
+const truck = (over: Record<string, unknown>) => ({
+  gate_pass_id: 'pass-1',
+  pass_number: 'GP-261027-0001',
+  vehicle_number: 'LHR-9999',
+  driver_name: null,
+  arrived_at: '2026-10-27T05:00:00.000Z',
+  ready: false,
+  lines: [],
+  ...over,
+});
+
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
@@ -105,10 +123,11 @@ beforeEach(() => {
   role = 'MANAGER';
   permissions = ['outbound.record', 'outbound.finalize', 'invoices.manage', 'payments.record'];
   userLoaded = true;
-  apiClient.mockResolvedValue({});
+  trucks = [];
+  apiClient.mockImplementation((path: string) => Promise.resolve(path === '/v1/dispatch/trucks' ? trucks : {}));
   apiClientList.mockImplementation((path: string) => {
     if (path.startsWith('/v1/outbound-events')) return Promise.resolve({ data: ROWS, meta: { total: ROWS.length, page: 1, per_page: 50 } });
-    if (path.startsWith('/v1/gate-passes')) return Promise.resolve({ data: [{ vehicle_number: 'LHR-9999' }, { vehicle_number: 'LHR-9999' }], meta: {} });
+
     if (path.startsWith('/v1/lots')) {
       return Promise.resolve({
         data: [{ id: 'lot-7', lot_number: 'LOT-7', owner_party_name: 'Bashir', marka: 'BF', commodity_name: 'POTATO', current_balance_bags: 120, status: 'ACTIVE' }],
@@ -139,7 +158,7 @@ describe('Dispatch Desk', () => {
     renderPage();
     await screen.findByText('DN-BOOKED');
     const call = apiClientList.mock.calls.map(([p]) => String(p)).find((p) => p.startsWith('/v1/outbound-events'))!;
-    expect(call).toContain('status=PENDING%2CWEIGHED%2CDISPATCHED');
+    expect(call).toContain('status=PENDING%2CWEIGHED%2CDISPUTED%2CDISPATCHED');
     expect(call).toMatch(/date_from=\d{4}-\d{2}-\d{2}/);
   });
 
@@ -175,7 +194,13 @@ describe('Dispatch Desk', () => {
     role = 'OPERATOR';
     permissions = ['outbound.record'];
     apiClient.mockImplementation((path: string) =>
-      Promise.resolve(path === '/v1/facilities/me' ? { id: 'f', name: 'F', settings: { dispatch_solo_mode: true } } : {}),
+      Promise.resolve(
+        path === '/v1/facilities/me'
+          ? { id: 'f', name: 'F', settings: { dispatch_solo_mode: true } }
+          : path === '/v1/dispatch/trucks'
+            ? []
+            : {},
+      ),
     );
     renderPage();
     const weighed = (await screen.findByText('DN-WEIGHED')).closest('tr') as HTMLElement;
@@ -213,13 +238,14 @@ describe('Dispatch Desk', () => {
   });
 
   it('finds a lot and opens the withdrawal drawer with the trucks inside as one-tap plates', async () => {
+    trucks = [truck({})];
     renderPage();
     fireEvent.change(await screen.findByLabelText('Find a lot'), { target: { value: 'LOT-7' } });
-    fireEvent.click(await screen.findByRole('button', { name: /LOT-7/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /LOT-7/ }, { timeout: 5000 })); // after the 250 ms debounce
     const drawer = await screen.findByTestId('withdraw');
     expect(drawer).toHaveAttribute('data-lot', 'lot-7');
-    // The same plate logged twice is offered once.
     expect(drawer).toHaveAttribute('data-plates', 'LHR-9999');
+    expect(drawer).toHaveAttribute('data-fixed', '');
   });
 
   it('the queue refreshes at once after a checkout, even while the dispatch note is still rendering', async () => {
@@ -250,5 +276,66 @@ describe('Dispatch Desk', () => {
     renderPage();
     expect(await screen.findByText(/don.t have permission/i)).toBeInTheDocument();
     expect(apiClientList).not.toHaveBeenCalled();
+  });
+});
+
+describe('Dispatch Desk — trucks with several lots', () => {
+  const TWO_LINES = [
+    { outbound_id: 'ob-weighed', dispatch_note_number: 'DN-WEIGHED', status: 'WEIGHED', stage: 'WEIGHED', lot_number: 'LOT-1', marka: null, billing_party: { id: 'p', name: 'Haji Sahib' }, quantity_withdrawn_bags: 40 },
+    { outbound_id: 'ob-second', dispatch_note_number: 'DN-SECOND', status: 'WEIGHED', stage: 'WEIGHED', lot_number: 'LOT-2', marka: 'AH', billing_party: { id: 'p', name: 'Haji Sahib' }, quantity_withdrawn_bags: 20 },
+  ];
+
+  it('shows each truck inside with its lots, and checks a ready truck out whole', async () => {
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: true, lines: TWO_LINES })];
+    renderPage();
+    const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
+    expect(within(card).getByText(/DN-SECOND/)).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: 'Check out truck' }));
+    expect(await screen.findByTestId('truck-checkout')).toHaveAttribute('data-pass', 'pass-1');
+  });
+
+  it('a lot on a truck of several is checked out with the truck, not on its own', async () => {
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: true, lines: TWO_LINES })];
+    renderPage();
+    const weighed = (await screen.findByText('DN-WEIGHED', { selector: 'td' })).closest('tr') as HTMLElement;
+    await waitFor(() => expect(within(weighed).getByText('Check out with the truck')).toBeInTheDocument());
+    expect(within(weighed).queryByRole('button', { name: /Dispatch & Collect/ })).not.toBeInTheDocument();
+  });
+
+  it('a truck with a lot still to weigh cannot be checked out yet', async () => {
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: false, lines: [TWO_LINES[0], { ...TWO_LINES[1], status: 'PENDING', stage: 'BOOKED' }] })];
+    renderPage();
+    const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
+    expect(within(card).getByRole('button', { name: 'Check out truck' })).toBeDisabled();
+  });
+
+  it('a truck held by a lot still to weigh says which, and each lot on the card opens its withdrawal', async () => {
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: false, lines: [TWO_LINES[0], { ...TWO_LINES[1], status: 'PENDING', stage: 'BOOKED' }] })];
+    renderPage();
+    const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
+    expect(within(card).getByText(/Weigh or cancel DN-SECOND first/)).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: 'DN-SECOND' }));
+    expect(push).toHaveBeenCalledWith('/outbound-events/ob-second');
+  });
+
+  it('a truck carrying more lots than one checkout takes: each keeps its own Dispatch & Collect', async () => {
+    const many = Array.from({ length: 21 }, (_, i) => ({ ...TWO_LINES[1], outbound_id: `ob-m${i}`, dispatch_note_number: `DN-M${i}` }));
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: true, lines: [TWO_LINES[0], ...many] })];
+    renderPage();
+    const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
+    expect(within(card).queryByRole('button', { name: 'Check out truck' })).not.toBeInTheDocument();
+    expect(within(card).getByText(/one by one/)).toBeInTheDocument();
+    const weighed = screen.getByText('DN-WEIGHED', { selector: 'td' }).closest('tr') as HTMLElement;
+    expect(within(weighed).getByRole('button', { name: /Dispatch & Collect/ })).toBeInTheDocument();
+  });
+
+  it('"Add a lot" books the next lot onto that truck: the drawer opens with its plate fixed', async () => {
+    trucks = [truck({ vehicle_number: 'LHR-2222', lines: [TWO_LINES[0]] })];
+    renderPage();
+    const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Add a lot' }));
+    fireEvent.change(screen.getByLabelText('Find a lot'), { target: { value: 'LOT-7' } });
+    fireEvent.click(await screen.findByRole('button', { name: /LOT-7/ }, { timeout: 5000 }));
+    expect(await screen.findByTestId('withdraw')).toHaveAttribute('data-fixed', 'LHR-2222');
   });
 });

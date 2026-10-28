@@ -93,8 +93,8 @@ export const Errors = {
     new AppError('ACCOUNT_LOCKED', 'Account is temporarily locked due to failed login attempts', 423),
   OUTBOUND_NOT_FOUND: () =>
     new AppError('OUTBOUND_NOT_FOUND', 'Outbound event does not exist', 404),
-  OUTBOUND_ALREADY_FINALIZED: () =>
-    new AppError('OUTBOUND_ALREADY_FINALIZED', 'Outbound event is already dispatched', 409),
+  OUTBOUND_ALREADY_FINALIZED: (message = 'Outbound event is already dispatched') =>
+    new AppError('OUTBOUND_ALREADY_FINALIZED', message, 409),
   OUTBOUND_WEIGHT_REQUIRED: () =>
     new AppError('OUTBOUND_WEIGHT_REQUIRED', 'Outbound weight must be recorded before finalizing', 422),
   OUTBOUND_OWNER_MISMATCH: () =>
@@ -123,13 +123,33 @@ export const Errors = {
     new AppError('DATE_IN_FUTURE', 'This date is after today; only a MANAGER or higher may enter a future date', 422, field),
   OUTBOUND_CANCELLED: () =>
     new AppError('OUTBOUND_CANCELLED', 'This withdrawal was cancelled', 409),
-  DISPATCH_TOTAL_CHANGED: (expected: number, actual: number) =>
+  // `dispatchNote` names the line on a truck of several; a one-withdrawal checkout leaves it out.
+  DISPATCH_TOTAL_CHANGED: (expected: number, actual: number, dispatchNote?: string) =>
     new AppError(
       'DISPATCH_TOTAL_CHANGED',
-      `The bill is now Rs ${actual.toFixed(2)}, not the Rs ${expected.toFixed(2)} shown — review it again before collecting`,
+      `${dispatchNote ? `${dispatchNote}: the bill` : 'The bill'} is now Rs ${actual.toFixed(2)}, not the Rs ${expected.toFixed(2)} shown — review it again before collecting`,
       409,
       'expected_total_pkr',
     ),
+  // Whole-truck checkout (C2).
+  TRUCK_NOT_READY: (dispatchNotes: string[]) =>
+    new AppError(
+      'TRUCK_NOT_READY',
+      `Not everything on this truck is weighed: ${dispatchNotes.join(', ')} — weigh or cancel it first`,
+      409,
+    ),
+  TRUCK_LOAD_CHANGED: (missing: string[], extra: string[]) =>
+    new AppError(
+      'TRUCK_LOAD_CHANGED',
+      `The truck's load changed since it was reviewed${missing.length ? ` — not in the review: ${missing.join(', ')}` : ''}${
+        extra.length ? ` — no longer on this truck: ${extra.join(', ')}` : ''
+      } — review it again`,
+      409,
+    ),
+  TRUCK_TOO_MANY_LINES: (max: number) =>
+    new AppError('TRUCK_TOO_MANY_LINES', `One truck checkout takes at most ${max} lines`, 422, 'lines'),
+  TRUCK_PAYMENTS_MISMATCH: (detail: string) =>
+    new AppError('TRUCK_PAYMENTS_MISMATCH', `One payment row is needed for each party and book on the truck: ${detail}`, 422, 'payments'),
   // Solo dispatch (C1b): the checkout is a manager's job unless the owner has let the munshi finish a clean truck alone.
   DISPATCH_NEEDS_MANAGER: (reason: string) =>
     new AppError('DISPATCH_NEEDS_MANAGER', `A manager must finish this truck: ${reason}`, 403),

@@ -484,6 +484,8 @@ export interface GatePassReceiptData {
   status: string;
   relatedLotNumber: string | null;
   relatedDispatchNoteNumber: string | null;
+  /** Every withdrawal the truck carried (a truck may carry several lots). */
+  withdrawals?: { dispatch_note_number: string | null; marka: string | null; owner_party_name: string | null }[];
   commodityName?: string | null;
   marka?: string | null;
   unitLabel?: string | null;
@@ -523,6 +525,51 @@ export function renderGatePassReceiptHtml(data: GatePassReceiptData): string {
 
 export async function renderGatePassReceipt(data: GatePassReceiptData): Promise<Buffer> {
   return htmlToA5Pdf(renderGatePassReceiptHtml(data));
+}
+
+/** The driver's load slip for a truck (fast-dispatch C2): lots, bills, receipts and credit. Never the guard's. */
+export interface LoadSlipData {
+  facilityName: string;
+  facilityCity: string;
+  passNumber: string;
+  vehicleNumber: string;
+  driverName: string | null;
+  arrivedAt: string;
+  printedAt: string;
+  printedBy: string;
+  left: boolean;
+  lines: {
+    dispatchNoteNumber: string;
+    lotNumber: string;
+    marka: string | null;
+    commodityName: string | null;
+    ownerName: string | null;
+    billingPartyName: string;
+    bags: number;
+    status: string;
+    invoiceNumber: string | null;
+    totalPkr: number | null;
+    paidPkr: number | null;
+  }[];
+  receipts: { receiptNumber: string; mode: string; partyName: string; collectedBy: string; amountPkr: number }[];
+  credit: { partyName: string; amountPkr: number; authorizedBy: string; standing: boolean }[];
+  totalBags: number;
+  totalBilledPkr: number;
+  totalReceivedPkr: number;
+  totalCreditPkr: number;
+}
+
+let _loadSlipTemplate: HandlebarsTemplateDelegate | null = null;
+
+export function renderLoadSlipHtml(data: LoadSlipData, numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE): string {
+  if (!_loadSlipTemplate) {
+    _loadSlipTemplate = Handlebars.compile(readFileSync(join(__dirname, 'templates', 'load-slip.html'), 'utf-8'));
+  }
+  return _loadSlipTemplate({ ...data, numberLocale });
+}
+
+export async function renderLoadSlip(data: LoadSlipData, numberLocale: PdfNumberLocale = DEFAULT_PDF_LOCALE): Promise<Buffer> {
+  return htmlToA5Pdf(renderLoadSlipHtml(data, numberLocale));
 }
 
 // ============================================================================

@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Search, Truck } from 'lucide-react';
-import { addDays, localIsoDate } from '@coldchain/shared';
+import { addDays, localIsoDate, normalizePlate } from '@coldchain/shared';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
@@ -24,7 +24,9 @@ import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
 import { CancelWithdrawalDialog } from '@/components/outbound/cancel-withdrawal-dialog';
 import { CashTodayCard } from '@/components/dispatch/cash-today-card';
 import { CheckoutSheet, type CheckoutResult } from '@/components/dispatch/checkout-sheet';
-import { openDispatchNotePdf } from '@/components/dispatch/dispatch-pdf';
+import { TruckCheckoutSheet, type TruckResult } from '@/components/dispatch/truck-checkout-sheet';
+import { TrucksPanel, checkedOutWhole, type TruckInside } from '@/components/dispatch/trucks-panel';
+import { openDispatchNotePdf, openLoadSlipPdf } from '@/components/dispatch/dispatch-pdf';
 import { openInvoicePdf } from '@/components/billing/invoice-pdf';
 
 type Stage = 'BOOKED' | 'WEIGHED' | 'DISPATCHED' | 'PAID' | 'LEFT' | 'CANCELLED';
@@ -51,10 +53,6 @@ interface LotHit {
   commodity_name: string | null;
   current_balance_bags: number;
   status: string;
-}
-
-interface GatePassLite {
-  vehicle_number: string;
 }
 
 const STAGE_LABEL: Record<Stage, { text: string; tone: 'info' | 'warning' | 'danger' | 'success' | 'muted' }> = {
@@ -84,7 +82,11 @@ export default function DispatchDeskPage() {
   const [debounced, setDebounced] = useState('');
   const [bookLot, setBookLot] = useState<LotHit | null>(null);
   const [checkoutId, setCheckoutId] = useState<string | null>(null);
+  const [truckCheckoutId, setTruckCheckoutId] = useState<string | null>(null);
   const [cancelId, setCancelId] = useState<string | null>(null);
+  // "Add a lot" on a truck card: the next lot found is booked onto that truck's plate.
+  const [addTo, setAddTo] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 250);
@@ -99,23 +101,21 @@ export default function DispatchDeskPage() {
     enabled: canQuery && debounced.length >= 2,
   });
 
-  // Trucks inside: their plates are one tap away when booking, so the gate matches them exactly.
-  const { data: inside = [] } = useQuery({
-    queryKey: ['dispatch', 'trucks-inside'],
-    queryFn: async () => {
-      try {
-        return (await apiClientList<GatePassLite>('/v1/gate-passes?active=true&page_size=50')).data;
-      } catch {
-        return []; // not everyone who books holds the gate permission
-      }
-    },
+  // Trucks inside, each with what is booked onto it (the gate's own reading of a truck's load).
+  // Their plates are one tap away when booking, so the gate matches them exactly.
+  const { data: trucks = [] } = useQuery({
+    queryKey: ['dispatch', 'trucks'],
+    queryFn: () => apiClient<TruckInside[]>('/v1/dispatch/trucks'),
     enabled: canQuery,
     refetchInterval: 15_000,
   });
-  const plates = [...new Set(inside.map((p) => p.vehicle_number))];
+  const plates = [...new Set(trucks.map((t) => t.vehicle_number))];
+  // A lot on a truck carrying several is checked out with that truck, not on its own (unless the
+  // truck carries more than one checkout takes).
+  const multiLotPlates = new Set(trucks.filter(checkedOutWhole).map((t) => normalizePlate(t.vehicle_number)));
 
   const params = {
-    status: 'PENDING,WEIGHED,DISPATCHED',
+    status: 'PENDING,WEIGHED,DISPUTED,DISPATCHED',
     date_from: addDays(localIsoDate(), -2),
     page_size: 50,
   };
@@ -128,7 +128,27 @@ export default function DispatchDeskPage() {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: qk.outbound.lists });
     queryClient.invalidateQueries({ queryKey: qk.outbound.day }); // cash may have just been taken
+    queryClient.invalidateQueries({ queryKey: ['dispatch', 'trucks'] });
   };
+
+  async function afterTruckCheckout(result: TruckResult) {
+    refresh();
+    const receipts = result.payments.map((p) => p.receipt_number).filter(Boolean);
+    if (receipts.length > 0) toast.message(`Receipt${receipts.length > 1 ? 's' : ''} ${receipts.join(', ')}`);
+    try {
+      await openLoadSlipPdf(result.gate_pass_id);
+    } catch {
+      /* the truck card's Load slip button is the fallback */
+    }
+  }
+
+  async function printSlip(passId: string) {
+    try {
+      await openLoadSlipPdf(passId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not load the load slip');
+    }
+  }
 
   async function afterCheckout(result: CheckoutResult) {
     // The queue first: rendering the note can take minutes and must not hold the row on "Weighed".
@@ -159,9 +179,18 @@ export default function DispatchDeskPage() {
           <CardTitle className="text-base">New withdrawal</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          {addTo && (
+            <p className="flex max-w-xl items-center gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+              Booking onto truck <span className="font-mono font-semibold">{addTo}</span> — find the lot.
+              <Button size="sm" variant="ghost" className="ml-auto h-6" onClick={() => setAddTo(null)}>
+                Any truck
+              </Button>
+            </p>
+          )}
           <div className="relative max-w-xl">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
             <Input
+              ref={searchRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Lot #, marka, party or vehicle…"
@@ -195,6 +224,18 @@ export default function DispatchDeskPage() {
         </CardContent>
       </Card>
 
+      <TrucksPanel
+        trucks={trucks}
+        canDispatch={canDispatch}
+        onAddLot={(plate) => {
+          setAddTo(plate);
+          searchRef.current?.focus();
+        }}
+        onCheckout={setTruckCheckoutId}
+        onSlip={printSlip}
+        onOpen={(id) => router.push(`/outbound-events/${id}`)}
+      />
+
       {canQuery && <CashTodayCard />}
 
       <Card>
@@ -224,6 +265,7 @@ export default function DispatchDeskPage() {
                     key={row.id}
                     row={row}
                     canDispatch={canDispatch}
+                    withTruck={!!row.vehicle_number && multiLotPlates.has(normalizePlate(row.vehicle_number))}
                     onChanged={refresh}
                     onCollect={() => setCheckoutId(row.id)}
                     onOpen={() => router.push(`/outbound-events/${row.id}`)}
@@ -243,11 +285,21 @@ export default function DispatchDeskPage() {
           lotId={bookLot.id}
           lotNumber={bookLot.lot_number}
           plateSuggestions={plates}
+          fixedPlate={addTo ?? undefined}
           onBooked={() => {
             setBookLot(null);
+            setAddTo(null);
             setSearch('');
             refresh();
           }}
+        />
+      )}
+      {truckCheckoutId && (
+        <TruckCheckoutSheet
+          open
+          onOpenChange={(o) => !o && setTruckCheckoutId(null)}
+          passId={truckCheckoutId}
+          onDone={afterTruckCheckout}
         />
       )}
       {cancelId && (
@@ -277,6 +329,7 @@ export default function DispatchDeskPage() {
 function DispatchRowView({
   row,
   canDispatch,
+  withTruck,
   onChanged,
   onCollect,
   onOpen,
@@ -284,6 +337,8 @@ function DispatchRowView({
 }: {
   row: DispatchRow;
   canDispatch: boolean;
+  /** On a truck carrying several lots: the truck card checks it out. */
+  withTruck: boolean;
   onChanged: () => void;
   onCollect: () => void;
   onOpen: () => void;
@@ -356,7 +411,9 @@ function DispatchRowView({
             </>
           )}
           {row.stage === 'WEIGHED' &&
-            (canDispatch ? (
+            (canDispatch && withTruck ? (
+              <span className="text-xs text-muted-foreground">Check out with the truck</span>
+            ) : canDispatch ? (
               <Button size="sm" onClick={onCollect}>
                 Dispatch &amp; Collect
               </Button>

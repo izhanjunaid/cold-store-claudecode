@@ -22,6 +22,7 @@ import { roleAtLeast } from '../../plugins/auth';
 import { standingCreditCover, type ActiveApproval } from '../credit-approval/credit-approval.service';
 import { generateGatePassNumber } from './gate-pass-number';
 import { GatePassRepository } from './gate-pass.repository';
+import { openLoads } from './open-load';
 
 /** What the gate needs to know about a withdrawal leaving on a truck. */
 const releaseSelect = {
@@ -216,39 +217,10 @@ export class GatePassService {
    * dispatched under the current rules). Bag quantities are never part of it.
    */
   private async releasePreviews(facilityId: string, plates: string[]): Promise<Map<string, GateReleaseType>> {
-    const wanted = new Set(plates.map(normalizePlate).filter(Boolean));
     const result = new Map<string, GateReleaseType>();
-    if (wanted.size === 0) return result;
-
-    const open = await this.prisma.outboundEvent.findMany({
-      where: {
-        facilityId,
-        voidedAt: null,
-        gatePassId: null,
-        vehicleNumber: { not: null },
-        status: { in: ['PENDING', 'WEIGHED', 'DISPUTED', 'DISPATCHED'] },
-        gatePasses: { none: { status: 'CLEARED' } },
-      },
-      select: {
-        id: true,
-        dispatchNoteNumber: true,
-        status: true,
-        vehicleNumber: true,
-        finalizedAt: true,
-        lot: { select: { marka: true } },
-        ownerPartySnapshot: { select: { name: true } },
-        invoice: { select: { id: true, status: true, totalPkr: true, amountPaidPkr: true, billingPartyId: true } },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
-    const byPlate = new Map<string, typeof open>();
-    for (const o of open) {
-      const key = normalizePlate(o.vehicleNumber ?? '');
-      if (!wanted.has(key)) continue;
-      // Dispatched before these rules (no finalized_at) may already have left untracked.
-      if (o.status === 'DISPATCHED' && !o.finalizedAt) continue;
-      byPlate.set(key, [...(byPlate.get(key) ?? []), o]);
-    }
+    // The same reading of a truck the dispatch desk uses (open-load.ts).
+    const byPlate = await openLoads(this.prisma, facilityId, plates);
+    if (byPlate.size === 0) return result;
 
     const invoiceIds = [...byPlate.values()].flat().flatMap((o) => (o.invoice ? [o.invoice.id] : []));
     const pending = await this.pendingChequeTotals(this.prisma as unknown as Prisma.TransactionClient, invoiceIds);
@@ -285,6 +257,11 @@ export class GatePassService {
       result.set(plate, {
         state,
         dispatch_notes: list.map((o) => o.dispatchNoteNumber ?? o.id.slice(0, 8)),
+        withdrawals: list.map((o) => ({
+          dispatch_note_number: dnOf(o),
+          marka: o.lot.marka,
+          owner_party_name: o.ownerPartySnapshot?.name ?? null,
+        })),
         outstanding_pkr: outstanding,
         cheque_pending: chequePending,
         marka: list.find((o) => o.lot.marka)?.lot.marka ?? null,
@@ -648,6 +625,14 @@ function formatGatePass(row: any): GatePassResponseType {
       row.creditAuthorizedAmountPkr != null ? Number(row.creditAuthorizedAmountPkr) : null,
     override_reason: row.overrideReason ?? null,
     outbound_ids: (row.clearedOutbounds ?? []).map((o: { id: string }) => o.id),
+    // Every withdrawal the truck carried, for the receipt — names and marks only, never a count.
+    withdrawals: (row.clearedOutbounds ?? []).map(
+      (o: { dispatchNoteNumber: string | null; lot?: { marka: string | null }; ownerPartySnapshot?: { name: string } | null }) => ({
+        dispatch_note_number: o.dispatchNoteNumber,
+        marka: o.lot?.marka ?? null,
+        owner_party_name: o.ownerPartySnapshot?.name ?? null,
+      }),
+    ),
   };
 }
 

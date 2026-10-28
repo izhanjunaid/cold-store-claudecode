@@ -190,6 +190,18 @@
   </div>
   {{/if}}
 
+  {{#if withdrawals.length}}
+  <div class="section-title">Withdrawals on this truck / مال</div>
+  <div class="info-grid">
+    <div>
+      {{#each withdrawals}}
+      <div class="field">{{dispatch_note_number}}{{#if marka}} · Marka: {{marka}}{{/if}}{{#if owner_party_name}} · {{owner_party_name}}{{/if}}</div>
+      {{/each}}
+    </div>
+    <div></div>
+  </div>
+  {{/if}}
+
   {{#if relatedLotNumber}}
   <div class="section-title">Linked Operation</div>
   <div class="info-grid">

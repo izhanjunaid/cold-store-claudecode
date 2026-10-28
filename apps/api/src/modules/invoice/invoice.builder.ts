@@ -1,5 +1,5 @@
-import { round2 } from '@coldchain/shared';
 import type { Prisma, RateType, BookType } from '@coldchain/db';
+import { invoiceTotals } from './invoice-totals';
 import { computeStorageCharge, billingPeriodStart } from './storage-charge';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 import { resolveFacilitySettings } from '../facility/facility.service';
@@ -67,8 +67,6 @@ export async function priceStorageInvoice(
     seasonEndDate: params.seasonEndDate,
   });
 
-  const subTotal = charge.amountPkr;
-
   // GST default: pre-fill from facility settings when GST-registered.
   // Still editable per invoice while DRAFT (PATCH /v1/invoices/:id).
   const facility = await tx.facility.findUnique({
@@ -78,8 +76,11 @@ export async function priceStorageInvoice(
   // The informal book carries no sales tax: nothing settles KATCHI output tax,
   // so charging it would only grow a liability no return ever clears (docs/25 R-06).
   const gstRate = settings.gst_registered && params.bookType === 'PACCI' ? settings.gst_default_rate : 0;
-  const gstAmount = round2(subTotal * (gstRate / 100));
-  const total = round2(subTotal + gstAmount);
+  const { subTotal, gst: gstAmount, total } = invoiceTotals({
+    lineAmounts: [charge.amountPkr],
+    gstRate,
+    bookType: params.bookType,
+  });
   return { charge, subTotal, gstRate, gstAmount, total };
 }
 

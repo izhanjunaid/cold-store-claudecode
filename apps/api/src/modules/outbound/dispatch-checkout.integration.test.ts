@@ -167,10 +167,15 @@ beforeAll(async () => {
 
 afterEach(cleanup);
 
+// Rows a test made that bills reference: removed after cleanup() has removed the bills.
+const extraChargeIds: string[] = [];
+const extraRatePlanIds: string[] = [];
+
 afterAll(async () => {
   await cleanup();
   await withGuardsDisabled(prisma, async () => {
-    await prisma.serviceCharge.deleteMany({ where: { id: loadingChargeId } });
+    await prisma.serviceCharge.deleteMany({ where: { id: { in: [loadingChargeId, ...extraChargeIds] } } });
+    await prisma.ratePlan.deleteMany({ where: { id: { in: extraRatePlanIds } } });
     await prisma.party.deleteMany({ where: { id: partyId } });
   });
   await closeTestApp();
@@ -223,6 +228,9 @@ describe('dispatch & collect', () => {
     const res = await checkout(id, cash(total, { payment: { mode: 'CASH' } }));
     expect(res.statusCode, res.body).toBe(200);
     const body = data(res);
+    // The one-truck answer keeps its shape when the checkout is cut into lines (C2).
+    expect(Object.keys(body).sort()).toEqual(['invoice', 'outbound', 'payment']);
+    expect(Object.keys(body.payment).sort()).toEqual(['id', 'receipt_number']);
     expect(body.outbound.status).toBe('DISPATCHED');
     expect(body.invoice.status).toBe('FINALIZED');
     expect(body.invoice.total_pkr).toBeCloseTo(total, 2);
@@ -289,12 +297,70 @@ describe('dispatch & collect', () => {
     }
   });
 
+  it('a bill whose lines fall on a half-paisa GST posts the total the preview showed', async () => {
+    // 102.55 storage + two 0.10 charges = 102.75, and 18% of that is exactly 18.495: summed as floats
+    // the bill used to round its GST down and refuse the checkout's total forever.
+    const facility = await prisma.facility.findUniqueOrThrow({ where: { id: TEST_FACILITY_ID } });
+    const original = facility.settings;
+    await prisma.facility.update({
+      where: { id: TEST_FACILITY_ID },
+      data: { settings: { ...(original as object), gst_registered: true, gst_default_rate: 18 } as never },
+    });
+    await prisma.serviceCharge.update({ where: { id: loadingChargeId }, data: { isActive: false } });
+    try {
+      const plan = await app.inject({
+        method: 'POST',
+        url: '/v1/rate-plans',
+        headers: authHeaders(managerToken),
+        payload: {
+          name: `Half-paisa-${Date.now()}`,
+          commodity_id: POTATO_ID,
+          rate_type: 'SEASONAL_PER_BAG',
+          rate_amount_pkr: 102.55,
+          season_start_date: '2026-03-01',
+          season_end_date: '2026-12-31',
+          min_billing_days: 1,
+        },
+      });
+      expect(plan.statusCode, plan.body).toBe(201);
+      extraRatePlanIds.push(data<{ id: string }>(plan).id);
+      for (const name of ['Dime-A', 'Dime-B']) {
+        const charge = await app.inject({
+          method: 'POST',
+          url: '/v1/service-charges',
+          headers: authHeaders(managerToken),
+          payload: { name: `${name}-${Date.now()}`, unit_type: 'FLAT', unit_price_pkr: 0.1, apply_at_dispatch: true },
+        });
+        expect(charge.statusCode, charge.body).toBe(201);
+        extraChargeIds.push(data<{ id: string }>(charge).id);
+      }
+
+      const { id } = await weighed(1, { lotExtra: { rate_plan_id: data<{ id: string }>(plan).id } });
+      const p = data(await preview(id));
+      // The premise, so the test cannot pass on a different bill.
+      expect(p.storage_line.amount_pkr).toBe(102.55);
+      expect((p.service_lines as { amount_pkr: number }[]).map((l) => l.amount_pkr)).toEqual([0.1, 0.1]);
+      expect([p.sub_total_pkr, p.gst_amount_pkr, p.total_pkr]).toEqual([102.75, 18.5, 121.25]);
+
+      const res = await checkout(id, cash(p.total_pkr));
+      expect(res.statusCode, res.body).toBe(200);
+      const inv = await prisma.invoice.findFirstOrThrow({ where: { outboundEventId: id } });
+      expect(Number(inv.totalPkr)).toBe(121.25);
+    } finally {
+      await prisma.serviceCharge.updateMany({ where: { id: { in: extraChargeIds } }, data: { isActive: false } });
+      await prisma.serviceCharge.update({ where: { id: loadingChargeId }, data: { isActive: true } });
+      await prisma.facility.update({ where: { id: TEST_FACILITY_ID }, data: { settings: original as never } });
+    }
+  });
+
   it('refuses a total that is not the one reviewed, and writes nothing', async () => {
     const { id, lotId } = await weighed(100);
     const total = data(await preview(id)).total_pkr as number;
     const res = await checkout(id, cash(total - 50));
     expect([res.statusCode, code(res)]).toEqual([409, 'DISPATCH_TOTAL_CHANGED']);
     expect(JSON.parse(res.body).error.field).toBe('expected_total_pkr');
+    // One withdrawal: the message names no dispatch note (a truck's names the line).
+    expect(JSON.parse(res.body).error.message).toMatch(/^The bill is now Rs \d+\.\d{2}, not the Rs \d+\.\d{2} shown/);
     await untouched(lotId, id, 100);
     expect(await prisma.payment.count({ where: { partyId } })).toBe(0);
     expect(await prisma.journalEntry.count({ where: { facilityId: TEST_FACILITY_ID } })).toBe(0);
@@ -360,6 +426,8 @@ describe('dispatch & collect', () => {
     expect((await prisma.lot.findUniqueOrThrow({ where: { id: lotId } })).currentBalanceBags).toBe(50);
   });
 
+  // Three rounds of two racing checkouts outran the 15 s default on a loaded machine (under 3 s
+  // alone); the assertions are unchanged.
   it('two checkouts of one withdrawal: one takes the money, the other is refused — one bill, one receipt', async () => {
     for (let round = 0; round < 3; round++) {
       const { id } = await weighed(40);
@@ -373,7 +441,7 @@ describe('dispatch & collect', () => {
       expect(await prisma.paymentAllocation.count({ where: { invoiceId: inv.id } })).toBe(1);
       await cleanup();
     }
-  });
+  }, 45_000);
 
   it('needs the money keys: the route wants outbound.finalize; a missing invoices.manage / payments.record is named before any write', async () => {
     const { id, lotId } = await weighed(30);

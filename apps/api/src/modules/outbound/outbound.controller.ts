@@ -6,10 +6,13 @@ import {
   CancelOutboundRequest,
   OutboundListQuery,
   DispatchAndCollectRequest,
+  TruckDispatchRequest,
 } from '@coldchain/shared';
 import { OutboundService } from './outbound.service';
 import { OutboundRepository } from './outbound.repository';
 import { DispatchCheckoutService } from './dispatch-checkout.service';
+import { buildLoadSlip } from './load-slip';
+import { renderLoadSlip, renderLoadSlipHtml } from '../pdf/pdf.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { InvoiceRepository } from '../invoice/invoice.repository';
 import { PaymentService } from '../payment/payment.service';
@@ -158,6 +161,67 @@ export async function outboundRoutes(app: FastifyInstance) {
         body,
       );
       return sendSuccess(reply, result);
+    },
+  });
+
+  // The whole truck (C2): a truck is its plate, as at the gate. Same rules as the single
+  // checkout — outbound.record for the route, then the manager keys or the solo door.
+  app.route({
+    method: 'GET',
+    url: '/v1/dispatch/trucks',
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
+    handler: async (request, reply) => sendSuccess(reply, await checkout.trucks(request.user!.facilityId)),
+  });
+
+  app.route({
+    method: 'GET',
+    url: '/v1/dispatch/trucks/:id/checkout-preview',
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
+    schema: { params: IdParam },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      return sendSuccess(reply, await checkout.truckPreview(request.user!.facilityId, id));
+    },
+  });
+
+  app.route({
+    method: 'POST',
+    url: '/v1/dispatch/trucks/:id/dispatch-and-collect',
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
+    schema: { params: IdParam, body: TruckDispatchRequest },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const result = await checkout.truckDispatchAndCollect(
+        {
+          facilityId: request.user!.facilityId,
+          userId: request.user!.userId,
+          role: request.user!.role,
+          permissions: await app.ensurePermissions(request),
+        },
+        id,
+        request.body as z.infer<typeof TruckDispatchRequest>,
+      );
+      return sendSuccess(reply, result);
+    },
+  });
+
+  // GET /v1/dispatch/trucks/:id/load-slip?format=pdf|html — the driver's slip: lots, bills,
+  // receipts and credit. It carries counts and money, so never the guard's (the redaction hook
+  // does not see a PDF).
+  app.route({
+    method: 'GET',
+    url: '/v1/dispatch/trucks/:id/load-slip',
+    preHandler: [app.authenticate, app.forbidBlindRole, app.requirePermission('outbound.record')],
+    schema: { params: IdParam, querystring: z.object({ format: z.enum(['pdf', 'html']).default('pdf') }) },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const { format } = request.query as { format: 'pdf' | 'html' };
+      const slip = await buildLoadSlip(app.prisma, request.user!.facilityId, id, request.user!.userId);
+      if (format === 'html') return reply.header('content-type', 'text/html; charset=utf-8').send(renderLoadSlipHtml(slip));
+      return reply
+        .header('content-type', 'application/pdf')
+        .header('content-disposition', `inline; filename="load-slip-${slip.passNumber}.pdf"`)
+        .send(await renderLoadSlip(slip));
     },
   });
 

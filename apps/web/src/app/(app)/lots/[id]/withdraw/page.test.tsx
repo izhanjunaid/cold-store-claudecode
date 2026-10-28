@@ -38,6 +38,7 @@ vi.mock('@coldchain/shared', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 
 import WithdrawPage from './page';
+import { WithdrawForm } from '@/components/outbound/withdraw-form';
 
 const OWNER_PARTY_ID = 'party-owner-1';
 const BILLING_PARTY_ID = OWNER_PARTY_ID;
@@ -276,4 +277,23 @@ describe('WithdrawPage — third-party release', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(posted()).toHaveLength(0);
   }, 10_000);
+});
+
+describe('WithdrawForm opened from a truck (the dispatch desk’s "Add a lot")', () => {
+  beforeEach(() => {
+    apiClient.mockReset();
+    routeApiClient();
+  });
+
+  it('books onto that truck: the plate is filled in and cannot be changed', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WithdrawForm lotId={LOT_ID} variant="sheet" fixedPlate="LHR-2222" onCreated={vi.fn()} onCancel={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    const plate = await screen.findByLabelText(/Vehicle number/);
+    expect(plate).toHaveValue('LHR-2222');
+    expect(plate).toHaveAttribute('readonly');
+  });
 });

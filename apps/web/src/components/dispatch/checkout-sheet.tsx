@@ -56,14 +56,14 @@ export interface CheckoutResult {
   payment: { id: string; receipt_number: string | null } | null;
 }
 
-const MODES = [
+export const MODES = [
   { value: 'CASH', label: 'Cash' },
   { value: 'BANK_TRANSFER', label: 'Bank transfer' },
   { value: 'CHEQUE', label: 'Cheque' },
   { value: 'MOBILE_WALLET', label: 'Mobile wallet' },
   { value: 'CREDIT', label: 'On credit' },
 ] as const;
-type Mode = (typeof MODES)[number]['value'];
+export type Mode = (typeof MODES)[number]['value'];
 
 /**
  * Dispatch a weighed withdrawal, finalize its bill and take the money — one button,
