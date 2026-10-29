@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { PrismaClient } from '@coldchain/db';
 import {
@@ -366,5 +366,66 @@ describe('Revenue accrual start date', () => {
     expect(res.statusCode, res.body).toBe(200);
     expect(JSON.parse(res.body).data.settings.revenue_accrual.start_date).toBe('2031-07-01');
     expect((await setStart(null)).statusCode).toBe(200);
+  });
+});
+
+// Weight optional (docs/27): the screen's "We weigh produce", stored inverted as hide_weights.
+describe('hide_weights', () => {
+  const PER_TON = 'Test hide-weights per ton';
+
+  const patch = (settings: Record<string, unknown>) =>
+    app.inject({ method: 'PATCH', url: '/v1/facilities/me', headers: authHeaders(ownerToken), payload: { settings } });
+  const settingsNow = async () =>
+    JSON.parse((await app.inject({ method: 'GET', url: '/v1/facilities/me', headers: authHeaders(ownerToken) })).body)
+      .data.settings;
+  // Writes the stored key directly (or removes it), leaving every other setting as it is.
+  async function storeHideWeights(value: boolean | undefined) {
+    const f = await prisma.facility.findUniqueOrThrow({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    const { hide_weights: _old, ...rest } = (f.settings ?? {}) as Record<string, unknown>;
+    await prisma.facility.update({
+      where: { id: TEST_FACILITY_ID },
+      data: { settings: (value === undefined ? rest : { ...rest, hide_weights: value }) as never },
+    });
+  }
+  const perTonCharge = (isActive: boolean) =>
+    prisma.serviceCharge.create({
+      data: { facilityId: TEST_FACILITY_ID, name: PER_TON, unitType: 'PER_TON', unitPricePkr: 500, isActive },
+    });
+
+  afterEach(async () => {
+    await prisma.serviceCharge.deleteMany({ where: { facilityId: TEST_FACILITY_ID, name: PER_TON } });
+    await storeHideWeights(undefined);
+  });
+
+  it('a facility that never saved hide_weights shows weights', async () => {
+    await storeHideWeights(undefined);
+    expect((await settingsNow()).hide_weights).toBe(false);
+  });
+
+  it('weights cannot be hidden while a per-ton charge is active', async () => {
+    const charge = await perTonCharge(true);
+
+    const refused = await patch({ hide_weights: true });
+    expect(refused.statusCode).toBe(400);
+    expect(JSON.parse(refused.body).error.code).toBe('VALIDATION_ERROR');
+    expect(JSON.parse(refused.body).error.field).toBe('settings.hide_weights');
+    expect((await settingsNow()).hide_weights).toBe(false);
+
+    await prisma.serviceCharge.update({ where: { id: charge.id }, data: { isActive: false } });
+    const saved = await patch({ hide_weights: true });
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect(JSON.parse(saved.body).data.settings.hide_weights).toBe(true);
+  });
+
+  it('a save that keeps hide_weights as it is never trips the guard', async () => {
+    await storeHideWeights(true);
+    await perTonCharge(true); // a leftover from before weights were hidden
+
+    // The Settings page sends every key on every save.
+    const res = await patch({ hide_weights: true, gst_default_rate: 17 });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(JSON.parse(res.body).data.settings.gst_default_rate).toBe(17);
+    // Showing weights again is never refused.
+    expect((await patch({ hide_weights: false })).statusCode).toBe(200);
   });
 });
