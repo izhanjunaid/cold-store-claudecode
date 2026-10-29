@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 import { DataTable, type DataTableColumn } from '@/components/data-table';
+import { useWeightsShown } from '@/hooks/use-reference-data';
 
 import { formatMoney } from '@/lib/format';
 interface ServiceCharge {
@@ -33,6 +34,8 @@ export default function ServiceChargeListPage() {
   const confirm = useConfirm();
   const { user } = useAuthStore();
   const canManage = can(user, 'service_charges.manage');
+  // With weights hidden nothing records a weight, so nothing new is priced per ton (docs/27).
+  const weightsShown = useWeightsShown();
 
   const [charges, setCharges] = useState<ServiceCharge[]>([]);
   const [loading, setLoading] = useState(true);
@@ -171,7 +174,8 @@ export default function ServiceChargeListPage() {
               <Label>Unit Type</Label>
               <select value={form.unit_type} onChange={(e) => setForm((f) => ({ ...f, unit_type: e.target.value }))} className={SELECT_CLASS}>
                 <option value="PER_BAG">Per Bag</option>
-                <option value="PER_TON">Per Ton</option>
+                {/* An existing per-ton charge still shows its unit; the API refuses reactivating it while hidden. */}
+                {(weightsShown || form.unit_type === 'PER_TON') && <option value="PER_TON">Per Ton</option>}
                 <option value="FLAT">Flat</option>
               </select>
             </div>
