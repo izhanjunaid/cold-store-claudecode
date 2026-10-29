@@ -84,8 +84,8 @@ async function createLot(quantity: number, token = operatorToken, extra: Record<
   return data<{ id: string }>(res).id;
 }
 
-/** A booked-and-weighed FULL withdrawal of a fresh lot: ready for the checkout. */
-async function weighed(quantity: number, opts: { lotExtra?: Record<string, unknown>; lotToken?: string; plate?: string; date?: string } = {}) {
+/** A booked FULL withdrawal of a fresh lot, not weighed: ready for the checkout, weight being optional (docs/27). */
+async function booked(quantity: number, opts: { lotExtra?: Record<string, unknown>; lotToken?: string; plate?: string; date?: string } = {}) {
   const lotId = await createLot(quantity, opts.lotToken ?? operatorToken, opts.lotExtra);
   const create = await app.inject({
     method: 'POST',
@@ -100,16 +100,27 @@ async function weighed(quantity: number, opts: { lotExtra?: Record<string, unkno
     },
   });
   expect(create.statusCode, create.body).toBe(201);
-  const id = data<{ id: string }>(create).id;
-  const w = await app.inject({
+  return { id: data<{ id: string }>(create).id, lotId };
+}
+
+const weigh = (id: string, kg: number) =>
+  app.inject({
     method: 'PATCH',
     url: `/v1/outbound-events/${id}/weight`,
     headers: authHeaders(operatorToken),
-    payload: { outbound_weight_kg: quantity * 19.5 },
+    payload: { outbound_weight_kg: kg },
   });
+
+/** The same, weighed. */
+async function weighed(quantity: number, opts: Parameters<typeof booked>[1] = {}) {
+  const b = await booked(quantity, opts);
+  const w = await weigh(b.id, quantity * 19.5);
   expect(w.statusCode, w.body).toBe(200);
-  return { id, lotId };
+  return b;
 }
+
+const activePerTonCharges = () =>
+  prisma.serviceCharge.count({ where: { facilityId: TEST_FACILITY_ID, isActive: true, unitType: 'PER_TON' } });
 
 const preview = (id: string, token = managerToken) =>
   app.inject({ method: 'GET', url: `/v1/outbound-events/${id}/checkout-preview`, headers: authHeaders(token) });
@@ -130,9 +141,9 @@ const cash = (total: number, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-async function untouched(lotId: string, id: string, balance: number) {
+async function untouched(lotId: string, id: string, balance: number, status: 'WEIGHED' | 'PENDING' = 'WEIGHED') {
   expect((await prisma.lot.findUniqueOrThrow({ where: { id: lotId } })).currentBalanceBags).toBe(balance);
-  expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id } })).status).toBe('WEIGHED');
+  expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id } })).status).toBe(status);
   expect(await prisma.invoice.count({ where: { outboundEventId: id } })).toBe(0);
 }
 
@@ -195,21 +206,22 @@ describe('checkout preview', () => {
     await untouched(lotId, id, 100);
   });
 
-  it('needs a weighed withdrawal and outbound.record (the guard is refused)', async () => {
-    const lotId = await createLot(50);
-    const create = await app.inject({
-      method: 'POST',
-      url: '/v1/outbound-events',
-      headers: authHeaders(operatorToken),
-      payload: { lot_id: lotId, withdrawal_type: 'FULL', quantity_withdrawn_bags: 50, outbound_date: '2026-09-01', vehicle_number: 'LHR-9002' },
-    });
-    const pendingId = data<{ id: string }>(create).id;
-    const notWeighed = await preview(pendingId);
-    expect([notWeighed.statusCode, code(notWeighed)]).toEqual([422, 'OUTBOUND_WEIGHT_REQUIRED']);
+  it('a booked withdrawal previews and checks out without a weight; the guard is refused', async () => {
+    // A per-ton dispatch charge would need a weight (docs/27): this fixture has none.
+    expect(await activePerTonCharges()).toBe(0);
+    const { id, lotId } = await booked(50, { plate: 'LHR-9002' });
+    const p = await preview(id);
+    expect(p.statusCode, p.body).toBe(200);
     // The munshi reads the bill (the solo switch decides whether they may finish it).
-    const asOperator = await preview(pendingId, operatorToken);
-    expect([asOperator.statusCode, code(asOperator)]).toEqual([422, 'OUTBOUND_WEIGHT_REQUIRED']);
-    expect((await preview(pendingId, securityToken)).statusCode).toBe(403);
+    expect((await preview(id, operatorToken)).statusCode).toBe(200);
+    expect((await preview(id, securityToken)).statusCode).toBe(403);
+
+    const res = await checkout(id, cash(data(p).total_pkr));
+    expect(res.statusCode, res.body).toBe(200);
+    const out = await prisma.outboundEvent.findUniqueOrThrow({ where: { id } });
+    expect([out.status, out.outboundWeightKg]).toEqual(['DISPATCHED', null]);
+    expect((await prisma.invoice.findFirstOrThrow({ where: { outboundEventId: id } })).status).toBe('FINALIZED');
+    expect((await prisma.lot.findUniqueOrThrow({ where: { id: lotId } })).currentBalanceBags).toBe(0);
   });
 
   it('tells the munshi whether they may finish the truck alone — booleans and a reason, never a ceiling', async () => {
@@ -469,6 +481,49 @@ describe('dispatch & collect', () => {
     await untouched(lotId, id, 30);
   });
 
+  // Weight optional (docs/27): a per-ton charge is the one thing that still needs a weight.
+  describe('a per-ton charge on a withdrawal with no weight', () => {
+    let perTon: { id: string; name: string };
+    beforeAll(async () => {
+      perTon = await prisma.serviceCharge.create({
+        data: { facilityId: TEST_FACILITY_ID, name: `Weighbridge-${Date.now()}`, unitType: 'PER_TON', unitPricePkr: 500, applyAtDispatch: true },
+      });
+      extraChargeIds.push(perTon.id);
+    });
+    // Deactivated, not deleted, until afterAll: bills of later files must not meet it.
+    afterAll(() => prisma.serviceCharge.update({ where: { id: perTon.id }, data: { isActive: false } }));
+    const perTonLine = (p: { service_lines: { service_charge_id: string }[] }) =>
+      p.service_lines.find((l) => l.service_charge_id === perTon.id);
+
+    it('is never billed at zero: the checkout is refused, naming the lot and the charge, until the weight is recorded', async () => {
+      const { id, lotId } = await booked(30);
+      const p = data(await preview(id));
+      expect(perTonLine(p)).toMatchObject({ needs_weight: true, amount_pkr: 0 });
+
+      const refused = await checkout(id, cash(p.total_pkr));
+      expect([refused.statusCode, code(refused)]).toEqual([422, 'OUTBOUND_WEIGHT_REQUIRED']);
+      const dn = (await prisma.outboundEvent.findUniqueOrThrow({ where: { id } })).dispatchNoteNumber!;
+      expect(JSON.parse(refused.body).error.message).toContain(dn);
+      expect(JSON.parse(refused.body).error.message).toContain(perTon.name);
+      await untouched(lotId, id, 30, 'PENDING');
+
+      expect((await weigh(id, 2000)).statusCode).toBe(200);
+      const weighedP = data(await preview(id));
+      expect(perTonLine(weighedP)).toMatchObject({ needs_weight: false, quantity: 2, amount_pkr: 1000 });
+      const ok = await checkout(id, cash(weighedP.total_pkr));
+      expect(ok.statusCode, ok.body).toBe(200);
+    });
+
+    it('a manager may leave it off the bill instead', async () => {
+      const { id } = await booked(30);
+      const p = data(await preview(id));
+      const res = await checkout(id, cash(p.total_pkr, { skip_service_charge_ids: [perTon.id] }));
+      expect(res.statusCode, res.body).toBe(200);
+      const inv = await prisma.invoice.findFirstOrThrow({ where: { outboundEventId: id } });
+      expect(await prisma.invoiceLineItem.count({ where: { invoiceId: inv.id, serviceChargeId: perTon.id } })).toBe(0);
+    });
+  });
+
   it('a cheque needs its date', async () => {
     const { id } = await weighed(30);
     const total = data(await preview(id)).total_pkr as number;
@@ -572,6 +627,29 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
     refusedAsManagerJob(await checkout(id, cash(total), operatorToken));
     await untouched(lotId, id, 30);
     await nothingWritten();
+  });
+
+  it('the solo rules cover a booked withdrawal too (weight is optional, docs/27)', async () => {
+    await setSolo(false);
+    const off = await booked(30, { date: businessDate() });
+    refusedAsManagerJob(await checkout(off.id, cash(data(await preview(off.id)).total_pkr), operatorToken));
+    await untouched(off.lotId, off.id, 30, 'PENDING');
+
+    await setSolo(true);
+    const old = await booked(30); // booked for 2026-09-01: its date sets the storage billed
+    const p = data(await preview(old.id, operatorToken));
+    expect(p.solo).toMatchObject({ allowed: false, credit_available: false });
+    expect(p.solo.reason).toMatch(/dated/);
+    refusedAsManagerJob(await checkout(old.id, cash(p.total_pkr), operatorToken));
+    await untouched(old.lotId, old.id, 30, 'PENDING');
+    await nothingWritten();
+
+    // A clean one, booked today and never weighed, the munshi finishes alone.
+    const clean = await booked(30, { date: businessDate() });
+    const pc = data(await preview(clean.id, operatorToken));
+    expect(pc.solo).toMatchObject({ allowed: true });
+    const ok = await checkout(clean.id, cash(pc.total_pkr), operatorToken);
+    expect(ok.statusCode, ok.body).toBe(200);
   });
 
   it('switch on: the munshi takes cash in full alone — dispatched, billed, paid, with their own name on it', async () => {

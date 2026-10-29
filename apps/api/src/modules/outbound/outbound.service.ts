@@ -9,7 +9,7 @@ import { roleAtLeast } from '../../plugins/auth';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { lockRow } from '../../common/row-lock';
 import { addDays, businessDate } from '@coldchain/shared';
-import { OPEN_OUTBOUND_STATUSES, openReservation } from './reservation';
+import { OPEN_OUTBOUND_STATUSES, isReadyToDispatch, openReservation } from './reservation';
 import { recordedKg } from '../../common/weight';
 
 function toNumber(d: { toString(): string } | null | undefined): number | null {
@@ -258,7 +258,8 @@ export class OutboundService {
     if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
     if (ob.status === 'DISPATCHED') throw Errors.OUTBOUND_ALREADY_FINALIZED();
     if (ob.status === 'CANCELLED') throw Errors.OUTBOUND_CANCELLED();
-    if (ob.status !== 'WEIGHED') throw Errors.OUTBOUND_WEIGHT_REQUIRED();
+    // Weighed or not: weight is optional (docs/27).
+    if (!isReadyToDispatch(ob.status)) throw Errors.OUTBOUND_DISPUTED();
 
     // Read the lot only after locking it: the balance read before the lock could
     // be stale by the time it was written back, losing a concurrent change.

@@ -338,7 +338,7 @@ describe('Outbound Events', () => {
     expect(dbLot?.closedAt).not.toBeNull();
   });
 
-  it('10. Reject finalize without weight (status PENDING)', async () => {
+  it('10. A withdrawal never weighed is dispatched (weight is optional, docs/27)', async () => {
     const lot = await createLot(60);
     const createRes = await app.inject({
       method: 'POST',
@@ -359,8 +359,11 @@ describe('Outbound Events', () => {
       headers: authHeaders(managerToken),
       payload: {},
     });
-    expect(res.statusCode).toBe(422);
-    expect(JSON.parse(res.body).error.code).toBe('OUTBOUND_WEIGHT_REQUIRED');
+    expect(res.statusCode, res.body).toBe(200);
+    const out = await prisma.outboundEvent.findUniqueOrThrow({ where: { id: eventId } });
+    expect(out.status).toBe('DISPATCHED');
+    expect(out.outboundWeightKg).toBeNull();
+    expect((await prisma.lot.findUniqueOrThrow({ where: { id: lot.id } })).currentBalanceBags).toBe(40);
   });
 
   it('11. Role gating: OPERATOR cannot finalize (403)', async () => {

@@ -23,6 +23,7 @@ import { invoiceTotals } from '../invoice/invoice-totals';
 import type { InvoiceService } from '../invoice/invoice.service';
 import type { PaymentService } from '../payment/payment.service';
 import type { OutboundService } from './outbound.service';
+import { isReadyToDispatch } from './reservation';
 
 const OUTBOUND_STATUSES = ['PENDING', 'WEIGHED', 'DISPATCHED', 'CANCELLED', 'DISPUTED'] as const;
 
@@ -69,7 +70,7 @@ export interface CheckoutCaller {
 }
 
 /**
- * The dispatch desk's reads and its one write: dispatch a weighed withdrawal, finalize
+ * The dispatch desk's reads and its one write: dispatch a booked withdrawal, finalize
  * its bill and take the money in a single transaction (fast-dispatch Phase B). Every
  * step is the existing service's own `…InTransaction` — the checkout composes them,
  * it does not re-implement them, so each keeps its own locks, guards and posting path.
@@ -155,7 +156,7 @@ export class DispatchCheckoutService {
     };
   }
 
-  /** The bill a weighed withdrawal will carry, before anything is written. */
+  /** The bill a booked withdrawal will carry, before anything is written. */
   async preview(facilityId: string, id: string) {
     const { bill, lot, outboundDate } = await this.priceLine(facilityId, id);
     // Whether the munshi may finish this truck alone, as booleans and a reason: never the party's
@@ -173,7 +174,7 @@ export class DispatchCheckoutService {
     };
   }
 
-  /** One weighed withdrawal's bill, priced as it will post: the review step of both checkouts. */
+  /** One booked withdrawal's bill, priced as it will post: the review step of both checkouts. */
   private async priceLine(facilityId: string, id: string) {
     const ob = await this.prisma.outboundEvent.findFirst({
       where: { id, facilityId },
@@ -184,7 +185,7 @@ export class DispatchCheckoutService {
     if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
     if (ob.status === 'DISPATCHED') throw Errors.OUTBOUND_ALREADY_FINALIZED();
     if (ob.status === 'CANCELLED') throw Errors.OUTBOUND_CANCELLED();
-    if (ob.status !== 'WEIGHED') throw Errors.OUTBOUND_WEIGHT_REQUIRED();
+    if (!isReadyToDispatch(ob.status)) throw Errors.OUTBOUND_DISPUTED();
 
     const priced = await previewInvoiceFromOutbound(this.prisma as unknown as Prisma.TransactionClient, id);
     const defaults = await this.defaultServiceLines(this.prisma as unknown as Prisma.TransactionClient, facilityId, {
@@ -226,6 +227,8 @@ export class DispatchCheckoutService {
         quantity: l.quantity,
         unit_price_pkr: l.unitPricePkr,
         amount_pkr: l.amountPkr,
+        // Priced per ton with no weight recorded: the checkout refuses it until weighed or left off.
+        needs_weight: l.needsWeight,
       })),
       sub_total_pkr: subTotal,
       gst_rate: priced.gstRate,
@@ -257,21 +260,21 @@ export class DispatchCheckoutService {
           vehicle_number: pass.vehicleNumber,
           driver_name: pass.driverName,
           arrived_at: pass.createdAt.toISOString(),
-          ready: lines.some((l) => l.status === 'WEIGHED') && !lines.some((l) => NOT_READY.has(l.status)),
+          ready: lines.some((l) => isReadyToDispatch(l.status)) && !lines.some((l) => NOT_READY.has(l.status)),
           lines: lines.map(truckLine),
         };
       })
       .sort((a, b) => a.arrived_at.localeCompare(b.arrived_at));
   }
 
-  /** A whole truck's review: each weighed line's bill, the payment groups, and whether the munshi may finish it. */
+  /** A whole truck's review: each line's bill, the payment groups, and whether the munshi may finish it. */
   async truckPreview(facilityId: string, passId: string) {
     const { pass, lines } = await this.truckLoad(this.prisma, facilityId, passId);
     const priced = [];
-    for (const l of lines.filter((x) => x.status === 'WEIGHED')) priced.push(await this.priceLine(facilityId, l.id));
+    for (const l of lines.filter((x) => isReadyToDispatch(x.status))) priced.push(await this.priceLine(facilityId, l.id));
 
     let solo: { allowed: true } | { allowed: false; reason: string } =
-      priced.length > 0 ? { allowed: true } : { allowed: false, reason: 'nothing on this truck is weighed' };
+      priced.length > 0 ? { allowed: true } : { allowed: false, reason: 'nothing on this truck is ready' };
     const approved = new Set<string>();
     for (const p of priced) {
       const verdict = await this.soloVerdict(this.prisma, facilityId, p.lot, p.outboundDate);
@@ -305,7 +308,7 @@ export class DispatchCheckoutService {
   }
 
   /**
-   * Check out a whole truck — every weighed line dispatched and billed, one receipt per
+   * Check out a whole truck — every line dispatched and billed, one receipt per
    * (party, book) — or nothing. The load and the payment rows are checked before anything is
    * written, and again under the locks.
    */
@@ -353,7 +356,8 @@ export class DispatchCheckoutService {
       throw Errors.DISPATCH_NEEDS_MANAGER(reason);
     };
     const approved = new Set<string>();
-    for (const l of lines.filter((x) => x.status === 'WEIGHED')) {
+    // Every line that will go out, weighed or not: a booked line meets the solo rules too (docs/27).
+    for (const l of lines.filter((x) => isReadyToDispatch(x.status))) {
       const verdict = await this.soloVerdict(
         this.prisma,
         caller.facilityId,
@@ -651,6 +655,13 @@ export class DispatchCheckoutService {
         weightKg: ob.outboundWeightKg == null ? null : Number(ob.outboundWeightKg),
       })
     ).filter((l) => !skip.has(l.serviceChargeId));
+    // A charge priced per ton is never billed at zero (docs/27): weigh it, or leave the charge off.
+    const unweighed = lines.find((l) => l.needsWeight);
+    if (unweighed) {
+      throw Errors.OUTBOUND_WEIGHT_REQUIRED(
+        `Record the weight of ${ob.dispatchNoteNumber ?? line.outboundId.slice(0, 8)} first: ${unweighed.description} is charged per ton`,
+      );
+    }
     const total =
       lines.length > 0
         ? await this.invoices.addServiceLinesInTransaction(tx, invoiceId, lines)
@@ -702,13 +713,15 @@ export class DispatchCheckoutService {
         quantity,
         unitPricePkr,
         amountPkr: round2(quantity * unitPricePkr),
+        // No weight to price it on: never billed at zero, the checkout refuses it (docs/27).
+        needsWeight: c.unitType === 'PER_TON' && load.weightKg == null,
       };
     });
   }
 }
 
-/** A line on a truck that is not weighed yet: the truck waits for it (no partial trucks). */
-const NOT_READY = new Set(['PENDING', 'DISPUTED']);
+/** A line that holds its truck (no partial trucks): only legacy DISPUTED; weight is optional (docs/27). */
+const NOT_READY = new Set(['DISPUTED']);
 
 const dnOf = (l: { dispatchNoteNumber: string | null; id: string }) => l.dispatchNoteNumber ?? l.id.slice(0, 8);
 
@@ -749,7 +762,7 @@ function groupBills(bills: { outbound_id: string; billing_party: { id: string; n
   return [...groups.values()];
 }
 
-/** The request covers exactly the truck's weighed lines, with one payment row per (party, book) among them. */
+/** The request covers exactly the truck's ready lines, with one payment row per (party, book) among them. */
 function checkTruckRequest(lines: OpenLoadLine[], body: TruckDispatchRequestType) {
   const onTruck = new Map(lines.map((l) => [l.id, l]));
   const asked = new Set(body.lines.map((l) => l.outbound_id));
@@ -762,15 +775,15 @@ function checkTruckRequest(lines: OpenLoadLine[], body: TruckDispatchRequestType
   const notReady = lines.filter((l) => NOT_READY.has(l.status));
   if (notReady.length > 0) throw Errors.TRUCK_NOT_READY(notReady.map(dnOf));
 
-  const weighed = new Map(lines.filter((l) => l.status === 'WEIGHED').map((l) => [l.id, l]));
-  const missing = [...weighed.values()].filter((l) => !asked.has(l.id)).map(dnOf);
-  // A line asked for that is no longer weighed on this truck, by its dispatch note while the truck still carries it.
-  const extra = [...asked].filter((id) => !weighed.has(id)).map((id) => (onTruck.has(id) ? dnOf(onTruck.get(id)!) : id.slice(0, 8)));
+  const ready = new Map(lines.filter((l) => isReadyToDispatch(l.status)).map((l) => [l.id, l]));
+  const missing = [...ready.values()].filter((l) => !asked.has(l.id)).map(dnOf);
+  // A line asked for that is no longer ready on this truck, by its dispatch note while the truck still carries it.
+  const extra = [...asked].filter((id) => !ready.has(id)).map((id) => (onTruck.has(id) ? dnOf(onTruck.get(id)!) : id.slice(0, 8)));
   if (missing.length > 0 || extra.length > 0 || asked.size !== body.lines.length) {
     throw Errors.TRUCK_LOAD_CHANGED(missing, extra);
   }
 
-  const needed = new Set([...weighed.values()].map((l) => `${l.lot.billingParty.id}:${l.lot.bookType}`));
+  const needed = new Set([...ready.values()].map((l) => `${l.lot.billingParty.id}:${l.lot.bookType}`));
   const given = body.payments.map((p) => `${p.billing_party_id}:${p.book_type}`);
   if (new Set(given).size !== given.length) throw Errors.TRUCK_PAYMENTS_MISMATCH('a party and book is paid twice');
   if (given.some((k) => !needed.has(k))) throw Errors.TRUCK_PAYMENTS_MISMATCH('a payment row is for a party or book not on this truck');

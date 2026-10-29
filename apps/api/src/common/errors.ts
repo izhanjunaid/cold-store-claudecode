@@ -95,8 +95,12 @@ export const Errors = {
     new AppError('OUTBOUND_NOT_FOUND', 'Outbound event does not exist', 404),
   OUTBOUND_ALREADY_FINALIZED: (message = 'Outbound event is already dispatched') =>
     new AppError('OUTBOUND_ALREADY_FINALIZED', message, 409),
-  OUTBOUND_WEIGHT_REQUIRED: () =>
-    new AppError('OUTBOUND_WEIGHT_REQUIRED', 'Outbound weight must be recorded before finalizing', 422),
+  // Weight is optional (docs/27): only a charge priced per ton needs one, and the message names it.
+  OUTBOUND_WEIGHT_REQUIRED: (message = 'Record the weight first') =>
+    new AppError('OUTBOUND_WEIGHT_REQUIRED', message, 422),
+  // A legacy status nothing sets any more; such a withdrawal is held until someone acts on it.
+  OUTBOUND_DISPUTED: () =>
+    new AppError('OUTBOUND_DISPUTED', 'This withdrawal is marked disputed: cancel it, or ask a manager to settle it first', 409),
   OUTBOUND_OWNER_MISMATCH: () =>
     new AppError(
       'OUTBOUND_OWNER_MISMATCH',
@@ -135,7 +139,7 @@ export const Errors = {
   TRUCK_NOT_READY: (dispatchNotes: string[]) =>
     new AppError(
       'TRUCK_NOT_READY',
-      `Not everything on this truck is weighed: ${dispatchNotes.join(', ')} — weigh or cancel it first`,
+      `Something on this truck is marked disputed: ${dispatchNotes.join(', ')} — cancel it first`,
       409,
     ),
   TRUCK_LOAD_CHANGED: (missing: string[], extra: string[]) =>

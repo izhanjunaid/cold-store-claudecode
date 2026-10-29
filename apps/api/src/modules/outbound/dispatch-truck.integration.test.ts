@@ -249,17 +249,90 @@ describe('a truck with several lots', () => {
 });
 
 describe('a truck that is not ready, or changed since it was reviewed', () => {
-  it('a booked line not yet weighed: the truck is not ready, and nothing is written', async () => {
+  it('a booked line needs no weight: a weighed and an unweighed line go out as one (docs/27)', async () => {
+    // A per-ton dispatch charge would need a weight: this fixture has none.
+    expect(await prisma.serviceCharge.count({ where: { facilityId: TEST_FACILITY_ID, isActive: true, unitType: 'PER_TON' } })).toBe(0);
     const pass = await arrive('LHR-8400');
     const weighed = await onTruck(await lot(partyA, 20), 'LHR-8400', 20);
     const booked = await onTruck(await lot(partyA, 10), 'LHR-8400', 10, { weigh: false });
+    const trucks = data<{ gate_pass_id: string; ready: boolean }[]>(await call('GET', '/v1/dispatch/trucks', managerToken));
+    expect(trucks.find((t) => t.gate_pass_id === pass)!.ready).toBe(true);
+    const p = await truckPreview(pass);
+    expect(p.not_ready).toEqual([]);
+    expect(p.lines.map((l: { outbound_id: string }) => l.outbound_id).sort()).toEqual([weighed, booked].sort());
+    const res = await checkoutTruck(pass, requestFrom(p));
+    expect(res.statusCode, res.body).toBe(200);
+    for (const id of [weighed, booked]) {
+      expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id } })).status).toBe('DISPATCHED');
+    }
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: booked } })).outboundWeightKg).toBeNull();
+  });
+
+  it('a legacy DISPUTED line still holds the truck, and nothing is written', async () => {
+    const pass = await arrive('LHR-8410');
+    const weighed = await onTruck(await lot(partyA, 20), 'LHR-8410', 20);
+    const held = await onTruck(await lot(partyA, 10), 'LHR-8410', 10, { weigh: false });
+    // Nothing sets DISPUTED any more; an old row can still carry it.
+    await prisma.outboundEvent.update({ where: { id: held }, data: { status: 'DISPUTED' } });
     const trucks = data<{ gate_pass_id: string; ready: boolean }[]>(await call('GET', '/v1/dispatch/trucks', managerToken));
     expect(trucks.find((t) => t.gate_pass_id === pass)!.ready).toBe(false);
     const p = await truckPreview(pass);
     expect(p.not_ready).toHaveLength(1);
     const res = await checkoutTruck(pass, requestFrom(p));
     expect([res.statusCode, code(res)]).toEqual([409, 'TRUCK_NOT_READY']);
-    await nothingWritten([weighed, booked]);
+    expect(JSON.parse(res.body).error.message).not.toMatch(/weigh/i);
+    await nothingWritten([weighed, held]);
+  });
+
+  it('the solo rules cover booked lines: switch off, the munshi is refused; on, a line dated before today still is', async () => {
+    await setSolo(false);
+    const pass = await arrive('LHR-8420');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-8420', 20, { weigh: false });
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-8420', 10, { weigh: false });
+    const off = await checkoutTruck(pass, requestFrom(await truckPreview(pass)), operatorToken);
+    expect([off.statusCode, code(off)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+    await nothingWritten([o1, o2]);
+
+    await setSolo(true);
+    try {
+      const pass2 = await arrive('LHR-8430');
+      const fresh = await onTruck(await lot(partyA, 20), 'LHR-8430', 20, { weigh: false });
+      const old = await onTruck(await lot(partyA, 10), 'LHR-8430', 10, { weigh: false, date: addDays(businessDate(), -3) });
+      const res = await checkoutTruck(pass2, requestFrom(await truckPreview(pass2)), operatorToken);
+      expect([res.statusCode, code(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+      const dn = (await prisma.outboundEvent.findUniqueOrThrow({ where: { id: old } })).dispatchNoteNumber!;
+      expect(JSON.parse(res.body).error.message).toContain(dn);
+      await nothingWritten([fresh, old]);
+    } finally {
+      await setSolo(false);
+    }
+  });
+
+  it('a per-ton charge on an unweighed line refuses the whole truck, naming it, and nothing is written', async () => {
+    const perTon = await prisma.serviceCharge.create({
+      data: { facilityId: TEST_FACILITY_ID, name: `Weighbridge-T-${Date.now()}`, unitType: 'PER_TON', unitPricePkr: 500, applyAtDispatch: true },
+    });
+    try {
+      const pass = await arrive('LHR-8440');
+      const weighed = await onTruck(await lot(partyA, 20), 'LHR-8440', 20);
+      const unweighed = await onTruck(await lot(partyA, 10), 'LHR-8440', 10, { weigh: false });
+      const p = await truckPreview(pass);
+      const line = p.lines.find((l: { outbound_id: string }) => l.outbound_id === unweighed);
+      expect(line.service_lines.find((s: { service_charge_id: string }) => s.service_charge_id === perTon.id)).toMatchObject({
+        needs_weight: true,
+        amount_pkr: 0,
+      });
+      const res = await checkoutTruck(pass, requestFrom(p));
+      expect([res.statusCode, code(res)]).toEqual([422, 'OUTBOUND_WEIGHT_REQUIRED']);
+      const dn = (await prisma.outboundEvent.findUniqueOrThrow({ where: { id: unweighed } })).dispatchNoteNumber!;
+      expect(JSON.parse(res.body).error.message).toContain(dn);
+      expect(JSON.parse(res.body).error.message).toContain(perTon.name);
+      await nothingWritten([weighed, unweighed]);
+    } finally {
+      // Bills first (should a failed assertion have left any), then the charge: no later test meets it.
+      await cleanup();
+      await prisma.serviceCharge.delete({ where: { id: perTon.id } });
+    }
   });
 
   it('a line left out, or one not on the truck, is refused as a changed load', async () => {
