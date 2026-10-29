@@ -15,6 +15,8 @@ vi.mock('../pdf/pdf.service', () => ({
   renderInvoiceHtml: vi.fn().mockReturnValue('<html>inv</html>'),
 }));
 
+import { renderStorageReceipt } from '../pdf/pdf.service';
+
 const prisma = new PrismaClient();
 
 const POTATO_ID = '00000000-0000-0000-0000-000000000100';
@@ -439,5 +441,75 @@ describe('Lot CRUD & inbound workflow', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('application/pdf');
     expect(res.rawPayload.length).toBeGreaterThan(0);
+  });
+});
+
+// Weight optional (docs/27): a lot may come in with no weight, and a facility may hide weights.
+describe('Weight optional', () => {
+  async function storeHideWeights(value: boolean | undefined) {
+    const f = await prisma.facility.findUniqueOrThrow({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    const { hide_weights: _old, ...rest } = (f.settings ?? {}) as Record<string, unknown>;
+    await prisma.facility.update({
+      where: { id: TEST_FACILITY_ID },
+      data: { settings: (value === undefined ? rest : { ...rest, hide_weights: value }) as never },
+    });
+  }
+  const createLot = (payload: Record<string, unknown>) =>
+    app.inject({ method: 'POST', url: '/v1/lots', headers: authHeaders(operatorToken), payload });
+  // Small lots: the file's earlier tests fill most of room A.
+  const unweighedLot = (extra: Record<string, unknown> = {}) => {
+    const { accepted_weight_kg: _none, ...lot } = baseLot({ owner_party_id: ownerPartyId, quantity_bags: 5, ...extra });
+    return lot;
+  };
+  const lastReceipt = () => vi.mocked(renderStorageReceipt).mock.calls.at(-1)![0];
+  const printReceipt = (lotId: string) =>
+    app.inject({ method: 'GET', url: `/v1/lots/${lotId}/receipt`, headers: authHeaders(operatorToken) });
+
+  it('a lot books with no weight', async () => {
+    const res = await createLot(unweighedLot());
+    expect(res.statusCode, res.body).toBe(201);
+    const lot = JSON.parse(res.body).data;
+    expect(lot.accepted_weight_kg).toBeNull();
+    // Stored as 0, "not weighed": the column stays NOT NULL, so an older image can still read it.
+    const row = await prisma.lot.findUniqueOrThrow({ where: { id: lot.id }, select: { acceptedWeightKg: true } });
+    expect(Number(row.acceptedWeightKg)).toBe(0);
+
+    expect((await printReceipt(lot.id)).statusCode).toBe(200);
+    expect(lastReceipt()).toMatchObject({ acceptedWeightKg: null, declaredWeightKg: null });
+  });
+
+  it('a declared weight alone raises no dispute', async () => {
+    const res = await createLot(unweighedLot({ declared_weight_kg: 4120 }));
+    expect(res.statusCode, res.body).toBe(201);
+    expect(JSON.parse(res.body).data.weight_dispute_flag).toBe(false);
+  });
+
+  it('with weights hidden the parchi carries no weight, and the stored one is kept', async () => {
+    const res = await createLot(
+      baseLot({
+        owner_party_id: ownerPartyId,
+        quantity_bags: 5,
+        accepted_weight_kg: 4000,
+        declared_weight_kg: 4120,
+        weight_dispute_note: 'Declared 4,120 kg, kanta 4,000 kg',
+      }),
+    );
+    expect(res.statusCode, res.body).toBe(201);
+    const lotId = JSON.parse(res.body).data.id;
+
+    await storeHideWeights(true);
+    try {
+      expect((await printReceipt(lotId)).statusCode).toBe(200);
+      expect(lastReceipt()).toMatchObject({
+        acceptedWeightKg: null,
+        declaredWeightKg: null,
+        weightDisputeFlag: false,
+        weightDisputeNote: null,
+      });
+    } finally {
+      await storeHideWeights(undefined);
+    }
+    const row = await prisma.lot.findUniqueOrThrow({ where: { id: lotId }, select: { acceptedWeightKg: true } });
+    expect(Number(row.acceptedWeightKg)).toBe(4000);
   });
 });

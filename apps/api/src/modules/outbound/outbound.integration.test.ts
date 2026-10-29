@@ -15,6 +15,8 @@ vi.mock('../pdf/pdf.service', () => ({
   renderInvoiceHtml: vi.fn().mockReturnValue('<html>inv</html>'),
 }));
 
+import { renderDispatchNote } from '../pdf/pdf.service';
+
 const prisma = new PrismaClient();
 
 const POTATO_ID = '00000000-0000-0000-0000-000000000100';
@@ -535,5 +537,72 @@ describe('Current-owner authorization on withdrawal (Fix #3)', () => {
     const body = JSON.parse(res.body).data;
     expect(body.receiving_party_id).toBe(receivingPartyId);
     expect(body.owner_party_id_snapshot).toBe(ownerPartyId);
+  });
+});
+
+// Weight optional (docs/27): a lot may come in with no weight, and a facility may hide weights.
+describe('Weight optional', () => {
+  async function storeHideWeights(value: boolean | undefined) {
+    const f = await prisma.facility.findUniqueOrThrow({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    const { hide_weights: _old, ...rest } = (f.settings ?? {}) as Record<string, unknown>;
+    await prisma.facility.update({
+      where: { id: TEST_FACILITY_ID },
+      data: { settings: (value === undefined ? rest : { ...rest, hide_weights: value }) as never },
+    });
+  }
+  async function book(lotId: string, bags: number) {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/outbound-events',
+      headers: authHeaders(operatorToken),
+      payload: { lot_id: lotId, withdrawal_type: 'PARTIAL', quantity_withdrawn_bags: bags, outbound_date: '2026-04-20' },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    return JSON.parse(res.body).data.id as string;
+  }
+  const weigh = (id: string, kg: number) =>
+    app.inject({
+      method: 'PATCH',
+      url: `/v1/outbound-events/${id}/weight`,
+      headers: authHeaders(operatorToken),
+      payload: { outbound_weight_kg: kg },
+    });
+
+  // Small lots: the file's earlier tests fill most of room A.
+  it("an unweighed lot's withdrawal shows no prorated weight", async () => {
+    const lotRes = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: { owner_party_id: ownerPartyId, commodity_id: POTATO_ID, rate_plan_id: RATE_PLAN, chamber_id: CHAMBER_A, quantity_bags: 4 },
+    });
+    expect(lotRes.statusCode, lotRes.body).toBe(201);
+    const id = await book(JSON.parse(lotRes.body).data.id, 2);
+
+    const res = await weigh(id, 900);
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body).data;
+    expect(body.outbound_weight_kg).toBe(900);
+    expect(body.prorated_inbound_weight_kg).toBeNull();
+    expect(body.weight_variance_pct).toBeNull();
+  });
+
+  it('with weights hidden the dispatch note carries no weight', async () => {
+    const lot = await createLot(4);
+    const id = await book(lot.id, 2);
+    expect((await weigh(id, 190)).statusCode).toBe(200);
+
+    await storeHideWeights(true);
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/outbound-events/${id}/dispatch-note`,
+        headers: authHeaders(operatorToken),
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(vi.mocked(renderDispatchNote).mock.calls.at(-1)![0].outboundWeightKg).toBeNull();
+    } finally {
+      await storeHideWeights(undefined);
+    }
   });
 });

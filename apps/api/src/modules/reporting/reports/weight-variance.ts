@@ -22,14 +22,17 @@ export async function getWeightVariance(
   if (toDate) outboundDateFilter.lte = toDate;
   const hasDateFilter = fromDate !== undefined || toDate !== undefined;
 
+  // Weight is optional (docs/27): only a lot weighed in (an unweighed one stores 0) and only its
+  // withdrawals weighed out compare. Unweighed bags counted at 0 kg would read as shrinkage.
+  const weighedOut: Prisma.OutboundEventWhereInput = {
+    status: 'DISPATCHED',
+    outboundWeightKg: { not: null },
+    ...(hasDateFilter ? { outboundDate: outboundDateFilter } : {}),
+  };
   const lotWhere: Prisma.LotWhereInput = {
     facilityId,
-    outboundEvents: {
-      some: {
-        status: 'DISPATCHED',
-        ...(hasDateFilter ? { outboundDate: outboundDateFilter } : {}),
-      },
-    },
+    acceptedWeightKg: { gt: 0 },
+    outboundEvents: { some: weighedOut },
   };
   if (filters.lot_id) lotWhere.id = filters.lot_id;
 
@@ -49,10 +52,7 @@ export async function getWeightVariance(
         acceptedWeightKg: true,
         ownerParty: { select: { name: true } },
         outboundEvents: {
-          where: {
-            status: 'DISPATCHED',
-            ...(hasDateFilter ? { outboundDate: outboundDateFilter } : {}),
-          },
+          where: weighedOut,
           select: { quantityWithdrawnBags: true, outboundWeightKg: true },
         },
       },

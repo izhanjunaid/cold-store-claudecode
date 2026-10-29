@@ -568,6 +568,67 @@ describe('GET /v1/reports/weight-variance', () => {
     const body = JSON.parse(res.body);
     expect(body.data.every((r: { finalized_outbound_count: number }) => r.finalized_outbound_count > 0)).toBe(true);
   });
+
+  // Weight optional (docs/27): unweighed bags must not read as shrinkage.
+  it('counts only the lots and withdrawals that were weighed', async () => {
+    async function dispatchPart(lotId: string, bags: number, weightKg: number) {
+      const out = await app.inject({
+        method: 'POST',
+        url: '/v1/outbound-events',
+        headers: authHeaders(operatorToken),
+        payload: { lot_id: lotId, withdrawal_type: 'PARTIAL', quantity_withdrawn_bags: bags, outbound_date: '2026-10-01' },
+      });
+      expect(out.statusCode, out.body).toBe(201);
+      const id = JSON.parse(out.body).data.id as string;
+      const w = await app.inject({
+        method: 'PATCH',
+        url: `/v1/outbound-events/${id}/weight`,
+        headers: authHeaders(operatorToken),
+        payload: { outbound_weight_kg: weightKg },
+      });
+      expect(w.statusCode).toBe(200);
+      const fin = await app.inject({
+        method: 'POST',
+        url: `/v1/outbound-events/${id}/finalize`,
+        headers: authHeaders(managerToken),
+        payload: {},
+      });
+      expect(fin.statusCode, fin.body).toBe(200);
+      return id;
+    }
+    const report = async (lotId: string) =>
+      JSON.parse(
+        (await app.inject({ method: 'GET', url: `/v1/reports/weight-variance?lot_id=${lotId}`, headers: authHeaders(managerToken) }))
+          .body,
+      );
+
+    // A: 50 bags at 1,000 kg; 10 bags out at 190 kg, and 10 bags out unweighed.
+    const lotA = await createLot({ ownerPartyId: partyA, commodityId: POTATO_ID, inboundDate: '2026-09-01', quantityBags: 50, acceptedWeightKg: 1000 });
+    await dispatchPart(lotA, 10, 190);
+    const unweighed = await dispatchPart(lotA, 10, 200);
+    await prisma.outboundEvent.update({ where: { id: unweighed }, data: { outboundWeightKg: null } });
+    const a = await report(lotA);
+    expect(a.meta.total).toBe(1);
+    expect(a.data[0]).toMatchObject({ inbound_kg_prorated: 200, outbound_kg_total: 190 });
+
+    // B came in with no weight.
+    const resB = await app.inject({
+      method: 'POST',
+      url: '/v1/lots',
+      headers: authHeaders(operatorToken),
+      payload: { owner_party_id: partyA, commodity_id: POTATO_ID, rate_plan_id: RATE_PLAN_MONTHLY, chamber_id: CHAMBER_A, quantity_bags: 20, inbound_date: '2026-09-01' },
+    });
+    expect(resB.statusCode, resB.body).toBe(201);
+    const lotB = JSON.parse(resB.body).data.id as string;
+    await dispatchPart(lotB, 10, 200);
+    expect(await report(lotB)).toMatchObject({ data: [], meta: { total: 0 } });
+
+    // C is a legacy partial-transfer lot stored at 0 kg.
+    const lotC = await createLot({ ownerPartyId: partyA, commodityId: POTATO_ID, inboundDate: '2026-09-01', quantityBags: 20, acceptedWeightKg: 400 });
+    await prisma.lot.update({ where: { id: lotC }, data: { acceptedWeightKg: 0 } });
+    await dispatchPart(lotC, 10, 200);
+    expect(await report(lotC)).toMatchObject({ data: [], meta: { total: 0 } });
+  });
 });
 
 // ============================================================

@@ -10,6 +10,7 @@ import { resolveFacilitySettings } from '../facility/facility.service';
 import { lockRow } from '../../common/row-lock';
 import { addDays, businessDate } from '@coldchain/shared';
 import { OPEN_OUTBOUND_STATUSES, openReservation } from './reservation';
+import { recordedKg } from '../../common/weight';
 
 function toNumber(d: { toString(): string } | null | undefined): number | null {
   if (d == null) return null;
@@ -22,10 +23,12 @@ function computeVariance(
   quantityWithdrawnBags: number,
   outboundWeightKg: { toString(): string } | null,
 ): { proratedInboundWeightKg: number | null; weightVariancePct: number | null } {
-  if (quantityBags === 0 || outboundWeightKg == null) {
+  // A lot that came in unweighed (stored as 0, docs/27) has nothing to compare against.
+  const inboundKg = recordedKg(acceptedWeightKg);
+  if (quantityBags === 0 || outboundWeightKg == null || inboundKg == null) {
     return { proratedInboundWeightKg: null, weightVariancePct: null };
   }
-  const prorated = Number(acceptedWeightKg) * (quantityWithdrawnBags / quantityBags);
+  const prorated = inboundKg * (quantityWithdrawnBags / quantityBags);
   const outbound = Number(outboundWeightKg);
   const variance = prorated !== 0 ? ((prorated - outbound) / prorated) * 100 : null;
   return {
@@ -357,7 +360,8 @@ export class OutboundService {
       receivingPartyName: ob.receivingParty?.name ?? null,
       commodityName: '', // will be filled via joined query if needed
       quantityWithdrawnBags: ob.quantityWithdrawnBags,
-      outboundWeightKg: toNumber(ob.outboundWeightKg),
+      // A facility that hides weights prints none (docs/27).
+      outboundWeightKg: resolveFacilitySettings(facility?.settings ?? null).hide_weights ? null : toNumber(ob.outboundWeightKg),
       vehicleNumber: ob.vehicleNumber,
       marka: ob.lot.marka,
       operatorName: ob.createdByUser.name,
