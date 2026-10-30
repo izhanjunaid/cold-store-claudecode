@@ -15,7 +15,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 import { useLotPlacements } from '@/components/lot-location';
-import { formatDate, formatCount } from '@/lib/format';
+import { formatDate, formatCount, formatKg } from '@/lib/format';
 import { useWeightsShown } from '@/hooks/use-reference-data';
 
 import { PageSkeleton } from '@/components/page-skeleton';
@@ -278,6 +278,10 @@ export default function OutboundEventDetailPage() {
   
             {event.status === 'PENDING' && event.outbound_weight_kg == null && (
               <p className="mt-2 text-xs text-muted-foreground">No weight recorded. It is optional.</p>
+            )}
+            {/* Went out (or is held) unweighed: a dash, never an empty card (docs/27). */}
+            {event.status !== 'PENDING' && event.outbound_weight_kg == null && (
+              <Field label="Outbound Weight" value={formatKg(null)} />
             )}
           </CardContent>
         </Card>

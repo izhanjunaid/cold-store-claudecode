@@ -1,9 +1,9 @@
 'use client';
 
-import { TRUCK_MAX_LINES } from '@coldchain/shared';
+import { TRUCK_MAX_LINES, localIsoDate } from '@coldchain/shared';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatCount, formatDateTime } from '@/lib/format';
+import { formatCount, formatDate, formatDateTime } from '@/lib/format';
 
 export interface TruckLine {
   outbound_id: string;
@@ -14,6 +14,8 @@ export interface TruckLine {
   marka: string | null;
   billing_party: { id: string; name: string };
   quantity_withdrawn_bags: number | null;
+  /** The withdrawal's date: one before today may be a booking left from an earlier visit of this plate. */
+  outbound_date?: string;
 }
 
 export interface TruckInside {
@@ -65,6 +67,7 @@ export function TrucksPanel({
   onOpen: (outboundId: string) => void;
 }) {
   if (trucks.length === 0) return null;
+  const today = localIsoDate();
   return (
     <Card>
       <CardHeader>
@@ -99,6 +102,15 @@ export function TrucksPanel({
                       <span className="truncate text-muted-foreground">{l.billing_party.name}</span>
                       <span className="ml-auto shrink-0 tabular-nums">{formatCount(l.quantity_withdrawn_bags)}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">{STAGE_TEXT[l.stage] ?? l.stage.toLowerCase()}</span>
+                      {/* A booked line goes out with the truck (docs/27): one dated before today may be an earlier visit's. */}
+                      {l.status !== 'DISPATCHED' && l.outbound_date && l.outbound_date < today && (
+                        <span
+                          className="shrink-0 text-xs font-medium text-amber-700"
+                          title="Booked for an earlier day: check it is on this truck, or cancel it"
+                        >
+                          dated {formatDate(l.outbound_date)}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>

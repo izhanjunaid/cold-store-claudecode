@@ -268,6 +268,21 @@ describe('a truck that is not ready, or changed since it was reviewed', () => {
     expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: booked } })).outboundWeightKg).toBeNull();
   });
 
+  // A booked line no longer holds its truck, so a booking left from an earlier visit of the same plate
+  // would ride out with the next one: the desk marks it by its date (review fix, docs/27).
+  it('the trucks list dates each line, so a booking from an earlier visit stands out', async () => {
+    const pass = await arrive('LHR-8450');
+    const earlier = addDays(businessDate(), -3);
+    const old = await onTruck(await lot(partyA, 10), 'LHR-8450', 10, { weigh: false, date: earlier });
+    const fresh = await onTruck(await lot(partyA, 20), 'LHR-8450', 20, { weigh: false });
+    const trucks = data<{ gate_pass_id: string; lines: { outbound_id: string; outbound_date: string }[] }[]>(
+      await call('GET', '/v1/dispatch/trucks', managerToken),
+    );
+    const lines = trucks.find((t) => t.gate_pass_id === pass)!.lines;
+    expect(lines.find((l) => l.outbound_id === old)!.outbound_date).toBe(earlier);
+    expect(lines.find((l) => l.outbound_id === fresh)!.outbound_date).toBe(businessDate());
+  });
+
   it('a legacy DISPUTED line still holds the truck, and nothing is written', async () => {
     const pass = await arrive('LHR-8410');
     const weighed = await onTruck(await lot(partyA, 20), 'LHR-8410', 20);

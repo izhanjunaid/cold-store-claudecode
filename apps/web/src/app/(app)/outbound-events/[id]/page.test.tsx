@@ -371,6 +371,13 @@ describe('OutboundEventDetailPage — weight optional', () => {
     expect(screen.getByText('Waiting for a manager to dispatch.')).toBeInTheDocument();
   });
 
+  it('a dispatched withdrawal with no weight shows a dash, not an empty card', async () => {
+    event = makeEvent({ status: 'DISPATCHED', outbound_weight_kg: null, prorated_inbound_weight_kg: null, weight_variance_pct: null });
+    renderPage();
+    await loaded();
+    expect(screen.getByText('Outbound Weight').parentElement).toHaveTextContent('—');
+  });
+
   it('the weight is optional: no required star', async () => {
     renderPage();
     await loaded();

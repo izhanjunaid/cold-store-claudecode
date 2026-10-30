@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { localIsoDate } from '@coldchain/shared';
 
 const apiClient = vi.fn();
 vi.mock('@/lib/api-client', async (importOriginal) => {
@@ -146,6 +147,23 @@ describe('TruckCheckoutSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: /Check out truck/ }));
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0]![1].body.lines[0]).toEqual({ outbound_id: '1', expected_total_pkr: 1000, skip_service_charge_ids: ['svc-ton'] });
+  });
+
+  it("a line dated before today is marked: it may be an earlier visit's booking", async () => {
+    const today = localIsoDate();
+    preview = {
+      ...preview,
+      lines: [
+        { ...bill('1', A, 1000, 60), period_end: today },
+        { ...bill('2', A, 500), period_end: '2026-01-05' },
+        { ...bill('3', B, 300), period_end: today },
+      ],
+    };
+    renderSheet();
+    await screen.findByText('Bashir', { selector: '[data-group-party]' });
+    const marked = screen.getAllByText(/dated/i);
+    expect(marked).toHaveLength(1);
+    expect(marked[0]!.closest('[data-line]')).toHaveTextContent('DN-2');
   });
 
   it('when the truck changed meanwhile it shows why and prices it again', async () => {

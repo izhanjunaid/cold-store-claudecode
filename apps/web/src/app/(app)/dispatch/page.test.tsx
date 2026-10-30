@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { localIsoDate } from '@coldchain/shared';
 
 const push = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -337,6 +338,24 @@ describe('Dispatch Desk — trucks with several lots', () => {
     const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
     expect(within(card).getByRole('button', { name: 'Check out truck' })).toBeEnabled();
     expect(within(card).queryByText(/first/)).not.toBeInTheDocument();
+  });
+
+  it("a lot dated before today is marked on the truck card: it may be an earlier visit's booking", async () => {
+    trucks = [
+      truck({
+        vehicle_number: 'LHR-2222',
+        ready: true,
+        lines: [
+          { ...TWO_LINES[0], outbound_date: localIsoDate() },
+          { ...TWO_LINES[1], status: 'PENDING', stage: 'BOOKED', outbound_date: '2026-01-05' },
+        ],
+      }),
+    ];
+    renderPage();
+    const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
+    const marked = within(card).getAllByText(/dated/i);
+    expect(marked).toHaveLength(1);
+    expect(marked[0]!.closest('li')).toHaveTextContent('DN-SECOND');
   });
 
   it('a truck held by a lot marked disputed cannot be checked out yet', async () => {

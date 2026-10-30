@@ -739,6 +739,9 @@ function truckLine(l: OpenLoadLine) {
     owner_party_name: l.ownerPartySnapshot?.name ?? null,
     quantity_withdrawn_bags: l.quantityWithdrawnBags,
     outbound_weight_kg: l.outboundWeightKg == null ? null : Number(l.outboundWeightKg),
+    // A booked line no longer holds its truck, so the desk marks one dated before today: it may be
+    // a booking left from an earlier visit of the same plate (docs/27).
+    outbound_date: l.outboundDate.toISOString().slice(0, 10),
     invoice: l.invoice && {
       id: l.invoice.id,
       invoice_number: l.invoice.invoiceNumber,

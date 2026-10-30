@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { round2 } from '@coldchain/shared';
+import { localIsoDate, round2 } from '@coldchain/shared';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
-import { formatMoney } from '@/lib/format';
+import { formatDate, formatMoney } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -102,6 +102,7 @@ export function TruckCheckoutSheet({
   };
   const lines = preview?.lines ?? [];
   const total = round2(lines.reduce((s, l) => s + lineTotal(l), 0));
+  const today = localIsoDate();
   // A charge priced per ton on a lot with no weight (docs/27): the server refuses it, so the sheet does too.
   const unweighed = lines.flatMap((l) =>
     l.service_lines
@@ -204,10 +205,16 @@ export function TruckCheckoutSheet({
                   <span className="text-xs text-muted-foreground">{g.book_type === 'KATCHI' ? 'KATCHI — only the owner takes this money' : 'PACCI'}</span>
                 </div>
                 {groupLines.map((l) => (
-                  <div key={l.outbound_id} className="rounded border text-sm">
+                  <div key={l.outbound_id} data-line className="rounded border text-sm">
                     <div className="flex justify-between px-2 py-1">
                       <span>
                         <span className="font-mono text-xs">{l.dispatch_note_number}</span> · {l.lot_number} · {l.storage_line.description}
+                        {/* A booked line goes out with the truck (docs/27): one dated before today may be an earlier visit's. */}
+                        {l.period_end < today && (
+                          <span className="block text-xs font-medium text-amber-700">
+                            Dated {formatDate(l.period_end)}: booked for an earlier day. Check it is on this truck, or cancel it.
+                          </span>
+                        )}
                       </span>
                       <span className="tabular-nums">{formatMoney(l.storage_line.amount_pkr)}</span>
                     </div>
