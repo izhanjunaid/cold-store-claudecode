@@ -1,6 +1,73 @@
 # ColdChain — Build Progress
 
 ## Current Status
+- **Weight optional everywhere (C3, part 1), docs/27.**
+  - **Where it stands:** built on `feat/weight-optional`, cut from `main` at `ae3ad1e`, 2026-10-29 → 31.
+    - No migration and no schema change; still 42 migrations.
+    - Landed through a PR, squash-merged into `main` once `build-and-test` passed (the owner's rule of 2026-10-29).
+    - **Not tagged or promoted:** `:stable` is still v0.6.2, and releasing is the owner's call.
+  - **Why:** the owner, 2026-10-29: most clients don't keep track of weight, so make it optional from inward to outward, with no weight check in C3. C3's blind weigh-out and tolerance band are dropped. Its rest (QR codes, the approval queue, the gate gaps) comes next.
+  - **Owner decisions (2026-10-29):**
+    - **"Both":** weight is optional for every client, and a facility setting, "We weigh produce", hides it completely for one that never weighs.
+    - **The live client keeps weights showing** after the update.
+    - **This ships first,** before the rest of C3.
+  - **What changed:**
+    - **The setting:** "We weigh produce" (Settings → Operational Settings), stored inverted as `hide_weights`.
+      - A facility that never saved it shows weights, so the live box changes nothing on update.
+      - `provision.ts` stores `true`, so new boxes start hidden.
+      - Hiding is refused while a per-ton service charge is active, and no charge can become active per ton while weights are hidden.
+    - **Inward:** the accepted weight is optional. A lot with none stores 0 ("not weighed"; the column stays NOT NULL so a rollback stays safe) and reads back as null through `recordedKg()`. The dispute note is needed only when both weights are typed.
+    - **Outward:** a booked withdrawal checks out straight away, alone or on a truck. One rule, `isReadyToDispatch()` (PENDING or WEIGHED), decides every dispatch check, the solo door's included. Only a legacy DISPUTED row waits (`OUTBOUND_DISPUTED`; it holds its truck).
+    - **Per-ton charges** are the one thing that needs a weight. Both previews mark `needs_weight`; both sheets block Confirm, naming the lot and the charge; both checkouts refuse it after the manager's skips (`OUTBOUND_WEIGHT_REQUIRED`). Never billed at zero.
+    - **Papers and pages:**
+      - the parchi and the dispatch note print a weight only when there is one and weights are shown;
+      - the weight-variance report counts only weighed lots and withdrawals, and hides from Reports while weights are hidden;
+      - a withdrawal with no weight shows a dash;
+      - the truck card and sheet mark a line dated before today.
+  - **Verified (2026-10-31) on the code head `4692120`:**
+    - guardrails, typecheck 8/8, build 5/5;
+    - api 287 unit + 988 integration (4 skipped) on a fresh database, web 402 unit;
+    - migration repair (42 migrations);
+    - e2e: desk 3/3 (6 clicks), truck 2/2 (10 clicks), no-weigh 1/1 (5 clicks); earlier on `81a3126` also solo 3/3, slip pop-up 1/1, season 1/1.
+  - **Browser check** (Haiku subagent in the owner's Chrome) 16/16, every claim confirmed at the API:
+    - hiding refused while a per-ton charge was active, then saved once it was deactivated;
+    - no weight boxes on the form, the desk or the lot page; no Per Ton choice and no Weight Variance card;
+    - an unweighed lot checked out from Booked, its bill paid;
+    - weights shown again with a weighed lot's 4,000 kg intact, and the desk's optional Weigh box back.
+  - **Final review (Opus):** 0 Critical and 1 Important, both fixed with failing-first tests:
+    - a withdrawal dispatched without a weight showed an empty "Weight" card;
+    - re-graded from Minor: a booking left on a plate from an earlier visit would ride out, billed and paid, with that truck's next checkout (it used to hold the truck). Lines dated before today are now marked on the truck card and sheet.
+    - The e2e's setting restore moved to `afterAll` as planned, and the docs/10 truck rows were corrected.
+  - **Rulings made while building:**
+    - *Owner-facing:*
+      - "not weighed" is stored as 0, which keeps a rollback safe;
+      - the setting is stored inverted, so existing clients need no data change;
+      - a per-ton charge with no weight stops the checkout and points to the lot's desk row or page; no weight box was added inside the sheet;
+      - a legacy DISPUTED withdrawal gets its own refusal, `OUTBOUND_DISPUTED`.
+    - *Implementation:*
+      - the guard tests assert 400, the code base's `VALIDATION_ERROR`;
+      - the papers' "hidden" tests assert on the renderer's data (both routes are PDF-only);
+      - the service-charge form still shows "Per Ton" for a charge that already is one;
+      - `useWeightsShown()` takes `useFacility`'s `enabled`, so the desk asks nothing before the user is known;
+      - the e2e books its lot through the API after checking the form, and stubs the dispatch-note PDF.
+    - *Declined to judge in review, ruled to stand:*
+      - no inward-weight edit after booking;
+      - a "Weighed" label on old rows after hiding;
+      - a brief flash of weight boxes while the setting loads;
+      - an inactive-path per-ton charge still blocks hiding;
+      - rollback shows 0 kg;
+      - the gate's "WEIGHING" label;
+      - the variance URL still works while hidden;
+      - no UI re-weigh after WEIGHED;
+      - a stale booking bills storage to its own date;
+      - the per-ton refusal runs after the rolled-back dispatch work.
+  - **Deferred minors:**
+    - a legacy DISPUTED row still shows the desk's Weigh box (weighing makes it WEIGHED); its refusal says "settle", but no settle action exists;
+    - the sheets don't re-price on `OUTBOUND_WEIGHT_REQUIRED`;
+    - the two weight guards read-then-write without a lock;
+    - the web re-derives the dispatch rule instead of sharing `READY_TO_DISPATCH`;
+    - test gaps: a booked KATCHI line with solo on, and per-ton skip or weigh on a truck;
+    - nits: the Urdu parchi heading for a lot with only a declared weight; `Number()` in weight-variance.ts behind its filter; the field named on a refused reactivation.
 - **Fast dispatch C2: a truck carrying several lots, checked out in one step, with a load slip.**
   - **Where it stands:** built on `feat/dispatch-c2-truck-basket`, cut from `main` at `3a1fd64` and worked 2026-10-23 → 29. No migration.
     - **Landed through PR #44**, squash-merged into `main` once `build-and-test` passed. Under the owner's rule of 2026-10-29, a PR or merge is mine to decide after careful consideration.
