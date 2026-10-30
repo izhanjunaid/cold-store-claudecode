@@ -45,7 +45,7 @@ type Payment = { mode: Mode; reference: string; chequeDate: string };
 const groupKey = (g: { billing_party: { id: string }; book_type: string }) => `${g.billing_party.id}:${g.book_type}`;
 
 /**
- * Check out a whole truck: every weighed lot on it dispatched and billed, the money taken once
+ * Check out a whole truck: every lot on it dispatched and billed, the money taken once
  * per paying party (one receipt each) — one transaction, or nothing. The same review as the
  * one-lot sheet, line by line; the server refuses it if any bill or the load changed meanwhile.
  */
@@ -102,13 +102,20 @@ export function TruckCheckoutSheet({
   };
   const lines = preview?.lines ?? [];
   const total = round2(lines.reduce((s, l) => s + lineTotal(l), 0));
+  // A charge priced per ton on a lot with no weight (docs/27): the server refuses it, so the sheet does too.
+  const unweighed = lines.flatMap((l) =>
+    l.service_lines
+      .filter((s) => s.needs_weight && !skipped.has(`${l.outbound_id}:${s.service_charge_id}`))
+      .map((s) => `${l.dispatch_note_number ?? l.lot_number}: ${s.description}`),
+  );
 
   const groupBlocked = (g: TruckGroup) => {
     const p = paymentOf(g);
     const needsReference = p.mode === 'BANK_TRANSFER' || p.mode === 'MOBILE_WALLET';
     return !modeOffered(g, p.mode) || (p.mode === 'CHEQUE' && !p.chequeDate) || (needsReference && !p.reference.trim());
   };
-  const blocked = !canFinish || !preview || preview.not_ready.length > 0 || lines.length === 0 || preview.groups.some(groupBlocked);
+  const blocked =
+    !canFinish || !preview || preview.not_ready.length > 0 || unweighed.length > 0 || lines.length === 0 || preview.groups.some(groupBlocked);
 
   async function submit() {
     if (!preview) return;
@@ -170,7 +177,13 @@ export function TruckCheckoutSheet({
           {loadError && <p className="text-sm text-destructive">{loadError instanceof Error ? loadError.message : 'Could not price this truck'}</p>}
           {preview && preview.not_ready.length > 0 && (
             <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              Weigh or cancel first: {preview.not_ready.join(', ')}.
+              Cancel first, marked disputed: {preview.not_ready.join(', ')}.
+            </p>
+          )}
+          {unweighed.length > 0 && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Record these lots&apos; weight first, on their desk rows or pages ({unweighed.join('; ')}): charged per ton
+              {holdsKeys ? '. Or leave the charge off that bill.' : '.'}
             </p>
           )}
           {!holdsKeys && preview && !solo && (

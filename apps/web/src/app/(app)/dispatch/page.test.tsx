@@ -142,6 +142,8 @@ describe('Dispatch Desk', () => {
   it('offers each row its next step, and leaves out trucks that already left', async () => {
     renderPage();
     const booked = (await screen.findByText('DN-BOOKED')).closest('tr') as HTMLElement;
+    // Weight is optional (docs/27): a booked row checks out straight away; weighing is on offer.
+    expect(within(booked).getByRole('button', { name: /Dispatch & Collect/ })).toBeInTheDocument();
     expect(within(booked).getByRole('button', { name: 'Weigh' })).toBeInTheDocument();
 
     const weighed = screen.getByText('DN-WEIGHED').closest('tr') as HTMLElement;
@@ -170,6 +172,33 @@ describe('Dispatch Desk', () => {
     await waitFor(() =>
       expect(apiClient).toHaveBeenCalledWith('/v1/outbound-events/ob-booked/weight', { method: 'PATCH', body: { outbound_weight_kg: 1950 } }),
     );
+  });
+
+  it('with weights hidden a booked row has no weight box, only its checkout', async () => {
+    apiClient.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === '/v1/facilities/me' ? { id: 'f', name: 'F', settings: { hide_weights: true } } : path === '/v1/dispatch/trucks' ? [] : {},
+      ),
+    );
+    renderPage();
+    const booked = (await screen.findByText('DN-BOOKED')).closest('tr') as HTMLElement;
+    await waitFor(() => expect(within(booked).queryByLabelText(/Weight in kg/)).not.toBeInTheDocument());
+    expect(within(booked).queryByRole('button', { name: 'Weigh' })).not.toBeInTheDocument();
+    expect(within(booked).getByRole('button', { name: /Dispatch & Collect/ })).toBeInTheDocument();
+  });
+
+  it('a row marked disputed (a status nothing sets any more) is never offered a checkout', async () => {
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.startsWith('/v1/outbound-events')
+          ? { data: [row({ id: 'ob-disputed', dispatch_note_number: 'DN-DISPUTED', status: 'DISPUTED', stage: 'BOOKED' })], meta: {} }
+          : { data: [], meta: {} },
+      ),
+    );
+    renderPage();
+    const disputed = (await screen.findByText('DN-DISPUTED')).closest('tr') as HTMLElement;
+    expect(within(disputed).queryByRole('button', { name: /Dispatch & Collect/ })).not.toBeInTheDocument();
+    expect(within(disputed).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
   it('a manager opens the checkout for a weighed truck; the munshi is told to wait for one', async () => {
@@ -302,18 +331,26 @@ describe('Dispatch Desk — trucks with several lots', () => {
     expect(within(weighed).queryByRole('button', { name: /Dispatch & Collect/ })).not.toBeInTheDocument();
   });
 
-  it('a truck with a lot still to weigh cannot be checked out yet', async () => {
-    trucks = [truck({ vehicle_number: 'LHR-2222', ready: false, lines: [TWO_LINES[0], { ...TWO_LINES[1], status: 'PENDING', stage: 'BOOKED' }] })];
+  it('a booked lot never holds its truck: weight is optional (docs/27)', async () => {
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: true, lines: [TWO_LINES[0], { ...TWO_LINES[1], status: 'PENDING', stage: 'BOOKED' }] })];
+    renderPage();
+    const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
+    expect(within(card).getByRole('button', { name: 'Check out truck' })).toBeEnabled();
+    expect(within(card).queryByText(/first/)).not.toBeInTheDocument();
+  });
+
+  it('a truck held by a lot marked disputed cannot be checked out yet', async () => {
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: false, lines: [TWO_LINES[0], { ...TWO_LINES[1], status: 'DISPUTED', stage: 'BOOKED' }] })];
     renderPage();
     const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
     expect(within(card).getByRole('button', { name: 'Check out truck' })).toBeDisabled();
   });
 
-  it('a truck held by a lot still to weigh says which, and each lot on the card opens its withdrawal', async () => {
-    trucks = [truck({ vehicle_number: 'LHR-2222', ready: false, lines: [TWO_LINES[0], { ...TWO_LINES[1], status: 'PENDING', stage: 'BOOKED' }] })];
+  it('a truck held by a disputed lot says which, and each lot on the card opens its withdrawal', async () => {
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: false, lines: [TWO_LINES[0], { ...TWO_LINES[1], status: 'DISPUTED', stage: 'BOOKED' }] })];
     renderPage();
     const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
-    expect(within(card).getByText(/Weigh or cancel DN-SECOND first/)).toBeInTheDocument();
+    expect(within(card).getByText(/Cancel DN-SECOND first/).textContent).not.toMatch(/weigh/i);
     fireEvent.click(within(card).getByRole('button', { name: 'DN-SECOND' }));
     expect(push).toHaveBeenCalledWith('/outbound-events/ob-second');
   });

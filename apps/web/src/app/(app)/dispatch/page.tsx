@@ -12,7 +12,7 @@ import { qk } from '@/lib/query-keys';
 import { formatMoney } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth.store';
 import { useListQuery } from '@/hooks/use-list-query';
-import { useFacility } from '@/hooks/use-reference-data';
+import { useFacility, useWeightsShown } from '@/hooks/use-reference-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -56,7 +56,7 @@ interface LotHit {
 }
 
 const STAGE_LABEL: Record<Stage, { text: string; tone: 'info' | 'warning' | 'danger' | 'success' | 'muted' }> = {
-  BOOKED: { text: 'Booked — weigh it', tone: 'info' },
+  BOOKED: { text: 'Booked', tone: 'info' },
   WEIGHED: { text: 'Weighed', tone: 'warning' },
   DISPATCHED: { text: 'Dispatched', tone: 'danger' },
   PAID: { text: 'Paid — ready to leave', tone: 'success' },
@@ -77,6 +77,8 @@ export default function DispatchDeskPage() {
   const { data: facility } = useFacility({ enabled: canQuery });
   const soloOn = facility?.settings?.dispatch_solo_mode === true;
   const canDispatch = (can(user, 'outbound.finalize') && can(user, 'invoices.manage')) || (canQuery && soloOn);
+  // Weight is optional; a facility that doesn't weigh gets no weight box at all (docs/27).
+  const weightsShown = useWeightsShown({ enabled: canQuery });
 
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -265,6 +267,7 @@ export default function DispatchDeskPage() {
                     key={row.id}
                     row={row}
                     canDispatch={canDispatch}
+                    weightsShown={weightsShown}
                     withTruck={!!row.vehicle_number && multiLotPlates.has(normalizePlate(row.vehicle_number))}
                     onChanged={refresh}
                     onCollect={() => setCheckoutId(row.id)}
@@ -329,6 +332,7 @@ export default function DispatchDeskPage() {
 function DispatchRowView({
   row,
   canDispatch,
+  weightsShown,
   withTruck,
   onChanged,
   onCollect,
@@ -337,6 +341,8 @@ function DispatchRowView({
 }: {
   row: DispatchRow;
   canDispatch: boolean;
+  /** "We weigh produce": the optional kanta-weight box shows only then. */
+  weightsShown: boolean;
   /** On a truck carrying several lots: the truck card checks it out. */
   withTruck: boolean;
   onChanged: () => void;
@@ -348,6 +354,8 @@ function DispatchRowView({
   const [weight, setWeight] = useState('');
   const [saving, setSaving] = useState(false);
   const label = STAGE_LABEL[row.stage];
+  // Booked or weighed may go out (weight is optional); a legacy DISPUTED row (shown as Booked) may not.
+  const ready = row.status === 'PENDING' || row.status === 'WEIGHED';
 
   async function weigh() {
     const kg = Number(weight);
@@ -393,7 +401,7 @@ function DispatchRowView({
       </TableCell>
       <TableCell className="py-1">
         <div className="flex items-center justify-end gap-1">
-          {row.stage === 'BOOKED' && (
+          {row.stage === 'BOOKED' && weightsShown && (
             <>
               <Input
                 type="number"
@@ -410,7 +418,7 @@ function DispatchRowView({
               </Button>
             </>
           )}
-          {row.stage === 'WEIGHED' &&
+          {ready &&
             (canDispatch && withTruck ? (
               <span className="text-xs text-muted-foreground">Check out with the truck</span>
             ) : canDispatch ? (

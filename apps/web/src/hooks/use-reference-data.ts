@@ -186,6 +186,6 @@ export function useFacility(options: { enabled?: boolean } = {}) {
  * Whether this facility shows weights ("We weigh produce", docs/27). A facility still loading,
  * or one that never saved the setting, shows them, as before. Weight is optional either way.
  */
-export function useWeightsShown(): boolean {
-  return useFacility().data?.settings?.hide_weights !== true;
+export function useWeightsShown(options: { enabled?: boolean } = {}): boolean {
+  return useFacility(options).data?.settings?.hide_weights !== true;
 }

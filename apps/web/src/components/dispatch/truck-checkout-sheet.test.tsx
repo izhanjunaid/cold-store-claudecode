@@ -123,11 +123,29 @@ describe('TruckCheckoutSheet', () => {
     expect(within(groupB).getByRole('button', { name: 'On credit' })).toBeEnabled();
   });
 
-  it('a truck with a lot still to weigh cannot be checked out, and says which', async () => {
+  it('a truck held by a lot marked disputed cannot be checked out, and says which (never "weigh")', async () => {
     preview = { ...preview, not_ready: ['DN-9'] };
     renderSheet();
-    expect(await screen.findByText(/DN-9/)).toBeInTheDocument();
+    const held = await screen.findByText(/DN-9/);
+    expect(held.textContent).not.toMatch(/weigh/i);
     expect(screen.getByRole('button', { name: /Check out truck/ })).toBeDisabled();
+  });
+
+  // Weight is optional (docs/27); a charge priced per ton is the one thing that needs a weight.
+  it('a per-ton charge with no weight blocks the truck until a manager leaves it off', async () => {
+    const perTon = { service_charge_id: 'svc-ton', description: 'Weighbridge', quantity: 0, unit_price_pkr: 500, amount_pkr: 0, needs_weight: true };
+    preview = { ...preview, lines: [{ ...bill('1', A, 1000, 60), service_lines: [perTon] }, bill('2', A, 500), bill('3', B, 300)] };
+    renderSheet();
+    const notice = await screen.findByText(/charged per ton/);
+    expect(notice).toHaveTextContent('DN-1');
+    expect(notice).toHaveTextContent('Weighbridge');
+    expect(screen.getByRole('button', { name: /Check out truck/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText(/Weighbridge/));
+    expect(screen.queryByText(/charged per ton/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Check out truck/ }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]![1].body.lines[0]).toEqual({ outbound_id: '1', expected_total_pkr: 1000, skip_service_charge_ids: ['svc-ton'] });
   });
 
   it('when the truck changed meanwhile it shows why and prices it again', async () => {
