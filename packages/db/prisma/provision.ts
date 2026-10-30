@@ -129,6 +129,9 @@ async function main() {
           // Stored, not left to the code default: it freezes once anything is
           // posted, and a frozen value has to be a stored one (docs/25 L-05).
           fiscal_year_start_month: 7,
+          // Most clients don't weigh, so a new box starts with weights hidden ("We weigh
+          // produce" off, docs/27). The owner switches it on in Settings for one that does.
+          hide_weights: true,
         },
       },
     });

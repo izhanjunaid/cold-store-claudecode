@@ -16,6 +16,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/layout/page-header';
+import { useWeightsShown } from '@/hooks/use-reference-data';
 
 interface ReportCard {
   title: string;
@@ -23,6 +24,8 @@ interface ReportCard {
   description: string;
   permission: string;
   icon: LucideIcon;
+  /** Only for a facility that shows weights ("We weigh produce", docs/27). */
+  weights?: true;
 }
 
 const cards: ReportCard[] = [
@@ -30,7 +33,7 @@ const cards: ReportCard[] = [
   { title: 'Receivables Aging', href: '/reports/receivables-aging', icon: Receipt, permission: 'reports.financial', description: 'Outstanding invoices bucketed 0–30 / 31–60 / 61–90 / 90+ days.' },
   { title: 'Party Statement', href: '/reports/party-statement', icon: FileSpreadsheet, permission: 'reports.financial', description: 'Generate a statement of account for any party, downloadable as PDF.' },
   { title: 'Commodity Inventory', href: '/reports/commodity-inventory', icon: Warehouse, permission: 'reports.inventory', description: 'Bags by commodity, expandable per-room breakdown.' },
-  { title: 'Weight Variance', href: '/reports/weight-variance', icon: Scale, permission: 'reports.inventory', description: 'Inbound vs. outbound weight per lot, flagged at ±2% variance.' },
+  { title: 'Weight Variance', href: '/reports/weight-variance', icon: Scale, permission: 'reports.inventory', weights: true, description: 'Inbound vs. outbound weight per lot, flagged at ±2% variance.' },
   { title: 'Seasonal Summary', href: '/reports/seasonal-summary', icon: CalendarRange, permission: 'reports.seasonal', description: 'Total inbound, outbound, and revenue across a date range, per commodity.' },
   { title: 'Ownership Transfer Log', href: '/reports/ownership-transfers', icon: ArrowRightLeft, permission: 'reports.inventory', description: 'Timeline of all FULL and PARTIAL ownership transfers across the facility.' },
   { title: 'Late Payment Surcharges', href: '/reports/surcharges', icon: AlarmClock, permission: 'reports.financial', description: 'Overdue invoices eligible for a surcharge, applied one at a time — never automatically.' },
@@ -39,7 +42,8 @@ const cards: ReportCard[] = [
 
 export default function ReportsHubPage() {
   const user = useAuthStore((s) => s.user);
-  const visible = cards.filter((c) => can(user, c.permission));
+  const weightsShown = useWeightsShown();
+  const visible = cards.filter((c) => can(user, c.permission) && (!c.weights || weightsShown));
 
   return (
     <div>

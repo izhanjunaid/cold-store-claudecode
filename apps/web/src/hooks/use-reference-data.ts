@@ -61,6 +61,8 @@ export interface FacilitySettings {
   fiscal_year_start_month?: number;
   /** Fast-dispatch C1b — the munshi may finish a clean truck (cash, or approved credit) without a manager. */
   dispatch_solo_mode?: boolean;
+  /** "We weigh produce", stored inverted (docs/27): true hides every weight box. Weight is optional either way. */
+  hide_weights?: boolean;
   [key: string]: unknown;
 }
 
@@ -178,4 +180,12 @@ export function useFacility(options: { enabled?: boolean } = {}) {
     staleTime: REFERENCE_STALE_TIME,
     enabled: options.enabled ?? true,
   });
+}
+
+/**
+ * Whether this facility shows weights ("We weigh produce", docs/27). A facility still loading,
+ * or one that never saved the setting, shows them, as before. Weight is optional either way.
+ */
+export function useWeightsShown(options: { enabled?: boolean } = {}): boolean {
+  return useFacility(options).data?.settings?.hide_weights !== true;
 }

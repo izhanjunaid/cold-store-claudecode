@@ -124,7 +124,7 @@ export async function outboundRoutes(app: FastifyInstance) {
     },
   });
 
-  // GET /v1/outbound-events/:id/checkout-preview — the bill a weighed withdrawal will carry.
+  // GET /v1/outbound-events/:id/checkout-preview — the bill a booked withdrawal will carry.
   // outbound.record, not .finalize: the munshi reads the bill, and the preview says whether the
   // owner's solo switch lets them finish it.
   app.route({

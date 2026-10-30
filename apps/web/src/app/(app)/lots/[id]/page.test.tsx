@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const LOT_ID = 'lot-1';
 const push = vi.fn();
@@ -73,7 +74,13 @@ const LOT = {
 let lot: typeof LOT = LOT;
 
 async function renderPage() {
-  render(<LotDetailPage />);
+  // The page reads the facility's settings (whether weights are shown) through React Query.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <LotDetailPage />
+    </QueryClientProvider>,
+  );
   await screen.findByRole('heading', { name: LOT.lot_number });
 }
 
@@ -105,6 +112,25 @@ describe('LotDetailPage actions', () => {
     await renderPage();
     expect(screen.queryByText(/NaN|null kg/)).not.toBeInTheDocument();
     expect(screen.queryByText(/4,000/)).not.toBeInTheDocument();
+  });
+
+  // Weight optional (docs/27).
+  it('with weights hidden the lot shows no weight row and no weight-dispute flag', async () => {
+    lot = { ...LOT, declared_weight_kg: 4120, weight_dispute_flag: true, weight_dispute_note: 'Six bags wet' } as unknown as typeof LOT;
+    apiClient.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === `/v1/lots/${LOT_ID}` ? lot : path === '/v1/facilities/me' ? { id: 'fac-1', settings: { hide_weights: true } } : [],
+      ),
+    );
+    await renderPage();
+    await waitFor(() => expect(screen.queryByText('Weight (Accepted / Declared)')).not.toBeInTheDocument());
+    expect(screen.queryByText('Weight dispute flag')).not.toBeInTheDocument();
+    expect(screen.queryByText(/4,000/)).not.toBeInTheDocument();
+  });
+
+  it('with weights shown the lot keeps its weight row', async () => {
+    await renderPage();
+    expect(screen.getByText('Weight (Accepted / Declared)')).toBeInTheDocument();
   });
 
   it('the guard has no Billing tab (the API refuses them the invoices); everyone else does', async () => {

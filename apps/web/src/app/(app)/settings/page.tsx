@@ -56,6 +56,8 @@ export default function SettingsPage() {
   // The business day from which the cash the dispatch desk takes is tracked and handed over; null = not tracked.
   const [cashTrackingFrom, setCashTrackingFrom] = useState<string | null>(null);
   const [dispatchSoloMode, setDispatchSoloMode] = useState(false);
+  // "We weigh produce": stored inverted, as hide_weights (docs/27).
+  const [weighsProduce, setWeighsProduce] = useState(true);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -83,6 +85,7 @@ export default function SettingsPage() {
         setSurchargeGraceDays(String(f.settings.late_payment_surcharge?.grace_days ?? 30));
         setCashTrackingFrom(f.settings.cash_tracking_from ?? null);
         setDispatchSoloMode(f.settings.dispatch_solo_mode ?? false);
+        setWeighsProduce(f.settings.hide_weights !== true);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Load failed'))
       .finally(() => setLoading(false));
@@ -118,6 +121,7 @@ export default function SettingsPage() {
             },
             cash_tracking_from: cashTrackingFrom,
             dispatch_solo_mode: dispatchSoloMode,
+            hide_weights: !weighsProduce,
           },
         },
       });
@@ -158,10 +162,22 @@ export default function SettingsPage() {
         <Card>
           <CardHeader><CardTitle className="text-sm">Operational Settings</CardTitle></CardHeader>
           <CardContent className="space-y-4">
+            <label className="flex items-start gap-2.5 text-sm">
+              <Checkbox checked={weighsProduce} onCheckedChange={(c) => setWeighsProduce(!!c)} className="mt-0.5" />
+              <span>
+                We weigh produce
+                <span className="block text-xs text-muted-foreground">
+                  Off: no weight boxes on the forms, the Dispatch Desk or the papers. On: they show, and stay optional.
+                </span>
+              </span>
+            </label>
+
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <Field label="Weight Dispute Threshold (kg)" hint="Flag lots whose accepted vs declared weight differs by ≥ this many kg.">
-                <Input type="number" min={0} value={weightThreshold} onChange={(e) => setWeightThreshold(e.target.value)} className="tabular-nums" />
-              </Field>
+              {weighsProduce && (
+                <Field label="Weight Dispute Threshold (kg)" hint="Flag lots whose accepted vs declared weight differs by ≥ this many kg.">
+                  <Input type="number" min={0} value={weightThreshold} onChange={(e) => setWeightThreshold(e.target.value)} className="tabular-nums" />
+                </Field>
+              )}
               <Field label="Room Capacity Warning (%)" hint="Warn when a room would exceed this occupancy after a new lot.">
                 <Input type="number" min={1} max={100} value={chamberWarningPct} onChange={(e) => setChamberWarningPct(e.target.value)} className="tabular-nums" />
               </Field>

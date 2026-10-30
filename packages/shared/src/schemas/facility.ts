@@ -95,6 +95,10 @@ export const FacilitySettings = z.object({
   // Solo dispatch (fast-dispatch C1b): when on, the munshi may finish a clean truck alone (cash in
   // full, or credit a standing approval covers). Off by default; the owner switches it on.
   dispatch_solo_mode: z.boolean(),
+  // "We weigh produce", stored inverted (docs/27): true hides every weight box and weight line.
+  // Weight is optional either way. A facility that never saved it shows weights; provision.ts
+  // stores true for new client boxes.
+  hide_weights: z.boolean(),
 });
 export type FacilitySettingsType = z.infer<typeof FacilitySettings>;
 
@@ -129,6 +133,7 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
   },
   cash_tracking_from: null,
   dispatch_solo_mode: false,
+  hide_weights: false,
 };
 
 export const UpdateFacilityRequest = z.object({

@@ -43,9 +43,9 @@ export interface StorageReceiptData {
   // Commodity
   commodityName: string;
   varietyName: string | null;
-  // Quantities & weight
+  // Quantities & weight (null when none was recorded or the facility hides weights, docs/27)
   quantityBags: number;
-  acceptedWeightKg: number;
+  acceptedWeightKg: number | null;
   declaredWeightKg: number | null;
   weightDisputeFlag: boolean;
   weightDisputeNote: string | null;

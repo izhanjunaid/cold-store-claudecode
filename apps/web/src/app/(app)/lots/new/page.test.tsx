@@ -39,8 +39,9 @@ const RATE_PLAN = { id: 'rate-1', name: 'Monthly', commodity_id: null, rate_type
 const FACILITY = {
   id: 'fac-1',
   name: 'Test Facility',
-  settings: { weight_dispute_threshold_kg: 5, chamber_capacity_warning_pct: 90, backdating_max_days: 3 },
+  settings: { weight_dispute_threshold_kg: 5, chamber_capacity_warning_pct: 90, backdating_max_days: 3 } as Record<string, unknown>,
 };
+let facility = FACILITY;
 
 function routeApiClient() {
   apiClient.mockImplementation((path: string, opts?: { method?: string; body?: unknown }) => {
@@ -49,7 +50,7 @@ function routeApiClient() {
     if (path.startsWith('/v1/varieties')) return Promise.resolve([]);
     if (path.startsWith('/v1/chambers') && !opts?.method) return Promise.resolve([CHAMBER]);
     if (path.startsWith('/v1/rate-plans')) return Promise.resolve([RATE_PLAN]);
-    if (path.startsWith('/v1/facilities/me')) return Promise.resolve(FACILITY);
+    if (path.startsWith('/v1/facilities/me')) return Promise.resolve(facility);
     if (path === '/v1/lots' && opts?.method === 'POST') {
       return Promise.resolve({ id: 'lot-1', lot_number: 'LOT-260101-0001' });
     }
@@ -71,20 +72,25 @@ async function pickCombobox(testId: string, optionText: string) {
   fireEvent.click(await screen.findByText(optionText));
 }
 
-async function fillRequiredFields() {
+async function fillRequiredFields({ weight = true }: { weight?: boolean } = {}) {
   await pickCombobox('combobox-owner_party_id', 'Farmer One');
   await pickCombobox('combobox-commodity_id', COMMODITY.name);
   await pickCombobox('combobox-chamber_id', CHAMBER.name);
   await pickCombobox('combobox-rate_plan_id', RATE_PLAN.name);
   fireEvent.change(screen.getByLabelText(/^Quantity/), { target: { value: '10' } });
-  fireEvent.change(screen.getByLabelText(/^Accepted weight/), { target: { value: '200' } });
+  if (weight) fireEvent.change(screen.getByLabelText(/^Accepted weight/), { target: { value: '200' } });
   fireEvent.change(screen.getByLabelText(/^Inbound date/), { target: { value: '2026-01-15' } });
 }
+
+const postedLot = () =>
+  (apiClient.mock.calls.find(([p, o]) => p === '/v1/lots' && (o as { method?: string })?.method === 'POST')![1] as { body: Record<string, unknown> })
+    .body;
 
 describe('LotCreatePage — Save & New', () => {
   beforeEach(() => {
     push.mockReset();
     apiClient.mockReset();
+    facility = FACILITY;
     routeApiClient();
   });
 
@@ -157,4 +163,49 @@ describe('LotCreatePage — Save & New', () => {
     },
     10_000,
   );
+});
+
+// Weight optional (docs/27): most clients don't weigh, and a facility may hide weights.
+describe('LotCreatePage — weight optional', () => {
+  beforeEach(() => {
+    push.mockReset();
+    apiClient.mockReset();
+    facility = FACILITY;
+    routeApiClient();
+  });
+  const create = async () => {
+    fireEvent.click(screen.getByRole('button', { name: /^create inbound lot$/i }));
+    await waitFor(() => expect(apiClient).toHaveBeenCalledWith('/v1/lots', expect.objectContaining({ method: 'POST' })));
+  };
+
+  it('with weights hidden the form has no weight boxes but keeps Quantity', async () => {
+    facility = { ...FACILITY, settings: { ...FACILITY.settings, hide_weights: true } };
+    renderPage();
+    await waitFor(() => expect(screen.queryByLabelText(/^Accepted weight/)).not.toBeInTheDocument());
+    expect(screen.queryByLabelText(/^Declared weight/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^Quantity/)).toBeInTheDocument();
+
+    await fillRequiredFields({ weight: false });
+    await create();
+    expect(postedLot()).not.toHaveProperty('accepted_weight_kg');
+    expect(postedLot()).not.toHaveProperty('declared_weight_kg');
+  }, 10_000);
+
+  it('a lot saves without an accepted weight', async () => {
+    renderPage();
+    await fillRequiredFields({ weight: false });
+    await create();
+    expect(postedLot()).toMatchObject({ quantity_bags: 10 });
+    expect(postedLot()).not.toHaveProperty('accepted_weight_kg');
+  }, 10_000);
+
+  it('a declared weight alone asks for no dispute note', async () => {
+    renderPage();
+    await fillRequiredFields({ weight: false });
+    fireEvent.change(screen.getByLabelText(/^Declared weight/), { target: { value: '4120' } });
+    expect(screen.queryByLabelText(/^Dispute note/)).not.toBeInTheDocument();
+    await create();
+    expect(postedLot()).toMatchObject({ declared_weight_kg: 4120 });
+    expect(postedLot()).not.toHaveProperty('accepted_weight_kg');
+  }, 10_000);
 });

@@ -345,6 +345,57 @@ describe('OutboundEventDetailPage — cancel withdrawal', () => {
   });
 });
 
+// Weight is optional (docs/27).
+describe('OutboundEventDetailPage — weight optional', () => {
+  beforeEach(() => {
+    push.mockReset();
+    apiClient.mockReset();
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    event = makeEvent({ status: 'PENDING', outbound_weight_kg: null, prorated_inbound_weight_kg: null, weight_variance_pct: null });
+    routeApiClient();
+  });
+
+  it('a manager can finalize a booked withdrawal, picks and all', async () => {
+    role = 'MANAGER';
+    permissions = ['outbound.record', 'outbound.finalize'];
+    renderPage();
+    await loaded();
+    expect(screen.getByRole('button', { name: /finalize & dispatch/i })).toBeInTheDocument();
+    expect(screen.queryByText('Waiting for a manager to dispatch.')).not.toBeInTheDocument();
+  });
+
+  it('the munshi is told a booked withdrawal waits for a manager', async () => {
+    renderPage();
+    await loaded();
+    expect(screen.getByText('Waiting for a manager to dispatch.')).toBeInTheDocument();
+  });
+
+  it('a dispatched withdrawal with no weight shows a dash, not an empty card', async () => {
+    event = makeEvent({ status: 'DISPATCHED', outbound_weight_kg: null, prorated_inbound_weight_kg: null, weight_variance_pct: null });
+    renderPage();
+    await loaded();
+    expect(screen.getByText('Outbound Weight').parentElement).toHaveTextContent('—');
+  });
+
+  it('the weight is optional: no required star', async () => {
+    renderPage();
+    await loaded();
+    expect(screen.getByText(/Outbound Weight \(kg\)/).textContent).not.toContain('*');
+  });
+
+  it('no weight card while weights are hidden', async () => {
+    const route = apiClient.getMockImplementation()!;
+    apiClient.mockImplementation((path: string, opts?: { method?: string }) =>
+      path === '/v1/facilities/me' ? Promise.resolve({ id: 'f', settings: { hide_weights: true } }) : route(path, opts),
+    );
+    renderPage();
+    await loaded();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /record weight/i })).not.toBeInTheDocument());
+    expect(screen.queryByText('Weight')).not.toBeInTheDocument(); // the card's title
+  });
+});
+
 describe('OutboundEventDetailPage — cancelled withdrawal', () => {
   beforeEach(() => {
     apiClient.mockReset();

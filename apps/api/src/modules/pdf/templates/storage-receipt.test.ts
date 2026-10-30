@@ -73,4 +73,28 @@ describe('storage-receipt template', () => {
     const html = renderStorageReceiptHtml({ ...SAMPLE, marka: null });
     expect(html).not.toContain('Marka');
   });
+
+  // Weight optional (docs/27): a lot with no weight, or a facility that hides weights.
+  it('prints the weights when the lot has them', () => {
+    const html = renderStorageReceiptHtml(SAMPLE);
+    expect(html).toContain('Accepted Weight');
+    expect(html).toContain('Quantity &amp; Weight');
+    expect(html).toContain('10200 کلو');
+  });
+
+  it('prints no weight line or weight heading when the lot has none', () => {
+    const html = renderStorageReceiptHtml({
+      ...SAMPLE,
+      acceptedWeightKg: null,
+      declaredWeightKg: null,
+      weightDisputeFlag: false,
+      weightDisputeNote: null,
+    });
+    expect(html).not.toContain('Accepted Weight');
+    expect(html).not.toContain('Declared Weight');
+    expect(html).not.toContain('&amp; Weight');
+    expect(html).not.toContain('کلو');
+    expect(html).not.toContain('و وزن');
+    expect(html).toContain('500'); // the bags still print
+  });
 });

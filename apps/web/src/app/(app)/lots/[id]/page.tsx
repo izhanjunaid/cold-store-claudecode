@@ -18,6 +18,7 @@ import { LotLocationCard, LotMovementsTimeline } from '@/components/lot-location
 import { formatDate, formatDateTime, formatCount, formatKg } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
 import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
+import { useWeightsShown } from '@/hooks/use-reference-data';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
 interface Lot {
@@ -113,6 +114,8 @@ export default function LotDetailPage() {
   // Rack placement and room moves (PUT /placements, POST /move) are lots.manage.
   const canPlace = can(user, 'lots.manage');
   const guardView = user?.role === 'SECURITY';
+  // A facility that doesn't weigh sees no weight at all (docs/27).
+  const weightsShown = useWeightsShown();
 
   const fetchLot = useCallback(async () => {
     setLoading(true);
@@ -228,7 +231,7 @@ export default function LotDetailPage() {
 
       <Card className="mb-6">
         <CardContent className="pt-6">
-          {lot.weight_dispute_flag && (
+          {weightsShown && lot.weight_dispute_flag && (
             <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
               <p className="text-sm font-medium text-amber-800">Weight dispute flag</p>
               {lot.weight_dispute_note && <p className="mt-1 text-xs text-amber-700">{lot.weight_dispute_note}</p>}
@@ -268,17 +271,19 @@ export default function LotDetailPage() {
                 </>
               }
             />
-            <Field
-              label="Weight (Accepted / Declared)"
-              value={
-                <>
-                  {formatKg(lot.accepted_weight_kg)}
-                  {lot.declared_weight_kg != null && (
-                    <span className="text-muted-foreground"> / {formatKg(lot.declared_weight_kg)}</span>
-                  )}
-                </>
-              }
-            />
+            {weightsShown && (
+              <Field
+                label="Weight (Accepted / Declared)"
+                value={
+                  <>
+                    {formatKg(lot.accepted_weight_kg)}
+                    {lot.declared_weight_kg != null && (
+                      <span className="text-muted-foreground"> / {formatKg(lot.declared_weight_kg)}</span>
+                    )}
+                  </>
+                }
+              />
+            )}
             <Field label="Inbound Date" value={formatDate(lot.inbound_date)} />
             <Field label="Days in Storage" value={lot.days_in_storage} />
             {lot.vehicle_number && <Field label="Vehicle" value={lot.vehicle_number} />}

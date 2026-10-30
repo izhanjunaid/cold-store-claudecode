@@ -107,3 +107,41 @@ describe('Service Charge CRUD', () => {
     expect(res.statusCode).toBe(400);
   });
 });
+
+// Weight optional (docs/27): with weights hidden nothing records a weight, so nothing may be priced by one.
+describe('with weights hidden', () => {
+  async function storeHideWeights(value: boolean | undefined) {
+    const f = await prisma.facility.findUniqueOrThrow({ where: { id: TEST_FACILITY_ID }, select: { settings: true } });
+    const { hide_weights: _old, ...rest } = (f.settings ?? {}) as Record<string, unknown>;
+    await prisma.facility.update({
+      where: { id: TEST_FACILITY_ID },
+      data: { settings: (value === undefined ? rest : { ...rest, hide_weights: value }) as never },
+    });
+  }
+  const send = (method: 'POST' | 'PATCH', url: string, payload: Record<string, unknown>) =>
+    app.inject({ method, url, headers: authHeaders(managerToken), payload });
+
+  beforeAll(() => storeHideWeights(true));
+  afterAll(async () => {
+    await storeHideWeights(undefined);
+    await prisma.serviceCharge.deleteMany({ where: { facilityId: TEST_FACILITY_ID, name: { startsWith: 'Test PT ' } } });
+  });
+
+  it('no charge can end up active and priced per ton', async () => {
+    const created = await send('POST', '/v1/service-charges', { name: 'Test PT new', unit_type: 'PER_TON', unit_price_pkr: 500 });
+    expect(created.statusCode).toBe(400);
+    expect(JSON.parse(created.body).error.code).toBe('VALIDATION_ERROR');
+
+    const inactive = await prisma.serviceCharge.create({
+      data: { facilityId: TEST_FACILITY_ID, name: 'Test PT inactive', unitType: 'PER_TON', unitPricePkr: 500, isActive: false },
+    });
+    expect((await send('PATCH', `/v1/service-charges/${inactive.id}`, { is_active: true })).statusCode).toBe(400);
+    // Editing it while it stays inactive is fine.
+    expect((await send('PATCH', `/v1/service-charges/${inactive.id}`, { unit_price_pkr: 600 })).statusCode).toBe(200);
+
+    const perBag = await send('POST', '/v1/service-charges', { name: 'Test PT bag', unit_type: 'PER_BAG', unit_price_pkr: 10 });
+    expect(perBag.statusCode).toBe(201);
+    const perBagId = JSON.parse(perBag.body).data.id;
+    expect((await send('PATCH', `/v1/service-charges/${perBagId}`, { unit_type: 'PER_TON' })).statusCode).toBe(400);
+  });
+});

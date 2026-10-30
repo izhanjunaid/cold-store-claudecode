@@ -41,6 +41,8 @@ export interface CheckoutPreview {
     quantity: number;
     unit_price_pkr: number;
     amount_pkr: number;
+    /** Priced per ton, but the withdrawal has no weight: refused until weighed or left off (docs/27). */
+    needs_weight?: boolean;
   }[];
   sub_total_pkr: number;
   gst_rate: number;
@@ -66,7 +68,7 @@ export const MODES = [
 export type Mode = (typeof MODES)[number]['value'];
 
 /**
- * Dispatch a weighed withdrawal, finalize its bill and take the money — one button,
+ * Dispatch a booked withdrawal, finalize its bill and take the money — one button,
  * one transaction. The sheet is the review: storage as the server priced it, the
  * charges that go on every dispatch (removable, deliberately), GST and the total; the
  * button names the amount, and the server refuses it if the bill changed meanwhile.
@@ -123,6 +125,8 @@ export function CheckoutSheet({
 
   // The same arithmetic the server applies when it builds and re-prices the bill.
   const keptServices = preview?.service_lines.filter((l) => !skipped.has(l.service_charge_id)) ?? [];
+  // A charge priced per ton cannot be billed without a weight (docs/27); the server refuses it too.
+  const unweighed = keptServices.filter((l) => l.needs_weight);
   const subTotal = round2((preview?.storage_line.amount_pkr ?? 0) + keptServices.reduce((s, l) => s + l.amount_pkr, 0));
   const gst = round2(subTotal * ((preview?.gst_rate ?? 0) / 100));
   const total = round2(subTotal + gst);
@@ -140,6 +144,7 @@ export function CheckoutSheet({
   const overPicked = !!preview && picksTotal(picks) > preview.quantity_withdrawn_bags;
   const blocked =
     !canFinish ||
+    unweighed.length > 0 ||
     overPicked ||
     !modeOffered(mode) ||
     (mode === 'CHEQUE' && !chequeDate) ||
@@ -208,6 +213,14 @@ export function CheckoutSheet({
             <p className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800">
               You can finish this truck yourself: cash in full
               {creditOffered ? ', or on this party’s approved credit' : ''}. Anything else needs a manager.
+            </p>
+          )}
+
+          {preview && unweighed.length > 0 && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Record the weight of {preview.dispatch_note_number ?? preview.lot_number} first, on its desk row or its page:{' '}
+              {unweighed.map((l) => l.description).join(', ')} is charged per ton
+              {holdsKeys ? '. Or leave the charge off this bill.' : '.'}
             </p>
           )}
 

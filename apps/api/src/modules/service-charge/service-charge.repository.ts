@@ -32,6 +32,11 @@ export class ServiceChargeRepository {
     return this.prisma.serviceCharge.update({ where: { id }, data });
   }
 
+  async facilitySettings(facilityId: string): Promise<Prisma.JsonValue> {
+    const f = await this.prisma.facility.findUnique({ where: { id: facilityId }, select: { settings: true } });
+    return f?.settings ?? null;
+  }
+
   deactivate(id: string): Promise<unknown> {
     return this.prisma.serviceCharge.update({
       where: { id },

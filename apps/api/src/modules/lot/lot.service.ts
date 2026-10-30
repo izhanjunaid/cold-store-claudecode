@@ -9,6 +9,7 @@ import { resolveFacilitySettings } from '../facility/facility.service';
 import { generateLotNumber } from './lot-number';
 import { renderStorageReceipt } from '../pdf/pdf.service';
 import type { StorageReceiptData } from '../pdf/pdf.service';
+import { recordedKg } from '../../common/weight';
 
 interface LotRecord {
   id: string;
@@ -85,7 +86,7 @@ function toResponse(lot: LotRecord) {
     rate_plan_name: lot.ratePlan?.name ?? null,
     quantity_bags: lot.quantityBags,
     current_balance_bags: lot.currentBalanceBags,
-    accepted_weight_kg: Number(lot.acceptedWeightKg),
+    accepted_weight_kg: recordedKg(lot.acceptedWeightKg),
     declared_weight_kg: lot.declaredWeightKg != null ? Number(lot.declaredWeightKg) : null,
     weight_dispute_flag: lot.weightDisputeFlag,
     weight_dispute_note: lot.weightDisputeNote,
@@ -116,7 +117,7 @@ export interface CreateLotInput {
   ratePlanId: string;
   chamberId: string;
   quantityBags: number;
-  acceptedWeightKg: number;
+  acceptedWeightKg?: number;
   declaredWeightKg?: number;
   weightDisputeNote?: string;
   qualityGradeInbound?: 'A' | 'B' | 'C';
@@ -273,9 +274,10 @@ export class LotService {
       );
     }
 
-    // 5. Weight dispute detection (absolute kg threshold from settings)
+    // 5. Weight dispute detection (absolute kg threshold from settings), only when both weights
+    // were typed: weight is optional (docs/27).
     let disputeFlag = false;
-    if (input.declaredWeightKg != null) {
+    if (input.declaredWeightKg != null && input.acceptedWeightKg != null) {
       const varianceKg = Math.abs(input.acceptedWeightKg - input.declaredWeightKg);
       if (varianceKg > settings.weight_dispute_threshold_kg) disputeFlag = true;
     }
@@ -324,7 +326,8 @@ export class LotService {
               ratePlanId: input.ratePlanId,
               quantityBags: input.quantityBags,
               currentBalanceBags: input.quantityBags,
-              acceptedWeightKg: input.acceptedWeightKg,
+              // 0 = not weighed; read back through recordedKg() (docs/27).
+              acceptedWeightKg: input.acceptedWeightKg ?? 0,
               declaredWeightKg: input.declaredWeightKg,
               weightDisputeFlag: disputeFlag,
               weightDisputeNote: disputeFlag ? input.weightDisputeNote : null,
@@ -419,7 +422,10 @@ export class LotService {
       where: { id: facilityId },
       select: { name: true, city: true, settings: true },
     });
-    const numberLocale = resolveFacilitySettings(facility?.settings ?? null).number_format;
+    const settings = resolveFacilitySettings(facility?.settings ?? null);
+    const numberLocale = settings.number_format;
+    // A facility that hides weights prints none, not even a lot weighed before it switched (docs/27).
+    const showWeights = !settings.hide_weights;
 
     const data: StorageReceiptData = {
       facilityName: facility?.name ?? 'ColdChain',
@@ -432,10 +438,10 @@ export class LotService {
       commodityName: typedLot.commodity?.name ?? '',
       varietyName: typedLot.variety?.name ?? null,
       quantityBags: typedLot.quantityBags,
-      acceptedWeightKg: Number(typedLot.acceptedWeightKg),
-      declaredWeightKg: typedLot.declaredWeightKg ? Number(typedLot.declaredWeightKg) : null,
-      weightDisputeFlag: typedLot.weightDisputeFlag,
-      weightDisputeNote: typedLot.weightDisputeNote,
+      acceptedWeightKg: showWeights ? recordedKg(typedLot.acceptedWeightKg) : null,
+      declaredWeightKg: showWeights ? recordedKg(typedLot.declaredWeightKg) : null,
+      weightDisputeFlag: showWeights && typedLot.weightDisputeFlag,
+      weightDisputeNote: showWeights ? typedLot.weightDisputeNote : null,
       qualityGradeInbound: typedLot.qualityGradeInbound,
       chamberName: typedLot.chamber?.name ?? '',
       ratePlanName: typedLot.ratePlan?.name ?? '',

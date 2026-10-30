@@ -138,6 +138,8 @@ X-Facility-ID: <facility_uuid>
 ```
 *`marka` is optional (≤100 chars), the goods-identification mark on the bardana/crates. It is echoed on `GET /lots/:id` as `marka`, printed on the parchi/dispatch-note/gate-pass PDFs, and inherited by child lots on partial transfer.*
 
+*`accepted_weight_kg` and `declared_weight_kg` are both optional (docs/27): most clients don't weigh. A lot with no accepted weight stores 0 ("not weighed") and every response reads it back as `accepted_weight_kg: null`. The dispute note is required only when both weights are given and differ by more than the facility's threshold.*
+
 **POST /lots — Response (201)**
 ```json
 {
@@ -204,16 +206,16 @@ X-Facility-ID: <facility_uuid>
 |---|---|---|---|
 | POST | `/outbound-events` | Initiate withdrawal | OPERATOR+ |
 | GET | `/outbound-events/:id` | Outbound event detail | All |
-| PATCH | `/outbound-events/:id/weight` | Record outbound weight | OPERATOR+ |
+| PATCH | `/outbound-events/:id/weight` | Record outbound weight (optional: a booked withdrawal can be dispatched without one, docs/27) | OPERATOR+ |
 | POST | `/outbound-events/:id/finalize` | Finalize and close (triggers invoice) | MANAGER+ |
 | GET | `/outbound-events` | Dispatch queue: withdrawals with the stage each has reached (BOOKED, WEIGHED, DISPATCHED, PAID, LEFT); filters `status` (csv), `date_from/to` (business days), `search` (DN / plate / lot #). Carries bag counts, so it needs `outbound.record`, not the guard's `gate_passes.log` | OPERATOR+ |
-| GET | `/outbound-events/:id/checkout-preview` | The bill a WEIGHED withdrawal will carry (storage line, apply-at-dispatch service lines, GST, total), without writing it. Also returns `solo: { allowed, reason?, credit_available }` (booleans and a reason, never a ceiling): may the munshi finish this truck alone | OPERATOR+ (`outbound.record`) |
+| GET | `/outbound-events/:id/checkout-preview` | The bill a booked (PENDING) or WEIGHED withdrawal will carry (storage line, apply-at-dispatch service lines, GST, total), without writing it. Each service line carries `needs_weight`: a charge priced per ton on a withdrawal with no weight, which the checkout refuses (`OUTBOUND_WEIGHT_REQUIRED`) until weighed or skipped. Also returns `solo: { allowed, reason?, credit_available }` (booleans and a reason, never a ceiling): may the munshi finish this truck alone | OPERATOR+ (`outbound.record`) |
 | POST | `/outbound-events/:id/dispatch-and-collect` | Dispatch, finalize the bill and take the money in one transaction. Body `{ expected_total_pkr, payment: { mode: CASH/BANK_TRANSFER/CHEQUE/MOBILE_WALLET/CREDIT, reference_number?, cheque_date? }, skip_service_charge_ids?, picked_from?, notes? }`. Refused with 409 `DISPATCH_TOTAL_CHANGED` if the bill is no longer `expected_total_pkr`. The route needs `outbound.record`; the handler then needs `outbound.finalize`, `invoices.manage` and (unless CREDIT) `payments.record` (a missing key is named before anything is written), **or** the owner's `dispatch_solo_mode` setting on a PACCI lot, a withdrawal dated today and no default charge priced by weight: CASH in full, or CREDIT for a party with a live standing credit approval whose ceiling still holds this bill, with no `skip_service_charge_ids`. Anything else from a caller without the keys is 403 `DISPATCH_NEEDS_MANAGER` with the reason in the message, and nothing is written | OPERATOR+ (solo) / MANAGER+ |
 | POST | `/outbound-events/:id/cancel` | Cancel a withdrawal that has not left (PENDING/WEIGHED/DISPUTED); body `{ reason }`; frees its bags | OPERATOR+ (`outbound.record`) |
 | GET | `/outbound-events/:id/dispatch-note` | Get dispatch note PDF URL (409 for a cancelled withdrawal) | OPERATOR+ |
-| GET | `/dispatch/trucks` | Trucks inside (ARRIVED/WEIGHING passes, newest per normalized plate), each `{ gate_pass_id, pass_number, vehicle_number, driver_name, arrived_at, ready, lines[] }`; a line is an open withdrawal on that plate with its stage. `ready` = something weighed and nothing PENDING/DISPUTED. The same reading of a truck's load as the gate's "Ready to leave" | OPERATOR+ (`outbound.record`) |
-| GET | `/dispatch/trucks/:passId/checkout-preview` | A whole truck's review: one bill per WEIGHED line (as the single preview), `not_ready` (dispatch notes still to weigh), `groups[]` per (billing party, book) with `total_pkr` and `credit_available` (does the party's standing approval cover all its bills on this truck), `total_pkr`, and `solo { allowed, reason? }` for the whole truck | OPERATOR+ (`outbound.record`) |
-| POST | `/dispatch/trucks/:passId/dispatch-and-collect` | Check out every weighed line on the truck in one transaction. Body `{ lines: [{ outbound_id, expected_total_pkr, skip_service_charge_ids?, picked_from? }] (1–20), payments: [{ billing_party_id, book_type, mode, reference_number?, cheque_date? }] (one per group), notes? }`. One invoice and JE-01 per line; one receipt per non-credit group, allocated across its bills. Returns `{ gate_pass_id, lines: [{ outbound, invoice }], payments: [{ id, receipt_number, billing_party_id, book_type, amount_pkr }] }`. The handler then needs the manager keys (`outbound.finalize`, `invoices.manage`, and `payments.record` unless every group is on credit) or the solo door | OPERATOR+ (`outbound.record`) |
+| GET | `/dispatch/trucks` | Trucks inside (ARRIVED/WEIGHING passes, newest per normalized plate), each `{ gate_pass_id, pass_number, vehicle_number, driver_name, arrived_at, ready, lines[] }`; a line is an open withdrawal on that plate with its stage and `outbound_date` (the desk marks one dated before today: it may be a booking left from an earlier visit of the same plate). `ready` = something booked or weighed and nothing DISPUTED (weight is optional, docs/27). The same reading of a truck's load as the gate's "Ready to leave" | OPERATOR+ (`outbound.record`) |
+| GET | `/dispatch/trucks/:passId/checkout-preview` | A whole truck's review: one bill per booked or weighed line (as the single preview, `needs_weight` included), `not_ready` (dispatch notes marked DISPUTED, which hold the truck), `groups[]` per (billing party, book) with `total_pkr` and `credit_available` (does the party's standing approval cover all its bills on this truck), `total_pkr`, and `solo { allowed, reason? }` for the whole truck | OPERATOR+ (`outbound.record`) |
+| POST | `/dispatch/trucks/:passId/dispatch-and-collect` | Check out every booked or weighed line on the truck in one transaction. Body `{ lines: [{ outbound_id, expected_total_pkr, skip_service_charge_ids?, picked_from? }] (1–20), payments: [{ billing_party_id, book_type, mode, reference_number?, cheque_date? }] (one per group), notes? }`. One invoice and JE-01 per line; one receipt per non-credit group, allocated across its bills. Returns `{ gate_pass_id, lines: [{ outbound, invoice }], payments: [{ id, receipt_number, billing_party_id, book_type, amount_pkr }] }`. The handler then needs the manager keys (`outbound.finalize`, `invoices.manage`, and `payments.record` unless every group is on credit) or the solo door | OPERATOR+ (`outbound.record`) |
 | GET | `/dispatch/trucks/:passId/load-slip` | The truck's load slip (A5 PDF; `?format=html` for the page): lines, bills, receipts and who took them, credit per party with its authorizer. Reads the truck's lines from the withdrawals stamped with the pass once it has left. Refused to SECURITY (`BLIND_ROLE_FORBIDDEN`) | OPERATOR+ (`outbound.record`) |
 
 **POST /outbound-events — Request**
@@ -335,7 +337,9 @@ X-Facility-ID: <facility_uuid>
 | `LOT_NOT_FOUND` | 404 | Lot does not exist |
 | `LOT_CLOSED` | 409 | Lot is closed; no operations allowed |
 | `LOT_BALANCE_INSUFFICIENT` | 422 | Withdrawal exceeds balance |
-| `WEIGHT_DISPUTE_UNRESOLVED` | 422 | Dispute note required |
+| `WEIGHT_DISPUTE_UNRESOLVED` | 422 | Dispute note required (only when both a declared and an accepted weight are given and they differ by more than the threshold; weight is optional, docs/27) |
+| `OUTBOUND_WEIGHT_REQUIRED` | 422 | A service charge priced per ton cannot be billed on a withdrawal with no weight: both checkouts refuse it after the manager's skips, and the message names the dispatch note and the charge. Record the weight, or leave the charge off. Weight is otherwise optional (docs/27) |
+| `OUTBOUND_DISPUTED` | 409 | The withdrawal is marked DISPUTED, a legacy status nothing sets any more: it cannot be dispatched until cancelled |
 | `INVOICE_ALREADY_FINALIZED` | 409 | Cannot edit finalized invoice |
 | `CHAMBER_CAPACITY_EXCEEDED` | 422 | Chamber at max capacity |
 | `TRANSFER_SAME_PARTY` | 422 | New owner must differ from current |
@@ -344,7 +348,7 @@ X-Facility-ID: <facility_uuid>
 | `ACCOUNT_NOT_FOUND` | 404 | Account code does not exist in CoA |
 | `SYSTEM_ACCOUNT_PROTECTED` | 409 | System accounts cannot be deleted or recoded |
 | `CREDIT_NOTE_EXCEEDS_INVOICE` | 422 | Credit note total exceeds original invoice |
-| `VALIDATION_ERROR` | 400 | Invalid input; field-level detail in error.field |
+| `VALIDATION_ERROR` | 400 | Invalid input; field-level detail in error.field. Includes the two weight rules (docs/27): hiding weights (`settings.hide_weights`) while a per-ton service charge is active, and a service charge that would end up active and per ton while weights are hidden (`unit_type`) |
 | `LOT_BALANCE_RESERVED` | 409 | Bags are held by open withdrawals (message names their dispatch notes); dispatch or cancel them first |
 | `DATE_IN_FUTURE` | 422 | A date after today (Lahore calendar); MANAGER+ only |
 | `OUTBOUND_CANCELLED` | 409 | The withdrawal was cancelled |
@@ -354,8 +358,8 @@ X-Facility-ID: <facility_uuid>
 | `HANDOVER_NOTHING_PENDING` | 409 | The collector has no cash waiting (already counted, or the owner's own cash, which is not tracked) |
 | `HANDOVER_EXPECTED_CHANGED` | 409 | The cash waiting changed since the manager looked; nothing was written — count again |
 | `DISPATCH_NEEDS_MANAGER` | 403 | Solo dispatch refused (switch off, KATCHI bill, a withdrawal not dated today, a default charge priced by weight, a charge left off, a mode other than cash/approved credit, no approval, or the bill would pass the approved ceiling); a manager must finish the truck |
-| `TRUCK_NOT_READY` | 409 | Truck checkout: a line is still PENDING or DISPUTED (message names its dispatch notes); weigh or cancel it first — no partial trucks |
-| `TRUCK_LOAD_CHANGED` | 409 | Truck checkout: the lines sent are not the truck's weighed lines now (the message names, by dispatch note, those missing from the review and those no longer weighed on the truck — e.g. one checked out on its own meanwhile); nothing was written — review the truck again |
+| `TRUCK_NOT_READY` | 409 | Truck checkout: a line is marked DISPUTED (message names its dispatch notes); cancel it first — no partial trucks. A booked (PENDING) line is ready: weight is optional (docs/27) |
+| `TRUCK_LOAD_CHANGED` | 409 | Truck checkout: the lines sent are not the truck's ready (booked or weighed) lines now (the message names, by dispatch note, those missing from the review and those no longer on the truck — e.g. one checked out on its own meanwhile); nothing was written — review the truck again |
 | `OUTBOUND_ALREADY_FINALIZED` | 409 | The withdrawal is already dispatched; on a truck checkout, everything the request asked for already is ("This truck was already checked out") — a retry or a double submit. The desk treats it as done and offers the load slip |
 | `TRUCK_TOO_MANY_LINES` | 422 | Truck checkout: more than 20 lines |
 | `TRUCK_PAYMENTS_MISMATCH` | 422 | Truck checkout: the payments are not exactly one per (billing party, book) group on the truck |

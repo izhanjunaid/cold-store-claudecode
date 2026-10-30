@@ -40,4 +40,13 @@ describe('dispatch-note template', () => {
     const html = renderDispatchNoteHtml({ ...SAMPLE, marka: null });
     expect(html).not.toContain('Marka');
   });
+
+  // Weight optional (docs/27).
+  it('names the weight in its heading only when it prints one', () => {
+    expect(renderDispatchNoteHtml(SAMPLE)).toContain('Quantity &amp; Weight');
+    const html = renderDispatchNoteHtml({ ...SAMPLE, outboundWeightKg: null });
+    expect(html).not.toContain('Outbound Weight');
+    expect(html).not.toContain('&amp; Weight');
+    expect(html).not.toContain('و وزن');
+  });
 });

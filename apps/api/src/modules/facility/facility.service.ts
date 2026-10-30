@@ -120,6 +120,19 @@ export class FacilityService {
         );
       }
 
+      // A charge priced per ton cannot be billed without a weight, so weights stay on screen while
+      // one is active (docs/27). Compared on the resolved value: the Settings page sends every key.
+      if (
+        patch.settings.hide_weights === true &&
+        !resolveFacilitySettings(existing.settings).hide_weights &&
+        (await this.prisma.serviceCharge.count({ where: { facilityId, isActive: true, unitType: 'PER_TON' } })) > 0
+      ) {
+        throw Errors.VALIDATION_ERROR(
+          'Deactivate the service charges priced per ton first: they cannot be billed without a weight',
+          'settings.hide_weights',
+        );
+      }
+
       // Monthly accrual is the policy from a fiscal-year boundary, applied
       // prospectively (docs/25 Q2, IFRS for SMEs s.10.12): a start mid-year, or in
       // a month already closed, would change figures that were already reported.

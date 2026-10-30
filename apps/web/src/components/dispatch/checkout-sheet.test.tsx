@@ -98,6 +98,27 @@ describe('CheckoutSheet', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  // Weight is optional (docs/27); a charge priced per ton is the one thing that needs a weight.
+  it('a per-ton charge with no weight blocks the checkout until a manager leaves it off', async () => {
+    const perTon = { service_charge_id: 'sc-ton', description: 'Weighbridge', quantity: 0, unit_price_pkr: 500, amount_pkr: 0, needs_weight: true };
+    apiClient.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (opts?.method === 'POST') return Promise.resolve(RESULT);
+      if (path.endsWith('/checkout-preview')) return Promise.resolve({ ...PREVIEW, service_lines: [...PREVIEW.service_lines, perTon] });
+      return Promise.resolve(null);
+    });
+    renderSheet();
+    const notice = await screen.findByText(/charged per ton/);
+    expect(notice).toHaveTextContent('DN-260101-0001');
+    expect(notice).toHaveTextContent('Weighbridge');
+    expect(screen.getByRole('button', { name: /Dispatch & Collect/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText(/Weighbridge/));
+    expect(screen.queryByText(/charged per ton/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Dispatch & Collect/ }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]![1].body).toEqual({ expected_total_pkr: 5200, skip_service_charge_ids: ['sc-ton'], payment: { mode: 'CASH' } });
+  });
+
   it('does not price the bill again once the truck is dispatched (that read would be refused)', async () => {
     const { onDone } = renderSheet();
     await screen.findByText(/Storage \(Seasonal\)/);

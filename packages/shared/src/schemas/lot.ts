@@ -16,7 +16,8 @@ export const CreateLotRequest = z.object({
   rate_plan_id: z.string().uuid(),
   chamber_id: z.string().uuid(),
   quantity_bags: z.number().int().positive(),
-  accepted_weight_kg: z.number().positive(),
+  // Optional (docs/27): most clients don't weigh. A lot with none stores 0 and reads back as null.
+  accepted_weight_kg: z.number().positive().optional(),
   declared_weight_kg: z.number().positive().optional(),
   weight_dispute_note: z.string().optional(),
   quality_grade_inbound: z.enum(['A', 'B', 'C']).optional(),
@@ -64,7 +65,7 @@ export const LotResponse = z.object({
   rate_plan_name: z.string().nullable(),
   quantity_bags: z.number().nullable(),
   current_balance_bags: z.number().nullable(),
-  accepted_weight_kg: z.number(),
+  accepted_weight_kg: z.number().nullable(),
   declared_weight_kg: z.number().nullable(),
   weight_dispute_flag: z.boolean(),
   weight_dispute_note: z.string().nullable(),

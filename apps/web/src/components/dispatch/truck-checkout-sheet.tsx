@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { round2 } from '@coldchain/shared';
+import { localIsoDate, round2 } from '@coldchain/shared';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
-import { formatMoney } from '@/lib/format';
+import { formatDate, formatMoney } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -45,7 +45,7 @@ type Payment = { mode: Mode; reference: string; chequeDate: string };
 const groupKey = (g: { billing_party: { id: string }; book_type: string }) => `${g.billing_party.id}:${g.book_type}`;
 
 /**
- * Check out a whole truck: every weighed lot on it dispatched and billed, the money taken once
+ * Check out a whole truck: every lot on it dispatched and billed, the money taken once
  * per paying party (one receipt each) — one transaction, or nothing. The same review as the
  * one-lot sheet, line by line; the server refuses it if any bill or the load changed meanwhile.
  */
@@ -102,13 +102,21 @@ export function TruckCheckoutSheet({
   };
   const lines = preview?.lines ?? [];
   const total = round2(lines.reduce((s, l) => s + lineTotal(l), 0));
+  const today = localIsoDate();
+  // A charge priced per ton on a lot with no weight (docs/27): the server refuses it, so the sheet does too.
+  const unweighed = lines.flatMap((l) =>
+    l.service_lines
+      .filter((s) => s.needs_weight && !skipped.has(`${l.outbound_id}:${s.service_charge_id}`))
+      .map((s) => `${l.dispatch_note_number ?? l.lot_number}: ${s.description}`),
+  );
 
   const groupBlocked = (g: TruckGroup) => {
     const p = paymentOf(g);
     const needsReference = p.mode === 'BANK_TRANSFER' || p.mode === 'MOBILE_WALLET';
     return !modeOffered(g, p.mode) || (p.mode === 'CHEQUE' && !p.chequeDate) || (needsReference && !p.reference.trim());
   };
-  const blocked = !canFinish || !preview || preview.not_ready.length > 0 || lines.length === 0 || preview.groups.some(groupBlocked);
+  const blocked =
+    !canFinish || !preview || preview.not_ready.length > 0 || unweighed.length > 0 || lines.length === 0 || preview.groups.some(groupBlocked);
 
   async function submit() {
     if (!preview) return;
@@ -170,7 +178,13 @@ export function TruckCheckoutSheet({
           {loadError && <p className="text-sm text-destructive">{loadError instanceof Error ? loadError.message : 'Could not price this truck'}</p>}
           {preview && preview.not_ready.length > 0 && (
             <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              Weigh or cancel first: {preview.not_ready.join(', ')}.
+              Cancel first, marked disputed: {preview.not_ready.join(', ')}.
+            </p>
+          )}
+          {unweighed.length > 0 && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Record these lots&apos; weight first, on their desk rows or pages ({unweighed.join('; ')}): charged per ton
+              {holdsKeys ? '. Or leave the charge off that bill.' : '.'}
             </p>
           )}
           {!holdsKeys && preview && !solo && (
@@ -191,10 +205,16 @@ export function TruckCheckoutSheet({
                   <span className="text-xs text-muted-foreground">{g.book_type === 'KATCHI' ? 'KATCHI — only the owner takes this money' : 'PACCI'}</span>
                 </div>
                 {groupLines.map((l) => (
-                  <div key={l.outbound_id} className="rounded border text-sm">
+                  <div key={l.outbound_id} data-line className="rounded border text-sm">
                     <div className="flex justify-between px-2 py-1">
                       <span>
                         <span className="font-mono text-xs">{l.dispatch_note_number}</span> · {l.lot_number} · {l.storage_line.description}
+                        {/* A booked line goes out with the truck (docs/27): one dated before today may be an earlier visit's. */}
+                        {l.period_end < today && (
+                          <span className="block text-xs font-medium text-amber-700">
+                            Dated {formatDate(l.period_end)}: booked for an earlier day. Check it is on this truck, or cancel it.
+                          </span>
+                        )}
                       </span>
                       <span className="tabular-nums">{formatMoney(l.storage_line.amount_pkr)}</span>
                     </div>

@@ -1,5 +1,6 @@
 import { ServiceChargeRepository } from './service-charge.repository';
 import { Errors } from '../../common/errors';
+import { resolveFacilitySettings } from '../facility/facility.service';
 
 interface ServiceChargeRecord {
   id: string;
@@ -50,6 +51,7 @@ export class ServiceChargeService {
     if (existing) {
       throw Errors.VALIDATION_ERROR(`Service charge "${input.name}" already exists`, 'name');
     }
+    await this.refusePerTonWhileWeightsHidden(input.facilityId, input.unitType, true);
     const sc = await this.repo.create({
       facilityId: input.facilityId,
       name: input.name,
@@ -71,8 +73,9 @@ export class ServiceChargeService {
       applyAtDispatch?: boolean;
     },
   ) {
-    const sc = await this.repo.findById(facilityId, id);
+    const sc = (await this.repo.findById(facilityId, id)) as ServiceChargeRecord | null;
     if (!sc) throw Errors.VALIDATION_ERROR('Service charge not found');
+    await this.refusePerTonWhileWeightsHidden(facilityId, input.unitType ?? sc.unitType, input.isActive ?? sc.isActive);
     const updated = await this.repo.update(id, {
       ...(input.name !== undefined && { name: input.name }),
       ...(input.unitType !== undefined && { unitType: input.unitType }),
@@ -81,6 +84,17 @@ export class ServiceChargeService {
       ...(input.applyAtDispatch !== undefined && { applyAtDispatch: input.applyAtDispatch }),
     });
     return toResponse(updated as ServiceChargeRecord);
+  }
+
+  /** With weights hidden nothing records a weight, so no charge may end up active and priced per ton (docs/27). */
+  private async refusePerTonWhileWeightsHidden(facilityId: string, unitType: string, isActive: boolean) {
+    if (unitType !== 'PER_TON' || !isActive) return;
+    if (resolveFacilitySettings(await this.repo.facilitySettings(facilityId)).hide_weights) {
+      throw Errors.VALIDATION_ERROR(
+        'Weights are switched off in Settings, so a charge cannot be priced per ton',
+        'unit_type',
+      );
+    }
   }
 
   async deactivate(facilityId: string, id: string) {

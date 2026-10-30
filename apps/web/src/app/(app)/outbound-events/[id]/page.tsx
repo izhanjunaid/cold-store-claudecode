@@ -15,7 +15,8 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 import { useLotPlacements } from '@/components/lot-location';
-import { formatDate, formatCount } from '@/lib/format';
+import { formatDate, formatCount, formatKg } from '@/lib/format';
+import { useWeightsShown } from '@/hooks/use-reference-data';
 
 import { PageSkeleton } from '@/components/page-skeleton';
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
@@ -75,6 +76,8 @@ export default function OutboundEventDetailPage() {
   // Optional per-rack pick record, keyed by rack_id (empty = auto-trim).
   const [picks, setPicks] = useState<Record<string, string>>({});
   const { data: location } = useLotPlacements(event?.lot_id ?? '');
+  // Weight is optional; a facility that doesn't weigh sees no weight card (docs/27).
+  const weightsShown = useWeightsShown();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,8 +171,10 @@ export default function OutboundEventDetailPage() {
 
   const isActionable = event.status !== 'DISPATCHED' && event.status !== 'CANCELLED';
   const isCancelled = event.status === 'CANCELLED';
+  // Booked or weighed may be dispatched (weight is optional, docs/27); a legacy DISPUTED one may not.
+  const ready = event.status === 'PENDING' || event.status === 'WEIGHED';
   // Rack picks only travel with finalize, so only someone who can finalize enters them.
-  const canPick = event.status === 'WEIGHED' && canFinalize;
+  const canPick = ready && canFinalize;
   const canCancel = canRecord && CANCELLABLE.includes(event.status);
 
   return (
@@ -224,7 +229,7 @@ export default function OutboundEventDetailPage() {
         </CardContent>
       </Card>
 
-      {(!isCancelled || event.outbound_weight_kg != null) && (
+      {weightsShown && (!isCancelled || event.outbound_weight_kg != null) && (
         <Card className="mb-5">
           <CardHeader>
             <CardTitle className="text-sm">Weight</CardTitle>
@@ -233,7 +238,7 @@ export default function OutboundEventDetailPage() {
             {event.status === 'PENDING' && canRecord && (
               <form onSubmit={handleRecordWeight} className="flex items-end gap-3">
                 <div className="flex-1 space-y-1.5">
-                  <Label>Outbound Weight (kg) <span className="text-destructive">*</span></Label>
+                  <Label>Outbound Weight (kg)</Label>
                   <Input
                     type="number"
                     min={0.01}
@@ -272,7 +277,11 @@ export default function OutboundEventDetailPage() {
             )}
   
             {event.status === 'PENDING' && event.outbound_weight_kg == null && (
-              <p className="mt-2 text-xs text-muted-foreground">Weight not yet recorded.</p>
+              <p className="mt-2 text-xs text-muted-foreground">No weight recorded. It is optional.</p>
+            )}
+            {/* Went out (or is held) unweighed: a dash, never an empty card (docs/27). */}
+            {event.status !== 'PENDING' && event.outbound_weight_kg == null && (
+              <Field label="Outbound Weight" value={formatKg(null)} />
             )}
           </CardContent>
         </Card>
@@ -319,12 +328,12 @@ export default function OutboundEventDetailPage() {
         </Card>
       )}
 
-      {event.status === 'WEIGHED' && !canFinalize && (
+      {ready && !canFinalize && (
         <p className="mb-3 text-sm text-muted-foreground">Waiting for a manager to dispatch.</p>
       )}
 
       <div className="flex flex-wrap gap-3">
-        {event.status === 'WEIGHED' && canFinalize && (
+        {ready && canFinalize && (
           <Button onClick={handleFinalize} disabled={finalizing || pickError != null}>
             <Truck className="h-4 w-4" aria-hidden />
             {finalizing ? 'Finalizing…' : 'Finalize & Dispatch'}

@@ -30,6 +30,7 @@ import {
   useRacks,
   useRatePlans,
   useFacility,
+  useWeightsShown,
 } from '@/hooks/use-reference-data';
 import { useAuthStore } from '@/stores/auth.store';
 import {
@@ -50,7 +51,8 @@ const lotSchema = z
     rate_plan_id: z.string().min(1, 'Select a rate plan'),
     quantity_bags: z.string().min(1, 'Required'),
     declared_weight_kg: z.string(),
-    accepted_weight_kg: z.string().min(1, 'Required'),
+    // Optional (docs/27): most clients don't weigh.
+    accepted_weight_kg: z.string(),
     weight_dispute_note: z.string(),
     vehicle_number: z.string(),
     marka: z.string(),
@@ -102,6 +104,7 @@ export default function LotCreatePage() {
   const { data: chambers = [] } = useChambers();
   const { data: ratePlans = [] } = useRatePlans();
   const { data: facility } = useFacility();
+  const weightsShown = useWeightsShown();
 
   const form = useForm<LotFormValues>({
     resolver: zodResolver(lotSchema),
@@ -144,12 +147,14 @@ export default function LotCreatePage() {
     : 0;
   const isBackdated = backdatingMaxDays !== null && daysBack > backdatingMaxDays;
 
-  const declared = parseFloat(declaredStr) || 0;
-  const accepted = parseFloat(acceptedStr) || 0;
+  // Weights are optional and may be hidden (docs/27): a variance exists only when both were typed.
+  const declared = weightsShown ? parseFloat(declaredStr) || 0 : 0;
+  const accepted = weightsShown ? parseFloat(acceptedStr) || 0 : 0;
   const qty = parseInt(qtyStr) || 0;
-  const variancePct = declared > 0 ? (Math.abs(accepted - declared) / declared) * 100 : 0;
-  const varianceKg = declared > 0 ? Math.abs(accepted - declared) : 0;
-  const hasDispute = declared > 0 && varianceKg > kgThreshold;
+  const bothWeights = declared > 0 && accepted > 0;
+  const variancePct = bothWeights ? (Math.abs(accepted - declared) / declared) * 100 : 0;
+  const varianceKg = bothWeights ? Math.abs(accepted - declared) : 0;
+  const hasDispute = bothWeights && varianceKg > kgThreshold;
 
   const filteredVarieties = useMemo(
     () => (commodityId ? varieties.filter((v) => v.commodity_id === commodityId) : varieties),
@@ -229,12 +234,13 @@ export default function LotCreatePage() {
       chamber_id: values.chamber_id,
       rate_plan_id: values.rate_plan_id,
       quantity_bags: parseInt(values.quantity_bags),
-      accepted_weight_kg: parseFloat(values.accepted_weight_kg),
     };
     if (values.billing_override && values.billing_party_id)
       payload['billing_party_id'] = values.billing_party_id;
     if (values.variety_id) payload['variety_id'] = values.variety_id;
-    if (values.declared_weight_kg) payload['declared_weight_kg'] = parseFloat(values.declared_weight_kg);
+    // A blank weight is left out, never sent as null; hidden weights send none (docs/27).
+    if (weightsShown && values.accepted_weight_kg) payload['accepted_weight_kg'] = parseFloat(values.accepted_weight_kg);
+    if (weightsShown && values.declared_weight_kg) payload['declared_weight_kg'] = parseFloat(values.declared_weight_kg);
     if (hasDispute && values.weight_dispute_note) payload['weight_dispute_note'] = values.weight_dispute_note;
     if (values.vehicle_number) payload['vehicle_number'] = values.vehicle_number;
     if (values.marka) payload['marka'] = values.marka;
@@ -336,7 +342,7 @@ export default function LotCreatePage() {
               />
             </EntryGroup>
 
-            <EntryGroup title="Weights" columns={6}>
+            <EntryGroup title={weightsShown ? 'Weights' : 'Quantity'} columns={6}>
               <NumberField
                 control={control}
                 name="quantity_bags"
@@ -346,25 +352,28 @@ export default function LotCreatePage() {
                 suffix="bags"
                 className="xl:col-span-2"
               />
-              <NumberField
-                control={control}
-                name="declared_weight_kg"
-                label="Declared weight"
-                min={0}
-                step="0.01"
-                suffix="kg"
-                className="xl:col-span-2"
-              />
-              <NumberField
-                control={control}
-                name="accepted_weight_kg"
-                label="Accepted weight"
-                required
-                min={0.01}
-                step="0.01"
-                suffix="kg"
-                className="xl:col-span-2"
-              />
+              {weightsShown && (
+                <>
+                  <NumberField
+                    control={control}
+                    name="declared_weight_kg"
+                    label="Declared weight"
+                    min={0}
+                    step="0.01"
+                    suffix="kg"
+                    className="xl:col-span-2"
+                  />
+                  <NumberField
+                    control={control}
+                    name="accepted_weight_kg"
+                    label="Accepted weight"
+                    min={0.01}
+                    step="0.01"
+                    suffix="kg"
+                    className="xl:col-span-2"
+                  />
+                </>
+              )}
               {hasDispute && (
                 <TextareaField
                   control={control}
@@ -454,7 +463,7 @@ export default function LotCreatePage() {
               <>
                 {qty > 0 && <EntryChip label="Bags" value={qty.toLocaleString()} />}
                 {accepted > 0 && <EntryChip label="Accepted" value={`${accepted.toLocaleString()} kg`} />}
-                {declared > 0 && (
+                {bothWeights && (
                   <EntryChip
                     label={hasDispute ? 'Variance — note required' : 'Variance'}
                     value={`${variancePct.toFixed(1)}% · ${varianceKg.toLocaleString()} kg`}
