@@ -48,7 +48,7 @@ These were played back to the owner and not challenged:
 ## Behaviour
 
 ### The setting
-- Stored as `hide_weights` (default `false`) in the facility settings. The screen calls it "We weigh produce", which is its inverse.
+- **Settings → Operational Settings → "We weigh produce"** (a checkbox). Stored as `hide_weights` (default `false`) in the facility settings, its inverse. The web reads it through `useWeightsShown()`.
 - A facility that never saved the key shows weights, so an existing box changes nothing on update.
 - New client boxes are created by `packages/db/prisma/provision.ts`, which stores `hide_weights: true`.
 - **Hiding weights is refused while an active per-ton service charge exists.** The check runs only when the switch goes from shown to hidden, because the Settings page re-sends every key on every save.
@@ -68,7 +68,7 @@ These were played back to the owner and not challenged:
   - both checkout previews and both checkouts;
   - the trucks panel's "ready";
   - the solo checks, so a munshi checking out booked lines meets the same rules as for weighed ones.
-- A legacy **DISPUTED** withdrawal is never set by the API. It still holds its truck and is never offered a checkout.
+- A legacy **DISPUTED** withdrawal is never set by the API. It still holds its truck (`TRUCK_NOT_READY`, "cancel it first"), is refused on its own (`OUTBOUND_DISPUTED`), and is never offered a checkout.
 - **Per-ton charges:**
   - Each preview's service line carries `needs_weight`.
   - Both checkouts refuse an unweighed per-ton line after the manager's skips are applied (`OUTBOUND_WEIGHT_REQUIRED`, naming the dispatch note and the charge).
@@ -80,7 +80,7 @@ These were played back to the owner and not challenged:
 - **The weight-variance report** counts only lots and withdrawals that have a weight. Otherwise unweighed bags would read as shrinkage.
 
 ## Upgrading a box
-- **No migration** and no schema change.
+- **No migration** and no schema change. The release still has 42 migrations.
 - **On the live client:** weights stay on screen, but are no longer required, and the Weigh step is optional. To hide weights, the owner switches off "We weigh produce" in Settings, after deactivating any per-ton service charge.
 - Tagging and Promote to stable stay the owner's.
 

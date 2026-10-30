@@ -335,7 +335,9 @@ X-Facility-ID: <facility_uuid>
 | `LOT_NOT_FOUND` | 404 | Lot does not exist |
 | `LOT_CLOSED` | 409 | Lot is closed; no operations allowed |
 | `LOT_BALANCE_INSUFFICIENT` | 422 | Withdrawal exceeds balance |
-| `WEIGHT_DISPUTE_UNRESOLVED` | 422 | Dispute note required |
+| `WEIGHT_DISPUTE_UNRESOLVED` | 422 | Dispute note required (only when both a declared and an accepted weight are given and they differ by more than the threshold; weight is optional, docs/27) |
+| `OUTBOUND_WEIGHT_REQUIRED` | 422 | A service charge priced per ton cannot be billed on a withdrawal with no weight: both checkouts refuse it after the manager's skips, and the message names the dispatch note and the charge. Record the weight, or leave the charge off. Weight is otherwise optional (docs/27) |
+| `OUTBOUND_DISPUTED` | 409 | The withdrawal is marked DISPUTED, a legacy status nothing sets any more: it cannot be dispatched until cancelled |
 | `INVOICE_ALREADY_FINALIZED` | 409 | Cannot edit finalized invoice |
 | `CHAMBER_CAPACITY_EXCEEDED` | 422 | Chamber at max capacity |
 | `TRANSFER_SAME_PARTY` | 422 | New owner must differ from current |
@@ -344,7 +346,7 @@ X-Facility-ID: <facility_uuid>
 | `ACCOUNT_NOT_FOUND` | 404 | Account code does not exist in CoA |
 | `SYSTEM_ACCOUNT_PROTECTED` | 409 | System accounts cannot be deleted or recoded |
 | `CREDIT_NOTE_EXCEEDS_INVOICE` | 422 | Credit note total exceeds original invoice |
-| `VALIDATION_ERROR` | 400 | Invalid input; field-level detail in error.field |
+| `VALIDATION_ERROR` | 400 | Invalid input; field-level detail in error.field. Includes the two weight rules (docs/27): hiding weights (`settings.hide_weights`) while a per-ton service charge is active, and a service charge that would end up active and per ton while weights are hidden (`unit_type`) |
 | `LOT_BALANCE_RESERVED` | 409 | Bags are held by open withdrawals (message names their dispatch notes); dispatch or cancel them first |
 | `DATE_IN_FUTURE` | 422 | A date after today (Lahore calendar); MANAGER+ only |
 | `OUTBOUND_CANCELLED` | 409 | The withdrawal was cancelled |
@@ -354,8 +356,8 @@ X-Facility-ID: <facility_uuid>
 | `HANDOVER_NOTHING_PENDING` | 409 | The collector has no cash waiting (already counted, or the owner's own cash, which is not tracked) |
 | `HANDOVER_EXPECTED_CHANGED` | 409 | The cash waiting changed since the manager looked; nothing was written — count again |
 | `DISPATCH_NEEDS_MANAGER` | 403 | Solo dispatch refused (switch off, KATCHI bill, a withdrawal not dated today, a default charge priced by weight, a charge left off, a mode other than cash/approved credit, no approval, or the bill would pass the approved ceiling); a manager must finish the truck |
-| `TRUCK_NOT_READY` | 409 | Truck checkout: a line is still PENDING or DISPUTED (message names its dispatch notes); weigh or cancel it first — no partial trucks |
-| `TRUCK_LOAD_CHANGED` | 409 | Truck checkout: the lines sent are not the truck's weighed lines now (the message names, by dispatch note, those missing from the review and those no longer weighed on the truck — e.g. one checked out on its own meanwhile); nothing was written — review the truck again |
+| `TRUCK_NOT_READY` | 409 | Truck checkout: a line is marked DISPUTED (message names its dispatch notes); cancel it first — no partial trucks. A booked (PENDING) line is ready: weight is optional (docs/27) |
+| `TRUCK_LOAD_CHANGED` | 409 | Truck checkout: the lines sent are not the truck's ready (booked or weighed) lines now (the message names, by dispatch note, those missing from the review and those no longer on the truck — e.g. one checked out on its own meanwhile); nothing was written — review the truck again |
 | `OUTBOUND_ALREADY_FINALIZED` | 409 | The withdrawal is already dispatched; on a truck checkout, everything the request asked for already is ("This truck was already checked out") — a retry or a double submit. The desk treats it as done and offers the load slip |
 | `TRUCK_TOO_MANY_LINES` | 422 | Truck checkout: more than 20 lines |
 | `TRUCK_PAYMENTS_MISMATCH` | 422 | Truck checkout: the payments are not exactly one per (billing party, book) group on the truck |

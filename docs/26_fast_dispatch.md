@@ -13,7 +13,7 @@ on one screen** at the desk, plus one Release and a blind count at the gate.
 | D1 | The munshi may finish a **clean** truck alone (cash in full, or credit a manager pre-approved), only once the owner switches it on. Anything that changes the money waits for a manager. |
 | D2 | The invoice is always **finalized** at checkout (a draft posts nothing, so a credit truck with a draft bill would vanish from receivables). |
 | D3 | One truck may carry several lots; the gate checks every withdrawal on the plate. |
-| D4 | Outbound weight stays mandatory (the blind inline weigh-out with a tolerance band is still to build, see the end). |
+| D4 | ~~Outbound weight stays mandatory (the blind inline weigh-out with a tolerance band is still to build, see the end).~~ **Superseded 2026-10-29:** weight is optional everywhere and the weigh-out check is dropped. See docs/27. |
 | 2026-10-21 | The gate guard sees **no weights and no money owed**, only that a payment is pending. |
 | 2026-10-21 | Tag v0.8.0 but **do not promote** to `:stable` until the owner says so. |
 
@@ -160,11 +160,14 @@ From the pre-merge review, judged too small or too rare to hold the release; eac
 - A standing approval revoked at the very moment a truck is released can still let that one truck out.
 - ~~The gate's "Ready to leave" poll reads every withdrawal dispatched before v0.8.0 and skips them in
   code, so its cost grows with history.~~ Fixed in C2: `openLoads` filters them out in SQL.
-- Until C3, solo dispatch refuses any truck while a default charge priced by weight is active, because
-  the munshi types the weight.
+- Solo dispatch refuses any truck while a default charge priced by weight is active, because the
+  munshi types the weight. This was to last "until C3"; C3's weigh-out was dropped (docs/27), so it
+  stays.
 
 ## Still to build
 
-C2 is built (above). C3: the blind inline weigh-out (and a whole-truck kanta weight split across lots) with a tolerance band that grows with storage time, and QR codes on the parchi and dispatch
-note. Also: a manager approval queue with reason codes; persisted gate count attempts and linking the
-gate pass at booking (Phase 0's residual gaps); a dispatch-note search replacing the gate's raw ID box.
+C2 is built (above). C3 was rescoped by the owner on 2026-10-29. Most clients don't weigh, so the
+blind weigh-out and its tolerance band are dropped, and weight became optional everywhere first
+(docs/27). Still to build: QR codes on the parchi and dispatch note; a manager approval queue with
+reason codes; persisted gate count attempts and linking the gate pass at booking (Phase 0's residual
+gaps); a dispatch-note search replacing the gate's raw ID box.
