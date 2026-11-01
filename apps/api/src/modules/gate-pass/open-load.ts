@@ -34,13 +34,21 @@ export const openLoadSelect = {
 export type OpenLoadLine = Prisma.OutboundEventGetPayload<{ select: typeof openLoadSelect }>;
 
 /**
+ * The stage test for "is on the truck": booked, weighed, disputed or dispatched. A withdrawal
+ * dispatched before the Phase 0 rules (no `finalized_at`) may already have left untracked, so it
+ * is on no truck. Shared by `openLoads` and the gate's release (`matchByPlate`), so the preview,
+ * the desk and the release cannot disagree about what a truck carries.
+ */
+export const OPEN_LOAD_STAGE_SQL = `o.status IN ('PENDING', 'WEIGHED', 'DISPUTED', 'DISPATCHED')
+        AND NOT (o.status = 'DISPATCHED' AND o.finalized_at IS NULL)`;
+
+/**
  * What is on each truck that has not left yet, by normalized plate (letters and digits only):
  * every withdrawal booked, weighed, disputed or dispatched on that plate, not cancelled, not
  * stamped by a pass (`gate_pass_id`), and not released by a pass under the legacy single link.
- * A withdrawal dispatched before the Phase 0 rules (no `finalized_at`) may already have left
- * untracked, so it is on no truck. The gate's Ready-to-leave preview and the dispatch desk read
- * a truck through this one helper, so they cannot disagree about its lines; the release itself
- * (`matchByPlate`) takes the dispatched ones under the same rules, locked.
+ * The gate's Ready-to-leave preview and the dispatch desk read a truck through this one helper,
+ * so they cannot disagree about its lines; the release itself (`matchByPlate`) takes the same
+ * lines, locked, and holds the truck while any is not yet dispatched (C3 D3).
  *
  * The plate test and the legacy rule run in SQL, so a poll reads only the trucks it asks about.
  */
@@ -52,11 +60,10 @@ export async function openLoads(db: Db, facilityId: string, plates: string[]): P
   const rows = await db.$queryRawUnsafe<{ id: string }[]>(
     `SELECT o.id FROM outbound_events o
       WHERE o.facility_id = $1::uuid
-        AND o.status IN ('PENDING', 'WEIGHED', 'DISPUTED', 'DISPATCHED')
+        AND ${OPEN_LOAD_STAGE_SQL}
         AND o.voided_at IS NULL
         AND o.gate_pass_id IS NULL
         AND o.vehicle_number IS NOT NULL
-        AND NOT (o.status = 'DISPATCHED' AND o.finalized_at IS NULL)
         AND regexp_replace(upper(o.vehicle_number), '[^A-Z0-9]', '', 'g') = ANY($2::text[])
         AND NOT EXISTS (
           SELECT 1 FROM gate_passes g WHERE g.related_outbound_id = o.id AND g.status = 'CLEARED')`,

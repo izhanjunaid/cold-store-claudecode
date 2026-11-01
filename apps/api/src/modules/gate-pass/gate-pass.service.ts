@@ -22,7 +22,7 @@ import { roleAtLeast } from '../../plugins/auth';
 import { standingCreditCover, type ActiveApproval } from '../credit-approval/credit-approval.service';
 import { generateGatePassNumber } from './gate-pass-number';
 import { GatePassRepository } from './gate-pass.repository';
-import { openLoads } from './open-load';
+import { openLoads, OPEN_LOAD_STAGE_SQL } from './open-load';
 
 /** What the gate needs to know about a withdrawal leaving on a truck. */
 const releaseSelect = {
@@ -41,6 +41,16 @@ const releaseSelect = {
 type ReleaseOutbound = Prisma.OutboundEventGetPayload<{ select: typeof releaseSelect }>;
 
 const dnOf = (o: { dispatchNoteNumber: string | null; id: string }) => o.dispatchNoteNumber ?? o.id.slice(0, 8);
+
+/**
+ * A truck whose load is still being booked, weighed or checked out is not ready to leave (C3 D3). No
+ * override: the fix is at the desk, which checks the line out or cancels it. Before this, only the
+ * dispatched lines were matched, so a loaded truck with a booked withdrawal left on a count of 0.
+ */
+function refuseIfStillLoading(lines: { status: string; dispatchNoteNumber: string | null; id: string }[]): void {
+  const open = lines.filter((o) => o.status !== 'DISPATCHED');
+  if (open.length > 0) throw Errors.GATE_OUTWARD_NOT_DISPATCHED(open.map(dnOf).join(', '));
+}
 
 const emptyRelease = (): GateReleaseType => ({
   state: 'NO_BOOKING',
@@ -367,9 +377,13 @@ export class GatePassService {
         if (!overrideReason) throw Errors.GATE_OUTWARD_PLATE_MISMATCH(dnOf(ob));
         overrideUsed = true;
       }
+      // Naming one withdrawal skips matching the rest of the truck, but not the hold: read the pass's
+      // plate unlocked (locking more withdrawals after the named one would break the sorted lock order).
+      refuseIfStillLoading((await openLoads(tx, facilityId, [pass.vehicleNumber])).get(normalizePlate(pass.vehicleNumber)) ?? []);
       outbounds = [ob];
     } else {
       outbounds = await this.matchByPlate(tx, facilityId, pass);
+      refuseIfStillLoading(outbounds);
     }
 
     // 4. Nothing booked on this truck: an empty or delivery truck leaves freely,
@@ -507,13 +521,15 @@ export class GatePassService {
   }
 
   /**
-   * Every dispatched withdrawal booked on this truck's plate that has not left
-   * yet, locked. Plates compare by letters and digits only. "Not left yet" is
-   * `gate_pass_id IS NULL`, with no date cutoff: a load dispatched days ago whose
-   * truck waited for a cheque to clear is still on the truck. Only withdrawals
-   * dispatched under these rules (finalized_at set) match by plate — one
-   * dispatched before them may already have left untracked, so it leaves only by
-   * a manager naming it.
+   * Every withdrawal booked on this truck's plate that has not left yet, locked:
+   * dispatched or still open (booked, weighed, disputed). The caller holds the truck
+   * while any is still open (`refuseIfStillLoading`). Plates compare by letters and
+   * digits only. "Not left yet" is `gate_pass_id IS NULL`, with no date cutoff: a load
+   * dispatched days ago whose truck waited for a cheque to clear is still on the
+   * truck. Only withdrawals dispatched under these rules (finalized_at set) match by
+   * plate — one dispatched before them may already have left untracked, so it leaves
+   * only by a manager naming it. The stage test is `openLoads`'s own, so the preview,
+   * the desk and the release read a truck the same way.
    */
   private async matchByPlate(
     tx: Prisma.TransactionClient,
@@ -525,10 +541,9 @@ export class GatePassService {
     const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
       `SELECT o.id FROM outbound_events o
         WHERE o.facility_id = $1::uuid
-          AND o.status = 'DISPATCHED'
+          AND ${OPEN_LOAD_STAGE_SQL}
           AND o.voided_at IS NULL
           AND o.gate_pass_id IS NULL
-          AND o.finalized_at IS NOT NULL
           AND o.vehicle_number IS NOT NULL
           AND regexp_replace(upper(o.vehicle_number), '[^A-Z0-9]', '', 'g') = $2
           AND NOT EXISTS (

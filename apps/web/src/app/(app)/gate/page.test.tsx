@@ -244,6 +244,38 @@ describe('GatePassConsolePage — clear outward', () => {
     expect(within(dialog).queryByRole('button', { name: /release anyway/i })).not.toBeInTheDocument();
   });
 
+  // C3 D3: a truck with a booking not yet checked out leaves by the desk, never by an override.
+  const NOT_DISPATCHED = 'Withdrawal DN-260101-0009 has not been dispatched — it cannot leave yet';
+
+  it('sends a truck with a booked line back to the desk, with no recount and no override', async () => {
+    apiClient.mockRejectedValueOnce(new ApiError(NOT_DISPATCHED, { code: 'GATE_OUTWARD_NOT_DISPATCHED', status: 422 }));
+    const dialog = await openClearOutward();
+    enterCount(dialog, '0');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+
+    expect(await within(dialog).findByText(/has not been dispatched/i)).toBeInTheDocument();
+    expect(within(dialog).getByText('Send the truck back to the desk.')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/recount/i)).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /release anyway/i })).not.toBeInTheDocument();
+  });
+
+  it('a manager who was offered Release anyway for the count loses it once a booked line holds the truck', async () => {
+    role = 'MANAGER';
+    apiClient
+      .mockRejectedValueOnce(new ApiError('The bag count does not match the dispatch', { code: 'GATE_OUTWARD_COUNT_MISMATCH', status: 422 }))
+      .mockRejectedValueOnce(new ApiError(NOT_DISPATCHED, { code: 'GATE_OUTWARD_NOT_DISPATCHED', status: 422 }));
+    const dialog = await openClearOutward();
+    enterCount(dialog, '130');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+    await within(dialog).findByRole('button', { name: /release anyway/i });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+    expect(await within(dialog).findByText(/has not been dispatched/i)).toBeInTheDocument();
+    expect(within(dialog).getByText('Send the truck back to the desk.')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /release anyway/i })).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/override reason/i)).not.toBeInTheDocument();
+  });
+
   it('shows the server message when payment is pending, with one next step for the guard', async () => {
     // What the API really tells the guard: the fact, no amount (managers hear the balance).
     apiClient.mockRejectedValueOnce(new ApiError('Payment pending', { code: 'GATE_OUTWARD_BLOCKED', status: 422 }));

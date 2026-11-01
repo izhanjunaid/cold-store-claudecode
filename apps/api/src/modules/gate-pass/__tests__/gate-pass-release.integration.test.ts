@@ -163,6 +163,19 @@ async function arrive(plate: string): Promise<string> {
   return data<{ id: string }>(res).id;
 }
 
+/** Book a FULL withdrawal of a fresh lot on `plate`, left booked: not weighed, not dispatched. */
+async function book(quantity: number, plate: string): Promise<string> {
+  const lotId = await createLot(quantity);
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/outbound-events',
+    headers: authHeaders(operatorToken),
+    payload: { lot_id: lotId, withdrawal_type: 'FULL', quantity_withdrawn_bags: quantity, outbound_date: '2026-09-01', vehicle_number: plate },
+  });
+  expect(res.statusCode, res.body).toBe(201);
+  return data<{ id: string }>(res).id;
+}
+
 function release(passId: string, body: Record<string, unknown>, token = securityToken) {
   return app.inject({
     method: 'POST',
@@ -311,6 +324,86 @@ describe('matching the truck to its withdrawals', () => {
     expect([...body.outbound_ids].sort()).toEqual([a.id, b.id].sort());
     const rows = await prisma.outboundEvent.findMany({ where: { id: { in: [a.id, b.id] } } });
     expect(rows.every((r) => r.gatePassId === pass)).toBe(true);
+  });
+});
+
+// C3 D3: the gate used to match only dispatched withdrawals, so a truck whose load was booked but not yet
+// checked out left on a count of 0. Anything still open on the plate holds the truck — even for a manager,
+// because the fix is at the desk (check it out, or cancel it), not at the gate.
+describe('a truck still being loaded cannot leave', () => {
+  const dnOfRow = async (id: string) => (await prisma.outboundEvent.findUniqueOrThrow({ where: { id } })).dispatchNoteNumber!;
+
+  it('holds a truck whose plate carries a booked withdrawal, even on a count of 0', async () => {
+    const booked = await book(20, 'LHR-9101');
+    const pass = await arrive('LHR-9101');
+
+    const out = await release(pass, { declared_quantity: 0 });
+    expect([out.statusCode, code(out)]).toEqual([422, 'GATE_OUTWARD_NOT_DISPATCHED']);
+    expect(JSON.parse(out.body).error.message).toContain(await dnOfRow(booked));
+    expect((await prisma.gatePass.findUniqueOrThrow({ where: { id: pass } })).status).toBe('ARRIVED');
+  });
+
+  it('holds a truck carrying one dispatched and one weighed line', async () => {
+    const sent = await dispatched(20, 'LHR-9102');
+    await pay(sent.invoiceId);
+    const weighed = await book(15, 'LHR-9102');
+    const weigh = await app.inject({
+      method: 'PATCH',
+      url: `/v1/outbound-events/${weighed}/weight`,
+      headers: authHeaders(operatorToken),
+      payload: { outbound_weight_kg: 15 * 19.5 },
+    });
+    expect(weigh.statusCode, weigh.body).toBe(200);
+    const pass = await arrive('LHR-9102');
+
+    // The dispatched line's own count would have let the truck out with the weighed one still to load.
+    const out = await release(pass, { declared_quantity: 20 });
+    expect([out.statusCode, code(out)]).toEqual([422, 'GATE_OUTWARD_NOT_DISPATCHED']);
+    const message = JSON.parse(out.body).error.message as string;
+    expect(message).toContain(await dnOfRow(weighed));
+    expect(message).not.toContain(await dnOfRow(sent.id));
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: sent.id } })).gatePassId).toBeNull();
+  });
+
+  it('an override reason does not release a booked line', async () => {
+    await book(20, 'LHR-9104');
+    const pass = await arrive('LHR-9104');
+    const out = await release(pass, { declared_quantity: 0, override_reason: 'driver is waiting, checked by hand' }, managerToken);
+    expect([out.statusCode, code(out)]).toEqual([422, 'GATE_OUTWARD_NOT_DISPATCHED']);
+  });
+
+  it('naming a withdrawal does not skip a booked line on the truck', async () => {
+    const sent = await dispatched(20, 'LHR-9105');
+    await pay(sent.invoiceId);
+    const booked = await book(15, 'LHR-9105');
+    const pass = await arrive('LHR-9105');
+
+    const out = await release(pass, { outbound_event_id: sent.id, declared_quantity: 20 }, managerToken);
+    expect([out.statusCode, code(out)]).toEqual([422, 'GATE_OUTWARD_NOT_DISPATCHED']);
+    expect(JSON.parse(out.body).error.message).toContain(await dnOfRow(booked));
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: sent.id } })).gatePassId).toBeNull();
+  });
+
+  it('a cancelled booking does not hold the truck', async () => {
+    const booked = await book(20, 'LHR-9106');
+    const cancel = await app.inject({
+      method: 'POST',
+      url: `/v1/outbound-events/${booked}/cancel`,
+      headers: authHeaders(operatorToken),
+      payload: { reason: 'Party changed its mind' },
+    });
+    expect(cancel.statusCode, cancel.body).toBe(200);
+    const pass = await arrive('LHR-9106');
+    expect((await release(pass, { declared_quantity: 0 })).statusCode).toBe(200);
+  });
+
+  it('a withdrawal dispatched before these rules neither holds nor counts', async () => {
+    const legacy = await dispatched(10, 'LHR-9103');
+    await prisma.outboundEvent.update({ where: { id: legacy.id }, data: { finalizedAt: null } });
+    const pass = await arrive('LHR-9103');
+
+    expect((await release(pass, { declared_quantity: 0 })).statusCode).toBe(200);
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: legacy.id } })).gatePassId).toBeNull();
   });
 });
 
@@ -612,18 +705,6 @@ describe('release preview on the active list (what the gate console shows before
 
 // One reading of what is on a truck, shared by the gate's Ready-to-leave preview and the dispatch desk.
 describe('the open load on a truck (openLoads)', () => {
-  const book = async (quantity: number, plate: string) => {
-    const lotId = await createLot(quantity);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/outbound-events',
-      headers: authHeaders(operatorToken),
-      payload: { lot_id: lotId, withdrawal_type: 'FULL', quantity_withdrawn_bags: quantity, outbound_date: '2026-09-01', vehicle_number: plate },
-    });
-    expect(res.statusCode, res.body).toBe(201);
-    return data<{ id: string }>(res).id;
-  };
-
   it('holds what is booked or dispatched on the plate and has not left — however the plate was typed — and nothing else', async () => {
     const sent = await dispatched(20, 'LHR-6950');
     const booked = await book(15, 'lhr 6950');

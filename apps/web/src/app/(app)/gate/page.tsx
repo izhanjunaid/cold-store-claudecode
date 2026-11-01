@@ -266,6 +266,9 @@ export default function GatePassConsolePage() {
       const errCode = err instanceof ApiError ? err.code : null;
       setOutwardErrCode(errCode);
       if (errCode && OVERRIDABLE_CODES.has(errCode)) setOverrideOffered(true);
+      // A booking not yet checked out holds the truck whatever a manager writes: drop an override
+      // that an earlier miss on the count offered.
+      if (errCode === 'GATE_OUTWARD_NOT_DISPATCHED') setOverrideOffered(false);
       setOutwardErr(err instanceof Error ? err.message : 'Failed to clear outward');
     } finally {
       setOutwardLoading(false);
@@ -275,6 +278,7 @@ export default function GatePassConsolePage() {
   const readyToLeave = passes.filter((p) => p.release?.state === 'READY');
   const countValid = parseCount(outwardCount) != null;
   const outwardBlocked = outwardErrCode === 'GATE_OUTWARD_BLOCKED';
+  const outwardHold = outwardErrCode === 'GATE_OUTWARD_NOT_DISPATCHED';
   const outwardMismatch = outwardErrCode != null && OVERRIDABLE_CODES.has(outwardErrCode);
 
   return (
@@ -528,6 +532,7 @@ export default function GatePassConsolePage() {
                     </p>
                   )}
                   {outwardMismatch && !canManager && <p className="font-semibold">Recount, or call a manager.</p>}
+                  {outwardHold && <p className="font-semibold">Send the truck back to the desk.</p>}
                 </div>
               )}
               {(outwardMismatch || overrideOffered) && canManager && (
