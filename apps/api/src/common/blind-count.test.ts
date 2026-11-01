@@ -96,4 +96,11 @@ describe('redactBagCounts', () => {
       total_pkr: 500,
     });
   });
+
+  it("hides what a refused count should have been, and keeps the number the guard typed", () => {
+    const out = redactBagCounts({
+      count_attempts: [{ declared_quantity: 41, expected_quantity: 50, counted_by_name: 'Bilal' }],
+    });
+    expect(out).toEqual({ count_attempts: [{ declared_quantity: 41, expected_quantity: null, counted_by_name: 'Bilal' }] });
+  });
 });

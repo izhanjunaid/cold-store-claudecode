@@ -17,7 +17,10 @@ async function errorHandler(app: FastifyInstance) {
 
     // App errors
     if (error instanceof AppError) {
-      const response: { success: false; error: { code: string; message: string; field?: string } } = {
+      const response: {
+        success: false;
+        error: { code: string; message: string; field?: string; details?: Record<string, unknown> };
+      } = {
         success: false,
         error: {
           code: error.code,
@@ -25,6 +28,7 @@ async function errorHandler(app: FastifyInstance) {
         },
       };
       if (error.field) response.error.field = error.field;
+      if (error.details) response.error.details = error.details;
       return reply.status(error.statusCode).send(response);
     }
 

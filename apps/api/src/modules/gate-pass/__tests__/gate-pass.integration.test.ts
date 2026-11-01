@@ -488,7 +488,11 @@ describe('Gate-side quantity & commodity verification (Fix #1)', () => {
     expect(err.code).toBe('GATE_OUTWARD_COUNT_MISMATCH');
     // The count is blind: the error never tells the guard what it should have been.
     expect(err.message).not.toContain('100');
-    expect(await prisma.gatePass.count({ where: { vehicleNumber: 'LHR-Q600' } })).toBe(0);
+    // The refused count is saved (D4), so the pass it belongs to survives the refusal, still inside.
+    const refused = await prisma.gatePass.findMany({ where: { vehicleNumber: 'LHR-Q600' } });
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ status: 'ARRIVED', relatedOutboundId: null });
+    expect(await prisma.gateCountAttempt.count({ where: { gatePassId: refused[0]!.id } })).toBe(1);
 
     const out = await app.inject({
       method: 'POST',

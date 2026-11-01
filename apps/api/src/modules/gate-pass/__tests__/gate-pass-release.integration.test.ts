@@ -35,6 +35,7 @@ let ownerToken: string;
 let managerToken: string;
 let operatorToken: string;
 let securityToken: string;
+let securityUserId: string;
 let accountantToken: string;
 let partyId: string;
 
@@ -191,7 +192,9 @@ beforeAll(async () => {
   ownerToken = (await loginAsRole(app, 'OWNER')).accessToken;
   managerToken = (await loginAsRole(app, 'MANAGER')).accessToken;
   operatorToken = (await loginAsRole(app, 'OPERATOR')).accessToken;
-  securityToken = (await loginAsRole(app, 'SECURITY')).accessToken;
+  const security = await loginAsRole(app, 'SECURITY');
+  securityToken = security.accessToken;
+  securityUserId = security.user.id;
   accountantToken = (await loginAsRole(app, 'ACCOUNTANT')).accessToken;
   const party = await app.inject({
     method: 'POST',
@@ -404,6 +407,164 @@ describe('a truck still being loaded cannot leave', () => {
 
     expect((await release(pass, { declared_quantity: 0 })).statusCode).toBe(200);
     expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: legacy.id } })).gatePassId).toBeNull();
+  });
+});
+
+// C3 D4: a guard used to retype the count until it matched, and nothing recorded the tries. Every wrong
+// count is now saved, and a truck that has had three of them since its last release is a manager's.
+describe('wrong counts are saved, and three of them lock the truck', () => {
+  const miss = (pass: string, bags: number, token = securityToken) => release(pass, { declared_quantity: bags }, token);
+  const triesLeft = (r: Res) => JSON.parse(r.body).error.details?.tries_left as number | undefined;
+  const attempts = (where: Record<string, unknown>) => prisma.gateCountAttempt.count({ where });
+  /** A paid 50-bag withdrawal dispatched on `plate`, and a truck of that plate at the gate. */
+  const loaded = async (plate: string) => {
+    const ob = await dispatched(50, plate);
+    await pay(ob.invoiceId);
+    return { ob, pass: await arrive(plate) };
+  };
+
+  it('saves each wrong count: the number typed, the number expected, who typed it', async () => {
+    const { pass } = await loaded('LHR-9201');
+    const out = await miss(pass, 45);
+    expect([out.statusCode, code(out)]).toEqual([422, 'GATE_OUTWARD_COUNT_MISMATCH']);
+    expect(JSON.parse(out.body).error.details).toEqual({ tries_left: 2 });
+
+    const rows = await prisma.gateCountAttempt.findMany({ where: { gatePassId: pass } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ plate: 'LHR9201', declaredQuantity: 45, expectedQuantity: 50, createdBy: securityUserId });
+    // The refusal left the truck where it was.
+    expect((await prisma.gatePass.findUniqueOrThrow({ where: { id: pass } })).status).toBe('ARRIVED');
+  });
+
+  it('after three wrong counts the guard is refused even with the right number; a manager still releases', async () => {
+    const { ob, pass } = await loaded('LHR-9203');
+    for (const [i, bags] of [41, 42, 43].entries()) {
+      const r = await miss(pass, bags);
+      expect([r.statusCode, code(r), triesLeft(r)]).toEqual([422, 'GATE_OUTWARD_COUNT_MISMATCH', 2 - i]);
+    }
+    const locked = await miss(pass, 50);
+    expect([locked.statusCode, code(locked)]).toEqual([403, 'GATE_OUTWARD_COUNT_LOCKED']);
+    expect(locked.body).not.toMatch(/\b50\b/);
+    expect(await attempts({ gatePassId: pass })).toBe(3); // the refusal saved nothing
+
+    const ok = await miss(pass, 50, managerToken);
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect(data(ok).outbound_ids).toEqual([ob.id]);
+  });
+
+  it('logging the truck again does not give the guard fresh tries', async () => {
+    const { pass: first } = await loaded('LHR-9204');
+    for (const bags of [41, 42, 43]) await miss(first, bags);
+    const second = await arrive('LHR-9204');
+    const locked = await miss(second, 50);
+    expect([locked.statusCode, code(locked)]).toEqual([403, 'GATE_OUTWARD_COUNT_LOCKED']);
+  });
+
+  it('tries start again once the truck has been released', async () => {
+    const { pass: first } = await loaded('LHR-9205');
+    await miss(first, 41);
+    await miss(first, 42);
+    expect((await miss(first, 50, managerToken)).statusCode).toBe(200);
+
+    const next = await dispatched(30, 'LHR-9205');
+    await pay(next.invoiceId);
+    const second = await arrive('LHR-9205');
+    const again = await miss(second, 20);
+    expect([again.statusCode, code(again), triesLeft(again)]).toEqual([422, 'GATE_OUTWARD_COUNT_MISMATCH', 2]);
+  });
+
+  it('a count on a truck nothing was dispatched for is a wrong count too', async () => {
+    const pass = await arrive('LHR-9206');
+    const out = await miss(pass, 5);
+    expect([out.statusCode, code(out), triesLeft(out)]).toEqual([422, 'GATE_OUTWARD_UNMATCHED_LOAD', 2]);
+    expect(await prisma.gateCountAttempt.findFirstOrThrow({ where: { gatePassId: pass } })).toMatchObject({
+      declaredQuantity: 5,
+      expectedQuantity: 0,
+    });
+  });
+
+  it('a refusal that is not about the count uses no try', async () => {
+    const unpaid = await dispatched(20, 'LHR-9207');
+    await finalizeInvoice(unpaid.invoiceId);
+    const pass = await arrive('LHR-9207');
+    expect(code(await miss(pass, 20))).toBe('GATE_OUTWARD_BLOCKED');
+
+    await book(10, 'LHR-9207'); // a booked line now holds the truck (D3)
+    expect(code(await miss(pass, 20))).toBe('GATE_OUTWARD_NOT_DISPATCHED');
+    expect(await attempts({ gatePassId: pass })).toBe(0);
+  });
+
+  it("a manager's wrong counts are saved too, but a manager is never locked", async () => {
+    const { pass } = await loaded('LHR-9209');
+    const lefts: (number | undefined)[] = [];
+    for (const bags of [41, 42, 43, 44]) {
+      const r = await miss(pass, bags, managerToken);
+      expect([r.statusCode, code(r)]).toEqual([422, 'GATE_OUTWARD_COUNT_MISMATCH']);
+      lefts.push(triesLeft(r));
+    }
+    expect(lefts).toEqual([2, 1, 0, 0]);
+    expect(await attempts({ gatePassId: pass })).toBe(4);
+    expect((await miss(pass, 50, managerToken)).statusCode).toBe(200);
+  });
+
+  it('a refused one-step log-and-release keeps its pass and its try, and is not tied to the withdrawal named', async () => {
+    const named = await dispatched(50, 'LHR-9208');
+    await pay(named.invoiceId);
+    const unpaid = await dispatched(30, 'LHR-9208'); // the same truck, billed and not paid
+    await finalizeInvoice(unpaid.invoiceId);
+
+    const logged = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/outward',
+      headers: authHeaders(managerToken),
+      payload: { vehicle_number: 'LHR-9208', outbound_event_id: named.id, declared_quantity: 45 },
+    });
+    expect([logged.statusCode, code(logged)]).toEqual([422, 'GATE_OUTWARD_COUNT_MISMATCH']);
+    const passes = await prisma.gatePass.findMany({ where: { facilityId: TEST_FACILITY_ID, vehicleNumber: 'LHR-9208' } });
+    expect(passes).toHaveLength(1);
+    expect(passes[0]).toMatchObject({ status: 'ARRIVED', relatedOutboundId: null });
+    expect(await attempts({ gatePassId: passes[0]!.id })).toBe(1);
+    const rows = await prisma.outboundEvent.findMany({ where: { id: { in: [named.id, unpaid.id] } } });
+    expect(rows.every((o) => o.gatePassId === null)).toBe(true);
+
+    // The pass does not remember the withdrawal the manager named: a guard's release still checks the
+    // whole truck by plate, so the unpaid one holds it. (A stored link let a guard release just the paid one.)
+    const bare = await release(passes[0]!.id, { declared_quantity: 50 });
+    expect([bare.statusCode, code(bare)]).toEqual([422, 'GATE_OUTWARD_BLOCKED']);
+  });
+
+  it('two passes of one plate cannot both take the last try', async () => {
+    // A truck with nothing dispatched for it holds no withdrawal row to serialize on, so the plate's own
+    // lock is all that stops two guards reading "2 used" at once. Three rounds, as the load race does: one
+    // lucky ordering must not pass a lock that is not there.
+    for (let round = 0; round < 3; round++) {
+      const plate = `LHR-92${round}0`;
+      const [a, b] = [await arrive(plate), await arrive(plate)];
+      await miss(a, 5);
+      await miss(a, 6);
+
+      const [ra, rb] = await Promise.all([miss(a, 7), miss(b, 8)]);
+      expect([ra.statusCode, rb.statusCode].sort()).toEqual([403, 422]);
+      expect(await attempts({ facilityId: TEST_FACILITY_ID, plate: `LHR92${round}0` })).toBe(3);
+    }
+  }, 45_000);
+
+  it('the pass lists its wrong counts: the guard sees what was typed, a manager what was expected', async () => {
+    const { pass } = await loaded('LHR-9211');
+    await miss(pass, 44);
+    type Attempts = { count_attempts: Record<string, unknown>[] };
+    const get = (url: string, token: string) => app.inject({ method: 'GET', url, headers: authHeaders(token) });
+
+    const guard = data<Attempts>(await get(`/v1/gate-passes/${pass}`, securityToken));
+    expect(guard.count_attempts).toHaveLength(1);
+    expect(guard.count_attempts[0]).toMatchObject({ declared_quantity: 44, expected_quantity: null });
+    const manager = data<Attempts>(await get(`/v1/gate-passes/${pass}`, managerToken));
+    expect(manager.count_attempts[0]).toMatchObject({ declared_quantity: 44, expected_quantity: 50 });
+    expect(manager.count_attempts[0]!['counted_by_name']).toBeTruthy();
+
+    // The gate page reads them from the list of trucks inside.
+    const listed = data<(Attempts & { id: string })[]>(await get('/v1/gate-passes?active=true', managerToken));
+    expect(listed.find((p) => p.id === pass)?.count_attempts).toHaveLength(1);
   });
 });
 

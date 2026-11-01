@@ -96,6 +96,24 @@ export const GateRelease = z.object({
 });
 export type GateReleaseType = z.infer<typeof GateRelease>;
 
+/**
+ * Wrong bag counts the gate takes from a truck, since its last release, before only a manager may
+ * release it (docs/28 D4). The API enforces it and the gate page prints "Try N of 3" from it.
+ */
+export const GATE_COUNT_TRIES = 3;
+
+/**
+ * One wrong count at the gate. `expected_quantity` is what the dispatch said: a blind field, so it is
+ * null for the guard, who keeps only the number they typed.
+ */
+export const GateCountAttempt = z.object({
+  declared_quantity: z.number().int(),
+  expected_quantity: z.number().int().nullable(),
+  counted_by_name: z.string().nullable(),
+  created_at: z.string(),
+});
+export type GateCountAttemptType = z.infer<typeof GateCountAttempt>;
+
 export const GatePassResponse = z.object({
   id: z.string().uuid(),
   pass_number: z.string(),
@@ -134,6 +152,8 @@ export const GatePassResponse = z.object({
   outbound_ids: z.array(z.string().uuid()).optional(),
   /** The same withdrawals as the receipt names them: dispatch note, marka, owner — never a count. */
   withdrawals: z.array(GateWithdrawal).optional(),
+  /** This pass's wrong counts, oldest first (docs/28 D4). */
+  count_attempts: z.array(GateCountAttempt).optional(),
   /** Only on the active list (?active=true). */
   release: GateRelease.optional(),
 });

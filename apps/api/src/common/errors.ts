@@ -1,9 +1,13 @@
+import { GATE_COUNT_TRIES } from '@coldchain/shared';
+
 export class AppError extends Error {
   constructor(
     public readonly code: string,
     message: string,
     public readonly statusCode: number = 400,
     public readonly field?: string,
+    /** Machine-readable extras for the client (e.g. `tries_left`): never a figure the caller may not see. */
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'AppError';
@@ -344,20 +348,31 @@ export const Errors = {
       422,
       'declared_quantity',
     ),
-  // Deliberately does not say what the count should have been: the guard's count is blind.
-  GATE_OUTWARD_COUNT_MISMATCH: () =>
+  // Deliberately does not say what the count should have been: the guard's count is blind. It says
+  // how many tries are left (docs/28 D4), which is a number of tries, not of bags.
+  GATE_OUTWARD_COUNT_MISMATCH: (triesLeft?: number) =>
     new AppError(
       'GATE_OUTWARD_COUNT_MISMATCH',
       // The fact only: what to do next depends on who is asking, and the gate page says it.
       'The bag count does not match the dispatch',
       422,
       'declared_quantity',
+      triesLeft == null ? undefined : { tries_left: triesLeft },
     ),
-  GATE_OUTWARD_UNMATCHED_LOAD: () =>
+  GATE_OUTWARD_UNMATCHED_LOAD: (triesLeft?: number) =>
     new AppError(
       'GATE_OUTWARD_UNMATCHED_LOAD',
       'No dispatched withdrawal matches this loaded truck — check the vehicle number with the munshi, or call a manager',
       422,
+      undefined,
+      triesLeft == null ? undefined : { tries_left: triesLeft },
+    ),
+  // The guard has used up the tries: only a manager releases this truck, whatever number is typed now.
+  GATE_OUTWARD_COUNT_LOCKED: () =>
+    new AppError(
+      'GATE_OUTWARD_COUNT_LOCKED',
+      `The bag count did not match ${GATE_COUNT_TRIES} times — a manager must release this truck`,
+      403,
     ),
   // Documents whose bag counts sit inside text or a PDF cannot be redacted field by field, so the guard does not get them.
   BLIND_ROLE_FORBIDDEN: () =>

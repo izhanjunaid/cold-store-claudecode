@@ -9,6 +9,17 @@ const lotLocationSelect = {
   },
 } as const;
 
+// This pass's wrong counts, oldest first (docs/28 D4); the counter's name is for the manager's list.
+export const countAttemptsInclude = {
+  select: {
+    declaredQuantity: true,
+    expectedQuantity: true,
+    createdAt: true,
+    countedBy: { select: { name: true } },
+  },
+  orderBy: { createdAt: 'asc' },
+} as const;
+
 const gatePassInclude = {
   relatedLot: {
     select: {
@@ -46,6 +57,7 @@ const gatePassInclude = {
     orderBy: { createdAt: 'asc' },
   },
   party: { select: { id: true, name: true } },
+  countAttempts: countAttemptsInclude,
 } satisfies Prisma.GatePassInclude;
 
 const gatePassListInclude = {
@@ -62,6 +74,7 @@ const gatePassListInclude = {
     orderBy: { createdAt: 'asc' },
   },
   party: { select: { id: true, name: true } },
+  countAttempts: countAttemptsInclude,
 } satisfies Prisma.GatePassInclude;
 
 export type GatePassWithRelations = Prisma.GatePassGetPayload<{ include: typeof gatePassInclude }>;

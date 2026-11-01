@@ -268,6 +268,22 @@ describe('the guard reads no weight', () => {
   });
 });
 
+// A wrong count is saved with what it should have been; the guard keeps their own number, never the expected one.
+describe('the guard reads no expected count for a wrong count', () => {
+  it("the pass's saved wrong count: what was typed shows to the guard, what was expected only to a manager", async () => {
+    const guard = json(await get(`/v1/gate-passes/${passId}`, securityToken)).data;
+    const manager = json(await get(`/v1/gate-passes/${passId}`, managerToken)).data;
+    expect(guard.count_attempts).toHaveLength(1);
+    expect(guard.count_attempts[0]).toMatchObject({ declared_quantity: 7 });
+    expect(guard.count_attempts[0]).toHaveProperty('expected_quantity', null);
+    expect(manager.count_attempts[0]).toMatchObject({ declared_quantity: 7, expected_quantity: 50 });
+  });
+
+  it('the refusal counts tries, not bags', () => {
+    expect(json(wrongCount).error.details).toEqual({ tries_left: 2 });
+  });
+});
+
 describe("the guard's own work is unchanged", () => {
   it('a wrong count is still refused, without saying what it should have been', () => {
     expect(wrongCount.statusCode, wrongCount.body).toBe(422);

@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { FileText, RefreshCw, Truck } from 'lucide-react';
-import { localIsoDate } from '@coldchain/shared';
+import { GATE_COUNT_TRIES, localIsoDate } from '@coldchain/shared';
 import { apiClient, apiClientList, ApiError } from '@/lib/api-client';
+import { formatCount } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { hasMinRole } from '@/lib/rbac';
@@ -40,6 +41,13 @@ interface GatePass {
   related_location?: string | null;
   created_at: string;
   turnaround_seconds: number | null;
+  /** This pass's wrong counts, oldest first. `expected_quantity` is null for the guard (blind). */
+  count_attempts?: {
+    declared_quantity: number;
+    expected_quantity: number | null;
+    counted_by_name: string | null;
+    created_at: string;
+  }[];
   /** On the active list only: can this truck be released now? Never carries a bag count. */
   release?: {
     state: 'READY' | 'PAYMENT_PENDING' | 'BILL_DRAFT' | 'NOT_DISPATCHED' | 'NO_BOOKING';
@@ -97,6 +105,13 @@ const OVERRIDABLE_CODES = new Set([
 // A blank box is "not counted yet"; 0 is a real count (an empty truck).
 function parseCount(raw: string): number | null {
   return /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : null;
+}
+
+/** How many tries a refused count leaves: the API's `error.details.tries_left` (a number of tries, never of bags). */
+function triesLeftOf(err: unknown): number | null {
+  const body = err instanceof ApiError ? (err.details as { details?: { tries_left?: unknown } } | undefined) : undefined;
+  const n = body?.details?.tries_left;
+  return typeof n === 'number' ? n : null;
 }
 
 function relativeTime(iso: string): string {
@@ -159,6 +174,8 @@ export default function GatePassConsolePage() {
   const [overrideOffered, setOverrideOffered] = useState(false);
   const [outwardErr, setOutwardErr] = useState<string | null>(null);
   const [outwardErrCode, setOutwardErrCode] = useState<string | null>(null);
+  // Tries the truck has left after a refused count (null: the refusal said nothing about tries).
+  const [outwardTriesLeft, setOutwardTriesLeft] = useState<number | null>(null);
   const [outwardLoading, setOutwardLoading] = useState(false);
 
   const fetchActive = useCallback(async () => {
@@ -233,6 +250,7 @@ export default function GatePassConsolePage() {
     setOverrideOffered(false);
     setOutwardErr(null);
     setOutwardErrCode(null);
+    setOutwardTriesLeft(null);
   }
 
   /** `withOverride`: a manager releasing a truck that failed a gate check, with a reason. */
@@ -244,6 +262,7 @@ export default function GatePassConsolePage() {
     setOutwardLoading(true);
     setOutwardErr(null);
     setOutwardErrCode(null);
+    setOutwardTriesLeft(null);
     try {
       const cleared = await apiClient<GatePass>(`/v1/gate-passes/${outwardModal.id}/outward`, {
         method: 'POST',
@@ -265,6 +284,7 @@ export default function GatePassConsolePage() {
     } catch (err) {
       const errCode = err instanceof ApiError ? err.code : null;
       setOutwardErrCode(errCode);
+      setOutwardTriesLeft(triesLeftOf(err));
       if (errCode && OVERRIDABLE_CODES.has(errCode)) setOverrideOffered(true);
       // A booking not yet checked out holds the truck whatever a manager writes: drop an override
       // that an earlier miss on the count offered.
@@ -279,6 +299,8 @@ export default function GatePassConsolePage() {
   const countValid = parseCount(outwardCount) != null;
   const outwardBlocked = outwardErrCode === 'GATE_OUTWARD_BLOCKED';
   const outwardHold = outwardErrCode === 'GATE_OUTWARD_NOT_DISPATCHED';
+  // Three counts have not matched: only a manager releases this truck, so the guard cannot try again.
+  const outwardLocked = outwardErrCode === 'GATE_OUTWARD_COUNT_LOCKED';
   const outwardMismatch = outwardErrCode != null && OVERRIDABLE_CODES.has(outwardErrCode);
 
   return (
@@ -492,6 +514,19 @@ export default function GatePassConsolePage() {
                   Count the bags on the truck. Enter 0 for an empty truck.
                 </p>
               </div>
+              {canManager && (outwardModal.count_attempts?.length ?? 0) > 0 && (
+                <div className="rounded-md border border-amber-300 p-3 text-sm">
+                  <p className="font-medium">Earlier counts on this pass</p>
+                  <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                    {outwardModal.count_attempts!.map((a) => (
+                      <li key={a.created_at}>
+                        {relativeTime(a.created_at)} — {a.counted_by_name ?? 'Someone'} counted {formatCount(a.declared_quantity)}
+                        {a.expected_quantity != null ? `, dispatch said ${formatCount(a.expected_quantity)}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {canManager && (
                 <div className="space-y-1.5">
                   <Label htmlFor="outward-outbound-id">Outbound event ID (optional)</Label>
@@ -531,7 +566,16 @@ export default function GatePassConsolePage() {
                       {canManager ? 'Tick “Authorize on credit” to release on credit.' : 'Escalate to Manager.'}
                     </p>
                   )}
-                  {outwardMismatch && !canManager && <p className="font-semibold">Recount, or call a manager.</p>}
+                  {outwardMismatch && !canManager && (
+                    <p className="font-semibold">
+                      {outwardTriesLeft == null
+                        ? 'Recount, or call a manager.'
+                        : outwardTriesLeft > 0
+                          ? `Try ${GATE_COUNT_TRIES - outwardTriesLeft} of ${GATE_COUNT_TRIES}, recount.`
+                          : `Try ${GATE_COUNT_TRIES} of ${GATE_COUNT_TRIES} — call a manager.`}
+                    </p>
+                  )}
+                  {outwardLocked && <p className="font-semibold">Call a manager.</p>}
                   {outwardHold && <p className="font-semibold">Send the truck back to the desk.</p>}
                 </div>
               )}
@@ -565,7 +609,7 @@ export default function GatePassConsolePage() {
             <Button variant="outline" onClick={() => setOutwardModal(null)}>
               Cancel
             </Button>
-            <Button onClick={() => submitOutward()} disabled={outwardLoading || !countValid}>
+            <Button onClick={() => submitOutward()} disabled={outwardLoading || !countValid || outwardLocked}>
               {outwardLoading ? 'Clearing…' : 'Clear Outward'}
             </Button>
           </DialogFooter>
