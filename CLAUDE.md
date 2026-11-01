@@ -108,6 +108,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `19_employee_advances_phase21.md` | Employee advances (2026-07-26/30, phase/21) — account 1230, JE-22/23, recovery rides inside payroll JEs, one-active-advance concurrency lock, reversal must unwind recoveries |
 | `25_accounting_consolidation.md` | Final accounting audit + fix program (2026-09-24 → 10-09, v0.6.0/v0.6.1): 136 findings, owner decisions, the invariants the code follows (registry, chart flags, one posting/reversal/ledger path), manual-posting matrix, and §10 what merged and what was deliberately left |
 | `26_fast_dispatch.md` | Fast dispatch (v0.8.0): owner decisions D1–D4, what Phase 0, A, B, the guard's blind count, C1 and the release round changed, the owner switches (all off by default), upgrade notes (migrations 0038–0042, account 6105, `:stable` held), and what is still to build (C2, C3) |
+| `27_weight_optional.md` | Weight optional everywhere (C3 part 1, on `main` since 2026-10-31): the "We weigh produce" setting, "not weighed" stored as 0, the one dispatch rule, per-ton charges as the one thing that needs a weight |
+| `28_c3.md` | The rest of C3 (2026-11): gate safety (a booked truck can't leave, wrong counts saved and limited to three, the "Book only trucks inside" switch), papers (every PDF tab opens first, dispatch-note box at the gate) and the manager waiting list; owner decisions, flow diagrams, known limits |
 
 ## Domain Terminology
 
