@@ -123,7 +123,7 @@ test.describe('Muhammad Aslam — full potato season', () => {
 
       // Capture inward pass id via API
       const list = await request.get(
-        `${API_URL}/v1/gate-passes?vehicle=${plates.inbound}&direction=INWARD&page_size=5`,
+        `${API_URL}/v1/gate-passes?vehicle_number=${plates.inbound}&direction=INWARD&page_size=5`,
         { headers: opHeaders },
       );
       const listJson = await list.json();

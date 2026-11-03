@@ -147,7 +147,7 @@ test('the desk path: booked, weighed, dispatched and paid in a handful of clicks
   await page.getByRole('button', { name: /^clear outward$/i }).click();
   await expect(page.getByText(/Cleared .*TAT/i).first()).toBeVisible({ timeout: 20_000 });
 
-  const passes = (await (await request.get(`${API_URL}/v1/gate-passes?vehicle=${truck}&page_size=5`, { headers: sec })).json()).data as {
+  const passes = (await (await request.get(`${API_URL}/v1/gate-passes?vehicle_number=${truck}&page_size=5`, { headers: sec })).json()).data as {
     status: string;
     direction?: string;
   }[];
