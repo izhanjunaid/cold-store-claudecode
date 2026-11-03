@@ -63,6 +63,8 @@ export interface FacilitySettings {
   dispatch_solo_mode?: boolean;
   /** "We weigh produce", stored inverted (docs/27): true hides every weight box. Weight is optional either way. */
   hide_weights?: boolean;
+  /** "Book only trucks inside the gate" (docs/28 D2): below a manager, a booking needs a truck the gate has logged in. */
+  book_only_trucks_inside?: boolean;
   [key: string]: unknown;
 }
 

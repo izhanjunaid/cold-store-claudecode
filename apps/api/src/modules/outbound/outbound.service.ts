@@ -8,7 +8,7 @@ import { reconcileWithdrawal, type PlacementInput } from '../lot/placement.servi
 import { roleAtLeast } from '../../plugins/auth';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { lockRow } from '../../common/row-lock';
-import { addDays, businessDate } from '@coldchain/shared';
+import { addDays, businessDate, normalizePlate } from '@coldchain/shared';
 import { OPEN_OUTBOUND_STATUSES, isReadyToDispatch, openReservation } from './reservation';
 import { recordedKg } from '../../common/weight';
 
@@ -163,6 +163,19 @@ export class OutboundService {
         where: { id: params.facilityId },
       });
       const settings = resolveFacilitySettings(facility?.settings ?? null);
+      // C3 D2: with the owner's switch on, anyone below manager books a truck the gate has logged in. The
+      // release matches a truck to its load by plate, so a typed plate can hide a load from the gate. Passes
+      // are read unlocked (the lot lock above already serializes this booking); a manager may book ahead.
+      if (settings.book_only_trucks_inside && !isManager) {
+        const wanted = normalizePlate(params.vehicleNumber ?? '');
+        const inside = wanted
+          ? await tx.gatePass.findMany({
+              where: { facilityId: params.facilityId, status: { in: ['ARRIVED', 'WEIGHING'] } },
+              select: { vehicleNumber: true },
+            })
+          : [];
+        if (!inside.some((p) => normalizePlate(p.vehicleNumber) === wanted)) throw Errors.OUTBOUND_TRUCK_NOT_INSIDE();
+      }
       const maxBackdateDays = settings.backdating_max_days;
       if (maxBackdateDays !== null && !isManager) {
         if (params.outboundDate < addDays(today, -maxBackdateDays)) {

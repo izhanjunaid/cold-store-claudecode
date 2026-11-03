@@ -99,6 +99,10 @@ export const FacilitySettings = z.object({
   // Weight is optional either way. A facility that never saved it shows weights; provision.ts
   // stores true for new client boxes.
   hide_weights: z.boolean(),
+  // "Book only trucks inside the gate" (docs/28 D2): when on, anyone below manager books a withdrawal only
+  // for a truck the gate has logged in, so a typed plate can no longer hide a load from the gate. Off by
+  // default: the owner switches it on once the gate logs every truck on arrival. A manager may still book ahead.
+  book_only_trucks_inside: z.boolean(),
 });
 export type FacilitySettingsType = z.infer<typeof FacilitySettings>;
 
@@ -134,6 +138,7 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
   cash_tracking_from: null,
   dispatch_solo_mode: false,
   hide_weights: false,
+  book_only_trucks_inside: false,
 };
 
 export const UpdateFacilityRequest = z.object({

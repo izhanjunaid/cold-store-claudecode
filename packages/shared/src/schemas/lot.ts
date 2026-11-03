@@ -22,7 +22,8 @@ export const CreateLotRequest = z.object({
   weight_dispute_note: z.string().optional(),
   quality_grade_inbound: z.enum(['A', 'B', 'C']).optional(),
   inbound_date: z.string().date().optional(),
-  vehicle_number: z.string().max(20).optional(),
+  // As long as a gate pass's and a withdrawal's, so a plate picked from the trucks inside always fits.
+  vehicle_number: z.string().max(30).optional(),
   marka: z.string().max(100).optional(),
   notes: z.string().optional(),
   book_type: BookType.optional(),

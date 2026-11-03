@@ -32,3 +32,12 @@ describe('maskVehicle', () => {
     expect(maskVehicle('le@a#12')).toBe('LEA12');
   });
 });
+
+describe('maskVehicle length', () => {
+  it('keeps up to 30 characters — as long as a gate pass, a withdrawal and a lot take', () => {
+    const thirty = 'LHR-1234567890-ABCDEFGHIJ-5678';
+    expect(thirty).toHaveLength(30);
+    expect(maskVehicle(thirty)).toBe(thirty);
+    expect(maskVehicle(`${thirty}XYZ`)).toBe(thirty);
+  });
+});

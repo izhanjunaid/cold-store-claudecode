@@ -675,3 +675,104 @@ describe('the truck routes', () => {
     expect((await checkoutTruck(pass, valid, securityToken)).statusCode).toBe(403);
   });
 });
+
+// C3 D2: with the owner's "Book only trucks inside the gate" switch on, a typed plate can no longer hide
+// a load from the gate (the release matches a truck to its load by plate): anyone below manager books a
+// truck the gate has logged in. A manager may still book ahead.
+describe('booking only trucks inside the gate', () => {
+  const setInside = async (on: boolean) => {
+    const res = await call('PATCH', '/v1/facilities/me', ownerToken, { settings: { book_only_trucks_inside: on } });
+    expect(res.statusCode, res.body).toBe(200);
+  };
+  const book = (lotId: string, plate: string | undefined, token = operatorToken) =>
+    call('POST', '/v1/outbound-events', token, {
+      lot_id: lotId,
+      withdrawal_type: 'FULL',
+      quantity_withdrawn_bags: 10,
+      outbound_date: businessDate(),
+      ...(plate ? { vehicle_number: plate } : {}),
+    });
+  const booked = () => prisma.outboundEvent.count({ where: { facilityId: TEST_FACILITY_ID } });
+
+  afterEach(() => setInside(false));
+
+  it('is off until the owner switches it on', async () => {
+    const f = data<{ settings: { book_only_trucks_inside: boolean } }>(await call('GET', '/v1/facilities/me', ownerToken));
+    expect(f.settings.book_only_trucks_inside).toBe(false);
+  });
+
+  it("a munshi can't book a plate that isn't inside — and nothing is booked", async () => {
+    await setInside(true);
+    const res = await book(await lot(partyA, 10), 'LHR-8901');
+    expect([res.statusCode, code(res)]).toEqual([422, 'OUTBOUND_TRUCK_NOT_INSIDE']);
+    expect(JSON.parse(res.body).error.field).toBe('vehicle_number');
+    expect(await booked()).toBe(0);
+  });
+
+  it('a munshi must name a truck at all', async () => {
+    await setInside(true);
+    const res = await book(await lot(partyA, 10), undefined);
+    expect([res.statusCode, code(res)]).toEqual([422, 'OUTBOUND_TRUCK_NOT_INSIDE']);
+    expect(await booked()).toBe(0);
+  });
+
+  it('a munshi books a truck that is inside, however the plate is typed', async () => {
+    await setInside(true);
+    await arrive('LES-1234');
+    const res = await book(await lot(partyA, 10), 'les 1234');
+    expect(res.statusCode, res.body).toBe(201);
+  });
+
+  it("'Add a lot' on a truck's card books with the switch on: it carries the pass's own plate", async () => {
+    await setInside(true);
+    const pass = await arrive('LHR-8902');
+    const stored = (await prisma.gatePass.findUniqueOrThrow({ where: { id: pass } })).vehicleNumber;
+    const res = await book(await lot(partyA, 10), stored);
+    expect(res.statusCode, res.body).toBe(201);
+  });
+
+  it('a truck that has left is no longer inside', async () => {
+    await setInside(true);
+    const pass = await arrive('LHR-8903');
+    const out = await call('POST', `/v1/gate-passes/${pass}/outward`, securityToken, { declared_quantity: 0 });
+    expect(out.statusCode, out.body).toBe(200);
+    const res = await book(await lot(partyA, 10), 'LHR-8903');
+    expect([res.statusCode, code(res)]).toEqual([422, 'OUTBOUND_TRUCK_NOT_INSIDE']);
+  });
+
+  it('a manager books any plate, inside or not', async () => {
+    await setInside(true);
+    const res = await book(await lot(partyA, 10), 'LHR-8904', managerToken);
+    expect(res.statusCode, res.body).toBe(201);
+  });
+
+  it('with the switch off, a plate that is not inside still books', async () => {
+    const res = await book(await lot(partyA, 10), 'LHR-8905');
+    expect(res.statusCode, res.body).toBe(201);
+  });
+});
+
+// C3 D5: a pass and a withdrawal already took 30 characters; the lot's column held 20.
+describe('plates take 30 characters', () => {
+  const thirty = 'LHR-1234567890-ABCDEFGHIJ-5678';
+
+  it('a lot keeps a 30-character plate as typed', async () => {
+    expect(thirty).toHaveLength(30);
+    const id = await lot(partyA, 5, operatorToken, { vehicle_number: thirty });
+    expect((await prisma.lot.findUniqueOrThrow({ where: { id } })).vehicleNumber).toBe(thirty);
+  });
+
+  it('a 31-character plate is refused', async () => {
+    const res = await call('POST', '/v1/lots', operatorToken, {
+      owner_party_id: partyA,
+      commodity_id: POTATO_ID,
+      rate_plan_id: RATE_PLAN_SEASONAL,
+      chamber_id: CHAMBER_A,
+      quantity_bags: 5,
+      accepted_weight_kg: 100,
+      inbound_date: '2026-04-10',
+      vehicle_number: `${thirty}X`,
+    });
+    expect([res.statusCode, code(res)]).toEqual([400, 'VALIDATION_ERROR']);
+  });
+});

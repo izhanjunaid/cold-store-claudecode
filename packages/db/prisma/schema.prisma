@@ -768,7 +768,7 @@ model Lot {
   inboundDate         DateTime  @map("inbound_date") @db.Date
   entryDate           DateTime  @map("entry_date") @db.Date
   parentLotId         String?   @map("parent_lot_id") @db.Uuid
-  vehicleNumber       String?   @map("vehicle_number") @db.VarChar(20)
+  vehicleNumber       String?   @map("vehicle_number") @db.VarChar(30)
   marka               String?   @map("marka") @db.VarChar(100)
   status              LotStatus @default(ACTIVE)
   closedAt            DateTime? @map("closed_at") @db.Date

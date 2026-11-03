@@ -404,6 +404,14 @@ export const Errors = {
       `Date is more than ${maxDays} day(s) in the past — requires MANAGER or higher`,
       422,
     ),
+  // C3 D2 — the owner's "Book only trucks inside the gate" switch is on and the plate is no truck at the gate.
+  OUTBOUND_TRUCK_NOT_INSIDE: () =>
+    new AppError(
+      'OUTBOUND_TRUCK_NOT_INSIDE',
+      "No truck with this plate is inside the gate. Pick a truck that's inside, or ask a manager.",
+      422,
+      'vehicle_number',
+    ),
   // Phase 19 — late-payment surcharge
   SURCHARGE_RULE_DISABLED: () =>
     new AppError('SURCHARGE_RULE_DISABLED', 'Late payment surcharge rule is disabled in facility settings', 422),

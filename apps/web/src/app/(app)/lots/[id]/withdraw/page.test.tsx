@@ -16,10 +16,11 @@ vi.mock('@/lib/api-client', () => ({
 }));
 
 let role = 'OWNER';
+let permissions: string[] = [];
 vi.mock('@/stores/auth.store', () => ({
   // Honour the selector so `useAuthStore((s) => s.user)` works.
   useAuthStore: (selector?: (s: unknown) => unknown) => {
-    const state = { user: { role, permissions: [] } };
+    const state = { user: { role, permissions } };
     return selector ? selector(state) : state;
   },
 }));
@@ -57,6 +58,9 @@ const OWNER_PARTY = { id: OWNER_PARTY_ID, name: 'Farmer One', party_type: 'FARME
 const RECEIVING_PARTY = { id: 'party-2', name: 'Trader Two', party_type: 'TRADER', is_active: true };
 const FACILITY = { id: 'fac-1', name: 'Test Facility', settings: { backdating_max_days: 3 } };
 let billingParty = { id: BILLING_PARTY_ID, name: 'Farmer One', credit_limit_pkr: null as number | null, over_credit_limit: undefined as boolean | undefined };
+// The gate's trucks inside (GET /v1/dispatch/trucks) and the owner's "Book only trucks inside the gate" switch.
+let trucksInside: { vehicle_number: string }[] = [];
+let bookOnlyInside = false;
 
 function routeApiClient() {
   apiClient.mockImplementation((path: string, opts?: { method?: string; body?: unknown }) => {
@@ -64,7 +68,10 @@ function routeApiClient() {
     if (path === `/v1/parties/${BILLING_PARTY_ID}`) return Promise.resolve(billingParty);
     if (path.startsWith('/v1/parties?')) return Promise.resolve([OWNER_PARTY, RECEIVING_PARTY]);
     if (path === `/v1/lots/${LOT_ID}/placements`) return Promise.resolve(null);
-    if (path === '/v1/facilities/me') return Promise.resolve(FACILITY);
+    if (path === '/v1/dispatch/trucks') return Promise.resolve(trucksInside);
+    if (path === '/v1/facilities/me') {
+      return Promise.resolve({ ...FACILITY, settings: { ...FACILITY.settings, book_only_trucks_inside: bookOnlyInside } });
+    }
     if (path === '/v1/outbound-events' && opts?.method === 'POST') {
       return Promise.resolve({ id: 'outbound-1' });
     }
@@ -97,6 +104,9 @@ beforeEach(() => {
   push.mockReset();
   apiClient.mockReset();
   role = 'OWNER';
+  permissions = [];
+  trucksInside = [];
+  bookOnlyInside = false;
   today = null;
   billingParty = { id: BILLING_PARTY_ID, name: 'Farmer One', credit_limit_pkr: null, over_credit_limit: undefined };
   routeApiClient();
@@ -295,5 +305,104 @@ describe('WithdrawForm opened from a truck (the dispatch desk’s "Add a lot")',
     const plate = await screen.findByLabelText(/Vehicle number/);
     expect(plate).toHaveValue('LHR-2222');
     expect(plate).toHaveAttribute('readonly');
+  });
+});
+
+// C3 D2: the plate is checked against the trucks the gate has logged in. With the owner's "Book only
+// trucks inside the gate" switch on, anyone below manager must pick one; with it off, a plate that matches
+// none only draws a warning. The list is the dispatch desk's own (GET /v1/dispatch/trucks).
+describe('WithdrawForm — the trucks inside the gate', () => {
+  const INSIDE = [{ vehicle_number: 'LHR-1111' }, { vehicle_number: 'LHR-2222' }];
+  const NOT_INSIDE_WARNING = 'No truck with this plate is inside. Check the plate.';
+  const NOT_INSIDE_BLOCK = /Pick a truck that's inside, or ask a manager/;
+  const submit = () => screen.getByRole('button', { name: /create withdrawal/i });
+  const trucksFetched = () => apiClient.mock.calls.filter(([p]) => p === '/v1/dispatch/trucks');
+
+  beforeEach(() => {
+    apiClient.mockReset();
+    role = 'OPERATOR'; // the munshi
+    permissions = ['outbound.record'];
+    trucksInside = INSIDE;
+    routeApiClient();
+  });
+
+  it('lists the trucks inside, and tapping one fills the plate', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'LHR-2222' }));
+    expect(screen.getByLabelText(/^Vehicle number/)).toHaveValue('LHR-2222');
+    expect(screen.queryByText(NOT_INSIDE_WARNING)).not.toBeInTheDocument();
+  });
+
+  it('warns, without blocking, when no truck with the plate is inside', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: 'LHR-1111' });
+    fillVehicle('LHR-9999');
+    expect(await screen.findByText(NOT_INSIDE_WARNING)).toBeInTheDocument();
+    expect(submit()).toBeEnabled();
+  });
+
+  it('matches a truck however the plate is typed', async () => {
+    renderPage();
+    await screen.findByRole('button', { name: 'LHR-1111' });
+    fillVehicle('lhr 1111');
+    expect(screen.queryByText(NOT_INSIDE_WARNING)).not.toBeInTheDocument();
+  });
+
+  it('with the switch on, a munshi cannot book a plate that is not inside — until they pick a truck', async () => {
+    bookOnlyInside = true;
+    renderPage();
+    await screen.findByRole('button', { name: 'LHR-1111' });
+    fillVehicle('LHR-9999');
+    expect(await screen.findByText(NOT_INSIDE_BLOCK)).toBeInTheDocument();
+    expect(submit()).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'LHR-1111' }));
+    await waitFor(() => expect(submit()).toBeEnabled());
+    expect(screen.queryByText(NOT_INSIDE_BLOCK)).not.toBeInTheDocument();
+  });
+
+  it('with the switch on, a manager can still type any plate and book it', async () => {
+    bookOnlyInside = true;
+    role = 'MANAGER';
+    renderPage();
+    await screen.findByRole('button', { name: 'LHR-1111' });
+    fillVehicle('LHR-9999');
+    expect(await screen.findByText(NOT_INSIDE_WARNING)).toBeInTheDocument();
+    expect(screen.queryByText(NOT_INSIDE_BLOCK)).not.toBeInTheDocument();
+    expect(submit()).toBeEnabled();
+
+    fireEvent.click(submit());
+    await waitFor(() => expect(posted()).toHaveLength(1));
+    expect(posted()[0]?.[1].body).toMatchObject({ vehicle_number: 'LHR-9999' });
+  });
+
+  it('without the permission to see the trucks, there is no list, no warning, and nothing is asked', async () => {
+    permissions = [];
+    renderPage();
+    await screen.findByText('LOT-260101-0001');
+    fillVehicle('LHR-9999');
+    expect(screen.queryByRole('button', { name: 'LHR-1111' })).not.toBeInTheDocument();
+    expect(screen.queryByText(NOT_INSIDE_WARNING)).not.toBeInTheDocument();
+    expect(trucksFetched()).toHaveLength(0);
+  });
+
+  it("the desk's own list is used as handed in: the form does not ask for the trucks again", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WithdrawForm lotId={LOT_ID} variant="sheet" plateSuggestions={['LHR-3333']} onCreated={vi.fn()} onCancel={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('button', { name: 'LHR-3333' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'LHR-1111' })).not.toBeInTheDocument();
+    expect(trucksFetched()).toHaveLength(0);
+  });
+
+  it('takes a plate of up to 30 characters', async () => {
+    renderPage();
+    await screen.findByText('LOT-260101-0001');
+    const plate = 'LHR-1234567890-ABCDEFGHIJ-5678';
+    fillVehicle(plate);
+    expect(screen.getByLabelText(/^Vehicle number/)).toHaveValue(plate);
   });
 });
