@@ -14,6 +14,8 @@ import { SelectField } from '@/components/form/select-field';
 import { NumberField } from '@/components/form/number-field';
 import { TextField } from '@/components/form/text-field';
 import { MaskedField } from '@/components/form/masked-field';
+import { MASKS } from '@/components/form/masks';
+import { TrucksInsideChips, useTrucksInside } from '@/components/gate/trucks-inside-chips';
 import { DateField } from '@/components/form/date-field';
 import { CheckboxField } from '@/components/form/checkbox-field';
 import { TextareaField } from '@/components/form/textarea-field';
@@ -105,6 +107,8 @@ export default function LotCreatePage() {
   const { data: ratePlans = [] } = useRatePlans();
   const { data: facility } = useFacility();
   const weightsShown = useWeightsShown();
+  // The trucks the gate has logged in, one tap from the plate field (docs/28 D5).
+  const trucksInside = useTrucksInside();
 
   const form = useForm<LotFormValues>({
     resolver: zodResolver(lotSchema),
@@ -112,6 +116,7 @@ export default function LotCreatePage() {
     mode: 'onBlur',
   });
   const { control, handleSubmit, setValue, setError } = form;
+  const vehicleNumber = useWatch({ control, name: 'vehicle_number' });
 
   // Optional rack placement — assign now or later from the lot page.
   const [allocationRows, setAllocationRows] = useState<AllocationRow[]>([]);
@@ -436,7 +441,14 @@ export default function LotCreatePage() {
                 label="Vehicle number"
                 mask="vehicle"
                 className="xl:col-span-2"
-              />
+              >
+                {/* The trucks the gate has logged in: one tap gives a plate the gate will match. Never strict here. */}
+                <TrucksInsideChips
+                  plates={trucksInside.plates}
+                  value={vehicleNumber ?? ''}
+                  onPick={(plate) => setValue('vehicle_number', MASKS.vehicle(plate), { shouldDirty: true })}
+                />
+              </MaskedField>
               <DateField control={control} name="inbound_date" label="Inbound date" className="xl:col-span-2" />
               <TextareaField control={control} name="notes" label="Notes" rows={1} className="xl:col-span-2" />
             </EntryGroup>

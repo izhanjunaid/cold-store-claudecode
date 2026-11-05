@@ -69,7 +69,7 @@ export async function gatePassRoutes(app: FastifyInstance) {
     schema: { querystring: GatePassListQuery },
     handler: async (request, reply) => {
       const q = request.query as z.infer<typeof GatePassListQuery>;
-      const data = await service.list(request.user!.facilityId, q);
+      const data = await service.list(request.user!.facilityId, q, request.user!.role);
       return sendSuccess(reply, data.data, data.meta);
     },
   });

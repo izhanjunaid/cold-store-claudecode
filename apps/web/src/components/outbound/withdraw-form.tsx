@@ -16,6 +16,7 @@ import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 import { MASKS, MASK_PLACEHOLDER } from '@/components/form/masks';
 import { useLotPlacements } from '@/components/lot-location';
 import { useFacility } from '@/hooks/use-reference-data';
+import { TrucksInsideChips, useTrucksInside } from '@/components/gate/trucks-inside-chips';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageSkeleton } from '@/components/page-skeleton';
 
@@ -41,7 +42,10 @@ export interface WithdrawFormProps {
   variant?: 'page' | 'sheet';
   onCreated: (outboundId: string) => void;
   onCancel: () => void;
-  /** Plates of trucks inside the store; one tap fills the vehicle field with a plate the gate will match exactly. */
+  /**
+   * Plates of trucks inside the store; one tap fills the vehicle field with a plate the gate will match exactly.
+   * The desk hands in its own list; without one the form reads the trucks inside itself.
+   */
   plateSuggestions?: string[];
   /** Booking onto a truck already chosen (the desk's "Add a lot"): its plate, filled in and fixed. */
   fixedPlate?: string;
@@ -110,6 +114,17 @@ export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, pla
   const isManager = hasMinRole(user?.role, 'MANAGER');
   const isThirdParty = !!lot && !!form.receiving_party_id && form.receiving_party_id !== lot.owner_party_id;
   const blockedThirdParty = isThirdParty && !isManager;
+
+  // The trucks the gate has logged in (docs/28 D2): the plate is checked against them. With the owner's
+  // "Book only trucks inside the gate" switch on, anyone below manager must pick one (the server refuses
+  // anything else); with it off, a plate that matches none only draws a warning. A truck already chosen
+  // (`fixedPlate`) is inside by definition.
+  const inside = useTrucksInside(plateSuggestions === undefined);
+  const plates = plateSuggestions ?? inside.plates;
+  const platesKnown = plateSuggestions !== undefined || inside.loaded;
+  const typedPlate = normalizePlate(form.vehicle_number);
+  const notInside = !fixedPlate && platesKnown && typedPlate.length >= 2 && !plates.some((p) => normalizePlate(p) === typedPlate);
+  const strictPlate = facility?.settings?.book_only_trucks_inside === true && !isManager;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -295,29 +310,26 @@ export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, pla
               name="vehicle_number"
               type="text"
               required
-              maxLength={20}
+              maxLength={30}
               autoComplete="off"
               value={form.vehicle_number}
               readOnly={!!fixedPlate}
               onChange={(e) => setForm({ ...form, vehicle_number: MASKS.vehicle(e.target.value) })}
               placeholder={MASK_PLACEHOLDER.vehicle}
             />
-            {!fixedPlate && plateSuggestions && plateSuggestions.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5" aria-label="Trucks inside">
-                <span className="text-xs text-muted-foreground">Inside:</span>
-                {plateSuggestions.map((plate) => (
-                  <Button
-                    key={plate}
-                    type="button"
-                    size="sm"
-                    variant={form.vehicle_number === plate ? 'default' : 'outline'}
-                    className="h-6 px-2 font-mono text-xs"
-                    onClick={() => setForm({ ...form, vehicle_number: MASKS.vehicle(plate) })}
-                  >
-                    {plate}
-                  </Button>
-                ))}
-              </div>
+            {!fixedPlate && (
+              <TrucksInsideChips
+                plates={plates}
+                value={form.vehicle_number}
+                onPick={(plate) => setForm({ ...form, vehicle_number: MASKS.vehicle(plate) })}
+              />
+            )}
+            {notInside && (
+              <p role={strictPlate ? 'alert' : undefined} className={strictPlate ? 'text-xs text-destructive' : 'text-xs text-amber-600'}>
+                {strictPlate
+                  ? "No truck with this plate is inside the gate. Pick a truck that's inside, or ask a manager."
+                  : 'No truck with this plate is inside. Check the plate.'}
+              </p>
             )}
             <p className="text-xs text-muted-foreground">The gate checks the truck by this plate.</p>
           </div>
@@ -366,7 +378,7 @@ export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, pla
 
   const actions = (
     <FormActions>
-      <Button type="submit" disabled={submitting || blockedThirdParty}>
+      <Button type="submit" disabled={submitting || blockedThirdParty || (strictPlate && notInside)}>
         {submitting ? 'Creating…' : 'Create Withdrawal'}
       </Button>
       <Button type="button" variant="outline" onClick={onCancel}>

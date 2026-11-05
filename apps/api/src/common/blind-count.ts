@@ -38,6 +38,12 @@ export const BLIND_KEYS: ReadonlySet<string> = new Set([
   // Money owed on a truck at the gate
   'outstanding_pkr',
   'credit_authorized_amount_pkr',
+  // What a refused count should have been (the pass's saved wrong counts, docs/28 D4): the guard
+  // keeps `declared_quantity`, the number they typed, and never the number to copy.
+  'expected_quantity',
+  // The whole list goes too: a manager's or another guard's wrong count sits near the truth, and the
+  // guard's own tries are told as `tries_left`, never as numbers.
+  'count_attempts',
 ]);
 
 /** "Room A → R-1 ×20, R-2 ×30" → "Room A → R-1, R-2": the rack names stay, the counts go. */

@@ -58,6 +58,8 @@ export default function SettingsPage() {
   const [dispatchSoloMode, setDispatchSoloMode] = useState(false);
   // "We weigh produce": stored inverted, as hide_weights (docs/27).
   const [weighsProduce, setWeighsProduce] = useState(true);
+  // "Book only trucks inside the gate" (docs/28 D2).
+  const [bookOnlyTrucksInside, setBookOnlyTrucksInside] = useState(false);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -86,6 +88,7 @@ export default function SettingsPage() {
         setCashTrackingFrom(f.settings.cash_tracking_from ?? null);
         setDispatchSoloMode(f.settings.dispatch_solo_mode ?? false);
         setWeighsProduce(f.settings.hide_weights !== true);
+        setBookOnlyTrucksInside(f.settings.book_only_trucks_inside ?? false);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Load failed'))
       .finally(() => setLoading(false));
@@ -122,6 +125,7 @@ export default function SettingsPage() {
             cash_tracking_from: cashTrackingFrom,
             dispatch_solo_mode: dispatchSoloMode,
             hide_weights: !weighsProduce,
+            book_only_trucks_inside: bookOnlyTrucksInside,
           },
         },
       });
@@ -315,6 +319,15 @@ export default function SettingsPage() {
                 Turn on cash tracking above as well: without it nobody counts the cash the munshi takes.
               </p>
             )}
+            <p className="pt-2 text-xs text-muted-foreground">
+              The gate checks a truck leaving against what is booked on its plate, so a mistyped plate at the desk can
+              hide a load from the gate. Turn this on once your gate logs every truck when it arrives: the desk then
+              books only trucks that are inside, picked from a list. A manager can still type a plate to book ahead.
+            </p>
+            <label className="flex items-center gap-2.5 text-sm">
+              <Checkbox checked={bookOnlyTrucksInside} onCheckedChange={(c) => setBookOnlyTrucksInside(c === true)} />
+              Book only trucks inside the gate
+            </label>
           </CardContent>
         </Card>
 

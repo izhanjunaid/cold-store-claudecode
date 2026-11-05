@@ -179,6 +179,20 @@ describe('GatePassConsolePage — clear outward', () => {
     expect(screen.queryByText(/137/)).not.toBeInTheDocument();
   });
 
+  it('a locked truck is not listed as ready to leave: the guard is told to call a manager', async () => {
+    const LOCKED = {
+      ...PASS,
+      vehicle_number: 'LHR-4444',
+      release: { state: 'COUNT_LOCKED' as const, dispatch_notes: ['DN-260101-0011'], outstanding_pkr: null, cheque_pending: false, marka: null, owner_party_name: null },
+    };
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve({ data: path.includes('active=true') ? [LOCKED] : [], meta: { page: 1, per_page: 50, total: 1 } }),
+    );
+    render(<GatePassConsolePage />);
+    expect(await screen.findByText(/Counts did not match — call a manager/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^release$/i })).not.toBeInTheDocument();
+  });
+
   it('a plate override that then hits a payment block keeps its reason when the manager adds credit', async () => {
     role = 'MANAGER';
     apiClient
@@ -242,6 +256,115 @@ describe('GatePassConsolePage — clear outward', () => {
     expect(within(dialog).getByText(/does not match the dispatch/i)).toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/override reason/i)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: /release anyway/i })).not.toBeInTheDocument();
+  });
+
+  // C3 D4: each wrong count is saved and three lock the truck. What the guard hears is how many tries are
+  // left, from the error's details (the API's `error.details`), never what the count should have been.
+  const withTries = (message: string, code: string, status: number, triesLeft: number) =>
+    new ApiError(message, { code, status, details: { code, message, details: { tries_left: triesLeft } } });
+
+  it('a wrong count tells the guard which try it was', async () => {
+    apiClient.mockRejectedValueOnce(
+      withTries('The bag count does not match the dispatch', 'GATE_OUTWARD_COUNT_MISMATCH', 422, 2),
+    );
+    const dialog = await openClearOutward();
+    enterCount(dialog, '130');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+
+    expect(await within(dialog).findByText('Try 1 of 3, recount.')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Recount, or call a manager.')).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/override reason/i)).not.toBeInTheDocument();
+  });
+
+  it('the last wrong count tells the guard to call a manager', async () => {
+    apiClient.mockRejectedValueOnce(
+      withTries('The bag count does not match the dispatch', 'GATE_OUTWARD_COUNT_MISMATCH', 422, 0),
+    );
+    const dialog = await openClearOutward();
+    enterCount(dialog, '130');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+
+    expect(await within(dialog).findByText('Try 3 of 3 — call a manager.')).toBeInTheDocument();
+  });
+
+  it('a locked truck tells the guard to call a manager, and the guard cannot try again', async () => {
+    apiClient.mockRejectedValueOnce(
+      new ApiError('The bag count did not match 3 times — a manager must release this truck', {
+        code: 'GATE_OUTWARD_COUNT_LOCKED',
+        status: 403,
+      }),
+    );
+    const dialog = await openClearOutward();
+    enterCount(dialog, '50');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+
+    expect(await within(dialog).findByText(/did not match 3 times/i)).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/call a manager/i)).toHaveLength(1);
+    expect(within(dialog).getByRole('button', { name: /^clear outward$/i })).toBeDisabled();
+    expect(within(dialog).queryByRole('button', { name: /release anyway/i })).not.toBeInTheDocument();
+  });
+
+  it('a manager sees the earlier counts on the pass; the guard sees none of them', async () => {
+    const attempts = [
+      { declared_quantity: 41, expected_quantity: 50, counted_by_name: 'Bilal', created_at: new Date().toISOString() },
+      { declared_quantity: 44, expected_quantity: 50, counted_by_name: 'Imran', created_at: new Date().toISOString() },
+    ];
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve({
+        data: path.includes('active=true') ? [{ ...PASS, count_attempts: attempts }] : [],
+        meta: { page: 1, per_page: 50, total: 1 },
+      }),
+    );
+    role = 'MANAGER';
+    const managerDialog = await openClearOutward();
+    expect(within(managerDialog).getByText(/earlier counts/i)).toBeInTheDocument();
+    expect(within(managerDialog).getByText(/Bilal counted 41, dispatch said 50/)).toBeInTheDocument();
+    expect(within(managerDialog).getByText(/Imran counted 44, dispatch said 50/)).toBeInTheDocument();
+  });
+
+  it('the guard is not shown the earlier counts, nor what was expected', async () => {
+    const attempts = [{ declared_quantity: 41, expected_quantity: null, counted_by_name: 'Bilal', created_at: new Date().toISOString() }];
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve({
+        data: path.includes('active=true') ? [{ ...PASS, count_attempts: attempts }] : [],
+        meta: { page: 1, per_page: 50, total: 1 },
+      }),
+    );
+    const dialog = await openClearOutward();
+    expect(within(dialog).queryByText(/earlier counts/i)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/Bilal/)).not.toBeInTheDocument();
+  });
+
+  // C3 D3: a truck with a booking not yet checked out leaves by the desk, never by an override.
+  const NOT_DISPATCHED = 'Withdrawal DN-260101-0009 has not been dispatched — it cannot leave yet';
+
+  it('sends a truck with a booked line back to the desk, with no recount and no override', async () => {
+    apiClient.mockRejectedValueOnce(new ApiError(NOT_DISPATCHED, { code: 'GATE_OUTWARD_NOT_DISPATCHED', status: 422 }));
+    const dialog = await openClearOutward();
+    enterCount(dialog, '0');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+
+    expect(await within(dialog).findByText(/has not been dispatched/i)).toBeInTheDocument();
+    expect(within(dialog).getByText('Send the truck back to the desk.')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/recount/i)).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /release anyway/i })).not.toBeInTheDocument();
+  });
+
+  it('a manager who was offered Release anyway for the count loses it once a booked line holds the truck', async () => {
+    role = 'MANAGER';
+    apiClient
+      .mockRejectedValueOnce(new ApiError('The bag count does not match the dispatch', { code: 'GATE_OUTWARD_COUNT_MISMATCH', status: 422 }))
+      .mockRejectedValueOnce(new ApiError(NOT_DISPATCHED, { code: 'GATE_OUTWARD_NOT_DISPATCHED', status: 422 }));
+    const dialog = await openClearOutward();
+    enterCount(dialog, '130');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+    await within(dialog).findByRole('button', { name: /release anyway/i });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+    expect(await within(dialog).findByText(/has not been dispatched/i)).toBeInTheDocument();
+    expect(within(dialog).getByText('Send the truck back to the desk.')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /release anyway/i })).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/override reason/i)).not.toBeInTheDocument();
   });
 
   it('shows the server message when payment is pending, with one next step for the guard', async () => {

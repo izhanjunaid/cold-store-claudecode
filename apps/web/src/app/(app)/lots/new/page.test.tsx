@@ -15,8 +15,13 @@ vi.mock('@/lib/api-client', () => ({
   ApiError: class ApiError extends Error {},
 }));
 
+let permissions: string[] = [];
 vi.mock('@/stores/auth.store', () => ({
-  useAuthStore: () => ({ user: { role: 'OPERATOR' } }),
+  // Honour the selector so `useAuthStore((s) => s.user)` works.
+  useAuthStore: (selector?: (s: unknown) => unknown) => {
+    const state = { user: { role: 'OPERATOR', permissions } };
+    return selector ? selector(state) : state;
+  },
 }));
 
 vi.mock('sonner', () => ({
@@ -42,9 +47,12 @@ const FACILITY = {
   settings: { weight_dispute_threshold_kg: 5, chamber_capacity_warning_pct: 90, backdating_max_days: 3 } as Record<string, unknown>,
 };
 let facility = FACILITY;
+// The gate's trucks inside (GET /v1/dispatch/trucks), read only by users who hold `outbound.record`.
+let trucksInside: { vehicle_number: string }[] = [];
 
 function routeApiClient() {
   apiClient.mockImplementation((path: string, opts?: { method?: string; body?: unknown }) => {
+    if (path === '/v1/dispatch/trucks') return Promise.resolve(trucksInside);
     if (path.startsWith('/v1/parties')) return Promise.resolve([PARTY]);
     if (path.startsWith('/v1/commodities')) return Promise.resolve([COMMODITY]);
     if (path.startsWith('/v1/varieties')) return Promise.resolve([]);
@@ -208,4 +216,56 @@ describe('LotCreatePage — weight optional', () => {
     expect(postedLot()).toMatchObject({ declared_weight_kg: 4120 });
     expect(postedLot()).not.toHaveProperty('accepted_weight_kg');
   }, 10_000);
+});
+
+// C3 D5: the trucks the gate has logged in are one tap away, so the lot's plate is one the gate will match.
+// The inbound form is never strict: a truck may be weighed before the gate logs it.
+describe('LotCreatePage — trucks inside the gate', () => {
+  beforeEach(() => {
+    push.mockReset();
+    apiClient.mockReset();
+    facility = FACILITY;
+    permissions = ['outbound.record'];
+    trucksInside = [{ vehicle_number: 'LHR-5555' }, { vehicle_number: 'LHR-6666' }];
+    routeApiClient();
+  });
+
+  const create = async () => {
+    fireEvent.click(screen.getByRole('button', { name: /^create inbound lot$/i }));
+    await waitFor(() => expect(apiClient).toHaveBeenCalledWith('/v1/lots', expect.objectContaining({ method: 'POST' })));
+  };
+
+  it('tapping a truck inside fills the plate, and the lot is saved with it', async () => {
+    renderPage();
+    await fillRequiredFields();
+    fireEvent.click(await screen.findByRole('button', { name: 'LHR-6666' }));
+    expect(screen.getByLabelText(/^Vehicle number/)).toHaveValue('LHR-6666');
+    await create();
+    expect(postedLot()).toMatchObject({ vehicle_number: 'LHR-6666' });
+  }, 10_000);
+
+  it('is never strict: a plate that is not inside is saved as typed, with no warning', async () => {
+    renderPage();
+    await fillRequiredFields();
+    await screen.findByRole('button', { name: 'LHR-5555' });
+    fireEvent.change(screen.getByLabelText(/^Vehicle number/), { target: { value: 'LHR-9999' } });
+    expect(screen.queryByText(/No truck with this plate/)).not.toBeInTheDocument();
+    await create();
+    expect(postedLot()).toMatchObject({ vehicle_number: 'LHR-9999' });
+  }, 10_000);
+
+  it('takes a plate of up to 30 characters', async () => {
+    renderPage();
+    const plate = 'LHR-1234567890-ABCDEFGHIJ-5678';
+    fireEvent.change(await screen.findByLabelText(/^Vehicle number/), { target: { value: plate } });
+    expect(screen.getByLabelText(/^Vehicle number/)).toHaveValue(plate);
+  });
+
+  it('without the permission to see the trucks there are no chips, and nothing is asked', async () => {
+    permissions = [];
+    renderPage();
+    await screen.findByLabelText(/^Vehicle number/);
+    expect(screen.queryByRole('button', { name: 'LHR-5555' })).not.toBeInTheDocument();
+    expect(apiClient.mock.calls.filter(([p]) => p === '/v1/dispatch/trucks')).toHaveLength(0);
+  });
 });

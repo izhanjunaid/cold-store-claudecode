@@ -389,6 +389,7 @@ model Facility {
   gatePasses       GatePass[]
   creditApprovals  PartyCreditApproval[]
   cashHandovers    CashHandover[]
+  gateCountAttempts GateCountAttempt[]
 
   racks             Rack[]
   lotRackPlacements LotRackPlacement[]
@@ -444,6 +445,7 @@ model User {
   employeeAdvancesCreated  EmployeeAdvance[]         @relation("EmployeeAdvanceCreatedBy")
   advanceRecoveriesCreated EmployeeAdvanceRecovery[] @relation("EmployeeAdvanceRecoveryCreatedBy")
   gatePassesCreated        GatePass[]                @relation("GatePassCreatedBy")
+  gateCountAttempts        GateCountAttempt[]        @relation("GateCountAttemptBy")
   lotMovements             LotMovement[]             @relation("LotMovementMovedBy")
 
   @@unique([facilityId, email])
@@ -766,7 +768,7 @@ model Lot {
   inboundDate         DateTime  @map("inbound_date") @db.Date
   entryDate           DateTime  @map("entry_date") @db.Date
   parentLotId         String?   @map("parent_lot_id") @db.Uuid
-  vehicleNumber       String?   @map("vehicle_number") @db.VarChar(20)
+  vehicleNumber       String?   @map("vehicle_number") @db.VarChar(30)
   marka               String?   @map("marka") @db.VarChar(100)
   status              LotStatus @default(ACTIVE)
   closedAt            DateTime? @map("closed_at") @db.Date
@@ -1545,6 +1547,7 @@ model GatePass {
   clearedOutbounds OutboundEvent[] @relation("OutboundGatePass")
   party            Party?          @relation("GatePassDepositor", fields: [partyId], references: [id])
   createdByUser    User            @relation("GatePassCreatedBy", fields: [createdBy], references: [id])
+  countAttempts    GateCountAttempt[]
 
   @@unique([facilityId, passNumber])
   @@index([facilityId, status])
@@ -1553,6 +1556,29 @@ model GatePass {
   @@index([relatedOutboundId])
   @@index([partyId])
   @@map("gate_passes")
+}
+
+/// One wrong bag count at the gate (0043, docs/28 D4): what the guard typed against what was dispatched.
+/// Tries are counted per plate since its last release, so a truck logged in again does not start over.
+/// Written in its own commit after the refused release rolled back. `plate` is the normalized plate
+/// (letters and digits). Deleting a pass deletes its counts.
+model GateCountAttempt {
+  id               String   @id @default(uuid()) @db.Uuid
+  facilityId       String   @map("facility_id") @db.Uuid
+  gatePassId       String   @map("gate_pass_id") @db.Uuid
+  plate            String   @db.VarChar(30)
+  declaredQuantity Int      @map("declared_quantity")
+  expectedQuantity Int      @map("expected_quantity")
+  createdBy        String   @map("created_by") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  facility Facility @relation(fields: [facilityId], references: [id])
+  gatePass GatePass @relation(fields: [gatePassId], references: [id], onDelete: Cascade)
+  countedBy User    @relation("GateCountAttemptBy", fields: [createdBy], references: [id])
+
+  @@index([facilityId, plate, createdAt], map: "gate_count_attempts_plate_idx")
+  @@index([gatePassId], map: "gate_count_attempts_pass_idx")
+  @@map("gate_count_attempts")
 }
 
 // ============================================================

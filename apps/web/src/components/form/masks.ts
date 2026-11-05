@@ -15,12 +15,12 @@ function maskCnic(raw: string): string {
   return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`;
 }
 
-/** Vehicle plate: uppercase, alphanumerics + dash/space. */
+/** Vehicle plate: uppercase, alphanumerics + dash/space, up to the 30 a gate pass, a withdrawal and a lot take. */
 function maskVehicle(raw: string): string {
   return raw
     .toUpperCase()
     .replace(/[^A-Z0-9 -]/g, '')
-    .slice(0, 20);
+    .slice(0, 30);
 }
 
 export const MASKS: Record<Mask, (raw: string) => string> = {

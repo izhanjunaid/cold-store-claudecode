@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import type { Control, FieldPath, FieldValues } from 'react-hook-form';
 import {
   FormControl,
@@ -23,6 +24,8 @@ interface MaskedFieldProps<T extends FieldValues> {
   required?: boolean;
   className?: string;
   inputName?: string;
+  /** Extra content under the input, e.g. the trucks-inside chips beside a plate field. */
+  children?: ReactNode;
 }
 
 /** Text field with lightweight input masking for phone / CNIC / vehicle. */
@@ -36,6 +39,7 @@ export function MaskedField<T extends FieldValues>({
   required,
   className,
   inputName,
+  children,
 }: MaskedFieldProps<T>) {
   const apply = MASKS[mask];
   return (
@@ -58,6 +62,7 @@ export function MaskedField<T extends FieldValues>({
               onChange={(e) => field.onChange(apply(e.target.value))}
             />
           </FormControl>
+          {children}
           {description && <FormDescription>{description}</FormDescription>}
           <FormMessage />
         </FormItem>

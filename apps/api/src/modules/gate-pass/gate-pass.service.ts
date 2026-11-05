@@ -12,17 +12,20 @@ import type {
 import {
   addDays,
   businessDayStart,
+  GATE_COUNT_TRIES,
   normalizePlate,
   round2,
 } from '@coldchain/shared';
-import { Errors } from '../../common/errors';
+import { advisoryXactLock } from '../../common/advisory-lock';
+import { Errors, type AppError } from '../../common/errors';
 import { isBlindRole } from '../../common/blind-count';
 import { lockRow } from '../../common/row-lock';
 import { roleAtLeast } from '../../plugins/auth';
 import { standingCreditCover, type ActiveApproval } from '../credit-approval/credit-approval.service';
+import { KeptRefusal, lockedPlates, recordMiss, triesUsed, withKeptRefusals } from './count-attempts';
 import { generateGatePassNumber } from './gate-pass-number';
-import { GatePassRepository } from './gate-pass.repository';
-import { openLoads } from './open-load';
+import { countAttemptsInclude, GatePassRepository } from './gate-pass.repository';
+import { openLoads, OPEN_LOAD_STAGE_SQL } from './open-load';
 
 /** What the gate needs to know about a withdrawal leaving on a truck. */
 const releaseSelect = {
@@ -41,6 +44,16 @@ const releaseSelect = {
 type ReleaseOutbound = Prisma.OutboundEventGetPayload<{ select: typeof releaseSelect }>;
 
 const dnOf = (o: { dispatchNoteNumber: string | null; id: string }) => o.dispatchNoteNumber ?? o.id.slice(0, 8);
+
+/**
+ * A truck whose load is still being booked, weighed or checked out is not ready to leave (C3 D3). No
+ * override: the fix is at the desk, which checks the line out or cancels it. Before this, only the
+ * dispatched lines were matched, so a loaded truck with a booked withdrawal left on a count of 0.
+ */
+function refuseIfStillLoading(lines: { status: string; dispatchNoteNumber: string | null; id: string }[]): void {
+  const open = lines.filter((o) => o.status !== 'DISPATCHED');
+  if (open.length > 0) throw Errors.GATE_OUTWARD_NOT_DISPATCHED(open.map(dnOf).join(', '));
+}
 
 const emptyRelease = (): GateReleaseType => ({
   state: 'NO_BOOKING',
@@ -98,8 +111,13 @@ export class GatePassService {
     userRole: string,
     body: LogOutwardRequestType,
   ): Promise<GatePassResponseType> {
-    return this.prisma.$transaction(async (tx) => {
+    // A wrong count is kept (docs/28 D4): it commits with the pass it belongs to, so a refused
+    // release leaves its truck inside and its try counted.
+    return withKeptRefusals(this.prisma, async (tx) => {
       const passNumber = await generateGatePassNumber(tx, facilityId, new Date());
+      // No `relatedOutboundId` here: a pass that survives a refusal must not carry the withdrawal a manager
+      // named, or a later bare release would take the named path without the manager check. The release
+      // writes the link itself, and the withdrawal reaches clearOutwardInternal through `body`.
       const row = await tx.gatePass.create({
         data: {
           facilityId,
@@ -109,7 +127,6 @@ export class GatePassService {
           driverName: body.driver_name ?? null,
           driverPhone: body.driver_phone ?? null,
           status: 'ARRIVED',
-          relatedOutboundId: body.outbound_event_id ?? null,
           notes: body.notes ?? null,
           createdBy: userId,
         },
@@ -171,12 +188,12 @@ export class GatePassService {
     userRole: string,
     body: ClearOutwardRequestType,
   ): Promise<GatePassResponseType> {
-    return this.prisma.$transaction(async (tx) => {
-      return this.clearOutwardInternal(tx, facilityId, passId, userId, userRole, body);
-    });
+    return withKeptRefusals(this.prisma, (tx) =>
+      this.clearOutwardInternal(tx, facilityId, passId, userId, userRole, body),
+    );
   }
 
-  async list(facilityId: string, query: GatePassListQueryType) {
+  async list(facilityId: string, query: GatePassListQueryType, userRole?: string) {
     const where: Prisma.GatePassWhereInput = {};
     if (query.status) where.status = query.status;
     if (query.direction) where.direction = query.direction;
@@ -194,7 +211,12 @@ export class GatePassService {
     const [rows, total] = await this.repo.list(facilityId, where, query.page, query.page_size);
     const data = rows.map((r) => formatGatePass(r));
     if (query.active) {
-      const previews = await this.releasePreviews(facilityId, data.map((d) => d.vehicle_number));
+      // A manager is never locked out by wrong counts (docs/28 D4), so only everyone else sees COUNT_LOCKED.
+      const previews = await this.releasePreviews(
+        facilityId,
+        data.map((d) => d.vehicle_number),
+        !roleAtLeast(userRole, 'MANAGER'),
+      );
       data.forEach((d) => {
         d.release = previews.get(normalizePlate(d.vehicle_number)) ?? emptyRelease();
       });
@@ -216,7 +238,11 @@ export class GatePassService {
    * rule clearOutwardInternal then enforces (letters and digits, not left yet,
    * dispatched under the current rules). Bag quantities are never part of it.
    */
-  private async releasePreviews(facilityId: string, plates: string[]): Promise<Map<string, GateReleaseType>> {
+  private async releasePreviews(
+    facilityId: string,
+    plates: string[],
+    countLocksApply: boolean,
+  ): Promise<Map<string, GateReleaseType>> {
     const result = new Map<string, GateReleaseType>();
     // The same reading of a truck the dispatch desk uses (open-load.ts).
     const byPlate = await openLoads(this.prisma, facilityId, plates);
@@ -269,6 +295,14 @@ export class GatePassService {
         ...(onCredit ? { on_credit: true } : {}),
       });
     }
+    // A truck the release would refuse for its wrong counts is not READY to the guard (the same rule as
+    // refuseIfLocked): otherwise the card says "ready" and every release meets a refusal.
+    if (countLocksApply) {
+      const ready = [...result].filter(([, r]) => r.state === 'READY').map(([plate]) => plate);
+      for (const plate of await lockedPlates(this.prisma, facilityId, ready)) {
+        result.get(plate)!.state = 'COUNT_LOCKED';
+      }
+    }
     return result;
   }
 
@@ -305,6 +339,7 @@ export class GatePassService {
           orderBy: { createdAt: 'asc' },
         },
         party: { select: { id: true, name: true } },
+        countAttempts: countAttemptsInclude,
       },
     });
     if (!row) throw Errors.GATE_PASS_NOT_FOUND();
@@ -339,15 +374,20 @@ export class GatePassService {
     if (overrideReason && !isManager) throw Errors.GATE_OVERRIDE_REQUIRES_MANAGER();
     let overrideUsed = false;
     const declared = body.declared_quantity ?? null;
+    // Tries are per truck (docs/28 D4): two passes of one plate take theirs one at a time, so they
+    // cannot both take the last one. Held to the end of this transaction, the saved miss included.
+    const plate = normalizePlate(pass.vehicleNumber);
+    if (plate) await advisoryXactLock(tx, `gate-count:${facilityId}:${plate}`);
 
-    // 2. The withdrawals on this truck: the one named, or every dispatched
-    //    withdrawal booked on this plate that has not left yet.
+    // 2. The withdrawals on this truck: the one named, or every withdrawal booked on
+    //    this plate that has not left yet (a truck carrying an undispatched one is held).
     let outbounds: ReleaseOutbound[];
     // Naming one withdrawal skips matching the rest of the truck's load, so it is
     // a manager's call: otherwise whoever booked an unpaid withdrawal could name a
-    // paid one on the same truck and drive both out.
+    // paid one on the same truck and drive both out. Only the request names one: the
+    // pass's stored link (a legacy single link) is not a manager's say-so.
     if (body.outbound_event_id && !isManager) throw Errors.GATE_OVERRIDE_REQUIRES_MANAGER();
-    const explicitId = body.outbound_event_id ?? pass.relatedOutboundId ?? null;
+    const explicitId = body.outbound_event_id ?? null;
     if (explicitId) {
       if (!(await lockRow(tx, 'outbound_events', explicitId, facilityId))) {
         throw Errors.GATE_OUTWARD_NO_OUTBOUND();
@@ -367,17 +407,26 @@ export class GatePassService {
         if (!overrideReason) throw Errors.GATE_OUTWARD_PLATE_MISMATCH(dnOf(ob));
         overrideUsed = true;
       }
+      // Naming one withdrawal skips matching the rest of the truck, but not the hold: read the pass's
+      // plate unlocked (locking more withdrawals after the named one would break the sorted lock order).
+      refuseIfStillLoading((await openLoads(tx, facilityId, [pass.vehicleNumber])).get(normalizePlate(pass.vehicleNumber)) ?? []);
       outbounds = [ob];
     } else {
       outbounds = await this.matchByPlate(tx, facilityId, pass);
+      refuseIfStillLoading(outbounds);
     }
 
     // 4. Nothing booked on this truck: an empty or delivery truck leaves freely,
     //    but a counted load that no withdrawal accounts for does not.
     if (outbounds.length === 0) {
+      await this.refuseIfLocked(tx, facilityId, plate, isManager);
       let unmatchedLoad = false;
       if (declared != null && declared > 0) {
-        if (!overrideReason) throw Errors.GATE_OUTWARD_UNMATCHED_LOAD();
+        if (!overrideReason) {
+          return this.refuseWrongCount(tx, facilityId, pass.id, plate, userId, declared, 0, (left) =>
+            Errors.GATE_OUTWARD_UNMATCHED_LOAD(left),
+          );
+        }
         overrideUsed = true;
         unmatchedLoad = true;
       }
@@ -456,12 +505,18 @@ export class GatePassService {
       }
     }
 
-    // 7. The guard's count, checked blind against what was dispatched.
+    // 7. The guard's count, checked blind against what was dispatched. A guard who has used up the
+    //    tries is a manager's to release, whatever number is typed now.
+    await this.refuseIfLocked(tx, facilityId, plate, isManager);
     if (declared == null) throw Errors.GATE_OUTWARD_COUNT_REQUIRED();
     const authorized = outbounds.reduce((sum, o) => sum + o.quantityWithdrawnBags, 0);
     const countMismatch = declared !== authorized;
     if (countMismatch) {
-      if (!overrideReason) throw Errors.GATE_OUTWARD_COUNT_MISMATCH();
+      if (!overrideReason) {
+        return this.refuseWrongCount(tx, facilityId, pass.id, plate, userId, declared, authorized, (left) =>
+          Errors.GATE_OUTWARD_COUNT_MISMATCH(left),
+        );
+      }
       overrideUsed = true;
     }
 
@@ -507,13 +562,15 @@ export class GatePassService {
   }
 
   /**
-   * Every dispatched withdrawal booked on this truck's plate that has not left
-   * yet, locked. Plates compare by letters and digits only. "Not left yet" is
-   * `gate_pass_id IS NULL`, with no date cutoff: a load dispatched days ago whose
-   * truck waited for a cheque to clear is still on the truck. Only withdrawals
-   * dispatched under these rules (finalized_at set) match by plate — one
-   * dispatched before them may already have left untracked, so it leaves only by
-   * a manager naming it.
+   * Every withdrawal booked on this truck's plate that has not left yet, locked:
+   * dispatched or still open (booked, weighed, disputed). The caller holds the truck
+   * while any is still open (`refuseIfStillLoading`). Plates compare by letters and
+   * digits only. "Not left yet" is `gate_pass_id IS NULL`, with no date cutoff: a load
+   * dispatched days ago whose truck waited for a cheque to clear is still on the
+   * truck. Only withdrawals dispatched under these rules (finalized_at set) match by
+   * plate — one dispatched before them may already have left untracked, so it leaves
+   * only by a manager naming it. The stage test is `openLoads`'s own, so the preview,
+   * the desk and the release read a truck the same way.
    */
   private async matchByPlate(
     tx: Prisma.TransactionClient,
@@ -525,10 +582,9 @@ export class GatePassService {
     const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
       `SELECT o.id FROM outbound_events o
         WHERE o.facility_id = $1::uuid
-          AND o.status = 'DISPATCHED'
+          AND ${OPEN_LOAD_STAGE_SQL}
           AND o.voided_at IS NULL
           AND o.gate_pass_id IS NULL
-          AND o.finalized_at IS NOT NULL
           AND o.vehicle_number IS NOT NULL
           AND regexp_replace(upper(o.vehicle_number), '[^A-Z0-9]', '', 'g') = $2
           AND NOT EXISTS (
@@ -546,6 +602,37 @@ export class GatePassService {
       select: releaseSelect,
       orderBy: { id: 'asc' },
     });
+  }
+
+  /** A guard who has used up the tries is a manager's to release; a manager is never locked (docs/28 D4). */
+  private async refuseIfLocked(
+    tx: Prisma.TransactionClient,
+    facilityId: string,
+    plate: string,
+    isManager: boolean,
+  ): Promise<void> {
+    if (isManager) return;
+    if ((await triesUsed(tx, facilityId, plate)) >= GATE_COUNT_TRIES) throw Errors.GATE_OUTWARD_COUNT_LOCKED();
+  }
+
+  /**
+   * Save a wrong count and refuse it. The refusal is kept: the row commits with it
+   * (`withKeptRefusals`), and `refuse` is told how many tries are left, never what the count should
+   * have been. `expected` is 0 for a count on a truck nothing was dispatched for.
+   */
+  private async refuseWrongCount(
+    tx: Prisma.TransactionClient,
+    facilityId: string,
+    passId: string,
+    plate: string,
+    userId: string,
+    declared: number,
+    expected: number,
+    refuse: (triesLeft: number) => AppError,
+  ): Promise<never> {
+    const used = await triesUsed(tx, facilityId, plate);
+    await recordMiss(tx, { facilityId, passId, plate, declared, expected, userId });
+    throw new KeptRefusal(refuse(Math.max(0, GATE_COUNT_TRIES - used - 1)));
   }
 
   /** A pass other than this one already released the withdrawal (legacy single link). */
@@ -625,6 +712,15 @@ function formatGatePass(row: any): GatePassResponseType {
       row.creditAuthorizedAmountPkr != null ? Number(row.creditAuthorizedAmountPkr) : null,
     override_reason: row.overrideReason ?? null,
     outbound_ids: (row.clearedOutbounds ?? []).map((o: { id: string }) => o.id),
+    // This pass's wrong counts. `expected_quantity` is a blind key: the guard keeps only the number they typed.
+    count_attempts: (row.countAttempts ?? []).map(
+      (a: { declaredQuantity: number; expectedQuantity: number; createdAt: Date; countedBy?: { name: string } | null }) => ({
+        declared_quantity: a.declaredQuantity,
+        expected_quantity: a.expectedQuantity,
+        counted_by_name: a.countedBy?.name ?? null,
+        created_at: a.createdAt.toISOString(),
+      }),
+    ),
     // Every withdrawal the truck carried, for the receipt — names and marks only, never a count.
     withdrawals: (row.clearedOutbounds ?? []).map(
       (o: { dispatchNoteNumber: string | null; lot?: { marka: string | null }; ownerPartySnapshot?: { name: string } | null }) => ({
