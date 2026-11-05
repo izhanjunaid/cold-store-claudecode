@@ -97,10 +97,11 @@ describe('redactBagCounts', () => {
     });
   });
 
-  it("hides what a refused count should have been, and keeps the number the guard typed", () => {
+  it("hides a pass's saved wrong counts from the guard: what was expected, and what others typed near it", () => {
     const out = redactBagCounts({
       count_attempts: [{ declared_quantity: 41, expected_quantity: 50, counted_by_name: 'Bilal' }],
+      expected_quantity: 50,
     });
-    expect(out).toEqual({ count_attempts: [{ declared_quantity: 41, expected_quantity: null, counted_by_name: 'Bilal' }] });
+    expect(out).toEqual({ count_attempts: null, expected_quantity: null });
   });
 });

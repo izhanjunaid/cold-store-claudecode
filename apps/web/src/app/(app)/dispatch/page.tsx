@@ -105,12 +105,13 @@ export default function DispatchDeskPage() {
 
   // Trucks inside, each with what is booked onto it (the gate's own reading of a truck's load).
   // Their plates are one tap away when booking, so the gate matches them exactly.
-  const { data: trucks = [] } = useQuery({
+  const { data: trucksRead, isSuccess: trucksLoaded } = useQuery({
     queryKey: ['dispatch', 'trucks'],
     queryFn: () => apiClient<TruckInside[]>('/v1/dispatch/trucks'),
     enabled: canQuery,
     refetchInterval: 15_000,
   });
+  const trucks = trucksRead ?? [];
   const plates = [...new Set(trucks.map((t) => t.vehicle_number))];
   // A lot on a truck carrying several is checked out with that truck, not on its own (unless the
   // truck carries more than one checkout takes).
@@ -287,7 +288,8 @@ export default function DispatchDeskPage() {
           onOpenChange={(o) => !o && setBookLot(null)}
           lotId={bookLot.id}
           lotNumber={bookLot.lot_number}
-          plateSuggestions={plates}
+          // Only a list that has been read: the form reads an empty one as "no truck is inside".
+          plateSuggestions={trucksLoaded ? plates : undefined}
           fixedPlate={addTo ?? undefined}
           onBooked={() => {
             setBookLot(null);

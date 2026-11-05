@@ -1,4 +1,5 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
+import { GATE_COUNT_TRIES } from '@coldchain/shared';
 import type { AppError } from '../../common/errors';
 
 /**
@@ -24,6 +25,32 @@ export async function triesUsed(tx: Prisma.TransactionClient, facilityId: string
     plate,
   );
   return rows[0]?.n ?? 0;
+}
+
+/**
+ * Which of these plates (normalized) have used up their tries since their last release: the same rule
+ * as `triesUsed`, in one query for the gate's list.
+ */
+export async function lockedPlates(db: PrismaClient | Prisma.TransactionClient, facilityId: string, plates: string[]): Promise<string[]> {
+  if (plates.length === 0) return [];
+  const rows = await db.$queryRawUnsafe<{ plate: string }[]>(
+    `SELECT a.plate
+       FROM gate_count_attempts a
+      WHERE a.facility_id = $1::uuid
+        AND a.plate = ANY($2::text[])
+        AND a.created_at > COALESCE(
+              (SELECT max(g.cleared_at) FROM gate_passes g
+                WHERE g.facility_id = $1::uuid
+                  AND g.status = 'CLEARED'
+                  AND regexp_replace(upper(g.vehicle_number), '[^A-Z0-9]', '', 'g') = a.plate),
+              '-infinity'::timestamptz)
+      GROUP BY a.plate
+     HAVING count(*) >= $3::int`,
+    facilityId,
+    plates,
+    GATE_COUNT_TRIES,
+  );
+  return rows.map((r) => r.plate);
 }
 
 /**

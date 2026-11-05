@@ -179,6 +179,20 @@ describe('GatePassConsolePage — clear outward', () => {
     expect(screen.queryByText(/137/)).not.toBeInTheDocument();
   });
 
+  it('a locked truck is not listed as ready to leave: the guard is told to call a manager', async () => {
+    const LOCKED = {
+      ...PASS,
+      vehicle_number: 'LHR-4444',
+      release: { state: 'COUNT_LOCKED' as const, dispatch_notes: ['DN-260101-0011'], outstanding_pkr: null, cheque_pending: false, marka: null, owner_party_name: null },
+    };
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve({ data: path.includes('active=true') ? [LOCKED] : [], meta: { page: 1, per_page: 50, total: 1 } }),
+    );
+    render(<GatePassConsolePage />);
+    expect(await screen.findByText(/Counts did not match — call a manager/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^release$/i })).not.toBeInTheDocument();
+  });
+
   it('a plate override that then hits a payment block keeps its reason when the manager adds credit', async () => {
     role = 'MANAGER';
     apiClient

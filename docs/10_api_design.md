@@ -565,7 +565,7 @@ X-Facility-ID: <facility_uuid>
 | POST | `/gate-passes/inward` | Log arriving truck | SECURITY+ |
 | GET | `/gate-passes` | List active vehicles. With `?active=true` each pass carries `release`: whether the truck can leave now (`state`), its dispatch notes, and `withdrawals[]` — dispatch note, marka and owner of each withdrawal on it (a truck may carry several owners' lots), never a count | All |
 | PATCH | `/gate-passes/:id/link-lot` | Link to generated lot after weigh-in | OPERATOR+ |
-| POST | `/gate-passes/:id/outward` | Dispatch truck (Clear). A refused count is saved and commits with the refusal; the pass response lists them as `count_attempts[]` (`declared_quantity`, `expected_quantity`, `counted_by_name`, `created_at`; `expected_quantity` is null for SECURITY). `POST /gate-passes/outward` (log and release in one step) keeps its pass when refused, and writes no `related_outbound_id` at creation | SECURITY+ |
+| POST | `/gate-passes/:id/outward` | Dispatch truck (Clear). A refused count is saved and commits with the refusal; the pass response lists them as `count_attempts[]` (`declared_quantity`, `expected_quantity`, `counted_by_name`, `created_at`; the whole list is null for SECURITY). `POST /gate-passes/outward` (log and release in one step) keeps its pass when refused, and writes no `related_outbound_id` at creation | SECURITY+ |
 | GET | `/parties/:id/credit-approval` | Whether the party has a live standing credit approval (`approved`, `valid_until`, approver). The ceiling and note only for `parties.credit_terms` holders | authenticated |
 
 | POST | `/parties/:id/credit-approval` | Approve credit: `{ max_outstanding_pkr, valid_until?, note? }`; replaces (revokes) any live approval; refuses a past date | MANAGER+ (`parties.credit_terms`) |

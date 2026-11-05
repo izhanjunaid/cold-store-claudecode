@@ -50,7 +50,7 @@ interface GatePass {
   }[];
   /** On the active list only: can this truck be released now? Never carries a bag count. */
   release?: {
-    state: 'READY' | 'PAYMENT_PENDING' | 'BILL_DRAFT' | 'NOT_DISPATCHED' | 'NO_BOOKING';
+    state: 'READY' | 'PAYMENT_PENDING' | 'BILL_DRAFT' | 'NOT_DISPATCHED' | 'NO_BOOKING' | 'COUNT_LOCKED';
     dispatch_notes: string[];
     /** Null for the gate guard: an amount stands in for the blind count. Managers get the figure. */
     outstanding_pkr: number | null;
@@ -88,6 +88,8 @@ function releaseLabel(r: NonNullable<GatePass['release']>): { text: string; tone
       return { text: 'Bill not finalized yet', tone: 'warning' };
     case 'NOT_DISPATCHED':
       return { text: 'Not dispatched yet', tone: 'warning' };
+    case 'COUNT_LOCKED':
+      return { text: 'Counts did not match — call a manager', tone: 'danger' };
     default:
       return { text: 'No dispatch booked', tone: 'muted' };
   }

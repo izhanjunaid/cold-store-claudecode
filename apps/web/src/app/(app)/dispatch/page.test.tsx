@@ -52,7 +52,7 @@ vi.mock('@/components/dispatch/checkout-sheet', () => ({
 }));
 vi.mock('@/components/outbound/withdraw-sheet', () => ({
   WithdrawSheet: ({ lotId, plateSuggestions, fixedPlate }: { lotId: string; plateSuggestions?: string[]; fixedPlate?: string }) => (
-    <div data-testid="withdraw" data-lot={lotId} data-plates={(plateSuggestions ?? []).join(',')} data-fixed={fixedPlate ?? ''} />
+    <div data-testid="withdraw" data-lot={lotId} data-plates={(plateSuggestions ?? []).join(',')} data-plates-known={plateSuggestions === undefined ? 'no' : 'yes'} data-fixed={fixedPlate ?? ''} />
   ),
 }));
 vi.mock('@/components/dispatch/truck-checkout-sheet', () => ({
@@ -276,6 +276,17 @@ describe('Dispatch Desk', () => {
     expect(drawer).toHaveAttribute('data-lot', 'lot-7');
     expect(drawer).toHaveAttribute('data-plates', 'LHR-9999');
     expect(drawer).toHaveAttribute('data-fixed', '');
+  });
+
+  it('does not hand the form a list of trucks it has not read: a failed fetch is "unknown", not "none inside"', async () => {
+    // Else the form reads an empty list as "no truck is inside" and, with the switch on, locks a munshi out.
+    apiClient.mockImplementation((path: string) =>
+      path === '/v1/dispatch/trucks' ? Promise.reject(new Error('offline')) : Promise.resolve({}),
+    );
+    renderPage();
+    fireEvent.change(await screen.findByLabelText('Find a lot'), { target: { value: 'LOT-7' } });
+    fireEvent.click(await screen.findByRole('button', { name: /LOT-7/ }, { timeout: 5000 }));
+    expect(await screen.findByTestId('withdraw')).toHaveAttribute('data-plates-known', 'no');
   });
 
   it('the queue refreshes at once after a checkout, even while the dispatch note is still rendering', async () => {

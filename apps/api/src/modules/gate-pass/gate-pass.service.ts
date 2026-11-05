@@ -22,7 +22,7 @@ import { isBlindRole } from '../../common/blind-count';
 import { lockRow } from '../../common/row-lock';
 import { roleAtLeast } from '../../plugins/auth';
 import { standingCreditCover, type ActiveApproval } from '../credit-approval/credit-approval.service';
-import { KeptRefusal, recordMiss, triesUsed, withKeptRefusals } from './count-attempts';
+import { KeptRefusal, lockedPlates, recordMiss, triesUsed, withKeptRefusals } from './count-attempts';
 import { generateGatePassNumber } from './gate-pass-number';
 import { countAttemptsInclude, GatePassRepository } from './gate-pass.repository';
 import { openLoads, OPEN_LOAD_STAGE_SQL } from './open-load';
@@ -193,7 +193,7 @@ export class GatePassService {
     );
   }
 
-  async list(facilityId: string, query: GatePassListQueryType) {
+  async list(facilityId: string, query: GatePassListQueryType, userRole?: string) {
     const where: Prisma.GatePassWhereInput = {};
     if (query.status) where.status = query.status;
     if (query.direction) where.direction = query.direction;
@@ -211,7 +211,12 @@ export class GatePassService {
     const [rows, total] = await this.repo.list(facilityId, where, query.page, query.page_size);
     const data = rows.map((r) => formatGatePass(r));
     if (query.active) {
-      const previews = await this.releasePreviews(facilityId, data.map((d) => d.vehicle_number));
+      // A manager is never locked out by wrong counts (docs/28 D4), so only everyone else sees COUNT_LOCKED.
+      const previews = await this.releasePreviews(
+        facilityId,
+        data.map((d) => d.vehicle_number),
+        !roleAtLeast(userRole, 'MANAGER'),
+      );
       data.forEach((d) => {
         d.release = previews.get(normalizePlate(d.vehicle_number)) ?? emptyRelease();
       });
@@ -233,7 +238,11 @@ export class GatePassService {
    * rule clearOutwardInternal then enforces (letters and digits, not left yet,
    * dispatched under the current rules). Bag quantities are never part of it.
    */
-  private async releasePreviews(facilityId: string, plates: string[]): Promise<Map<string, GateReleaseType>> {
+  private async releasePreviews(
+    facilityId: string,
+    plates: string[],
+    countLocksApply: boolean,
+  ): Promise<Map<string, GateReleaseType>> {
     const result = new Map<string, GateReleaseType>();
     // The same reading of a truck the dispatch desk uses (open-load.ts).
     const byPlate = await openLoads(this.prisma, facilityId, plates);
@@ -285,6 +294,14 @@ export class GatePassService {
         owner_party_name: list.find((o) => o.ownerPartySnapshot)?.ownerPartySnapshot?.name ?? null,
         ...(onCredit ? { on_credit: true } : {}),
       });
+    }
+    // A truck the release would refuse for its wrong counts is not READY to the guard (the same rule as
+    // refuseIfLocked): otherwise the card says "ready" and every release meets a refusal.
+    if (countLocksApply) {
+      const ready = [...result].filter(([, r]) => r.state === 'READY').map(([plate]) => plate);
+      for (const plate of await lockedPlates(this.prisma, facilityId, ready)) {
+        result.get(plate)!.state = 'COUNT_LOCKED';
+      }
     }
     return result;
   }

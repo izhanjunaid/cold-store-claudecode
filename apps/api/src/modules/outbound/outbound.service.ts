@@ -165,7 +165,8 @@ export class OutboundService {
       const settings = resolveFacilitySettings(facility?.settings ?? null);
       // C3 D2: with the owner's switch on, anyone below manager books a truck the gate has logged in. The
       // release matches a truck to its load by plate, so a typed plate can hide a load from the gate. Passes
-      // are read unlocked (the lot lock above already serializes this booking); a manager may book ahead.
+      // are read unlocked: a booking can land on a truck that is leaving at that moment, which only holds
+      // that plate's next visit at the gate. A manager may book ahead.
       if (settings.book_only_trucks_inside && !isManager) {
         const wanted = normalizePlate(params.vehicleNumber ?? '');
         const inside = wanted

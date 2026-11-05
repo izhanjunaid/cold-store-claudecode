@@ -7,6 +7,9 @@ const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 
 const vehicleNumber = VehicleNumber;
 
+// More bags than one truck could carry: the ceiling for a typed count (a saved wrong count is an INTEGER).
+const MAX_COUNT = 1_000_000;
+
 // A manager's reason for releasing a truck despite a count or plate mismatch, or a
 // counted load no withdrawal accounts for. Stored on the pass.
 const overrideReason = z.string().trim().min(3).max(400);
@@ -28,8 +31,9 @@ export const LogOutwardRequest = z.object({
   driver_phone: z.string().trim().min(7).max(20).optional(),
   outbound_event_id: z.string().uuid().optional(),
   credit_authorization: z.boolean().optional(),
-  // Bags/crates the guard counted on the truck; 0 for an empty truck.
-  declared_quantity: z.number().int().nonnegative().optional(),
+  // Bags/crates the guard counted on the truck; 0 for an empty truck. Bounded so a typo cannot overflow
+  // the saved wrong count.
+  declared_quantity: z.number().int().nonnegative().max(MAX_COUNT).optional(),
   override_reason: overrideReason.optional(),
   notes: z.string().optional(),
 });
@@ -46,7 +50,7 @@ export const ClearOutwardRequest = z.object({
   // Bags/crates the guard counted on the truck; 0 for an empty truck. Required
   // whenever a withdrawal leaves on it, and checked blind (the expected count is
   // never echoed in the error).
-  declared_quantity: z.number().int().nonnegative().optional(),
+  declared_quantity: z.number().int().nonnegative().max(MAX_COUNT).optional(),
   override_reason: overrideReason.optional(),
   notes: z.string().optional(),
 });
@@ -68,7 +72,15 @@ export type GatePassListQueryType = z.infer<typeof GatePassListQuery>;
  * Where a truck at the gate stands, from the dispatch desk's side: can it be released now?
  * Carries no bag quantity — the guard's count is blind.
  */
-export const GateReleaseState = z.enum(['READY', 'PAYMENT_PENDING', 'BILL_DRAFT', 'NOT_DISPATCHED', 'NO_BOOKING']);
+export const GateReleaseState = z.enum([
+  'READY',
+  'PAYMENT_PENDING',
+  'BILL_DRAFT',
+  'NOT_DISPATCHED',
+  'NO_BOOKING',
+  // Ready, but the guard has used up the truck's tries: only a manager releases it (never shown to a manager).
+  'COUNT_LOCKED',
+]);
 export type GateReleaseStateType = z.infer<typeof GateReleaseState>;
 
 /** One withdrawal on a truck as the guard may see it: dispatch note, marka, owner — never a count. */

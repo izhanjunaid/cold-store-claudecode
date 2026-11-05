@@ -549,15 +549,33 @@ describe('wrong counts are saved, and three of them lock the truck', () => {
     }
   }, 45_000);
 
-  it('the pass lists its wrong counts: the guard sees what was typed, a manager what was expected', async () => {
+  it('Ready to leave tells the guard a locked truck is locked, and still lists it as ready for a manager', async () => {
+    const { pass } = await loaded('LHR-9212');
+    for (const bags of [41, 42, 43]) await miss(pass, bags);
+    const state = async (token: string) =>
+      data<{ id: string; release: { state: string } }[]>(
+        await app.inject({ method: 'GET', url: '/v1/gate-passes?active=true', headers: authHeaders(token) }),
+      ).find((p) => p.id === pass)!.release.state;
+    expect(await state(securityToken)).toBe('COUNT_LOCKED');
+    expect(await state(managerToken)).toBe('READY');
+  });
+
+  it('a count too large to store is a plain refusal, not a server error', async () => {
+    const { pass } = await loaded('LHR-9213');
+    const res = await miss(pass, 3_000_000_000);
+    expect([res.statusCode, code(res)]).toEqual([400, 'VALIDATION_ERROR']);
+    expect(await attempts({ gatePassId: pass })).toBe(0);
+  });
+
+  it('the pass lists its wrong counts: the guard sees none, a manager sees what was typed and expected', async () => {
     const { pass } = await loaded('LHR-9211');
     await miss(pass, 44);
     type Attempts = { count_attempts: Record<string, unknown>[] };
     const get = (url: string, token: string) => app.inject({ method: 'GET', url, headers: authHeaders(token) });
 
-    const guard = data<Attempts>(await get(`/v1/gate-passes/${pass}`, securityToken));
-    expect(guard.count_attempts).toHaveLength(1);
-    expect(guard.count_attempts[0]).toMatchObject({ declared_quantity: 44, expected_quantity: null });
+    // The guard gets none of it: a manager's or another guard's wrong count sits near the truth.
+    const guard = data<{ count_attempts: unknown }>(await get(`/v1/gate-passes/${pass}`, securityToken));
+    expect(guard).toHaveProperty('count_attempts', null);
     const manager = data<Attempts>(await get(`/v1/gate-passes/${pass}`, managerToken));
     expect(manager.count_attempts[0]).toMatchObject({ declared_quantity: 44, expected_quantity: 50 });
     expect(manager.count_attempts[0]!['counted_by_name']).toBeTruthy();
