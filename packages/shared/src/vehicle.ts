@@ -10,6 +10,8 @@ export const VehicleNumber = z
   .trim()
   .min(2)
   .max(30)
+  // "--" is no plate: it normalizes to nothing, so it could never match a load or count its tries.
+  .refine((v) => normalizePlate(v).length > 0, 'A plate needs a letter or a digit')
   .transform((v) => v.toUpperCase());
 
 /**

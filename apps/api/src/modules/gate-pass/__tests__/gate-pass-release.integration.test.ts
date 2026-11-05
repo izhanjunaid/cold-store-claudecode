@@ -560,6 +560,14 @@ describe('wrong counts are saved, and three of them lock the truck', () => {
     expect(await state(managerToken)).toBe('READY');
   });
 
+  it('a plate with no letter or digit in it is refused at the gate, so no truck escapes the tries', async () => {
+    // "--" normalizes to nothing: it could match no load and would never count its tries.
+    for (const url of ['/v1/gate-passes/inward', '/v1/gate-passes/outward']) {
+      const res = await app.inject({ method: 'POST', url, headers: authHeaders(securityToken), payload: { vehicle_number: '--' } });
+      expect([res.statusCode, code(res)], url).toEqual([400, 'VALIDATION_ERROR']);
+    }
+  });
+
   it('a count too large to store is a plain refusal, not a server error', async () => {
     const { pass } = await loaded('LHR-9213');
     const res = await miss(pass, 3_000_000_000);
