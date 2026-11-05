@@ -1,6 +1,17 @@
 # ColdChain — Build Progress
 
 ## Current Status
+- **C3 part 1 — gate safety (docs/28): a loaded truck can't leave on a guessed or zero count, and plates come from the trucks inside.**
+  - **Where it stands:** built on `feat/c3-gate-safety`, cut from `main` at `097be68`, 2026-11-01 → 05. Migrations **0043** and **0044** (44 in all), both expand-only. Parts 2 (papers) and 3 (the manager queue) are designed in docs/28 and not built.
+  - **Owner answers (2026-10-31):** gate safety first; booking by a Settings switch, off at first; no scanner (no QR/barcode); the manager list now and "Allow" later ("it varies"). The flow diagrams were approved.
+  - **What changed:**
+    - **D3:** a truck whose plate carries a booked, weighed or disputed withdrawal can't leave (`GATE_OUTWARD_NOT_DISPATCHED`, no override, before the count). Before, the gate matched only dispatched lines, so a loaded truck left on a count of 0. `matchByPlate` and `openLoads()` share one stage test.
+    - **D4:** every wrong count is saved (`gate_count_attempts`) and commits with its refusal. Three per truck (the plate, since its last release), then only a manager releases (`GATE_OUTWARD_COUNT_LOCKED`). The guard sees "Try N of 3" and never the expected count (`expected_quantity` is a blind key); managers see the earlier counts. `AppError` gained `details`.
+    - **D2/D5:** the `book_only_trucks_inside` switch (off by default; a manager is exempt), trucks-inside chips on the withdrawal and lot forms, and 30-character plates everywhere.
+    - **One-step route:** a refused `POST /gate-passes/outward` now leaves its pass inside, with the wrong count saved, and writes no `related_outbound_id` at creation (a stored link let a bare release take the manager-only named path).
+  - **Verified (2026-11-05) on the code head:** guardrails, typecheck 8/8, build 5/5; api 288 unit + 1,016 integration (4 skipped, 79 files) on a fresh database; web 425 unit (53 files); migration repair; e2e gate-count 2/2, desk 3/3, season 1/1, truck 2/2, solo 3/3, no-weigh 1/1, slip pop-up 1/1.
+  - **Rulings:** see the PR body and the ledger summary; the notable ones are the race test rewritten on an empty truck (the loaded case is serialized by its withdrawal rows, so it could not fail), miss timestamps on the app clock, and `MaskedField` gaining `children`.
+  - **For the owner before promoting:** D3 holds a truck for an open booking of any date; docs/28 has a read-only query for old open bookings to cancel first. Known limits are in docs/28.
 - **Weight optional everywhere (C3, part 1), docs/27.**
   - **Where it stands:** built on `feat/weight-optional`, cut from `main` at `ae3ad1e`, 2026-10-29 → 31.
     - No migration and no schema change; still 42 migrations.

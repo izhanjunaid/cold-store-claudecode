@@ -133,6 +133,7 @@ payment per (billing party, book), each with its own receipt.
 |---|---|---|
 | Settings → Dispatch Desk Cash | `cash_tracking_from` | Cash taken from that business day on waits for a manager's count. Turn this on **before** solo dispatch. |
 | Settings → Dispatch | `dispatch_solo_mode` | The munshi may finish clean trucks without a manager. |
+| Settings → Dispatch | `book_only_trucks_inside` | Below a manager, a withdrawal is booked only for a truck the gate has logged in (docs/28 D2). Turn it on once the gate logs every truck on arrival. |
 | Party page → Standing credit | per party | That party's credit trucks leave the gate without a manager while the approval holds. |
 
 ## Upgrading a box

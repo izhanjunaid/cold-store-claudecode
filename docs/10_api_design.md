@@ -60,6 +60,8 @@ X-Facility-ID: <facility_uuid>
 }
 ```
 
+`field` and `details` are optional. `details` carries machine-readable extras that are safe for the caller to read — today only `{ "tries_left": 2 }` on a refused gate count (a number of tries, never of bags).
+
 ---
 
 ## 4. API Endpoints
@@ -370,12 +372,14 @@ X-Facility-ID: <facility_uuid>
 | `OUTBOUND_QUANTITY_STALE` | 409 | A FULL withdrawal no longer equals the lot balance; cancel and rebook |
 | `GATE_OUTWARD_BLOCKED` | 422 | Payment pending (uncleared cheques do not count) or no valid bill — needs MANAGER credit authorization, unless every unpaid bill belongs to a party with a live standing credit approval that holds its exposure (then the guard releases it alone). The message names the balance for everyone but SECURITY, who reads only "Payment pending" |
 | `GATE_OUTWARD_INVOICE_NOT_FINAL` | 422 | A withdrawal on the truck is billed on a DRAFT invoice — finalize it first (credit cannot cover a draft) |
-| `GATE_OUTWARD_NOT_DISPATCHED` | 422 | The named withdrawal has not been dispatched |
+| `GATE_OUTWARD_NOT_DISPATCHED` | 422 | A withdrawal on the truck's plate (or the one named) has not been dispatched: booked, weighed or disputed. No override: the desk checks it out or cancels it. It is refused before the count is compared and uses no try (docs/28 D3) |
 | `GATE_OUTWARD_ALREADY_USED` | 409 | The withdrawal already left on another truck |
 | `GATE_OUTWARD_PLATE_MISMATCH` | 422 | Truck plate ≠ the withdrawal's booked vehicle (or none booked); MANAGER may override with a reason |
 | `GATE_OUTWARD_COUNT_REQUIRED` | 422 | The guard's bag count is required when a withdrawal leaves |
-| `GATE_OUTWARD_COUNT_MISMATCH` | 422 | Count ≠ bags dispatched. The message is the fact only ("The bag count does not match the dispatch"), never the expected number; the page says what to do next (MANAGER may override with a reason, the guard recounts or calls one) |
-| `GATE_OUTWARD_UNMATCHED_LOAD` | 422 | A counted load no dispatched withdrawal accounts for; MANAGER may override with a reason |
+| `GATE_OUTWARD_COUNT_MISMATCH` | 422 | Count ≠ bags dispatched. The message is the fact only ("The bag count does not match the dispatch"), never the expected number; the page says what to do next (MANAGER may override with a reason, the guard recounts or calls one). The wrong count is saved in `gate_count_attempts`, and `error.details.tries_left` says how many of the truck's three tries remain (docs/28 D4) |
+| `GATE_OUTWARD_UNMATCHED_LOAD` | 422 | A counted load no dispatched withdrawal accounts for; MANAGER may override with a reason. Saved as a wrong count too (`details.tries_left`) |
+| `GATE_OUTWARD_COUNT_LOCKED` | 403 | The truck has had three wrong counts since its last release: only a MANAGER releases it, whatever number is typed (a manager is never locked). Tries are per plate, not per pass |
+| `OUTBOUND_TRUCK_NOT_INSIDE` | 422 | `book_only_trucks_inside` is on and the plate (field `vehicle_number`) is no truck inside the gate; below MANAGER only |
 | `GATE_OVERRIDE_REQUIRES_MANAGER` | 403 | `override_reason` or `outbound_event_id` (naming a withdrawal) sent by someone below MANAGER |
 | `GATE_SELF_RELEASE` | 403 | The releaser booked or dispatched a withdrawal on this truck (MANAGER+ exempt) |
 | `CONSTRAINT_VIOLATION` | 409 | A database rule refused the change (e.g. a lot balance below zero) |
@@ -561,7 +565,7 @@ X-Facility-ID: <facility_uuid>
 | POST | `/gate-passes/inward` | Log arriving truck | SECURITY+ |
 | GET | `/gate-passes` | List active vehicles. With `?active=true` each pass carries `release`: whether the truck can leave now (`state`), its dispatch notes, and `withdrawals[]` — dispatch note, marka and owner of each withdrawal on it (a truck may carry several owners' lots), never a count | All |
 | PATCH | `/gate-passes/:id/link-lot` | Link to generated lot after weigh-in | OPERATOR+ |
-| POST | `/gate-passes/:id/outward` | Dispatch truck (Clear) | SECURITY+ |
+| POST | `/gate-passes/:id/outward` | Dispatch truck (Clear). A refused count is saved and commits with the refusal; the pass response lists them as `count_attempts[]` (`declared_quantity`, `expected_quantity`, `counted_by_name`, `created_at`; `expected_quantity` is null for SECURITY). `POST /gate-passes/outward` (log and release in one step) keeps its pass when refused, and writes no `related_outbound_id` at creation | SECURITY+ |
 | GET | `/parties/:id/credit-approval` | Whether the party has a live standing credit approval (`approved`, `valid_until`, approver). The ceiling and note only for `parties.credit_terms` holders | authenticated |
 
 | POST | `/parties/:id/credit-approval` | Approve credit: `{ max_outstanding_pkr, valid_until?, note? }`; replaces (revokes) any live approval; refuses a past date | MANAGER+ (`parties.credit_terms`) |
