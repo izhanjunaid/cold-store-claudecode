@@ -60,7 +60,8 @@ describe('opening a PDF in a new tab', () => {
   });
 
   it('a blocked pop-up (no tab) still opens the PDF once it arrives', async () => {
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    // The early tab was refused; the one more try (after the wait) is allowed.
+    const open = vi.spyOn(window, 'open').mockReturnValueOnce(null).mockReturnValueOnce(tab as unknown as Window);
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, blob: async () => new Blob(['%PDF']) } as Response);
 
     await openPdf('/v1/x/pdf', 'paper');
@@ -127,5 +128,38 @@ describe('a PDF shown in place (fetchPdfBlobUrl)', () => {
   it('says which paper and why when it fails', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status: 404 } as Response);
     await expect(fetchPdfBlobUrl('/v1/x', 'transfer acknowledgment')).rejects.toThrow('Could not open the transfer acknowledgment (404)');
+  });
+});
+
+describe('the tab while the PDF renders, and when it cannot be shown', () => {
+  beforeEach(() => {
+    localStorage.setItem('access_token', 'token');
+    URL.createObjectURL = vi.fn(() => 'blob:paper');
+    URL.revokeObjectURL = vi.fn();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('says in the blank tab that the paper is being prepared', () => {
+    const doc = { title: '', body: { textContent: '' } };
+    const waiting = { document: doc, location: { href: '' }, close: vi.fn() };
+    vi.spyOn(window, 'open').mockReturnValue(waiting as unknown as Window);
+    openPdfTab();
+    expect(doc.title).toMatch(/preparing/i);
+    expect(doc.body.textContent).toMatch(/preparing/i);
+  });
+
+  it('does not fill a tab the person closed, and does not open another', async () => {
+    const closed = { location: { href: '' }, close: vi.fn(), closed: true };
+    const open = vi.spyOn(window, 'open').mockReturnValue(closed as unknown as Window);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, blob: async () => new Blob(['%PDF']) } as Response);
+    await openPdf('/v1/x/pdf', 'paper');
+    expect(closed.location.href).toBe('');
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('says so when the browser blocks the tab and the fallback as well', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, blob: async () => new Blob(['%PDF']) } as Response);
+    await expect(openPdf('/v1/x/pdf', 'paper')).rejects.toThrow(/allow pop-ups/i);
   });
 });

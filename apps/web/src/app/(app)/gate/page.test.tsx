@@ -185,7 +185,7 @@ describe('GatePassConsolePage — clear outward', () => {
       expect(outwardPosts()[0]![1].body).toEqual({ outbound_event_id: 'ob-9', declared_quantity: 20 });
     });
 
-    it('Enter in the box looks the note up and releases nothing', async () => {
+    it('Enter in the box looks the note up', async () => {
       lookupReturns([withdrawal()]);
       const dialog = await openClearOutward();
       enterCount(dialog, '20');
@@ -194,7 +194,49 @@ describe('GatePassConsolePage — clear outward', () => {
 
       await within(dialog).findByText(/Haji Sahib/);
       expect(lookups()).toHaveLength(1);
+    });
+
+    // The box stays editable while a lookup is out: its answer must only count for what the box
+    // still says, or the release would name a withdrawal the manager did not find.
+    it('a late answer for an edited box names nothing, and releases nothing by it', async () => {
+      let answer!: (v: unknown) => void;
+      apiClientList.mockImplementation((path: string) =>
+        path.startsWith('/v1/outbound-events')
+          ? new Promise((r) => (answer = r))
+          : Promise.resolve({ data: path.includes('active=true') ? [PASS] : [], meta: { page: 1, per_page: 50, total: 1 } }),
+      );
+      const dialog = await openClearOutward();
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      find(dialog); // the answer is still out
+      fireEvent.change(box(dialog), { target: { value: 'DN-260101-0010' } }); // the manager changed their mind
+      answer({ data: [withdrawal()], meta: { page: 1, per_page: 10, total: 1 } });
+
+      await new Promise((r) => setTimeout(r, 30)); // the late answer has been applied by now
+      expect(within(dialog).queryByText(/Haji Sahib/)).not.toBeInTheDocument();
+      enterCount(dialog, '20');
+      expect(clear(dialog)).toBeDisabled();
       expect(outwardPosts()).toHaveLength(0);
+    });
+
+    it('Release anyway waits too while a typed note has not been found', async () => {
+      apiClient.mockRejectedValueOnce(new ApiError('The bag count does not match the dispatch', { code: 'GATE_OUTWARD_COUNT_MISMATCH', status: 422 }));
+      const dialog = await openClearOutward();
+      enterCount(dialog, '130');
+      fireEvent.click(clear(dialog));
+      fireEvent.change(await within(dialog).findByLabelText(/override reason/i), { target: { value: 'Seven bags torn' } });
+      expect(within(dialog).getByRole('button', { name: /release anyway/i })).toBeEnabled();
+
+      fireEvent.change(box(dialog), { target: { value: 'DN-260101-0' } });
+      expect(within(dialog).getByRole('button', { name: /release anyway/i })).toBeDisabled();
+    });
+
+    it('a refusal in the box still says how to go on without it', async () => {
+      lookupReturns([]);
+      const dialog = await openClearOutward();
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      find(dialog);
+      await within(dialog).findByText('No dispatched withdrawal with that dispatch note number.');
+      expect(within(dialog).getByText('Find the dispatch note, or clear the box.')).toBeInTheDocument();
     });
 
     it('does not pick a near miss: DN-…-0009 is not DN-…-00090', async () => {

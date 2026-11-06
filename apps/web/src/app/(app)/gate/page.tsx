@@ -309,7 +309,7 @@ export default function GatePassConsolePage() {
         method: 'POST',
         body: {
           // Naming a withdrawal is a manager's call (the server refuses it from anyone else).
-          ...(canManager && dnMatch ? { outbound_event_id: dnMatch.id } : {}),
+          ...(canManager && found ? { outbound_event_id: found.id } : {}),
           ...(creditAuth ? { credit_authorization: true } : {}),
           declared_quantity: declared,
           ...(sendOverride ? { override_reason: reason } : {}),
@@ -340,8 +340,12 @@ export default function GatePassConsolePage() {
   const readyToLeave = passes.filter((p) => p.release?.state === 'READY');
   const countValid = parseCount(outwardCount) != null;
   const outwardBlocked = outwardErrCode === 'GATE_OUTWARD_BLOCKED';
+  // The withdrawal found for what the box says NOW. A lookup that was answered after the box was edited
+  // (or the dialog reopened) found something else, and must not name it.
+  const found =
+    dnMatch && (dnMatch.dispatch_note_number ?? '').toUpperCase() === dnText.trim().toUpperCase() ? dnMatch : null;
   // A dispatch note was typed but is not (or no longer) a withdrawal that was found: releasing waits.
-  const dnPending = canManager && dnText.trim() !== '' && !dnMatch;
+  const dnPending = canManager && dnText.trim() !== '' && !found;
   const outwardHold = outwardErrCode === 'GATE_OUTWARD_NOT_DISPATCHED';
   // Three counts have not matched: only a manager releases this truck, so the guard cannot try again.
   const outwardLocked = outwardErrCode === 'GATE_OUTWARD_COUNT_LOCKED';
@@ -596,13 +600,13 @@ export default function GatePassConsolePage() {
                       Find
                     </Button>
                   </div>
-                  {dnMatch && (
+                  {found && (
                     <p className="text-xs text-muted-foreground">
-                      {dnMatch.dispatch_note_number} · {dnMatch.owner_party_name ?? '—'} · {dnMatch.marka ?? '—'} · {dnMatch.vehicle_number ?? '—'}
+                      {found.dispatch_note_number} · {found.owner_party_name ?? '—'} · {found.marka ?? '—'} · {found.vehicle_number ?? '—'}
                     </p>
                   )}
                   {dnNote && <p className="text-xs text-destructive">{dnNote}</p>}
-                  {dnPending && !dnNote && !dnLooking && (
+                  {dnPending && !dnLooking && (
                     <p className="text-xs text-amber-700">Find the dispatch note, or clear the box.</p>
                   )}
                 </div>
@@ -665,7 +669,7 @@ export default function GatePassConsolePage() {
                     variant="destructive"
                     size="sm"
                     onClick={() => submitOutward(true)}
-                    disabled={outwardLoading || !countValid || overrideReason.trim().length < 3}
+                    disabled={outwardLoading || !countValid || overrideReason.trim().length < 3 || dnPending}
                   >
                     Release anyway
                   </Button>

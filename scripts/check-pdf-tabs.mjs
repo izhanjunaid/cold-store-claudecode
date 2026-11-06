@@ -7,8 +7,9 @@
 // Pass directories to scan as arguments (the default is apps/web/src).
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN = process.argv.length > 2 ? process.argv.slice(2) : ['apps/web/src'];
 
 const RULES = [
@@ -38,7 +39,11 @@ function* walk(dir) {
 const offences = [];
 for (const base of SCAN) {
   const dir = path.resolve(ROOT, base);
-  if (!fs.existsSync(dir)) continue;
+  if (!fs.existsSync(dir)) {
+    // A guardrail that scans nothing would pass for ever.
+    console.error(`::error::scan directory not found: ${base}`);
+    process.exit(1);
+  }
   for (const file of walk(dir)) {
     const rel = path.relative(ROOT, file).split(path.sep).join('/');
     if (skip(rel)) continue;

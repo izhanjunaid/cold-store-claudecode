@@ -10,9 +10,21 @@
  * hands it in.
  */
 
-/** A blank tab, opened at once; null when the browser refused it. */
+/**
+ * A blank tab, opened at once; null when the browser refused it. It says it is waiting, so a slow
+ * render does not look like a dead page.
+ */
 export function openPdfTab(): Window | null {
-  return window.open('', '_blank');
+  const tab = window.open('', '_blank');
+  try {
+    if (tab) {
+      tab.document.title = 'Preparing…';
+      tab.document.body.textContent = 'Preparing the paper…';
+    }
+  } catch {
+    /* a blank tab we cannot write to is still a tab to fill */
+  }
+  return tab;
 }
 
 /**
@@ -44,9 +56,15 @@ export async function fetchPdfBlobUrl(path: string, what: string): Promise<strin
 export async function openPdf(path: string, what: string, tab: Window | null = openPdfTab()): Promise<void> {
   try {
     const url = await fetchPdfBlobUrl(path, what);
-    if (tab) tab.location.href = url;
-    else window.open(url, '_blank'); // the early tab was refused: one more try
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    // The blob URL is not revoked: Chrome's PDF viewer may still need it to save or reload the paper,
+    // and it dies with the page anyway.
+    if (tab) {
+      // A tab the person closed while the paper rendered stays closed.
+      if (!tab.closed) tab.location.href = url;
+    } else if (!window.open(url, '_blank')) {
+      // The early tab was refused and so is this one (it is long past the click).
+      throw new Error('The browser blocked the PDF tab — allow pop-ups for this site and try again');
+    }
   } catch (e) {
     tab?.close();
     throw e;
