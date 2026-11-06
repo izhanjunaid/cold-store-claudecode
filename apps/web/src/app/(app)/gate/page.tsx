@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { FileText, RefreshCw, Truck } from 'lucide-react';
@@ -177,6 +177,8 @@ export default function GatePassConsolePage() {
   const [dnMatch, setDnMatch] = useState<WithdrawalHit | null>(null);
   const [dnNote, setDnNote] = useState<string | null>(null);
   const [dnLooking, setDnLooking] = useState(false);
+  // Which lookup may still answer: an answer from an older one (or for an edited box) is dropped.
+  const dnSeq = useRef(0);
   const [creditAuth, setCreditAuth] = useState(false);
   // The guard's count is blind: the dialog never shows what was dispatched.
   const [outwardCount, setOutwardCount] = useState('');
@@ -257,6 +259,7 @@ export default function GatePassConsolePage() {
   function openOutward(p: GatePass) {
     setOutwardModal(p);
     // No pre-fill from the pass's stored link: only the manager's own typed choice names a withdrawal.
+    dropLookup();
     setDnText('');
     setDnMatch(null);
     setDnNote(null);
@@ -276,6 +279,7 @@ export default function GatePassConsolePage() {
   async function findDispatchNote() {
     const dn = dnText.trim().toUpperCase();
     if (!dn) return;
+    const seq = ++dnSeq.current;
     setDnLooking(true);
     setDnMatch(null);
     setDnNote(null);
@@ -283,15 +287,23 @@ export default function GatePassConsolePage() {
       const { data } = await apiClientList<WithdrawalHit>(
         `/v1/outbound-events?status=DISPATCHED&search=${encodeURIComponent(dn)}&page_size=10`,
       );
+      if (seq !== dnSeq.current) return; // the box was edited, or searched again, since: this answer is old
       const hit = data.find((r) => (r.dispatch_note_number ?? '').toUpperCase() === dn);
       if (!hit) setDnNote('No dispatched withdrawal with that dispatch note number.');
       else if (hit.gate_pass_id) setDnNote('That dispatch note already left on another truck.');
       else setDnMatch(hit);
     } catch (err) {
+      if (seq !== dnSeq.current) return;
       setDnNote(err instanceof Error ? err.message : 'Could not look up the dispatch note');
     } finally {
-      setDnLooking(false);
+      if (seq === dnSeq.current) setDnLooking(false);
     }
+  }
+
+  /** The box changed (or the dialog did): an answer still on its way is for something else now. */
+  function dropLookup() {
+    dnSeq.current += 1;
+    setDnLooking(false);
   }
 
   /** `withOverride`: a manager releasing a truck that failed a gate check, with a reason. */
@@ -584,6 +596,7 @@ export default function GatePassConsolePage() {
                       value={dnText}
                       onChange={(e) => {
                         // An edited number no longer names what was found for the old one.
+                        dropLookup();
                         setDnText(e.target.value);
                         setDnMatch(null);
                         setDnNote(null);

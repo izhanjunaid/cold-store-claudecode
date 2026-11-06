@@ -218,6 +218,33 @@ describe('GatePassConsolePage — clear outward', () => {
       expect(outwardPosts()).toHaveLength(0);
     });
 
+    it('an older lookup answering after a newer one does not replace it', async () => {
+      const answers: ((v: unknown) => void)[] = [];
+      apiClientList.mockImplementation((path: string) =>
+        path.startsWith('/v1/outbound-events')
+          ? new Promise((r) => answers.push(r))
+          : Promise.resolve({ data: path.includes('active=true') ? [PASS] : [], meta: { page: 1, per_page: 50, total: 1 } }),
+      );
+      const dialog = await openClearOutward();
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      find(dialog); // lookup 1, for DN-…-0009
+      const other = 'DN-260101-0010';
+      fireEvent.change(box(dialog), { target: { value: other } });
+      find(dialog); // lookup 2, for DN-…-0010
+      const page = (dn: string, id: string) => ({ data: [withdrawal({ id, dispatch_note_number: dn })], meta: { page: 1, per_page: 10, total: 1 } });
+      answers[1]!(page(other, 'ob-10')); // the newer answer first
+      await within(dialog).findByText(new RegExp(other));
+      answers[0]!(page(DN, 'ob-9')); // then the older one, for text the box no longer holds
+      await new Promise((r) => setTimeout(r, 30));
+
+      expect(within(dialog).getByText(new RegExp(other))).toBeInTheDocument();
+      enterCount(dialog, '20');
+      expect(clear(dialog)).toBeEnabled();
+      fireEvent.click(clear(dialog));
+      await waitFor(() => expect(outwardPosts()).toHaveLength(1));
+      expect(outwardPosts()[0]![1].body).toEqual({ outbound_event_id: 'ob-10', declared_quantity: 20 });
+    });
+
     it('Release anyway waits too while a typed note has not been found', async () => {
       apiClient.mockRejectedValueOnce(new ApiError('The bag count does not match the dispatch', { code: 'GATE_OUTWARD_COUNT_MISMATCH', status: 422 }));
       const dialog = await openClearOutward();
