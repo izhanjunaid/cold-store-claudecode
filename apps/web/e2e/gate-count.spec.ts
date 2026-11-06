@@ -109,7 +109,8 @@ test('three wrong counts lock the truck for the guard; a manager releases it', a
   await expect(mgrDialog.getByText(/counted 41, dispatch said 50/)).toBeVisible();
   await mgrDialog.getByLabel(/bags counted/i).fill('50');
   await mgrDialog.getByRole('button', { name: /^clear outward$/i }).click();
-  await expect(page.getByText(/Cleared .*TAT/i).first()).toBeVisible({ timeout: 20_000 });
+  // This truck's own toast: the "Recently Cleared Today" list holds earlier trucks' "TAT" text too.
+  await expect(page.getByText(new RegExp(`Cleared ${truck} — TAT`))).toBeVisible({ timeout: 20_000 });
 
   const sec = await authHeaders('SECURITY');
   const passes = (await (await request.get(`${API_URL}/v1/gate-passes?vehicle_number=${truck}&page_size=5`, { headers: sec })).json()).data as {
@@ -146,7 +147,9 @@ test('a manager releases a truck by its dispatch note number', async ({ page, re
 
   await loginAs('MANAGER');
   await page.goto('/gate');
-  const inside = page.locator('li', { hasText: truck });
+  // A dispatched, paid truck is on the Ready-to-leave card and in the list of trucks inside; the
+  // dispatch note box belongs to the dialog that Clear Outward opens, from the list.
+  const inside = page.locator('li', { hasText: truck }).filter({ has: page.getByRole('button', { name: /^clear outward$/i }) });
   await expect(inside).toBeVisible({ timeout: 30_000 });
   await inside.getByRole('button', { name: /^clear outward$/i }).click();
 
@@ -156,7 +159,8 @@ test('a manager releases a truck by its dispatch note number', async ({ page, re
   await expect(dialog.getByText(new RegExp(`${dispatchNote} · .* · ${truck}`))).toBeVisible({ timeout: 20_000 });
   await dialog.getByLabel(/bags counted/i).fill('40');
   await dialog.getByRole('button', { name: /^clear outward$/i }).click();
-  await expect(page.getByText(/Cleared .*TAT/i).first()).toBeVisible({ timeout: 20_000 });
+  // This truck's own toast: the "Recently Cleared Today" list holds earlier trucks' "TAT" text too.
+  await expect(page.getByText(new RegExp(`Cleared ${truck} — TAT`))).toBeVisible({ timeout: 20_000 });
 
   const sec = await authHeaders('SECURITY');
   const passes = (await (await request.get(`${API_URL}/v1/gate-passes?vehicle_number=${truck}&page_size=5`, { headers: sec })).json()).data as {
