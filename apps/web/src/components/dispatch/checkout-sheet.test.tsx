@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -66,7 +66,7 @@ const posts = () => apiClient.mock.calls.filter(([, opts]) => opts?.method === '
 
 // The dispatch note's tab: opened on the click, before the checkout answers (docs/28 D8).
 const tab = { location: { href: '' }, close: vi.fn() };
-let openSpy: ReturnType<typeof vi.spyOn>;
+let openSpy: MockInstance<typeof window.open>;
 
 beforeEach(() => {
   apiClient.mockReset();

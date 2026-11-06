@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { localIsoDate } from '@coldchain/shared';
@@ -48,7 +48,7 @@ let preview: any;
 
 // The load slip's tab: opened on the click, before the checkout answers (docs/28 D8).
 const tab = { location: { href: '' }, close: vi.fn() };
-let openSpy: ReturnType<typeof vi.spyOn>;
+let openSpy: MockInstance<typeof window.open>;
 const posts = () => apiClient.mock.calls.filter(([, o]) => o?.method === 'POST');
 
 function renderSheet(onDone = vi.fn()) {
