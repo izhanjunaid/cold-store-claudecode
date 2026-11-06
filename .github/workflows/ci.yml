@@ -94,6 +94,11 @@ jobs:
         # still yesterday. "Today" is businessDate() on the server, localIsoDate() in forms.
         run: node scripts/check-business-date.mjs
 
+      - name: Guardrail — every PDF opens through openPdf (docs/28 D8)
+        # A PDF tab must open on the click (Chrome blocks one opened after a slow await), and a
+        # production build has NEXT_PUBLIC_API_URL="" which an `||` fallback turns into localhost.
+        run: node scripts/check-pdf-tabs.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 

@@ -22,8 +22,7 @@ import {
   type AllocationRow,
 } from '@/components/rack-allocation-editor';
 import { formatDateTime, formatCount } from '@/lib/format';
-
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
+import { openPdf } from '@/lib/open-pdf';
 
 export interface LotPlacements {
   lot_id: string;
@@ -80,20 +79,9 @@ export function LotLocationCard({ lotId, canOperate }: { lotId: string; canOpera
   const printSlip = async () => {
     setSlipLoading(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const facilityId = localStorage.getItem('facility_id');
-      const res = await fetch(`${API_URL}/v1/lots/${lotId}/placement-slip`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
-        },
-      });
-      if (!res.ok) throw new Error('Failed to fetch placement slip');
-      const url = URL.createObjectURL(await res.blob());
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch {
-      toast.error('Could not generate the placement slip');
+      await openPdf(`/v1/lots/${lotId}/placement-slip`, 'placement slip'); // its tab opens here, on the click
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not open the placement slip');
     } finally {
       setSlipLoading(false);
     }

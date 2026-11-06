@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { localIsoDate } from '@coldchain/shared';
@@ -45,6 +45,10 @@ const A = { id: 'pa', name: 'Haji Sahib' };
 const B = { id: 'pb', name: 'Bashir' };
 
 let preview: any;
+
+// The load slip's tab: opened on the click, before the checkout answers (docs/28 D8).
+const tab = { location: { href: '' }, close: vi.fn() };
+let openSpy: MockInstance<typeof window.open>;
 const posts = () => apiClient.mock.calls.filter(([, o]) => o?.method === 'POST');
 
 function renderSheet(onDone = vi.fn()) {
@@ -59,6 +63,8 @@ function renderSheet(onDone = vi.fn()) {
 
 beforeEach(() => {
   apiClient.mockReset();
+  tab.close.mockReset();
+  openSpy = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
   permissions = ['outbound.record', 'outbound.finalize', 'invoices.manage', 'payments.record'];
   preview = {
     gate_pass_id: 'pass-1',
@@ -80,6 +86,66 @@ beforeEach(() => {
         : preview,
     ),
   );
+});
+
+afterEach(() => openSpy.mockRestore());
+
+describe('TruckCheckoutSheet — the load slip tab (docs/28 D8)', () => {
+  const base = () => apiClient.getMockImplementation()!;
+  const checkOut = async () => {
+    await screen.findByText('Bashir', { selector: '[data-group-party]' }); // priced: the button is live
+    fireEvent.click(screen.getByRole('button', { name: /Check out truck/ }));
+  };
+
+  it('opens the tab on the click, before the checkout answers, and hands it on with the result', async () => {
+    const impl = base();
+    const RESULT = { gate_pass_id: 'pass-1', lines: [], payments: [] };
+    let answer!: (r: unknown) => void;
+    apiClient.mockImplementation((path: string, opts?: { method?: string }) =>
+      opts?.method === 'POST' ? new Promise((r) => (answer = r)) : impl(path, opts),
+    );
+    const onDone = renderSheet();
+    await checkOut();
+
+    expect(openSpy).toHaveBeenCalledTimes(1); // the POST has not answered yet
+    answer(RESULT);
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(RESULT, tab));
+    expect(tab.close).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a refusal', new ApiError('A manager must finish this truck', { code: 'DISPATCH_NEEDS_MANAGER', status: 403 })],
+    ['a changed load', new ApiError('The truck\'s load changed', { code: 'TRUCK_LOAD_CHANGED', status: 409 })],
+    ['a bill that moved', new ApiError('The bill moved', { code: 'DISPATCH_TOTAL_CHANGED', status: 409 })],
+    ['a network failure', new Error('offline')],
+  ])('closes the tab it opened after %s', async (_name, failure) => {
+    const impl = base();
+    apiClient.mockImplementation((path: string, opts?: { method?: string }) =>
+      opts?.method === 'POST' ? Promise.reject(failure) : impl(path, opts),
+    );
+    const onDone = renderSheet();
+    await checkOut();
+
+    await screen.findByRole('alert');
+    expect(tab.close).toHaveBeenCalledTimes(1);
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  // The truck was checked out already (a retry, or someone else): the sheet only points to the truck
+  // card's Load slip. Filling the tab would print a second slip, so the tab is closed.
+  it('a truck already checked out closes the tab and prints nothing', async () => {
+    const impl = base();
+    apiClient.mockImplementation((path: string, opts?: { method?: string }) =>
+      opts?.method === 'POST'
+        ? Promise.reject(new ApiError('Already checked out', { code: 'OUTBOUND_ALREADY_FINALIZED', status: 409 }))
+        : impl(path, opts),
+    );
+    const onDone = renderSheet();
+    await checkOut();
+
+    await waitFor(() => expect(tab.close).toHaveBeenCalledTimes(1));
+    expect(onDone).not.toHaveBeenCalled();
+  });
 });
 
 describe('TruckCheckoutSheet', () => {

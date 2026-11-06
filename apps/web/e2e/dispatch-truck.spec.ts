@@ -102,7 +102,10 @@ test('a two-lot truck: booked from its card, checked out in one step, released o
   }
 
   await tap(card.getByRole('button', { name: 'Check out truck' }));
+  // The sheet opens the load slip's tab on this click (docs/28 D8) and the page fills it.
+  const slipPopup = page.waitForEvent('popup', { timeout: 30_000 });
   await tap(page.getByRole('button', { name: /Check out truck Rs\s?[\d,]+/ }));
+  await (await slipPopup).waitForURL(/^blob:/, { timeout: 30_000 });
   await expect(page.getByText(/checked out/i).first()).toBeVisible({ timeout: 30_000 });
 
   console.log(`dispatch truck: ${clicks} clicks from the truck's card to two lots dispatched and paid`);

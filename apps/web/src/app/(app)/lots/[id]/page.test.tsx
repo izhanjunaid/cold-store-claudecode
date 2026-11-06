@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -38,6 +38,10 @@ vi.mock('@/components/lot-location', () => ({
 vi.mock('@/components/outbound/withdraw-form', () => ({
   WithdrawForm: ({ lotId }: { lotId: string }) => <div data-testid="withdraw-form" data-lot-id={lotId} />,
 }));
+
+// Print Receipt reports a failure through a toast.
+const toastError = vi.fn();
+vi.mock('sonner', () => ({ toast: { error: (...a: unknown[]) => toastError(...a), success: vi.fn() } }));
 
 import LotDetailPage from './page';
 
@@ -209,5 +213,38 @@ describe('LotDetailPage actions', () => {
     expect(screen.queryByRole('button', { name: /new withdrawal/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /transfer ownership/i })).toBeNull();
     expect(screen.getByTestId('lot-location')).toHaveAttribute('data-can-operate', 'false');
+  });
+});
+
+describe('LotDetailPage — Print Receipt', () => {
+  const tab = { location: { href: '' }, close: vi.fn() };
+
+  beforeEach(() => {
+    apiClient.mockReset();
+    apiClient.mockImplementation((path: string) => Promise.resolve(path === `/v1/lots/${LOT_ID}` ? lot : []));
+    lot = LOT;
+    role = 'OPERATOR';
+    permissions = ['lots.manage'];
+    toastError.mockReset();
+    tab.location.href = '';
+    tab.close.mockReset();
+    URL.createObjectURL = vi.fn(() => 'blob:receipt');
+    URL.revokeObjectURL = vi.fn();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('opens its tab at once, and a failure is shown, not swallowed', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    let answer!: (r: Response) => void;
+    vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise<Response>((r) => (answer = r)));
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Print Receipt' }));
+    expect(open).toHaveBeenCalledTimes(1); // before the receipt is back
+    answer({ ok: false, status: 500 } as Response);
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/Could not open the storage receipt \(500\)/)));
+    expect(tab.close).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Print Receipt' })).toBeEnabled();
   });
 });

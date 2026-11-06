@@ -41,10 +41,10 @@ vi.mock('@/components/dispatch/checkout-sheet', () => ({
   }: {
     outboundId: string;
     lotId?: string;
-    onDone: (r: unknown) => void;
+    onDone: (r: unknown, tab?: unknown) => void;
   }) => (
     <div data-testid="checkout" data-id={outboundId} data-lot={lotId}>
-      <button type="button" onClick={() => onDone({ outbound: { id: outboundId }, invoice: {}, payment: null })}>
+      <button type="button" onClick={() => onDone({ outbound: { id: outboundId }, invoice: {}, payment: null }, { noteTab: true })}>
         finish checkout
       </button>
     </div>
@@ -56,13 +56,19 @@ vi.mock('@/components/outbound/withdraw-sheet', () => ({
   ),
 }));
 vi.mock('@/components/dispatch/truck-checkout-sheet', () => ({
-  TruckCheckoutSheet: ({ passId }: { passId: string }) => <div data-testid="truck-checkout" data-pass={passId} />,
+  TruckCheckoutSheet: ({ passId, onDone }: { passId: string; onDone: (r: unknown, tab?: unknown) => void }) => (
+    <div data-testid="truck-checkout" data-pass={passId}>
+      <button type="button" onClick={() => onDone({ gate_pass_id: passId, lines: [], payments: [] }, { slipTab: true })}>
+        finish truck checkout
+      </button>
+    </div>
+  ),
 }));
 vi.mock('@/components/dispatch/dispatch-pdf', () => ({
   openDispatchNotePdf: vi.fn().mockResolvedValue(undefined),
   openLoadSlipPdf: vi.fn().mockResolvedValue(undefined),
 }));
-import { openDispatchNotePdf } from '@/components/dispatch/dispatch-pdf';
+import { openDispatchNotePdf, openLoadSlipPdf } from '@/components/dispatch/dispatch-pdf';
 vi.mock('@/components/billing/invoice-pdf', () => ({ openInvoicePdf: vi.fn().mockResolvedValue(undefined) }));
 
 import DispatchDeskPage from './page';
@@ -300,7 +306,8 @@ describe('Dispatch Desk', () => {
     const before = queueFetches();
     fireEvent.click(screen.getByRole('button', { name: 'finish checkout' }));
     await waitFor(() => expect(queueFetches()).toBeGreaterThan(before));
-    expect(openDispatchNotePdf).toHaveBeenCalledWith('ob-weighed');
+    // The tab the sheet opened on the click is the one that is filled (docs/28 D8).
+    expect(openDispatchNotePdf).toHaveBeenCalledWith('ob-weighed', { noteTab: true });
   });
 
   it('asks the server nothing until the signed-in user is known', async () => {
@@ -333,6 +340,15 @@ describe('Dispatch Desk — trucks with several lots', () => {
     expect(within(card).getByText(/DN-SECOND/)).toBeInTheDocument();
     fireEvent.click(within(card).getByRole('button', { name: 'Check out truck' }));
     expect(await screen.findByTestId('truck-checkout')).toHaveAttribute('data-pass', 'pass-1');
+  });
+
+  it("a truck's checkout fills the load slip tab the sheet opened on the click", async () => {
+    trucks = [truck({ vehicle_number: 'LHR-2222', ready: true, lines: TWO_LINES })];
+    renderPage();
+    const card = (await screen.findByText('LHR-2222', { selector: '[data-truck-plate]' })).closest('[data-truck]') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Check out truck' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'finish truck checkout' }));
+    await waitFor(() => expect(openLoadSlipPdf).toHaveBeenCalledWith('pass-1', { slipTab: true }));
   });
 
   it('a lot on a truck of several is checked out with the truck, not on its own', async () => {

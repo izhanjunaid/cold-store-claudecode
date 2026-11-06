@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { FileText, RefreshCw, Truck } from 'lucide-react';
 import { GATE_COUNT_TRIES, localIsoDate } from '@coldchain/shared';
 import { apiClient, apiClientList, ApiError } from '@/lib/api-client';
 import { formatCount } from '@/lib/format';
+import { openPdf } from '@/lib/open-pdf';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { hasMinRole } from '@/lib/rbac';
@@ -62,6 +63,17 @@ interface GatePass {
     /** READY on a standing credit approval rather than payment. A flag only: no amount or ceiling. */
     on_credit?: boolean;
   };
+}
+
+/** A row of GET /v1/outbound-events, as far as the dispatch note lookup reads it. */
+interface WithdrawalHit {
+  id: string;
+  dispatch_note_number: string | null;
+  vehicle_number: string | null;
+  marka: string | null;
+  owner_party_name: string | null;
+  /** Set once a truck has carried it out. */
+  gate_pass_id: string | null;
 }
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = {
@@ -134,17 +146,11 @@ function formatTurnaround(seconds: number | null): string {
 }
 
 async function printGatePassReceipt(passId: string) {
-  const token = localStorage.getItem('access_token');
-  const facilityId = localStorage.getItem('facility_id');
-  const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
-  const res = await fetch(`${apiUrl}/v1/gate-passes/${passId}/receipt?format=pdf`, {
-    headers: { Authorization: `Bearer ${token}`, 'X-Facility-ID': facilityId ?? '' },
-  });
-  if (!res.ok) {
-    toast.error(`Receipt download failed (${res.status})`);
-    return;
+  try {
+    await openPdf(`/v1/gate-passes/${passId}/receipt?format=pdf`, 'gate receipt'); // its tab opens on the click
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : 'Could not open the gate receipt');
   }
-  window.open(URL.createObjectURL(await res.blob()), '_blank');
 }
 
 export default function GatePassConsolePage() {
@@ -165,7 +171,14 @@ export default function GatePassConsolePage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [outwardModal, setOutwardModal] = useState<GatePass | null>(null);
-  const [outwardOutboundId, setOutwardOutboundId] = useState('');
+  // A manager may name the withdrawal by its dispatch note number (docs/28 D9): what is typed, the
+  // dispatched withdrawal found for it, and why none was.
+  const [dnText, setDnText] = useState('');
+  const [dnMatch, setDnMatch] = useState<WithdrawalHit | null>(null);
+  const [dnNote, setDnNote] = useState<string | null>(null);
+  const [dnLooking, setDnLooking] = useState(false);
+  // Which lookup may still answer: an answer from an older one (or for an edited box) is dropped.
+  const dnSeq = useRef(0);
   const [creditAuth, setCreditAuth] = useState(false);
   // The guard's count is blind: the dialog never shows what was dispatched.
   const [outwardCount, setOutwardCount] = useState('');
@@ -245,7 +258,11 @@ export default function GatePassConsolePage() {
 
   function openOutward(p: GatePass) {
     setOutwardModal(p);
-    setOutwardOutboundId(p.related_outbound_id ?? '');
+    // No pre-fill from the pass's stored link: only the manager's own typed choice names a withdrawal.
+    dropLookup();
+    setDnText('');
+    setDnMatch(null);
+    setDnNote(null);
     setCreditAuth(false);
     setOutwardCount('');
     setOverrideReason('');
@@ -253,6 +270,40 @@ export default function GatePassConsolePage() {
     setOutwardErr(null);
     setOutwardErrCode(null);
     setOutwardTriesLeft(null);
+  }
+
+  /**
+   * Find the dispatched withdrawal a typed dispatch note number names. The search route matches a
+   * substring (DN-…-0009 also finds DN-…-00090), so only the exact number counts.
+   */
+  async function findDispatchNote() {
+    const dn = dnText.trim().toUpperCase();
+    if (!dn) return;
+    const seq = ++dnSeq.current;
+    setDnLooking(true);
+    setDnMatch(null);
+    setDnNote(null);
+    try {
+      const { data } = await apiClientList<WithdrawalHit>(
+        `/v1/outbound-events?status=DISPATCHED&search=${encodeURIComponent(dn)}&page_size=10`,
+      );
+      if (seq !== dnSeq.current) return; // the box was edited, or searched again, since: this answer is old
+      const hit = data.find((r) => (r.dispatch_note_number ?? '').toUpperCase() === dn);
+      if (!hit) setDnNote('No dispatched withdrawal with that dispatch note number.');
+      else if (hit.gate_pass_id) setDnNote('That dispatch note already left on another truck.');
+      else setDnMatch(hit);
+    } catch (err) {
+      if (seq !== dnSeq.current) return;
+      setDnNote(err instanceof Error ? err.message : 'Could not look up the dispatch note');
+    } finally {
+      if (seq === dnSeq.current) setDnLooking(false);
+    }
+  }
+
+  /** The box changed (or the dialog did): an answer still on its way is for something else now. */
+  function dropLookup() {
+    dnSeq.current += 1;
+    setDnLooking(false);
   }
 
   /** `withOverride`: a manager releasing a truck that failed a gate check, with a reason. */
@@ -270,14 +321,15 @@ export default function GatePassConsolePage() {
         method: 'POST',
         body: {
           // Naming a withdrawal is a manager's call (the server refuses it from anyone else).
-          ...(canManager && outwardOutboundId.trim() ? { outbound_event_id: outwardOutboundId.trim() } : {}),
+          ...(canManager && found ? { outbound_event_id: found.id } : {}),
           ...(creditAuth ? { credit_authorization: true } : {}),
           declared_quantity: declared,
           ...(sendOverride ? { override_reason: reason } : {}),
         },
       });
       setOutwardModal(null);
-      setOutwardOutboundId('');
+      setDnText('');
+      setDnMatch(null);
       setCreditAuth(false);
       setOutwardCount('');
       setOverrideReason('');
@@ -300,6 +352,12 @@ export default function GatePassConsolePage() {
   const readyToLeave = passes.filter((p) => p.release?.state === 'READY');
   const countValid = parseCount(outwardCount) != null;
   const outwardBlocked = outwardErrCode === 'GATE_OUTWARD_BLOCKED';
+  // The withdrawal found for what the box says NOW. A lookup that was answered after the box was edited
+  // (or the dialog reopened) found something else, and must not name it.
+  const found =
+    dnMatch && (dnMatch.dispatch_note_number ?? '').toUpperCase() === dnText.trim().toUpperCase() ? dnMatch : null;
+  // A dispatch note was typed but is not (or no longer) a withdrawal that was found: releasing waits.
+  const dnPending = canManager && dnText.trim() !== '' && !found;
   const outwardHold = outwardErrCode === 'GATE_OUTWARD_NOT_DISPATCHED';
   // Three counts have not matched: only a manager releases this truck, so the guard cannot try again.
   const outwardLocked = outwardErrCode === 'GATE_OUTWARD_COUNT_LOCKED';
@@ -531,14 +589,39 @@ export default function GatePassConsolePage() {
               )}
               {canManager && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="outward-outbound-id">Outbound event ID (optional)</Label>
-                  <Input
-                    id="outward-outbound-id"
-                    value={outwardOutboundId}
-                    onChange={(e) => setOutwardOutboundId(e.target.value)}
-                    placeholder="Auto-match by vehicle if blank"
-                    className="font-mono"
-                  />
+                  <Label htmlFor="outward-dn">Dispatch note number (optional)</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="outward-dn"
+                      value={dnText}
+                      onChange={(e) => {
+                        // An edited number no longer names what was found for the old one.
+                        dropLookup();
+                        setDnText(e.target.value);
+                        setDnMatch(null);
+                        setDnNote(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        e.preventDefault(); // looks the number up; releasing is the button's job
+                        void findDispatchNote();
+                      }}
+                      placeholder="Match the truck by its plate if blank"
+                      className="font-mono"
+                    />
+                    <Button type="button" variant="outline" onClick={() => void findDispatchNote()} disabled={!dnText.trim() || dnLooking}>
+                      Find
+                    </Button>
+                  </div>
+                  {found && (
+                    <p className="text-xs text-muted-foreground">
+                      {found.dispatch_note_number} · {found.owner_party_name ?? '—'} · {found.marka ?? '—'} · {found.vehicle_number ?? '—'}
+                    </p>
+                  )}
+                  {dnNote && <p className="text-xs text-destructive">{dnNote}</p>}
+                  {dnPending && !dnLooking && (
+                    <p className="text-xs text-amber-700">Find the dispatch note, or clear the box.</p>
+                  )}
                 </div>
               )}
               {canManager && (
@@ -599,7 +682,7 @@ export default function GatePassConsolePage() {
                     variant="destructive"
                     size="sm"
                     onClick={() => submitOutward(true)}
-                    disabled={outwardLoading || !countValid || overrideReason.trim().length < 3}
+                    disabled={outwardLoading || !countValid || overrideReason.trim().length < 3 || dnPending}
                   >
                     Release anyway
                   </Button>
@@ -611,7 +694,7 @@ export default function GatePassConsolePage() {
             <Button variant="outline" onClick={() => setOutwardModal(null)}>
               Cancel
             </Button>
-            <Button onClick={() => submitOutward()} disabled={outwardLoading || !countValid || outwardLocked}>
+            <Button onClick={() => submitOutward()} disabled={outwardLoading || !countValid || outwardLocked || dnPending}>
               {outwardLoading ? 'Clearing…' : 'Clear Outward'}
             </Button>
           </DialogFooter>

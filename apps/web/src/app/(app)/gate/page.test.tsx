@@ -132,21 +132,208 @@ describe('GatePassConsolePage — clear outward', () => {
     expect(within(dialog).queryByDisplayValue('137')).not.toBeInTheDocument();
   });
 
-  it('shows the raw outbound event ID box to managers only', async () => {
-    const guardDialog = await openClearOutward();
-    expect(within(guardDialog).queryByLabelText(/outbound event id/i)).not.toBeInTheDocument();
-  });
+  // C3 D9: a manager names a withdrawal by its dispatch note number, not a raw id. The search route is a
+  // substring match, so only the exact dispatch note counts.
+  describe('the dispatch note box (managers only)', () => {
+    const DN = 'DN-260101-0009';
+    const withdrawal = (over: Record<string, unknown> = {}) => ({
+      id: 'ob-9',
+      dispatch_note_number: DN,
+      status: 'DISPATCHED',
+      vehicle_number: 'LHR-1234',
+      lot_number: 'LOT-260101-0001',
+      marka: 'AH',
+      owner_party_name: 'Haji Sahib',
+      gate_pass_id: null,
+      ...over,
+    });
+    const lookupReturns = (rows: unknown[], pass: Record<string, unknown> = PASS) =>
+      apiClientList.mockImplementation((path: string) =>
+        Promise.resolve({
+          data: path.startsWith('/v1/outbound-events') ? rows : path.includes('active=true') ? [pass] : [],
+          meta: { page: 1, per_page: 50, total: 1 },
+        }),
+      );
+    const lookups = () => apiClientList.mock.calls.filter(([p]) => String(p).startsWith('/v1/outbound-events'));
+    const box = (dialog: HTMLElement) => within(dialog).getByLabelText(/dispatch note number/i);
+    const find = (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: /^find$/i }));
+    const clear = (dialog: HTMLElement) => within(dialog).getByRole('button', { name: /^clear outward$/i });
 
-  it('lets a manager send an outbound event ID with the count', async () => {
-    role = 'MANAGER';
-    const dialog = await openClearOutward();
-    const id = '0b6f3c1e-8f2a-4d6b-9a51-2c7e5d4f1a90';
-    fireEvent.change(within(dialog).getByLabelText(/outbound event id/i), { target: { value: id } });
-    enterCount(dialog, '20');
-    fireEvent.click(within(dialog).getByRole('button', { name: /^clear outward$/i }));
+    beforeEach(() => {
+      role = 'MANAGER';
+    });
 
-    await waitFor(() => expect(outwardPosts()).toHaveLength(1));
-    expect(outwardPosts()[0]![1].body).toEqual({ outbound_event_id: id, declared_quantity: 20 });
+    it('is not shown to the guard', async () => {
+      role = 'SECURITY';
+      const dialog = await openClearOutward();
+      expect(within(dialog).queryByLabelText(/dispatch note number/i)).not.toBeInTheDocument();
+      expect(within(dialog).queryByLabelText(/outbound event id/i)).not.toBeInTheDocument();
+    });
+
+    it('finds a withdrawal by its dispatch note and releases it by that note', async () => {
+      lookupReturns([withdrawal()]);
+      const dialog = await openClearOutward();
+      fireEvent.change(box(dialog), { target: { value: ' dn-260101-0009 ' } });
+      find(dialog);
+
+      expect(await within(dialog).findByText(/Haji Sahib/)).toHaveTextContent(`${DN} · Haji Sahib · AH · LHR-1234`);
+      expect(lookups()[0]![0]).toBe(`/v1/outbound-events?status=DISPATCHED&search=${DN}&page_size=10`);
+      enterCount(dialog, '20');
+      fireEvent.click(clear(dialog));
+
+      await waitFor(() => expect(outwardPosts()).toHaveLength(1));
+      expect(outwardPosts()[0]![1].body).toEqual({ outbound_event_id: 'ob-9', declared_quantity: 20 });
+    });
+
+    it('Enter in the box looks the note up', async () => {
+      lookupReturns([withdrawal()]);
+      const dialog = await openClearOutward();
+      enterCount(dialog, '20');
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      fireEvent.keyDown(box(dialog), { key: 'Enter' });
+
+      await within(dialog).findByText(/Haji Sahib/);
+      expect(lookups()).toHaveLength(1);
+    });
+
+    // The box stays editable while a lookup is out: its answer must only count for what the box
+    // still says, or the release would name a withdrawal the manager did not find.
+    it('a late answer for an edited box names nothing, and releases nothing by it', async () => {
+      let answer!: (v: unknown) => void;
+      apiClientList.mockImplementation((path: string) =>
+        path.startsWith('/v1/outbound-events')
+          ? new Promise((r) => (answer = r))
+          : Promise.resolve({ data: path.includes('active=true') ? [PASS] : [], meta: { page: 1, per_page: 50, total: 1 } }),
+      );
+      const dialog = await openClearOutward();
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      find(dialog); // the answer is still out
+      fireEvent.change(box(dialog), { target: { value: 'DN-260101-0010' } }); // the manager changed their mind
+      answer({ data: [withdrawal()], meta: { page: 1, per_page: 10, total: 1 } });
+
+      await new Promise((r) => setTimeout(r, 30)); // the late answer has been applied by now
+      expect(within(dialog).queryByText(/Haji Sahib/)).not.toBeInTheDocument();
+      enterCount(dialog, '20');
+      expect(clear(dialog)).toBeDisabled();
+      expect(outwardPosts()).toHaveLength(0);
+    });
+
+    it('an older lookup answering after a newer one does not replace it', async () => {
+      const answers: ((v: unknown) => void)[] = [];
+      apiClientList.mockImplementation((path: string) =>
+        path.startsWith('/v1/outbound-events')
+          ? new Promise((r) => answers.push(r))
+          : Promise.resolve({ data: path.includes('active=true') ? [PASS] : [], meta: { page: 1, per_page: 50, total: 1 } }),
+      );
+      const dialog = await openClearOutward();
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      find(dialog); // lookup 1, for DN-…-0009
+      const other = 'DN-260101-0010';
+      fireEvent.change(box(dialog), { target: { value: other } });
+      find(dialog); // lookup 2, for DN-…-0010
+      const page = (dn: string, id: string) => ({ data: [withdrawal({ id, dispatch_note_number: dn })], meta: { page: 1, per_page: 10, total: 1 } });
+      answers[1]!(page(other, 'ob-10')); // the newer answer first
+      await within(dialog).findByText(new RegExp(other));
+      answers[0]!(page(DN, 'ob-9')); // then the older one, for text the box no longer holds
+      await new Promise((r) => setTimeout(r, 30));
+
+      expect(within(dialog).getByText(new RegExp(other))).toBeInTheDocument();
+      enterCount(dialog, '20');
+      expect(clear(dialog)).toBeEnabled();
+      fireEvent.click(clear(dialog));
+      await waitFor(() => expect(outwardPosts()).toHaveLength(1));
+      expect(outwardPosts()[0]![1].body).toEqual({ outbound_event_id: 'ob-10', declared_quantity: 20 });
+    });
+
+    it('Release anyway waits too while a typed note has not been found', async () => {
+      apiClient.mockRejectedValueOnce(new ApiError('The bag count does not match the dispatch', { code: 'GATE_OUTWARD_COUNT_MISMATCH', status: 422 }));
+      const dialog = await openClearOutward();
+      enterCount(dialog, '130');
+      fireEvent.click(clear(dialog));
+      fireEvent.change(await within(dialog).findByLabelText(/override reason/i), { target: { value: 'Seven bags torn' } });
+      expect(within(dialog).getByRole('button', { name: /release anyway/i })).toBeEnabled();
+
+      fireEvent.change(box(dialog), { target: { value: 'DN-260101-0' } });
+      expect(within(dialog).getByRole('button', { name: /release anyway/i })).toBeDisabled();
+    });
+
+    it('a refusal in the box still says how to go on without it', async () => {
+      lookupReturns([]);
+      const dialog = await openClearOutward();
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      find(dialog);
+      await within(dialog).findByText('No dispatched withdrawal with that dispatch note number.');
+      expect(within(dialog).getByText('Find the dispatch note, or clear the box.')).toBeInTheDocument();
+    });
+
+    it('does not pick a near miss: DN-…-0009 is not DN-…-00090', async () => {
+      lookupReturns([withdrawal({ id: 'ob-90', dispatch_note_number: `${DN}0` })]);
+      const dialog = await openClearOutward();
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      find(dialog);
+
+      expect(await within(dialog).findByText('No dispatched withdrawal with that dispatch note number.')).toBeInTheDocument();
+      enterCount(dialog, '20');
+      expect(clear(dialog)).toBeDisabled();
+    });
+
+    it('refuses a dispatch note that already left on another truck', async () => {
+      lookupReturns([withdrawal({ gate_pass_id: 'gp-other' })]);
+      const dialog = await openClearOutward();
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      find(dialog);
+
+      expect(await within(dialog).findByText('That dispatch note already left on another truck.')).toBeInTheDocument();
+      enterCount(dialog, '20');
+      expect(clear(dialog)).toBeDisabled();
+    });
+
+    it('holds Clear Outward while a typed note has not been found, and again once it is edited', async () => {
+      lookupReturns([withdrawal()]);
+      const dialog = await openClearOutward();
+      enterCount(dialog, '20');
+      expect(clear(dialog)).toBeEnabled(); // nothing typed: match the truck by its plate as before
+
+      fireEvent.change(box(dialog), { target: { value: 'DN-260101-0' } });
+      expect(within(dialog).getByText('Find the dispatch note, or clear the box.')).toBeInTheDocument();
+      expect(clear(dialog)).toBeDisabled();
+
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      find(dialog);
+      await within(dialog).findByText(/Haji Sahib/);
+      expect(clear(dialog)).toBeEnabled();
+
+      fireEvent.change(box(dialog), { target: { value: `${DN}1` } }); // edited after the match: it no longer applies
+      expect(clear(dialog)).toBeDisabled();
+      fireEvent.change(box(dialog), { target: { value: '' } });
+      expect(clear(dialog)).toBeEnabled();
+    });
+
+    it('shows a failed lookup instead of releasing anything', async () => {
+      apiClientList.mockImplementation((path: string) =>
+        path.startsWith('/v1/outbound-events')
+          ? Promise.reject(new ApiError('Missing permission: outbound.record', { code: 'FORBIDDEN', status: 403 }))
+          : Promise.resolve({ data: path.includes('active=true') ? [PASS] : [], meta: { page: 1, per_page: 50, total: 1 } }),
+      );
+      const dialog = await openClearOutward();
+      fireEvent.change(box(dialog), { target: { value: DN } });
+      find(dialog);
+
+      expect(await within(dialog).findByText('Missing permission: outbound.record')).toBeInTheDocument();
+      enterCount(dialog, '20');
+      expect(clear(dialog)).toBeDisabled();
+    });
+
+    it("a pass's stored link is never sent as the manager's choice", async () => {
+      lookupReturns([], { ...PASS, related_outbound_id: 'ob-9' });
+      const dialog = await openClearOutward();
+      expect(box(dialog)).toHaveValue('');
+      enterCount(dialog, '5');
+      fireEvent.click(clear(dialog));
+
+      await waitFor(() => expect(outwardPosts()).toHaveLength(1));
+      expect(outwardPosts()[0]![1].body).toEqual({ declared_quantity: 5 });
+    });
   });
 
   it('on a count mismatch a manager gives a reason and releases anyway', async () => {

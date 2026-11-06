@@ -63,6 +63,9 @@ async function bookTruck(request: APIRequestContext, truck: string, bags: number
   const sec = await authHeaders('SECURITY');
   const inward = await request.post(`${API_URL}/v1/gate-passes/inward`, { headers: sec, data: { vehicle_number: truck } });
   expect(inward.ok(), await inward.text()).toBeTruthy();
+  // The dispatch note number the withdrawal was given when it was booked.
+  const row = (await (await request.get(`${API_URL}/v1/outbound-events/${outboundId}`, { headers: mgr })).json()).data;
+  return { outboundId, dispatchNote: row.dispatch_note_number as string };
 }
 
 test('three wrong counts lock the truck for the guard; a manager releases it', async ({ page, request, loginAs }) => {
@@ -106,7 +109,8 @@ test('three wrong counts lock the truck for the guard; a manager releases it', a
   await expect(mgrDialog.getByText(/counted 41, dispatch said 50/)).toBeVisible();
   await mgrDialog.getByLabel(/bags counted/i).fill('50');
   await mgrDialog.getByRole('button', { name: /^clear outward$/i }).click();
-  await expect(page.getByText(/Cleared .*TAT/i).first()).toBeVisible({ timeout: 20_000 });
+  // This truck's own toast: the "Recently Cleared Today" list holds earlier trucks' "TAT" text too.
+  await expect(page.getByText(new RegExp(`Cleared ${truck} — TAT`))).toBeVisible({ timeout: 20_000 });
 
   const sec = await authHeaders('SECURITY');
   const passes = (await (await request.get(`${API_URL}/v1/gate-passes?vehicle_number=${truck}&page_size=5`, { headers: sec })).json()).data as {
@@ -132,4 +136,35 @@ test('a truck whose load is only booked is sent back to the desk — no recount,
   await expect(dialog.getByText('Send the truck back to the desk.')).toBeVisible({ timeout: 20_000 });
   await expect(dialog.getByText(/recount/i)).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: /release anyway/i })).toHaveCount(0);
+});
+
+// C3 D9: a manager names the withdrawal by its dispatch note number — the real search route, then the
+// named release — instead of pasting a raw id.
+test('a manager releases a truck by its dispatch note number', async ({ page, request, loginAs }) => {
+  test.setTimeout(180_000);
+  const truck = plate();
+  const { dispatchNote } = await bookTruck(request, truck, 40, true);
+
+  await loginAs('MANAGER');
+  await page.goto('/gate');
+  // A dispatched, paid truck is on the Ready-to-leave card and in the list of trucks inside; the
+  // dispatch note box belongs to the dialog that Clear Outward opens, from the list.
+  const inside = page.locator('li', { hasText: truck }).filter({ has: page.getByRole('button', { name: /^clear outward$/i }) });
+  await expect(inside).toBeVisible({ timeout: 30_000 });
+  await inside.getByRole('button', { name: /^clear outward$/i }).click();
+
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel(/dispatch note number/i).fill(dispatchNote.toLowerCase());
+  await dialog.getByRole('button', { name: 'Find', exact: true }).click();
+  await expect(dialog.getByText(new RegExp(`${dispatchNote} · .* · ${truck}`))).toBeVisible({ timeout: 20_000 });
+  await dialog.getByLabel(/bags counted/i).fill('40');
+  await dialog.getByRole('button', { name: /^clear outward$/i }).click();
+  // This truck's own toast: the "Recently Cleared Today" list holds earlier trucks' "TAT" text too.
+  await expect(page.getByText(new RegExp(`Cleared ${truck} — TAT`))).toBeVisible({ timeout: 20_000 });
+
+  const sec = await authHeaders('SECURITY');
+  const passes = (await (await request.get(`${API_URL}/v1/gate-passes?vehicle_number=${truck}&page_size=5`, { headers: sec })).json()).data as {
+    status: string;
+  }[];
+  expect(passes.some((p) => p.status === 'CLEARED')).toBeTruthy();
 });

@@ -116,7 +116,10 @@ test('the desk path: booked, weighed, dispatched and paid in a handful of clicks
   await tap(row.getByRole('button', { name: 'Weigh', exact: true }));
 
   await tap(row.getByRole('button', { name: /Dispatch & Collect/ }));
+  // The sheet opens the dispatch note's tab on this click (docs/28 D8) and the page fills it.
+  const notePopup = page.waitForEvent('popup', { timeout: 30_000 });
   await tap(page.getByRole('button', { name: /Dispatch & Collect Rs\s?[\d,]+/ }));
+  await (await notePopup).waitForURL(/^blob:/, { timeout: 30_000 });
   await expect(page.getByText(/Dispatched and collected/i).first()).toBeVisible({ timeout: 30_000 });
 
   console.log(`dispatch desk: ${clicks} clicks from the open desk to a paid, dispatched truck`);

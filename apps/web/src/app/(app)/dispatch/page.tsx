@@ -134,12 +134,12 @@ export default function DispatchDeskPage() {
     queryClient.invalidateQueries({ queryKey: ['dispatch', 'trucks'] });
   };
 
-  async function afterTruckCheckout(result: TruckResult) {
+  async function afterTruckCheckout(result: TruckResult, tab?: Window | null) {
     refresh();
     const receipts = result.payments.map((p) => p.receipt_number).filter(Boolean);
     if (receipts.length > 0) toast.message(`Receipt${receipts.length > 1 ? 's' : ''} ${receipts.join(', ')}`);
     try {
-      await openLoadSlipPdf(result.gate_pass_id);
+      await openLoadSlipPdf(result.gate_pass_id, tab); // the tab the sheet opened on the click
     } catch {
       /* the truck card's Load slip button is the fallback */
     }
@@ -153,12 +153,12 @@ export default function DispatchDeskPage() {
     }
   }
 
-  async function afterCheckout(result: CheckoutResult) {
+  async function afterCheckout(result: CheckoutResult, tab?: Window | null) {
     // The queue first: rendering the note can take minutes and must not hold the row on "Weighed".
     refresh();
     if (result.payment?.receipt_number) toast.message(`Receipt ${result.payment.receipt_number}`);
     try {
-      await openDispatchNotePdf(result.outbound.id);
+      await openDispatchNotePdf(result.outbound.id, tab); // the tab the sheet opened on the click
     } catch {
       /* the row's Print button is the fallback */
     }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
 import { ArrowLeftRight, FileText, PackageMinus } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
@@ -19,7 +20,7 @@ import { formatDate, formatDateTime, formatCount, formatKg } from '@/lib/format'
 import { PageSkeleton } from '@/components/page-skeleton';
 import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
 import { useWeightsShown } from '@/hooks/use-reference-data';
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
+import { openPdf } from '@/lib/open-pdf';
 
 interface Lot {
   id: string;
@@ -144,20 +145,9 @@ export default function LotDetailPage() {
   const handlePrintReceipt = async () => {
     setReceiptLoading(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const facilityId = localStorage.getItem('facility_id');
-      const res = await fetch(`${API_URL}/v1/lots/${id}/receipt`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
-        },
-      });
-      if (!res.ok) throw new Error('Failed to fetch receipt');
-      const url = URL.createObjectURL(await res.blob());
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch {
-      /* handled */
+      await openPdf(`/v1/lots/${id}/receipt`, 'storage receipt'); // its tab opens here, on the click
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not open the storage receipt');
     } finally {
       setReceiptLoading(false);
     }

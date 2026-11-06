@@ -15,6 +15,7 @@ import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { useAccounts } from '@/hooks/use-reference-data';
+import { openPdf } from '@/lib/open-pdf';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -226,17 +227,7 @@ export default function PayrollRunDetailPage() {
 
   async function viewSlip(lineId: string) {
     try {
-      const token = localStorage.getItem('access_token');
-      const facilityId = localStorage.getItem('facility_id');
-      const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
-      const res = await fetch(
-        `${apiUrl}/v1/payroll-runs/${id}/lines/${lineId}/slip?format=pdf`,
-        { headers: { Authorization: `Bearer ${token}`, 'X-Facility-ID': facilityId ?? '' } },
-      );
-      if (!res.ok) throw new Error(`PDF download failed (${res.status})`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      await openPdf(`/v1/payroll-runs/${id}/lines/${lineId}/slip?format=pdf`, 'payslip'); // its tab opens on the click
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Slip download failed'); }
   }
 

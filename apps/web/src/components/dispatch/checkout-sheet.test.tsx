@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -64,8 +64,14 @@ let placements: { rack_id: string; rack_name: string; bags: number }[] = [];
 
 const posts = () => apiClient.mock.calls.filter(([, opts]) => opts?.method === 'POST');
 
+// The dispatch note's tab: opened on the click, before the checkout answers (docs/28 D8).
+const tab = { location: { href: '' }, close: vi.fn() };
+let openSpy: MockInstance<typeof window.open>;
+
 beforeEach(() => {
   apiClient.mockReset();
+  tab.close.mockReset();
+  openSpy = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
   role = 'MANAGER';
   permissions = ['outbound.finalize', 'invoices.manage', 'payments.record'];
   placements = [];
@@ -76,6 +82,48 @@ beforeEach(() => {
       return Promise.resolve({ lot_id: 'lot-1', chamber_id: 'c1', chamber_name: 'Room 1', current_balance_bags: 300, placements, unplaced_bags: 0 });
     }
     return Promise.resolve(null);
+  });
+});
+
+afterEach(() => openSpy.mockRestore());
+
+describe('CheckoutSheet — the dispatch note tab (docs/28 D8)', () => {
+  const base = () => apiClient.getMockImplementation()!;
+  const finish = async () => {
+    await screen.findByText(/Storage \(Seasonal\)/);
+    fireEvent.click(screen.getByRole('button', { name: /Dispatch & Collect/ }));
+  };
+
+  it('opens the tab on the click, before the checkout answers, and hands it on with the result', async () => {
+    const impl = base();
+    let answer!: (r: unknown) => void;
+    apiClient.mockImplementation((path: string, opts?: { method?: string }) =>
+      opts?.method === 'POST' ? new Promise((r) => (answer = r)) : impl(path, opts),
+    );
+    const { onDone } = renderSheet();
+    await finish();
+
+    expect(openSpy).toHaveBeenCalledTimes(1); // the POST has not answered yet
+    answer(RESULT);
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(RESULT, tab));
+    expect(tab.close).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a refusal', new ApiError('A manager must finish this truck', { code: 'DISPATCH_NEEDS_MANAGER', status: 403 })],
+    ['a bill that moved', new ApiError('The bill is now Rs 5,400.00', { code: 'DISPATCH_TOTAL_CHANGED', status: 409 })],
+    ['a network failure', new Error('offline')],
+  ])('closes the tab it opened after %s', async (_name, failure) => {
+    const impl = base();
+    apiClient.mockImplementation((path: string, opts?: { method?: string }) =>
+      opts?.method === 'POST' ? Promise.reject(failure) : impl(path, opts),
+    );
+    const { onDone } = renderSheet();
+    await finish();
+
+    await screen.findByRole('alert');
+    expect(tab.close).toHaveBeenCalledTimes(1);
+    expect(onDone).not.toHaveBeenCalled();
   });
 });
 
@@ -94,7 +142,7 @@ describe('CheckoutSheet', () => {
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0]![0]).toBe(`/v1/outbound-events/${OB}/dispatch-and-collect`);
     expect(posts()[0]![1].body).toEqual({ expected_total_pkr: 5200, payment: { mode: 'CASH' } });
-    await waitFor(() => expect(onDone).toHaveBeenCalledWith(RESULT));
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(RESULT, tab));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 

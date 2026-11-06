@@ -6,7 +6,7 @@ import { Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
+import { fetchPdfBlobUrl } from '@/lib/open-pdf';
 
 export default function AcknowledgmentPage() {
   const params = useParams();
@@ -20,20 +20,7 @@ export default function AcknowledgmentPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const token = localStorage.getItem('access_token');
-        const facilityId = localStorage.getItem('facility_id');
-        const res = await fetch(
-          `${API_URL}/v1/lots/${lotId}/transfer/${transferId}/acknowledgment`,
-          {
-            headers: {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
-            },
-          },
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob();
-        setBlobUrl(URL.createObjectURL(blob));
+        setBlobUrl(await fetchPdfBlobUrl(`/v1/lots/${lotId}/transfer/${transferId}/acknowledgment`, 'transfer acknowledgment'));
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load PDF');
       }

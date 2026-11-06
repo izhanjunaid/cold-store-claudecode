@@ -19,7 +19,7 @@ import { formatDate, formatCount, formatKg } from '@/lib/format';
 import { useWeightsShown } from '@/hooks/use-reference-data';
 
 import { PageSkeleton } from '@/components/page-skeleton';
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
+import { openDispatchNotePdf } from '@/components/dispatch/dispatch-pdf';
 
 interface OutboundEvent {
   id: string;
@@ -150,16 +150,7 @@ export default function OutboundEventDetailPage() {
 
   const handlePrintDispatchNote = async () => {
     try {
-      const token = localStorage.getItem('access_token');
-      const facilityId = localStorage.getItem('facility_id');
-      const res = await fetch(`${API_URL}/v1/outbound-events/${eventId}/dispatch-note`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
-        },
-      });
-      if (!res.ok) throw new Error('Failed to fetch dispatch note');
-      window.open(URL.createObjectURL(await res.blob()), '_blank');
+      await openDispatchNotePdf(eventId); // its tab opens here, on the click, before the note renders
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load dispatch note');
     }

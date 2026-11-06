@@ -21,6 +21,7 @@ import { StatTile } from '@/components/stat-tile';
 
 import { formatDate, formatMoney } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
+import { openPdf } from '@/lib/open-pdf';
 interface Repayment {
   id: string;
   repayment_date: string;
@@ -44,8 +45,6 @@ interface Loan {
   write_off_at: string | null;
   repayments?: Repayment[];
 }
-
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 
 export default function LoanDetailPage() {
   const router = useRouter();
@@ -141,13 +140,11 @@ export default function LoanDetailPage() {
   }
 
   async function downloadAck() {
-    const token = localStorage.getItem('access_token');
-    const facilityId = localStorage.getItem('facility_id');
-    const res = await fetch(`${API_URL}/v1/loans/${loanId}/acknowledgment?format=pdf`, {
-      headers: { Authorization: `Bearer ${token}`, 'X-Facility-ID': facilityId ?? '' },
-    });
-    if (!res.ok) return toast.error(`Download failed (${res.status})`);
-    window.open(URL.createObjectURL(await res.blob()), '_blank');
+    try {
+      await openPdf(`/v1/loans/${loanId}/acknowledgment?format=pdf`, 'loan acknowledgment'); // its tab opens on the click
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not open the loan acknowledgment');
+    }
   }
 
   return (
