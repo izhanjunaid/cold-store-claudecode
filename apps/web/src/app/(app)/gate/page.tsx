@@ -65,6 +65,17 @@ interface GatePass {
   };
 }
 
+/** A row of GET /v1/outbound-events, as far as the dispatch note lookup reads it. */
+interface WithdrawalHit {
+  id: string;
+  dispatch_note_number: string | null;
+  vehicle_number: string | null;
+  marka: string | null;
+  owner_party_name: string | null;
+  /** Set once a truck has carried it out. */
+  gate_pass_id: string | null;
+}
+
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'muted' | 'danger'> = {
   ARRIVED: 'success',
   WEIGHING: 'warning',
@@ -160,7 +171,12 @@ export default function GatePassConsolePage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [outwardModal, setOutwardModal] = useState<GatePass | null>(null);
-  const [outwardOutboundId, setOutwardOutboundId] = useState('');
+  // A manager may name the withdrawal by its dispatch note number (docs/28 D9): what is typed, the
+  // dispatched withdrawal found for it, and why none was.
+  const [dnText, setDnText] = useState('');
+  const [dnMatch, setDnMatch] = useState<WithdrawalHit | null>(null);
+  const [dnNote, setDnNote] = useState<string | null>(null);
+  const [dnLooking, setDnLooking] = useState(false);
   const [creditAuth, setCreditAuth] = useState(false);
   // The guard's count is blind: the dialog never shows what was dispatched.
   const [outwardCount, setOutwardCount] = useState('');
@@ -240,7 +256,10 @@ export default function GatePassConsolePage() {
 
   function openOutward(p: GatePass) {
     setOutwardModal(p);
-    setOutwardOutboundId(p.related_outbound_id ?? '');
+    // No pre-fill from the pass's stored link: only the manager's own typed choice names a withdrawal.
+    setDnText('');
+    setDnMatch(null);
+    setDnNote(null);
     setCreditAuth(false);
     setOutwardCount('');
     setOverrideReason('');
@@ -248,6 +267,31 @@ export default function GatePassConsolePage() {
     setOutwardErr(null);
     setOutwardErrCode(null);
     setOutwardTriesLeft(null);
+  }
+
+  /**
+   * Find the dispatched withdrawal a typed dispatch note number names. The search route matches a
+   * substring (DN-…-0009 also finds DN-…-00090), so only the exact number counts.
+   */
+  async function findDispatchNote() {
+    const dn = dnText.trim().toUpperCase();
+    if (!dn) return;
+    setDnLooking(true);
+    setDnMatch(null);
+    setDnNote(null);
+    try {
+      const { data } = await apiClientList<WithdrawalHit>(
+        `/v1/outbound-events?status=DISPATCHED&search=${encodeURIComponent(dn)}&page_size=10`,
+      );
+      const hit = data.find((r) => (r.dispatch_note_number ?? '').toUpperCase() === dn);
+      if (!hit) setDnNote('No dispatched withdrawal with that dispatch note number.');
+      else if (hit.gate_pass_id) setDnNote('That dispatch note already left on another truck.');
+      else setDnMatch(hit);
+    } catch (err) {
+      setDnNote(err instanceof Error ? err.message : 'Could not look up the dispatch note');
+    } finally {
+      setDnLooking(false);
+    }
   }
 
   /** `withOverride`: a manager releasing a truck that failed a gate check, with a reason. */
@@ -265,14 +309,15 @@ export default function GatePassConsolePage() {
         method: 'POST',
         body: {
           // Naming a withdrawal is a manager's call (the server refuses it from anyone else).
-          ...(canManager && outwardOutboundId.trim() ? { outbound_event_id: outwardOutboundId.trim() } : {}),
+          ...(canManager && dnMatch ? { outbound_event_id: dnMatch.id } : {}),
           ...(creditAuth ? { credit_authorization: true } : {}),
           declared_quantity: declared,
           ...(sendOverride ? { override_reason: reason } : {}),
         },
       });
       setOutwardModal(null);
-      setOutwardOutboundId('');
+      setDnText('');
+      setDnMatch(null);
       setCreditAuth(false);
       setOutwardCount('');
       setOverrideReason('');
@@ -295,6 +340,8 @@ export default function GatePassConsolePage() {
   const readyToLeave = passes.filter((p) => p.release?.state === 'READY');
   const countValid = parseCount(outwardCount) != null;
   const outwardBlocked = outwardErrCode === 'GATE_OUTWARD_BLOCKED';
+  // A dispatch note was typed but is not (or no longer) a withdrawal that was found: releasing waits.
+  const dnPending = canManager && dnText.trim() !== '' && !dnMatch;
   const outwardHold = outwardErrCode === 'GATE_OUTWARD_NOT_DISPATCHED';
   // Three counts have not matched: only a manager releases this truck, so the guard cannot try again.
   const outwardLocked = outwardErrCode === 'GATE_OUTWARD_COUNT_LOCKED';
@@ -526,14 +573,38 @@ export default function GatePassConsolePage() {
               )}
               {canManager && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="outward-outbound-id">Outbound event ID (optional)</Label>
-                  <Input
-                    id="outward-outbound-id"
-                    value={outwardOutboundId}
-                    onChange={(e) => setOutwardOutboundId(e.target.value)}
-                    placeholder="Auto-match by vehicle if blank"
-                    className="font-mono"
-                  />
+                  <Label htmlFor="outward-dn">Dispatch note number (optional)</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="outward-dn"
+                      value={dnText}
+                      onChange={(e) => {
+                        // An edited number no longer names what was found for the old one.
+                        setDnText(e.target.value);
+                        setDnMatch(null);
+                        setDnNote(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        e.preventDefault(); // looks the number up; releasing is the button's job
+                        void findDispatchNote();
+                      }}
+                      placeholder="Match the truck by its plate if blank"
+                      className="font-mono"
+                    />
+                    <Button type="button" variant="outline" onClick={() => void findDispatchNote()} disabled={!dnText.trim() || dnLooking}>
+                      Find
+                    </Button>
+                  </div>
+                  {dnMatch && (
+                    <p className="text-xs text-muted-foreground">
+                      {dnMatch.dispatch_note_number} · {dnMatch.owner_party_name ?? '—'} · {dnMatch.marka ?? '—'} · {dnMatch.vehicle_number ?? '—'}
+                    </p>
+                  )}
+                  {dnNote && <p className="text-xs text-destructive">{dnNote}</p>}
+                  {dnPending && !dnNote && !dnLooking && (
+                    <p className="text-xs text-amber-700">Find the dispatch note, or clear the box.</p>
+                  )}
                 </div>
               )}
               {canManager && (
@@ -606,7 +677,7 @@ export default function GatePassConsolePage() {
             <Button variant="outline" onClick={() => setOutwardModal(null)}>
               Cancel
             </Button>
-            <Button onClick={() => submitOutward()} disabled={outwardLoading || !countValid || outwardLocked}>
+            <Button onClick={() => submitOutward()} disabled={outwardLoading || !countValid || outwardLocked || dnPending}>
               {outwardLoading ? 'Clearing…' : 'Clear Outward'}
             </Button>
           </DialogFooter>
