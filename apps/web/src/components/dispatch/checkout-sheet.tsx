@@ -8,6 +8,7 @@ import { apiClient, ApiError } from '@/lib/api-client';
 import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
 import { formatMoney } from '@/lib/format';
+import { openPdfTab } from '@/lib/open-pdf';
 import { useAuthStore } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -85,7 +86,8 @@ export function CheckoutSheet({
   outboundId: string;
   /** The withdrawal's lot: lets the sheet offer "picked from which racks" (optional). */
   lotId?: string;
-  onDone: (result: CheckoutResult) => void;
+  /** `tab` is the dispatch note's tab, opened on the click for the caller to fill. */
+  onDone: (result: CheckoutResult, tab?: Window | null) => void;
 }) {
   const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
@@ -152,6 +154,9 @@ export function CheckoutSheet({
 
   async function submit() {
     if (!preview) return;
+    // The dispatch note's tab opens here, on the click: Chrome blocks one opened after the checkout
+    // answers (docs/28 D8). It goes to onDone on success and is closed on every other path.
+    const tab = openPdfTab();
     setSubmitting(true);
     setError(null);
     try {
@@ -172,8 +177,9 @@ export function CheckoutSheet({
       // Lists only: refetching this sheet's own preview now would 409 (the truck is dispatched).
       queryClient.invalidateQueries({ queryKey: qk.outbound.lists });
       onOpenChange(false);
-      onDone(result);
+      onDone(result, tab);
     } catch (e) {
+      tab?.close(); // before the awaited re-preview below
       if (e instanceof ApiError && e.code === 'DISPATCH_TOTAL_CHANGED') {
         // The bill moved under us: show the new one and make them review it again.
         await queryClient.invalidateQueries({ queryKey: qk.outbound.preview(outboundId) });

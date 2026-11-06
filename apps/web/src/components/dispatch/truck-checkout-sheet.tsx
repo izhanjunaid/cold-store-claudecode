@@ -8,6 +8,7 @@ import { apiClient, ApiError } from '@/lib/api-client';
 import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
 import { formatDate, formatMoney } from '@/lib/format';
+import { openPdfTab } from '@/lib/open-pdf';
 import { useAuthStore } from '@/stores/auth.store';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -58,7 +59,8 @@ export function TruckCheckoutSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   passId: string;
-  onDone: (result: TruckResult) => void;
+  /** `tab` is the load slip's tab, opened on the click for the caller to fill. */
+  onDone: (result: TruckResult, tab?: Window | null) => void;
 }) {
   const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
@@ -120,6 +122,9 @@ export function TruckCheckoutSheet({
 
   async function submit() {
     if (!preview) return;
+    // The load slip's tab opens here, on the click: Chrome blocks one opened after the checkout
+    // answers (docs/28 D8). It goes to onDone on success and is closed on every other path.
+    const tab = openPdfTab();
     setSubmitting(true);
     setError(null);
     try {
@@ -146,10 +151,12 @@ export function TruckCheckoutSheet({
       queryClient.invalidateQueries({ queryKey: qk.outbound.lists });
       queryClient.invalidateQueries({ queryKey: ['dispatch', 'trucks'] });
       onOpenChange(false);
-      onDone(result);
+      onDone(result, tab);
     } catch (e) {
+      tab?.close(); // before any awaited re-preview below
       if (e instanceof ApiError && e.code === 'OUTBOUND_ALREADY_FINALIZED') {
-        // Someone else (or a retry) checked it out first: it is done, and the truck card prints the slip.
+        // Someone else (or a retry) checked it out first: it is done, and the truck card prints the slip
+        // (so the tab is closed, not filled: filling it would print a second one).
         toast.message('This truck was already checked out — print its load slip from the truck card.');
         queryClient.invalidateQueries({ queryKey: qk.outbound.lists });
         queryClient.invalidateQueries({ queryKey: ['dispatch', 'trucks'] });
