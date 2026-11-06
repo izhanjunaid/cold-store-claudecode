@@ -7,6 +7,7 @@ import { FileText, RefreshCw, Truck } from 'lucide-react';
 import { GATE_COUNT_TRIES, localIsoDate } from '@coldchain/shared';
 import { apiClient, apiClientList, ApiError } from '@/lib/api-client';
 import { formatCount } from '@/lib/format';
+import { openPdf } from '@/lib/open-pdf';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
 import { hasMinRole } from '@/lib/rbac';
@@ -134,17 +135,11 @@ function formatTurnaround(seconds: number | null): string {
 }
 
 async function printGatePassReceipt(passId: string) {
-  const token = localStorage.getItem('access_token');
-  const facilityId = localStorage.getItem('facility_id');
-  const apiUrl = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
-  const res = await fetch(`${apiUrl}/v1/gate-passes/${passId}/receipt?format=pdf`, {
-    headers: { Authorization: `Bearer ${token}`, 'X-Facility-ID': facilityId ?? '' },
-  });
-  if (!res.ok) {
-    toast.error(`Receipt download failed (${res.status})`);
-    return;
+  try {
+    await openPdf(`/v1/gate-passes/${passId}/receipt?format=pdf`, 'gate receipt'); // its tab opens on the click
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : 'Could not open the gate receipt');
   }
-  window.open(URL.createObjectURL(await res.blob()), '_blank');
 }
 
 export default function GatePassConsolePage() {

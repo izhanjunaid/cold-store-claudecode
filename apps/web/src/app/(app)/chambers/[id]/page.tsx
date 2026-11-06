@@ -22,8 +22,7 @@ import { UrduText } from '@/components/ui/urdu-text';
 import { cn } from '@/lib/utils';
 import { formatDateTime, formatCount } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
-
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
+import { openPdf } from '@/lib/open-pdf';
 
 interface TemperatureLog {
   id: string;
@@ -102,20 +101,10 @@ export default function RoomDetailPage() {
   const printLabels = async () => {
     setLabelsLoading(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const facilityId = localStorage.getItem('facility_id');
-      const res = await fetch(`${API_URL}/v1/chambers/${chamberId}/rack-labels`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
-        },
-      });
-      if (!res.ok) throw new Error('label fetch failed');
-      const url = URL.createObjectURL(await res.blob());
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch {
-      toast.error('Could not generate rack labels — does this room have active racks?');
+      await openPdf(`/v1/chambers/${chamberId}/rack-labels`, 'rack labels'); // its tab opens here, on the click
+    } catch (e) {
+      // An empty room has no labels to print, which is the usual reason this fails.
+      toast.error(`${e instanceof Error ? e.message : 'Could not open the rack labels'} — does this room have active racks?`);
     } finally {
       setLabelsLoading(false);
     }

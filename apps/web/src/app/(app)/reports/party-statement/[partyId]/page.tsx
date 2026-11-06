@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import type { PartyLedgerResponseType } from '@coldchain/shared';
+import { openPdf } from '@/lib/open-pdf';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/auth.store';
 import { can } from '@/lib/permissions';
@@ -17,7 +19,6 @@ import { DataTable, type DataTableColumn } from '@/components/data-table';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { formatMoney } from '@/lib/format';
 
-const API_URL = process.env['NEXT_PUBLIC_API_URL'] || 'http://localhost:3001';
 const fmtPkr = (n: number) => n.toLocaleString('en-PK', { maximumFractionDigits: 2 });
 
 type LedgerEntry = PartyLedgerResponseType['entries'][number];
@@ -68,14 +69,12 @@ export default function PartyStatementDetailPage() {
   async function downloadPdf() {
     setDownloading(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const facilityId = localStorage.getItem('facility_id');
       const pdfQs = new URLSearchParams(qs);
       pdfQs.set('format', 'pdf');
-      const res = await fetch(`${API_URL}/v1/reports/party-statement/${partyId}?${pdfQs.toString()}`, {
-        headers: { Authorization: `Bearer ${token}`, 'X-Facility-ID': facilityId ?? '' },
-      });
-      window.open(URL.createObjectURL(await res.blob()), '_blank');
+      // Its tab opens here, on the click; an error response is never shown as the statement.
+      await openPdf(`/v1/reports/party-statement/${partyId}?${pdfQs.toString()}`, 'party statement');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not open the party statement');
     } finally {
       setDownloading(false);
     }
