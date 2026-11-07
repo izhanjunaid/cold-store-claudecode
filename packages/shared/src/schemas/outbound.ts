@@ -143,6 +143,27 @@ export const MANAGER_REASON_TEXT: Record<ManagerReasonCode, string> = {
 };
 
 /**
+ * A munshi calls a manager on a withdrawal (docs/28 O6), saying what the buyer wants when they
+ * picked it. Never which credit rule failed: the munshi is not told a party's credit standing.
+ */
+export const MANAGER_ASK_CODES = ['CALLED', 'CHEQUE_OR_TRANSFER', 'CREDIT', 'LEAVE_CHARGE_OFF'] as const;
+export type ManagerAskCode = (typeof MANAGER_ASK_CODES)[number];
+
+export const MANAGER_ASK_TEXT: Record<ManagerAskCode, string> = {
+  CALLED: 'the desk called a manager',
+  CHEQUE_OR_TRANSFER: 'the buyer pays by cheque or transfer',
+  CREDIT: 'the buyer wants credit',
+  LEAVE_CHARGE_OFF: 'a charge to leave off the bill',
+};
+
+/** POST /v1/dispatch/ask-manager — one withdrawal, or every line of a truck. */
+export const AskManagerRequest = z.object({
+  outbound_ids: z.array(z.string().uuid()).min(1).max(TRUCK_MAX_LINES),
+  ask_code: z.enum(MANAGER_ASK_CODES),
+});
+export type AskManagerRequestType = z.infer<typeof AskManagerRequest>;
+
+/**
  * POST /v1/dispatch/trucks/:passId/dispatch-and-collect — check out every weighed withdrawal on a
  * truck in one transaction: each line its own bill (the total it showed is what posts), and one
  * payment row per (billing party, book) on the truck. The line cap is checked by the service so

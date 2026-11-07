@@ -5,6 +5,7 @@ import {
   FinalizeOutboundRequest,
   CancelOutboundRequest,
   OutboundListQuery,
+  AskManagerRequest,
   DispatchAndCollectRequest,
   TruckDispatchRequest,
 } from '@coldchain/shared';
@@ -171,6 +172,28 @@ export async function outboundRoutes(app: FastifyInstance) {
     url: '/v1/dispatch/trucks',
     preHandler: [app.authenticate, app.requirePermission('outbound.record')],
     handler: async (request, reply) => sendSuccess(reply, await checkout.trucks(request.user!.facilityId)),
+  });
+
+  // The managers' waiting list (docs/28 D6, O7): what the munshi may not finish alone, and what a
+  // munshi called a manager on. The manager's key, not the munshi's: it lists every party's work.
+  app.route({
+    method: 'GET',
+    url: '/v1/dispatch/waiting',
+    preHandler: [app.authenticate, app.requirePermission('outbound.finalize')],
+    handler: async (request, reply) => {
+      const result = await checkout.waiting(request.user!.facilityId);
+      return sendSuccess(reply, result.data, result.meta);
+    },
+  });
+
+  // A munshi calls a manager on a withdrawal, or on every line of a truck (docs/28 O6).
+  app.route({
+    method: 'POST',
+    url: '/v1/dispatch/ask-manager',
+    preHandler: [app.authenticate, app.requirePermission('outbound.record')],
+    schema: { body: AskManagerRequest },
+    handler: async (request, reply) =>
+      sendSuccess(reply, await checkout.askManager(request.user!.facilityId, request.body as z.infer<typeof AskManagerRequest>)),
   });
 
   app.route({

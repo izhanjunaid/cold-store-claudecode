@@ -8,6 +8,7 @@ import {
   sumMoney,
   MANAGER_REASON_TEXT,
   TRUCK_MAX_LINES,
+  type AskManagerRequestType,
   type DispatchAndCollectRequestType,
   type ManagerReasonCode,
   type OutboundListQueryType,
@@ -32,6 +33,9 @@ const OUTBOUND_STATUSES = ['PENDING', 'WEIGHED', 'DISPATCHED', 'CANCELLED', 'DIS
 export type DispatchStage = 'BOOKED' | 'WEIGHED' | 'DISPATCHED' | 'PAID' | 'LEFT' | 'CANCELLED';
 
 const PAID_TOLERANCE = 0.01;
+
+/** Most rows the managers' waiting list sends; its `total` counts every one. */
+const WAITING_CAP = 200;
 
 function stageOf(o: {
   status: string;
@@ -145,6 +149,9 @@ export class DispatchCheckoutService {
         created_by_name: o.createdByUser.name,
         finalized_at: o.finalizedAt ? o.finalizedAt.toISOString() : null,
         gate_pass_id: o.gatePassId,
+        // A munshi's call to a manager (docs/28 O6): the desk shows it on the row.
+        ask_code: o.managerAskCode,
+        asked_at: o.managerAskAt ? o.managerAskAt.toISOString() : null,
         invoice: o.invoice && {
           id: o.invoice.id,
           invoice_number: o.invoice.invoiceNumber,
@@ -154,6 +161,63 @@ export class DispatchCheckoutService {
         },
       })),
       meta: { total, page: query.page, per_page: query.page_size },
+    };
+  }
+
+  /**
+   * A munshi calls a manager (docs/28 O6): stamp what the buyer wants on each withdrawal still booked
+   * or weighed in this facility. Nothing else is locked or read, so the lock order holds; a row
+   * dispatched or cancelled meanwhile is skipped, and a second call overwrites the first.
+   */
+  async askManager(facilityId: string, body: AskManagerRequestType) {
+    const askedAt = new Date();
+    const { count } = await this.prisma.outboundEvent.updateMany({
+      where: { id: { in: body.outbound_ids }, facilityId, status: { in: ['PENDING', 'WEIGHED'] } },
+      data: { managerAskCode: body.ask_code, managerAskAt: askedAt },
+    });
+    if (count === 0) throw Errors.OUTBOUND_NOT_WAITING();
+    return { asked: count, asked_at: askedAt.toISOString() };
+  }
+
+  /**
+   * The managers' waiting list (docs/28 D6, O7): every withdrawal still booked or weighed, of any date,
+   * that the munshi may not finish alone (the solo rules, the same function the checkout asks) or that
+   * a munshi called a manager on. Called ones first, then newest first, so old forgotten bookings
+   * cannot push today's out of the first page; `total` counts them all.
+   */
+  async waiting(facilityId: string) {
+    const ctx = await loadSoloContext(this.prisma, facilityId);
+    // ponytail: reads every ready row; paginate if a facility ever holds thousands.
+    const ready = await this.prisma.outboundEvent.findMany({
+      where: { facilityId, status: { in: ['PENDING', 'WEIGHED'] } },
+      include: {
+        lot: { select: { lotNumber: true, marka: true, bookType: true } },
+        ownerPartySnapshot: { select: { name: true } },
+        createdByUser: { select: { name: true } },
+      },
+      orderBy: [{ managerAskAt: { sort: 'desc', nulls: 'last' } }, { outboundDate: 'desc' }, { createdAt: 'desc' }],
+    });
+    const rows = ready
+      .map((o) => ({ o, reason: soloRefusal(ctx, o.lot, o.outboundDate) }))
+      .filter(({ o, reason }) => reason !== null || o.managerAskAt !== null);
+    return {
+      data: rows.slice(0, WAITING_CAP).map(({ o, reason }) => ({
+        id: o.id,
+        dispatch_note_number: o.dispatchNoteNumber,
+        lot_id: o.lotId,
+        lot_number: o.lot.lotNumber,
+        marka: o.lot.marka,
+        owner_party_name: o.ownerPartySnapshot?.name ?? null,
+        quantity_withdrawn_bags: o.quantityWithdrawnBags,
+        vehicle_number: o.vehicleNumber,
+        outbound_date: o.outboundDate.toISOString().slice(0, 10),
+        created_at: o.createdAt.toISOString(),
+        created_by_name: o.createdByUser.name,
+        reason_code: reason,
+        ask_code: o.managerAskCode,
+        asked_at: o.managerAskAt ? o.managerAskAt.toISOString() : null,
+      })),
+      meta: { total: rows.length, page: 1, per_page: WAITING_CAP },
     };
   }
 

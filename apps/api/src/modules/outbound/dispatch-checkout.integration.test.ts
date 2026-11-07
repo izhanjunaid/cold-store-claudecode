@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import { withGuardsDisabled } from '../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
-import { businessDate } from '@coldchain/shared';
+import { addDays, businessDate } from '@coldchain/shared';
 import type { FastifyInstance } from 'fastify';
 import { DispatchCheckoutService } from './dispatch-checkout.service';
 
@@ -595,16 +595,18 @@ describe('the queue', () => {
   });
 });
 
+/** The owner's one-person dispatch switch. */
+async function setSolo(on: boolean) {
+  const res = await app.inject({
+    method: 'PATCH',
+    url: '/v1/facilities/me',
+    headers: authHeaders(ownerToken),
+    payload: { settings: { dispatch_solo_mode: on } },
+  });
+  expect(res.statusCode, res.body).toBe(200);
+}
+
 describe('solo dispatch (the owner lets the munshi finish a clean truck)', () => {
-  const setSolo = async (on: boolean) => {
-    const res = await app.inject({
-      method: 'PATCH',
-      url: '/v1/facilities/me',
-      headers: authHeaders(ownerToken),
-      payload: { settings: { dispatch_solo_mode: on } },
-    });
-    expect(res.statusCode, res.body).toBe(200);
-  };
   const approve = async (max: number) => {
     const res = await app.inject({
       method: 'POST',
@@ -800,5 +802,179 @@ it('switch on: a truck dated before today is a manager decision — its date set
     // The loser left no trace: its lot still holds its bags and it is still weighed.
     const loser = ra.statusCode === 403 ? a : b;
     await untouched(loser.lotId, loser.id, 40);
+  });
+});
+
+describe('waiting for a manager (docs/28 D6, O6, O7)', () => {
+  type Waiting = { id: string; reason_code: string | null; ask_code: string | null; asked_at: string | null };
+  const waiting = (token = managerToken) =>
+    app.inject({ method: 'GET', url: '/v1/dispatch/waiting', headers: authHeaders(token) });
+  const ask = (ids: string[], askCode = 'CALLED', token = operatorToken) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/dispatch/ask-manager',
+      headers: authHeaders(token),
+      payload: { outbound_ids: ids, ask_code: askCode },
+    });
+  const listed = async () => {
+    const res = await waiting();
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body);
+    return { rows: body.data as Waiting[], total: body.meta.total as number };
+  };
+  const row = (rows: Waiting[], id: string) => rows.find((r) => r.id === id);
+  const cancel = async (id: string) => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/outbound-events/${id}/cancel`,
+      headers: authHeaders(operatorToken),
+      payload: { reason: 'The buyer left' },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+  };
+  const dispatchIt = async (id: string) => {
+    const res = await checkout(id, cash(data(await preview(id)).total_pkr));
+    expect(res.statusCode, res.body).toBe(200);
+  };
+  const askedAt = async (id: string) => (await prisma.outboundEvent.findUniqueOrThrow({ where: { id } })).managerAskAt;
+
+  afterAll(() => setSolo(false));
+
+  it('with one-person dispatch off every ready withdrawal of any date waits, as SOLO_OFF', async () => {
+    await setSolo(false);
+    const fresh = await booked(10, { date: businessDate(), plate: 'LHR-7001' });
+    const old = await weighed(10, { date: addDays(businessDate(), -10), plate: 'LHR-7002' });
+    const gone = await weighed(10, { plate: 'LHR-7003' });
+    await dispatchIt(gone.id);
+    const cancelled = await booked(10, { plate: 'LHR-7004' });
+    await cancel(cancelled.id);
+    const disputed = await booked(10, { plate: 'LHR-7005' });
+    await prisma.outboundEvent.update({ where: { id: disputed.id }, data: { status: 'DISPUTED' } });
+
+    const { rows, total } = await listed();
+    expect(row(rows, fresh.id)).toMatchObject({ reason_code: 'SOLO_OFF', ask_code: null, asked_at: null });
+    expect(row(rows, old.id)).toMatchObject({ reason_code: 'SOLO_OFF' });
+    for (const id of [gone.id, cancelled.id, disputed.id]) expect(row(rows, id)).toBeUndefined();
+    // Every ready row waits while the switch is off: other files may leave rows here, so count, don't fix a number.
+    expect(total).toBe(
+      await prisma.outboundEvent.count({ where: { facilityId: TEST_FACILITY_ID, status: { in: ['PENDING', 'WEIGHED'] } } }),
+    );
+  });
+
+  it('the desk’s list shows when a withdrawal was called', async () => {
+    const b = await booked(10, { date: businessDate(), plate: 'LHR-7006' });
+    const res = await ask([b.id], 'CHEQUE_OR_TRANSFER');
+    expect(res.statusCode, res.body).toBe(200);
+    expect(data(res)).toMatchObject({ asked: 1, asked_at: expect.any(String) });
+    const queue = await app.inject({
+      method: 'GET',
+      url: '/v1/outbound-events?status=PENDING,WEIGHED',
+      headers: authHeaders(operatorToken),
+    });
+    expect(data<Waiting[]>(queue).find((r) => r.id === b.id)).toMatchObject({
+      ask_code: 'CHEQUE_OR_TRANSFER',
+      asked_at: expect.any(String),
+    });
+  });
+
+  it('with it on, a withdrawal the munshi can finish is not listed, and the munshi can finish it', async () => {
+    await setSolo(true);
+    expect(await activePerTonCharges()).toBe(0);
+    const clean = await booked(30, { date: businessDate(), plate: 'LHR-7007' });
+    expect(row((await listed()).rows, clean.id)).toBeUndefined();
+    const p = data(await preview(clean.id, operatorToken));
+    expect(p.solo.allowed).toBe(true);
+    const res = await checkout(clean.id, cash(p.total_pkr), operatorToken);
+    expect(res.statusCode, res.body).toBe(200);
+  });
+
+  it('with it on, KATCHI, not-today and per-ton rows are listed with their codes', async () => {
+    await setSolo(true);
+    const katchi = await booked(10, { date: businessDate(), plate: 'LHR-7008', lotToken: ownerToken, lotExtra: { book_type: 'KATCHI' } });
+    const old = await booked(10, { plate: 'LHR-7009' }); // booked for 2026-09-01
+    const clean = await booked(10, { date: businessDate(), plate: 'LHR-7010' });
+    let { rows } = await listed();
+    expect(row(rows, katchi.id)?.reason_code).toBe('KATCHI');
+    expect(row(rows, old.id)?.reason_code).toBe('NOT_TODAY');
+    expect(row(rows, clean.id)).toBeUndefined();
+
+    const perTon = await app.inject({
+      method: 'POST',
+      url: '/v1/service-charges',
+      headers: authHeaders(managerToken),
+      payload: { name: `Weighbridge-${Date.now()}`, unit_type: 'PER_TON', unit_price_pkr: 50, apply_at_dispatch: true },
+    });
+    expect(perTon.statusCode, perTon.body).toBe(201);
+    try {
+      ({ rows } = await listed());
+      expect(row(rows, clean.id)?.reason_code).toBe('PER_TON_CHARGE');
+    } finally {
+      await prisma.serviceCharge.delete({ where: { id: data<{ id: string }>(perTon).id } });
+    }
+  });
+
+  it('a call puts a withdrawal the munshi could finish on the list, first, with its ask code and time', async () => {
+    await setSolo(true);
+    const a = await booked(10, { date: businessDate(), plate: 'LHR-7020' });
+    const old = await booked(10, { plate: 'LHR-7021' });
+    expect(row((await listed()).rows, a.id)).toBeUndefined();
+    expect((await ask([a.id], 'CREDIT')).statusCode).toBe(200);
+    const { rows } = await listed();
+    expect(rows[0]).toMatchObject({ id: a.id, reason_code: null, ask_code: 'CREDIT', asked_at: expect.any(String) });
+    expect(row(rows, old.id)).toMatchObject({ reason_code: 'NOT_TODAY', ask_code: null });
+  });
+
+  it('a call stamps only this facility’s booked or weighed rows', async () => {
+    const ready = await booked(10, { plate: 'LHR-7030' });
+    const done = await weighed(10, { plate: 'LHR-7031' });
+    await dispatchIt(done.id);
+
+    const res = await ask([ready.id, done.id]);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(data(res).asked).toBe(1);
+    expect(await askedAt(ready.id)).not.toBeNull();
+    expect(await askedAt(done.id)).toBeNull();
+
+    const none = await ask([done.id]);
+    expect([none.statusCode, code(none)]).toEqual([409, 'OUTBOUND_NOT_WAITING']);
+
+    // A caller from another facility cannot reach this facility's withdrawal.
+    const fresh = await booked(10, { plate: 'LHR-7032' });
+    const svc = new DispatchCheckoutService(prisma, null as never, null as never, null as never);
+    await expect(
+      svc.askManager('00000000-0000-0000-0000-0000000000ff', { outbound_ids: [fresh.id], ask_code: 'CALLED' }),
+    ).rejects.toMatchObject({ code: 'OUTBOUND_NOT_WAITING' });
+    expect(await askedAt(fresh.id)).toBeNull();
+  });
+
+  it('a dispatched or cancelled withdrawal leaves the list', async () => {
+    await setSolo(false);
+    const a = await weighed(10, { plate: 'LHR-7040' });
+    const b = await booked(10, { plate: 'LHR-7041' });
+    expect((await ask([a.id, b.id])).statusCode).toBe(200);
+    let { rows } = await listed();
+    expect([row(rows, a.id), row(rows, b.id)].every(Boolean)).toBe(true);
+    await dispatchIt(a.id);
+    await cancel(b.id);
+    ({ rows } = await listed());
+    expect([row(rows, a.id), row(rows, b.id)]).toEqual([undefined, undefined]);
+  });
+
+  it('today’s rows come before older ones', async () => {
+    await setSolo(false);
+    const old = await booked(10, { plate: 'LHR-7050' }); // booked for 2026-09-01
+    const fresh = await booked(10, { date: businessDate(), plate: 'LHR-7051' });
+    const ids = (await listed()).rows.map((r) => r.id);
+    expect(ids.indexOf(fresh.id)).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf(fresh.id)).toBeLessThan(ids.indexOf(old.id));
+  });
+
+  it('only the manager keys read the list; the guard cannot call a manager', async () => {
+    expect((await waiting(operatorToken)).statusCode).toBe(403);
+    expect((await waiting(accountantToken)).statusCode).toBe(403);
+    expect((await waiting(securityToken)).statusCode).toBe(403);
+    expect((await waiting(managerToken)).statusCode).toBe(200);
+    const b = await booked(10, { plate: 'LHR-7060' });
+    expect((await ask([b.id], 'CALLED', securityToken)).statusCode).toBe(403);
   });
 });

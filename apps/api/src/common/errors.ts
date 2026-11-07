@@ -162,6 +162,9 @@ export const Errors = {
   // The reason travels as a code too (docs/28 D6): the munshi's sheet offers the matching call to a manager.
   DISPATCH_NEEDS_MANAGER: (code: ManagerReasonCode, reason: string = MANAGER_REASON_TEXT[code]) =>
     new AppError('DISPATCH_NEEDS_MANAGER', `A manager must finish this truck: ${reason}`, 403, undefined, { reason_code: code }),
+  // A call to a manager on withdrawals none of which is still booked or weighed in this facility.
+  OUTBOUND_NOT_WAITING: () =>
+    new AppError('OUTBOUND_NOT_WAITING', 'Nothing here is waiting for a manager: it was dispatched or cancelled', 409),
   OUTBOUND_ALREADY_LEFT: () =>
     new AppError(
       'OUTBOUND_ALREADY_LEFT',

@@ -858,6 +858,9 @@ model OutboundEvent {
   /// The truck visit that carried this withdrawal out (0038). One withdrawal
   /// leaves on exactly one truck; one truck may carry several withdrawals.
   gatePassId            String?        @map("gate_pass_id") @db.Uuid
+  /// A munshi called a manager on it (0045, docs/28 O6): what the buyer wants, and when.
+  managerAskCode        String?        @map("manager_ask_code") @db.VarChar(30)
+  managerAskAt          DateTime?      @map("manager_ask_at") @db.Timestamptz()
 
   lot                Lot        @relation(fields: [lotId], references: [id])
   facility           Facility   @relation(fields: [facilityId], references: [id])

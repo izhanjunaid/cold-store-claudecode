@@ -520,6 +520,23 @@ describe('the munshi alone (solo switch on)', () => {
     expect([res.statusCode, code(res), reasonOf(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', 'OVER_CREDIT_CEILING']);
     await nothingWritten([o1, o2]);
   });
+
+  it('a call from the truck sheet stamps every ready line of the truck (docs/28 O6)', async () => {
+    await setSolo(true);
+    const pass = await arrive('LHR-9400');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-9400', 20);
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-9400', 10, { weigh: false });
+    const p = await truckPreview(pass, operatorToken);
+    const res = await call('POST', '/v1/dispatch/ask-manager', operatorToken, {
+      outbound_ids: p.lines.map((l: { outbound_id: string }) => l.outbound_id),
+      ask_code: 'CHEQUE_OR_TRANSFER',
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(JSON.parse(res.body).data.asked).toBe(2);
+    const rows = await prisma.outboundEvent.findMany({ where: { id: { in: [o1, o2] } } });
+    expect(rows.map((r) => r.managerAskCode)).toEqual(['CHEQUE_OR_TRANSFER', 'CHEQUE_OR_TRANSFER']);
+    await nothingWritten([o1, o2]);
+  });
 });
 
 describe('the load slip and the gate receipt', () => {
