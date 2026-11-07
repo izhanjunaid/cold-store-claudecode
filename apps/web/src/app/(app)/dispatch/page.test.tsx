@@ -248,7 +248,8 @@ describe('Dispatch Desk', () => {
     renderPage();
     const again = (await screen.findByText('DN-WEIGHED')).closest('tr') as HTMLElement;
     expect(within(again).queryByRole('button', { name: /Dispatch & Collect/ })).not.toBeInTheDocument();
-    expect(within(again).getByText(/Waiting for a manager/)).toBeInTheDocument();
+    // The munshi calls a manager instead (docs/28 O6).
+    expect(within(again).getByRole('button', { name: 'Call a manager' })).toBeInTheDocument();
   });
 
   it('with the owner’s solo switch on, the munshi gets the Dispatch & Collect button too', async () => {
@@ -266,7 +267,7 @@ describe('Dispatch Desk', () => {
     renderPage();
     const weighed = (await screen.findByText('DN-WEIGHED')).closest('tr') as HTMLElement;
     expect(await within(weighed).findByRole('button', { name: /Dispatch & Collect/ })).toBeInTheDocument();
-    expect(within(weighed).queryByText(/Waiting for a manager/)).not.toBeInTheDocument();
+    expect(within(weighed).queryByRole('button', { name: 'Call a manager' })).not.toBeInTheDocument();
   });
 
   it('offers Cancel only while the truck has not been dispatched', async () => {
@@ -445,6 +446,37 @@ describe('Dispatch Desk — trucks with several lots', () => {
     fireEvent.change(screen.getByLabelText('Find a lot'), { target: { value: 'LOT-7' } });
     fireEvent.click(await screen.findByRole('button', { name: /LOT-7/ }, { timeout: 5000 }));
     expect(await screen.findByTestId('withdraw')).toHaveAttribute('data-fixed', 'LHR-2222');
+  });
+});
+
+describe('Dispatch Desk — the munshi calls a manager (docs/28 O6)', () => {
+  it("a munshi's ready row has Call a manager, and shows when it was called", async () => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.startsWith('/v1/outbound-events')
+          ? {
+              data: [
+                row({ id: 'ob-booked', dispatch_note_number: 'DN-BOOKED' }),
+                row({ id: 'ob-called', dispatch_note_number: 'DN-CALLED', ask_code: 'CALLED', asked_at: '2026-11-08T09:05:00.000Z' }),
+              ],
+              meta: { total: 2, page: 1, per_page: 50 },
+            }
+          : { data: [], meta: {} },
+      ),
+    );
+    renderPage();
+    const booked = (await screen.findByText('DN-BOOKED')).closest('tr') as HTMLElement;
+    fireEvent.click(within(booked).getByRole('button', { name: 'Call a manager' }));
+    await waitFor(() =>
+      expect(apiClient).toHaveBeenCalledWith('/v1/dispatch/ask-manager', {
+        method: 'POST',
+        body: { outbound_ids: ['ob-booked'], ask_code: 'CALLED' },
+      }),
+    );
+    const called = screen.getByText('DN-CALLED').closest('tr') as HTMLElement;
+    expect(within(called).getByRole('button', { name: /^Called / })).toBeInTheDocument();
   });
 });
 

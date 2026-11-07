@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { localIsoDate, round2 } from '@coldchain/shared';
+import { localIsoDate, round2, type ManagerAskCode } from '@coldchain/shared';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { MODES, type CheckoutPreview, type Mode } from './checkout-sheet';
+import { CallManager, askForRefusal } from './call-manager';
 
 interface TruckGroup {
   billing_party: { id: string; name: string };
@@ -72,6 +73,8 @@ export function TruckCheckoutSheet({
   const [pay, setPay] = useState<Record<string, Payment>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A refusal the preview did not foresee (it went stale): the call to a manager it offers.
+  const [refusedAsk, setRefusedAsk] = useState<ManagerAskCode | null>(null);
 
   const { data: preview, isLoading, error: loadError } = useQuery({
     queryKey: previewKey,
@@ -85,6 +88,7 @@ export function TruckCheckoutSheet({
       setSkipped(new Set());
       setPay({});
       setError(null);
+      setRefusedAsk(null);
     }
   }, [open, passId]);
 
@@ -120,6 +124,23 @@ export function TruckCheckoutSheet({
   const blocked =
     !canFinish || !preview || preview.not_ready.length > 0 || unweighed.length > 0 || lines.length === 0 || preview.groups.some(groupBlocked);
 
+  // Whatever the munshi can't give the buyer, they can call a manager for: every line of the truck (docs/28 O6).
+  const lineIds = lines.map((l) => l.outbound_id);
+  const askOptions: ManagerAskCode[] =
+    holdsKeys || !preview || lineIds.length === 0
+      ? []
+      : !solo
+        ? ['CALLED']
+        : [
+            'CHEQUE_OR_TRANSFER',
+            ...(preview.groups.some((g) => !g.credit_available) ? (['CREDIT'] as const) : []),
+            ...(lines.some((l) => l.service_lines.length > 0) ? (['LEAVE_CHARGE_OFF'] as const) : []),
+          ];
+  const afterAsk = () => {
+    queryClient.invalidateQueries({ queryKey: qk.outbound.lists }); // the desk shows the call
+    onOpenChange(false);
+  };
+
   async function submit() {
     if (!preview) return;
     // The load slip's tab opens here, on the click: Chrome blocks one opened after the checkout
@@ -127,6 +148,7 @@ export function TruckCheckoutSheet({
     const tab = openPdfTab();
     setSubmitting(true);
     setError(null);
+    setRefusedAsk(null);
     try {
       const result = await apiClient<TruckResult>(`/v1/dispatch/trucks/${passId}/dispatch-and-collect`, {
         method: 'POST',
@@ -166,6 +188,7 @@ export function TruckCheckoutSheet({
       if (e instanceof ApiError && (e.code === 'TRUCK_LOAD_CHANGED' || e.code === 'DISPATCH_TOTAL_CHANGED' || e.code === 'TRUCK_NOT_READY')) {
         await queryClient.invalidateQueries({ queryKey: previewKey }); // show the truck as it is now
       }
+      setRefusedAsk(askForRefusal(e));
       setError(e instanceof Error ? e.message : 'Checkout failed');
     } finally {
       setSubmitting(false);
@@ -199,6 +222,7 @@ export function TruckCheckoutSheet({
               Checking out this truck needs a manager{preview.solo.reason ? ` — ${preview.solo.reason}` : ''}.
             </p>
           )}
+          <CallManager outboundIds={lineIds} options={askOptions} onAsked={afterAsk} />
 
           {preview?.groups.map((g) => {
             const p = paymentOf(g);
@@ -290,8 +314,9 @@ export function TruckCheckoutSheet({
           })}
 
           {error && (
-            <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
+            <div role="alert" className="space-y-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <p>{error}</p>
+              {refusedAsk && <CallManager outboundIds={lineIds} options={[refusedAsk]} onAsked={afterAsk} />}
             </div>
           )}
         </SheetBody>

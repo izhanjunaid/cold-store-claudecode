@@ -27,6 +27,7 @@ import { CheckoutSheet, type CheckoutResult } from '@/components/dispatch/checko
 import { TruckCheckoutSheet, type TruckResult } from '@/components/dispatch/truck-checkout-sheet';
 import { TrucksPanel, checkedOutWhole, type TruckInside } from '@/components/dispatch/trucks-panel';
 import { WaitingCard } from '@/components/dispatch/waiting-card';
+import { askManager } from '@/components/dispatch/call-manager';
 import { useWaitingForManager } from '@/hooks/use-waiting-for-manager';
 import { openDispatchNotePdf, openLoadSlipPdf } from '@/components/dispatch/dispatch-pdf';
 import { openInvoicePdf } from '@/components/billing/invoice-pdf';
@@ -45,6 +46,9 @@ interface DispatchRow {
   quantity_withdrawn_bags: number;
   vehicle_number: string | null;
   invoice: { id: string; invoice_number: string | null; status: string; total_pkr: number; balance_due_pkr: number } | null;
+  /** When a munshi last called a manager on it (docs/28 O6). */
+  ask_code?: string | null;
+  asked_at?: string | null;
 }
 
 interface LotHit {
@@ -389,6 +393,19 @@ function DispatchRowView({
     }
   }
 
+  async function callManager() {
+    setSaving(true);
+    try {
+      await askManager([row.id], 'CALLED');
+      toast.success('Sent to the managers’ list');
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not call a manager');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function print() {
     try {
       await openDispatchNotePdf(row.id);
@@ -442,7 +459,10 @@ function DispatchRowView({
                 Dispatch &amp; Collect
               </Button>
             ) : (
-              <span className="text-xs text-muted-foreground">Waiting for a manager</span>
+              // The munshi calls a manager: the row goes to the top of the managers' list (docs/28 O6).
+              <Button size="sm" variant="outline" onClick={callManager} disabled={saving}>
+                {row.asked_at ? `Called ${new Date(row.asked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Call a manager'}
+              </Button>
             ))}
           {(row.stage === 'DISPATCHED' || row.stage === 'PAID') && (
             <>
