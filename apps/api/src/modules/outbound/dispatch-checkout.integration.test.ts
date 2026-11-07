@@ -227,7 +227,12 @@ describe('checkout preview', () => {
   it('tells the munshi whether they may finish the truck alone — booleans and a reason, never a ceiling', async () => {
     const { id } = await weighed(20);
     const off = data(await preview(id, operatorToken));
-    expect(off.solo).toEqual({ allowed: false, reason: expect.stringContaining('one-person dispatch'), credit_available: false });
+    expect(off.solo).toEqual({
+      allowed: false,
+      reason: expect.stringContaining('one-person dispatch'),
+      reason_code: 'SOLO_OFF',
+      credit_available: false,
+    });
     expect(JSON.stringify(off.solo)).not.toMatch(/max|ceiling|exposure/i);
   });
 });
@@ -614,7 +619,11 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
     expect(await prisma.payment.count({ where: { partyId } })).toBe(0);
     expect(await prisma.journalEntry.count({ where: { facilityId: TEST_FACILITY_ID } })).toBe(0);
   };
-  const refusedAsManagerJob = (r: Res) => expect([r.statusCode, code(r)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+  // The refusal names its reason as a code (docs/28 D6), and nothing else: never a figure.
+  const refusedAsManagerJob = (r: Res, reason: string) => {
+    const error = JSON.parse(r.body).error;
+    expect([r.statusCode, error?.code, error?.details]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', { reason_code: reason }]);
+  };
   // A truck the munshi may finish alone is booked today: the date sets the storage billed.
   const today = (quantity: number, opts: Parameters<typeof weighed>[1] = {}) => weighed(quantity, { ...opts, date: businessDate() });
 
@@ -624,7 +633,7 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
     await setSolo(false);
     const { id, lotId } = await today(30);
     const total = data(await preview(id)).total_pkr as number;
-    refusedAsManagerJob(await checkout(id, cash(total), operatorToken));
+    refusedAsManagerJob(await checkout(id, cash(total), operatorToken), 'SOLO_OFF');
     await untouched(lotId, id, 30);
     await nothingWritten();
   });
@@ -632,15 +641,15 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
   it('the solo rules cover a booked withdrawal too (weight is optional, docs/27)', async () => {
     await setSolo(false);
     const off = await booked(30, { date: businessDate() });
-    refusedAsManagerJob(await checkout(off.id, cash(data(await preview(off.id)).total_pkr), operatorToken));
+    refusedAsManagerJob(await checkout(off.id, cash(data(await preview(off.id)).total_pkr), operatorToken), 'SOLO_OFF');
     await untouched(off.lotId, off.id, 30, 'PENDING');
 
     await setSolo(true);
     const old = await booked(30); // booked for 2026-09-01: its date sets the storage billed
     const p = data(await preview(old.id, operatorToken));
-    expect(p.solo).toMatchObject({ allowed: false, credit_available: false });
+    expect(p.solo).toMatchObject({ allowed: false, reason_code: 'NOT_TODAY', credit_available: false });
     expect(p.solo.reason).toMatch(/dated/);
-    refusedAsManagerJob(await checkout(old.id, cash(p.total_pkr), operatorToken));
+    refusedAsManagerJob(await checkout(old.id, cash(p.total_pkr), operatorToken), 'NOT_TODAY');
     await untouched(old.lotId, old.id, 30, 'PENDING');
     await nothingWritten();
 
@@ -673,10 +682,13 @@ describe('solo dispatch (the owner lets the munshi finish a clean truck)', () =>
     await setSolo(true);
     const { id, lotId } = await today(30);
     const total = data(await preview(id)).total_pkr as number;
-    refusedAsManagerJob(await checkout(id, cash(total, { skip_service_charge_ids: [loadingChargeId] }), operatorToken));
-    refusedAsManagerJob(await checkout(id, { expected_total_pkr: total, payment: { mode: 'CHEQUE', cheque_date: businessDate() } }, operatorToken));
-    refusedAsManagerJob(await checkout(id, { expected_total_pkr: total, payment: { mode: 'BANK_TRANSFER' } }, operatorToken));
-    refusedAsManagerJob(await checkout(id, credit(total), operatorToken)); // no standing approval
+    refusedAsManagerJob(await checkout(id, cash(total, { skip_service_charge_ids: [loadingChargeId] }), operatorToken), 'SKIP_CHARGE');
+    refusedAsManagerJob(
+      await checkout(id, { expected_total_pkr: total, payment: { mode: 'CHEQUE', cheque_date: businessDate() } }, operatorToken),
+      'PAYMENT_MODE',
+    );
+    refusedAsManagerJob(await checkout(id, { expected_total_pkr: total, payment: { mode: 'BANK_TRANSFER' } }, operatorToken), 'PAYMENT_MODE');
+    refusedAsManagerJob(await checkout(id, credit(total), operatorToken), 'NO_STANDING_CREDIT'); // no standing approval
     await untouched(lotId, id, 30);
     await nothingWritten();
     // The manager's own path is unchanged by the switch.
@@ -688,9 +700,9 @@ it('switch on: a truck dated before today is a manager decision — its date set
     await setSolo(true);
     const { id, lotId } = await weighed(30); // booked for 2026-09-01
     const p = data(await preview(id, operatorToken));
-    expect(p.solo).toMatchObject({ allowed: false, credit_available: false });
+    expect(p.solo).toMatchObject({ allowed: false, reason_code: 'NOT_TODAY', credit_available: false });
     expect(p.solo.reason).toMatch(/dated/);
-    refusedAsManagerJob(await checkout(id, cash(p.total_pkr), operatorToken));
+    refusedAsManagerJob(await checkout(id, cash(p.total_pkr), operatorToken), 'NOT_TODAY');
     await untouched(lotId, id, 30);
     await nothingWritten();
   });
@@ -707,9 +719,9 @@ it('switch on: a truck dated before today is a manager decision — its date set
     try {
       const { id, lotId } = await today(30);
       const p = data(await preview(id, operatorToken));
-      expect(p.solo).toMatchObject({ allowed: false, credit_available: false });
+      expect(p.solo).toMatchObject({ allowed: false, reason_code: 'PER_TON_CHARGE', credit_available: false });
       expect(p.solo.reason).toMatch(/weight/);
-      refusedAsManagerJob(await checkout(id, cash(p.total_pkr), operatorToken));
+      refusedAsManagerJob(await checkout(id, cash(p.total_pkr), operatorToken), 'PER_TON_CHARGE');
       await untouched(lotId, id, 30);
       await nothingWritten();
     } finally {
@@ -721,8 +733,8 @@ it('switch on: a truck dated before today is a manager decision — its date set
     await setSolo(true);
     const { id, lotId } = await today(30, { lotToken: ownerToken, lotExtra: { book_type: 'KATCHI' } });
     const p = data(await preview(id, operatorToken));
-    expect(p.solo).toMatchObject({ allowed: false, credit_available: false });
-    refusedAsManagerJob(await checkout(id, cash(p.total_pkr), operatorToken));
+    expect(p.solo).toMatchObject({ allowed: false, reason_code: 'KATCHI', credit_available: false });
+    refusedAsManagerJob(await checkout(id, cash(p.total_pkr), operatorToken), 'KATCHI');
     await untouched(lotId, id, 30);
     await nothingWritten();
   });
@@ -747,7 +759,7 @@ it('switch on: a truck dated before today is a manager decision — its date set
 
     await approve(Math.floor(total) - 1); // one rupee short of this bill
     expect(data(await preview(id, operatorToken)).solo.credit_available).toBe(false);
-    refusedAsManagerJob(await checkout(id, credit(total), operatorToken));
+    refusedAsManagerJob(await checkout(id, credit(total), operatorToken), 'OVER_CREDIT_CEILING');
     await untouched(lotId, id, 30);
     await nothingWritten();
 
@@ -756,7 +768,7 @@ it('switch on: a truck dated before today is a manager decision — its date set
       where: { facilityId: TEST_FACILITY_ID, partyId, revokedAt: null },
       data: { validUntil: new Date('2020-01-01') },
     });
-    refusedAsManagerJob(await checkout(id, credit(total), operatorToken));
+    refusedAsManagerJob(await checkout(id, credit(total), operatorToken), 'NO_STANDING_CREDIT');
 
     await prisma.partyCreditApproval.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
     await approve(1_000_000);
@@ -767,7 +779,7 @@ it('switch on: a truck dated before today is a manager decision — its date set
       payload: { reason: 'Party stopped paying' },
     });
     expect(revoke.statusCode, revoke.body).toBe(200);
-    refusedAsManagerJob(await checkout(id, credit(total), operatorToken));
+    refusedAsManagerJob(await checkout(id, credit(total), operatorToken), 'NO_STANDING_CREDIT');
     await untouched(lotId, id, 30);
     await nothingWritten();
   });
@@ -783,7 +795,7 @@ it('switch on: a truck dated before today is a manager decision — its date set
       checkout(b.id, credit(total), operatorToken),
     ]);
     expect([ra.statusCode, rb.statusCode].sort()).toEqual([200, 403]);
-    refusedAsManagerJob([ra, rb].find((r) => r.statusCode === 403)!);
+    refusedAsManagerJob([ra, rb].find((r) => r.statusCode === 403)!, 'OVER_CREDIT_CEILING');
     expect(await prisma.invoice.count({ where: { outboundEventId: { in: [a.id, b.id] }, status: 'FINALIZED' } })).toBe(1);
     // The loser left no trace: its lot still holds its bags and it is still weighed.
     const loser = ra.statusCode === 403 ? a : b;

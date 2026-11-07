@@ -6,9 +6,10 @@ import {
   normalizePlate,
   round2,
   sumMoney,
-  toIsoDate,
+  MANAGER_REASON_TEXT,
   TRUCK_MAX_LINES,
   type DispatchAndCollectRequestType,
+  type ManagerReasonCode,
   type OutboundListQueryType,
   type TruckDispatchRequestType,
 } from '@coldchain/shared';
@@ -17,13 +18,13 @@ import { advisoryXactLock } from '../../common/advisory-lock';
 import { lockRow } from '../../common/row-lock';
 import { findActiveApproval, standingCreditCover } from '../credit-approval/credit-approval.service';
 import { openLoads, type OpenLoadLine } from '../gate-pass/open-load';
-import { resolveFacilitySettings } from '../facility/facility.service';
 import { previewInvoiceFromOutbound } from '../invoice/invoice.builder';
 import { invoiceTotals } from '../invoice/invoice-totals';
 import type { InvoiceService } from '../invoice/invoice.service';
 import type { PaymentService } from '../payment/payment.service';
 import type { OutboundService } from './outbound.service';
 import { isReadyToDispatch } from './reservation';
+import { loadSoloContext, soloRefusal } from './solo-rule';
 
 const OUTBOUND_STATUSES = ['PENDING', 'WEIGHED', 'DISPATCHED', 'CANCELLED', 'DISPUTED'] as const;
 
@@ -170,7 +171,7 @@ export class DispatchCheckoutService {
       ...bill,
       solo: verdict.allowed
         ? { allowed: true, credit_available: creditAvailable }
-        : { allowed: false, reason: verdict.reason, credit_available: false },
+        : { allowed: false, reason: MANAGER_REASON_TEXT[verdict.code], reason_code: verdict.code, credit_available: false },
     };
   }
 
@@ -273,13 +274,17 @@ export class DispatchCheckoutService {
     const priced = [];
     for (const l of lines.filter((x) => isReadyToDispatch(x.status))) priced.push(await this.priceLine(facilityId, l.id));
 
-    let solo: { allowed: true } | { allowed: false; reason: string } =
+    let solo: { allowed: true } | { allowed: false; reason: string; reason_code?: ManagerReasonCode } =
       priced.length > 0 ? { allowed: true } : { allowed: false, reason: 'nothing on this truck is ready' };
     const approved = new Set<string>();
     for (const p of priced) {
       const verdict = await this.soloVerdict(this.prisma, facilityId, p.lot, p.outboundDate);
       if (!verdict.allowed) {
-        solo = { allowed: false, reason: `${p.bill.dispatch_note_number ?? p.bill.outbound_id}: ${verdict.reason}` };
+        solo = {
+          allowed: false,
+          reason: `${p.bill.dispatch_note_number ?? p.bill.outbound_id}: ${MANAGER_REASON_TEXT[verdict.code]}`,
+          reason_code: verdict.code,
+        };
         break;
       }
       if (verdict.creditApproved) approved.add(p.lot.billingPartyId);
@@ -351,9 +356,9 @@ export class DispatchCheckoutService {
     const missing = need.find((key) => !caller.permissions.has(key));
     if (!missing) return false;
 
-    const refuse = (reason: string): never => {
+    const refuse = (code: ManagerReasonCode, reason?: string): never => {
       if (caller.permissions.has('outbound.finalize')) throw Errors.FORBIDDEN(`Missing permission: ${missing}`);
-      throw Errors.DISPATCH_NEEDS_MANAGER(reason);
+      throw Errors.DISPATCH_NEEDS_MANAGER(code, reason);
     };
     const approved = new Set<string>();
     // Every line that will go out, weighed or not: a booked line meets the solo rules too (docs/27).
@@ -364,17 +369,17 @@ export class DispatchCheckoutService {
         { bookType: l.lot.bookType, billingPartyId: l.lot.billingParty.id },
         l.outboundDate,
       );
-      if (!verdict.allowed) return refuse(`${dnOf(l)}: ${verdict.reason}`);
+      if (!verdict.allowed) return refuse(verdict.code, `${dnOf(l)}: ${MANAGER_REASON_TEXT[verdict.code]}`);
       if (verdict.creditApproved) approved.add(l.lot.billingParty.id);
     }
     if (body.lines.some((l) => (l.skip_service_charge_ids ?? []).length > 0)) {
-      return refuse('leaving a charge off the bill is a manager decision');
+      return refuse('SKIP_CHARGE');
     }
     for (const p of body.payments) {
       if (p.mode === 'CREDIT') {
-        if (!approved.has(p.billing_party_id)) return refuse('a party on this truck has no standing credit approval');
+        if (!approved.has(p.billing_party_id)) return refuse('NO_STANDING_CREDIT', 'a party on this truck has no standing credit approval');
       } else if (p.mode !== 'CASH') {
-        return refuse('only cash or approved credit can be taken without a manager');
+        return refuse('PAYMENT_MODE');
       }
     }
     return true;
@@ -420,7 +425,7 @@ export class DispatchCheckoutService {
     // Every bill is in the ledger: each solo credit party must still sit under its ceiling with all of them.
     for (const partyId of creditParties) {
       const cover = await standingCreditCover(tx, facilityId, [{ partyId }]);
-      if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('these bills would take a party past its approved credit');
+      if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('OVER_CREDIT_CEILING', 'these bills would take a party past its approved credit');
     }
 
     const payments = [];
@@ -489,9 +494,9 @@ export class DispatchCheckoutService {
 
     // A manager-level caller with an owner-customised matrix keeps the plain message; a munshi is
     // told why a manager is needed.
-    const refuse = (reason: string): never => {
+    const refuse = (code: ManagerReasonCode): never => {
       if (caller.permissions.has('outbound.finalize')) throw Errors.FORBIDDEN(`Missing permission: ${missing}`);
-      throw Errors.DISPATCH_NEEDS_MANAGER(reason);
+      throw Errors.DISPATCH_NEEDS_MANAGER(code);
     };
 
     const ob = await this.prisma.outboundEvent.findFirst({
@@ -501,45 +506,30 @@ export class DispatchCheckoutService {
     if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
 
     const verdict = await this.soloVerdict(this.prisma, caller.facilityId, ob.lot, ob.outboundDate);
-    if (!verdict.allowed) return refuse(verdict.reason);
-    if ((body.skip_service_charge_ids ?? []).length > 0) return refuse('leaving a charge off the bill is a manager decision');
+    if (!verdict.allowed) return refuse(verdict.code);
+    if ((body.skip_service_charge_ids ?? []).length > 0) return refuse('SKIP_CHARGE');
     if (body.payment.mode === 'CREDIT') {
-      if (!verdict.creditApproved) return refuse('this party has no standing credit approval');
+      if (!verdict.creditApproved) return refuse('NO_STANDING_CREDIT');
     } else if (body.payment.mode !== 'CASH') {
-      return refuse('only cash or approved credit can be taken without a manager');
+      return refuse('PAYMENT_MODE');
     }
     return true;
   }
 
   /**
-   * May the munshi finish this truck alone? Needs the owner's switch, a PACCI lot, a withdrawal dated
-   * today (its date ends the storage billed) and no default charge priced by weight (the munshi typed
-   * the weight). `creditApproved`
-   * says the billing party holds a live standing approval; whether the bill fits under its ceiling
-   * is checked at the checkout, under a lock, once the bill is in the ledger.
+   * May the munshi finish this truck alone? The solo rules are `soloRefusal()` (solo-rule.ts), shared
+   * with the managers' waiting list. `creditApproved` says the billing party holds a live standing
+   * approval; whether the bill fits under its ceiling is checked at the checkout, under a lock, once the
+   * bill is in the ledger.
    */
   private async soloVerdict(
     db: PrismaClient | Prisma.TransactionClient,
     facilityId: string,
     lot: { bookType: string; billingPartyId: string },
     outboundDate: Date,
-  ): Promise<{ allowed: true; creditApproved: boolean } | { allowed: false; reason: string; creditApproved: false }> {
-    const facility = await db.facility.findUnique({ where: { id: facilityId }, select: { settings: true } });
-    if (!resolveFacilitySettings(facility?.settings ?? null).dispatch_solo_mode) {
-      return { allowed: false, reason: 'the owner has not switched on one-person dispatch', creditApproved: false };
-    }
-    if (lot.bookType !== 'PACCI') {
-      return { allowed: false, reason: 'a KATCHI-book bill is a manager decision', creditApproved: false };
-    }
-    if (toIsoDate(outboundDate) !== businessDate()) {
-      return { allowed: false, reason: 'a withdrawal not dated today is a manager decision', creditApproved: false };
-    }
-    const byWeight = await db.serviceCharge.count({
-      where: { facilityId, isActive: true, applyAtDispatch: true, unitType: 'PER_TON', unitPricePkr: { gt: 0 } },
-    });
-    if (byWeight > 0) {
-      return { allowed: false, reason: 'a charge priced by the weight is a manager decision', creditApproved: false };
-    }
+  ): Promise<{ allowed: true; creditApproved: boolean } | { allowed: false; code: ManagerReasonCode; creditApproved: false }> {
+    const code = soloRefusal(await loadSoloContext(db, facilityId), lot, outboundDate);
+    if (code) return { allowed: false, code, creditApproved: false };
     const approval = await findActiveApproval(db, facilityId, lot.billingPartyId);
     return { allowed: true, creditApproved: approval != null };
   }
@@ -574,7 +564,7 @@ export class DispatchCheckoutService {
     // The bill is in the ledger now, so the party's exposure includes it: it must still sit under the ceiling.
     if (soloCredit) {
       const cover = await standingCreditCover(tx, facilityId, [{ partyId: done.billingPartyId }]);
-      if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('this bill would take the party past its approved credit');
+      if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('OVER_CREDIT_CEILING');
     }
 
     let payment: { id: string; receipt_number: string | null } | null = null;

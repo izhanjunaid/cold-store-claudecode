@@ -114,6 +114,35 @@ export type DispatchAndCollectRequestType = z.infer<typeof DispatchAndCollectReq
 export const TRUCK_MAX_LINES = 20;
 
 /**
+ * Why a manager must finish a checkout (docs/28 D6). The first four are the solo rules (the owner's
+ * switch, the book, the date, a per-ton charge); the rest are what the munshi asked the checkout to do.
+ * A refusal carries the code in `details.reason_code`; the previews in `solo.reason_code`.
+ */
+export const MANAGER_REASON_CODES = [
+  'SOLO_OFF',
+  'KATCHI',
+  'NOT_TODAY',
+  'PER_TON_CHARGE',
+  'SKIP_CHARGE',
+  'NO_STANDING_CREDIT',
+  'PAYMENT_MODE',
+  'OVER_CREDIT_CEILING',
+] as const;
+export type ManagerReasonCode = (typeof MANAGER_REASON_CODES)[number];
+
+/** Each reason in words, as the munshi has always been told it. */
+export const MANAGER_REASON_TEXT: Record<ManagerReasonCode, string> = {
+  SOLO_OFF: 'the owner has not switched on one-person dispatch',
+  KATCHI: 'a KATCHI-book bill is a manager decision',
+  NOT_TODAY: 'a withdrawal not dated today is a manager decision',
+  PER_TON_CHARGE: 'a charge priced by the weight is a manager decision',
+  SKIP_CHARGE: 'leaving a charge off the bill is a manager decision',
+  NO_STANDING_CREDIT: 'this party has no standing credit approval',
+  PAYMENT_MODE: 'only cash or approved credit can be taken without a manager',
+  OVER_CREDIT_CEILING: 'this bill would take the party past its approved credit',
+};
+
+/**
  * POST /v1/dispatch/trucks/:passId/dispatch-and-collect — check out every weighed withdrawal on a
  * truck in one transaction: each line its own bill (the total it showed is what posts), and one
  * payment row per (billing party, book) on the truck. The line cap is checked by the service so

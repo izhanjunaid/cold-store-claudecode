@@ -127,6 +127,9 @@ function requestFrom(preview: any, mode: (g: any) => string = () => 'CASH') {
 const checkoutTruck = (passId: string, body: unknown, token = managerToken) =>
   call('POST', `/v1/dispatch/trucks/${passId}/dispatch-and-collect`, token, body);
 
+/** The reason a manager is needed, as a code (docs/28 D6). */
+const reasonOf = (r: { body: string }) => JSON.parse(r.body).error?.details?.reason_code;
+
 async function nothingWritten(outboundIds: string[]) {
   for (const id of outboundIds) {
     expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id } })).status).not.toBe('DISPATCHED');
@@ -305,7 +308,7 @@ describe('a truck that is not ready, or changed since it was reviewed', () => {
     const o1 = await onTruck(await lot(partyA, 20), 'LHR-8420', 20, { weigh: false });
     const o2 = await onTruck(await lot(partyA, 10), 'LHR-8420', 10, { weigh: false });
     const off = await checkoutTruck(pass, requestFrom(await truckPreview(pass)), operatorToken);
-    expect([off.statusCode, code(off)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+    expect([off.statusCode, code(off), reasonOf(off)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', 'SOLO_OFF']);
     await nothingWritten([o1, o2]);
 
     await setSolo(true);
@@ -314,7 +317,7 @@ describe('a truck that is not ready, or changed since it was reviewed', () => {
       const fresh = await onTruck(await lot(partyA, 20), 'LHR-8430', 20, { weigh: false });
       const old = await onTruck(await lot(partyA, 10), 'LHR-8430', 10, { weigh: false, date: addDays(businessDate(), -3) });
       const res = await checkoutTruck(pass2, requestFrom(await truckPreview(pass2)), operatorToken);
-      expect([res.statusCode, code(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+      expect([res.statusCode, code(res), reasonOf(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', 'NOT_TODAY']);
       const dn = (await prisma.outboundEvent.findUniqueOrThrow({ where: { id: old } })).dispatchNoteNumber!;
       expect(JSON.parse(res.body).error.message).toContain(dn);
       await nothingWritten([fresh, old]);
@@ -492,9 +495,12 @@ describe('the munshi alone (solo switch on)', () => {
     const o1 = await onTruck(await lot(partyA, 20), 'LHR-9200', 20);
     const o2 = await onTruck(await lot(partyA, 10), 'LHR-9200', 10, { date: addDays(businessDate(), -1) });
     const p = await truckPreview(pass, operatorToken);
-    expect(p.solo.allowed).toBe(false);
+    // The preview names the line and its reason as a code.
+    expect(p.solo).toMatchObject({ allowed: false, reason_code: 'NOT_TODAY' });
+    const dn = (await prisma.outboundEvent.findUniqueOrThrow({ where: { id: o2 } })).dispatchNoteNumber!;
+    expect(p.solo.reason).toContain(dn);
     const res = await checkoutTruck(pass, requestFrom(p), operatorToken);
-    expect([res.statusCode, code(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+    expect([res.statusCode, code(res), reasonOf(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', 'NOT_TODAY']);
     await nothingWritten([o1, o2]);
   });
 
@@ -511,7 +517,7 @@ describe('the munshi alone (solo switch on)', () => {
     const p = await truckPreview(pass, operatorToken);
     expect(p.groups[0].credit_available).toBe(false);
     const res = await checkoutTruck(pass, requestFrom(p, () => 'CREDIT'), operatorToken);
-    expect([res.statusCode, code(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+    expect([res.statusCode, code(res), reasonOf(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', 'OVER_CREDIT_CEILING']);
     await nothingWritten([o1, o2]);
   });
 });
