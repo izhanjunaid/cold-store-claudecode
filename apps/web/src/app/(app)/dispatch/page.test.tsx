@@ -478,6 +478,24 @@ describe('Dispatch Desk — the munshi calls a manager (docs/28 O6)', () => {
     const called = screen.getByText('DN-CALLED').closest('tr') as HTMLElement;
     expect(within(called).getByRole('button', { name: /^Called / })).toBeInTheDocument();
   });
+
+  it('a call from an earlier day names its day on the desk row', async () => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.startsWith('/v1/outbound-events')
+          ? {
+              data: [row({ id: 'ob-old-call', dispatch_note_number: 'DN-OLDCALL', ask_code: 'CALLED', asked_at: '2026-09-02T09:05:00.000Z' })],
+              meta: { total: 1, page: 1, per_page: 50 },
+            }
+          : { data: [], meta: {} },
+      ),
+    );
+    renderPage();
+    const old = (await screen.findByText('DN-OLDCALL')).closest('tr') as HTMLElement;
+    expect(within(old).getByRole('button', { name: /^Called 2 Sep\w* 2026/ })).toBeInTheDocument();
+  });
 });
 
 describe('Dispatch Desk — waiting for a manager (docs/28 D6)', () => {
@@ -555,6 +573,39 @@ describe('Dispatch Desk — waiting for a manager (docs/28 D6)', () => {
     expect(within(old).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     const today = within(c).getByText('DN-TODAY').closest('li') as HTMLElement;
     expect(within(today).queryByRole('button', { name: 'Cancel' })).toBeNull();
+  });
+
+  it('a called booking from an earlier day still shows its date and a Cancel button, and which day it was called', async () => {
+    waitingRows = [
+      waitingRow({
+        id: 'w-stale',
+        dispatch_note_number: 'DN-STALE',
+        outbound_date: '2026-09-01',
+        reason_code: null,
+        ask_code: 'CHEQUE_OR_TRANSFER',
+        asked_at: '2026-09-02T09:05:00.000Z',
+      }),
+      waitingRow({
+        id: 'w-fresh',
+        dispatch_note_number: 'DN-FRESH',
+        reason_code: null,
+        ask_code: 'CREDIT',
+        asked_at: new Date().toISOString(),
+      }),
+    ];
+    renderPage();
+    const c = await card();
+    // Called rows keep their place at the top, not in the "Booked before today" group.
+    expect(within(c).queryByRole('group', { name: 'Booked before today' })).toBeNull();
+    const stale = within(c).getByText('DN-STALE').closest('li') as HTMLElement;
+    expect(stale).toHaveTextContent(/booked for 1 Sep\w* 2026/);
+    expect(stale).toHaveTextContent(/Called 2 Sep\w* 2026/);
+    expect(within(stale).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    // A call made today reads as a time, and a booking dated today cannot be cancelled from here.
+    const fresh = within(c).getByText('DN-FRESH').closest('li') as HTMLElement;
+    expect(fresh).not.toHaveTextContent(/booked for/);
+    expect(fresh).not.toHaveTextContent(/Called \d{1,2} \w{3} \d{4}/);
+    expect(within(fresh).queryByRole('button', { name: 'Cancel' })).toBeNull();
   });
 
   it('after a checkout the waiting list is read again', async () => {

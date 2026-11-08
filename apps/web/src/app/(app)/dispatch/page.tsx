@@ -27,7 +27,7 @@ import { CheckoutSheet, type CheckoutResult } from '@/components/dispatch/checko
 import { TruckCheckoutSheet, type TruckResult } from '@/components/dispatch/truck-checkout-sheet';
 import { TrucksPanel, checkedOutWhole, type TruckInside } from '@/components/dispatch/trucks-panel';
 import { WaitingCard } from '@/components/dispatch/waiting-card';
-import { askManager } from '@/components/dispatch/call-manager';
+import { askManager, calledAt } from '@/components/dispatch/call-manager';
 import { useWaitingForManager } from '@/hooks/use-waiting-for-manager';
 import { openDispatchNotePdf, openLoadSlipPdf } from '@/components/dispatch/dispatch-pdf';
 import { openInvoicePdf } from '@/components/billing/invoice-pdf';
@@ -461,7 +461,7 @@ function DispatchRowView({
             ) : (
               // The munshi calls a manager: the row goes to the top of the managers' list (docs/28 O6).
               <Button size="sm" variant="outline" onClick={callManager} disabled={saving}>
-                {row.asked_at ? `Called ${new Date(row.asked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Call a manager'}
+                {row.asked_at ? `Called ${calledAt(row.asked_at)}` : 'Call a manager'}
               </Button>
             ))}
           {(row.stage === 'DISPATCHED' || row.stage === 'PAID') && (

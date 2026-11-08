@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import type { ManagerAskCode } from '@coldchain/shared';
+import { localIsoDate, type ManagerAskCode } from '@coldchain/shared';
 import { apiClient, ApiError } from '@/lib/api-client';
+import { formatDateTime } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 
 const LABEL: Record<ManagerAskCode, string> = {
@@ -12,6 +13,14 @@ const LABEL: Record<ManagerAskCode, string> = {
   CREDIT: 'Credit',
   LEAVE_CHARGE_OFF: 'Leave a charge off',
 };
+
+/** When a call was made: "14:05" if today, else "2 Sep 2026, 14:05" so an old call never reads as today's. */
+export function calledAt(iso: string): string {
+  const d = new Date(iso);
+  return localIsoDate(d) === localIsoDate()
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : formatDateTime(d);
+}
 
 /** Put withdrawals on the managers' waiting list, saying what the buyer wants (docs/28 O6). */
 export async function askManager(outboundIds: string[], askCode: ManagerAskCode): Promise<void> {
