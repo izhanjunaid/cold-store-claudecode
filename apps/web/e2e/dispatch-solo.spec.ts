@@ -95,7 +95,8 @@ test('the munshi finishes a cash truck alone; the guard releases it; a manager c
   await expect(row).toBeVisible({ timeout: 30_000 });
   await row.getByRole('button', { name: /Dispatch & Collect/ }).click();
   await expect(page.getByText(/finish this truck yourself/i)).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('button', { name: 'Cheque' })).toBeDisabled();
+  // The payment mode, not the "Cheque or transfer" call to a manager beside it (docs/28 O6).
+  await expect(page.getByRole('button', { name: 'Cheque', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: /Dispatch & Collect Rs\s?[\d,]+/ }).click();
   await expect(page.getByText(/Dispatched and collected/i).first()).toBeVisible({ timeout: 30_000 });
 
@@ -190,4 +191,40 @@ test('a KATCHI-book truck: the munshi is told a manager must finish it', async (
   await row.getByRole('button', { name: /Dispatch & Collect/ }).click();
   await expect(page.getByText(/needs a manager — a KATCHI-book bill is a manager decision/i)).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('button', { name: /Dispatch & Collect Rs/ })).toBeDisabled();
+});
+
+test('a munshi calls a manager for a cheque buyer; the manager finishes it from the waiting card (docs/28 O6)', async ({
+  page,
+  request,
+  loginAs,
+}) => {
+  test.setTimeout(240_000);
+  const truck = plate();
+  const { id } = await weighedTruck(request, truck, { label: 'Solo Call' });
+  await page.route('**/dispatch-note', (route) => route.fulfill({ status: 200, contentType: 'application/pdf', body: '%PDF-1.4\n%%EOF' }));
+
+  // ── 1. The munshi: the buyer pays by cheque, which the munshi may not take alone.
+  await loginAs('OPERATOR');
+  await page.goto('/dispatch');
+  const row = page.locator('tr', { hasText: truck });
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await row.getByRole('button', { name: /Dispatch & Collect/ }).click();
+  await page.getByRole('button', { name: 'Cheque or transfer' }).click();
+  await expect(page.getByText('Sent to the managers’ list').first()).toBeVisible({ timeout: 20_000 });
+
+  // ── 2. The manager: a count beside Dispatch Desk, the withdrawal on the card with its reason.
+  await loginAs('MANAGER');
+  await page.goto('/dispatch');
+  await expect(page.getByRole('link', { name: /Dispatch Desk.*waiting for a manager/ })).toBeVisible({ timeout: 30_000 });
+  const card = page.getByRole('region', { name: 'Waiting for a manager' });
+  const item = card.locator('li', { hasText: truck });
+  await expect(item).toContainText('the buyer pays by cheque or transfer', { timeout: 30_000 });
+
+  // ── 3. Finished from the card (in cash here), it leaves the list.
+  await item.getByRole('button', { name: /Dispatch & Collect/ }).click();
+  await page.getByRole('button', { name: /Dispatch & Collect Rs\s?[\d,]+/ }).click();
+  await expect(page.getByText(/Dispatched and collected/i).first()).toBeVisible({ timeout: 30_000 });
+  await expect(card.locator('li', { hasText: truck })).toHaveCount(0, { timeout: 30_000 });
+  const ob = (await (await request.get(`${API_URL}/v1/outbound-events/${id}`, { headers: await authHeaders('MANAGER') })).json()).data;
+  expect(ob.status).toBe('DISPATCHED');
 });
