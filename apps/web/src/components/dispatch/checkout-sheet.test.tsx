@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const OB = 'ob-1';
@@ -21,6 +21,7 @@ vi.mock('@/stores/auth.store', () => ({
   },
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }));
+import { toast } from 'sonner';
 
 import { CheckoutSheet } from './checkout-sheet';
 
@@ -330,5 +331,94 @@ describe('CheckoutSheet', () => {
     renderSheet();
     expect(await screen.findByRole('button', { name: 'Cash' })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Dispatch on credit/ })).toBeEnabled();
+  });
+});
+
+// The munshi calls a manager and says what the buyer wants (docs/28 O6): the withdrawal goes to the
+// top of the managers' waiting list. A call opens no paper and dispatches nothing.
+describe('CheckoutSheet — calling a manager (docs/28 O6)', () => {
+  const ASK = '/v1/dispatch/ask-manager';
+  const asks = () => apiClient.mock.calls.filter(([path]) => path === ASK);
+  const withPreview = (solo: unknown, over: Record<string, unknown> = {}, onPost?: () => Promise<unknown>) =>
+    apiClient.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (path === ASK) return Promise.resolve({ asked: 1, asked_at: '2026-11-08T09:05:00.000Z' });
+      if (opts?.method === 'POST') return onPost ? onPost() : Promise.resolve(RESULT);
+      if (path.endsWith('/checkout-preview')) return Promise.resolve({ ...PREVIEW, ...over, solo });
+      return Promise.resolve(null);
+    });
+  beforeEach(() => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+  });
+
+  it('a munshi on one-person dispatch can call a manager for a cheque buyer', async () => {
+    withPreview({ allowed: true, credit_available: false });
+    const { onOpenChange, onDone } = renderSheet();
+    expect(await screen.findByRole('button', { name: 'Credit' })).toBeInTheDocument(); // credit isn't offered here
+    expect(screen.getByRole('button', { name: 'Leave a charge off' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cheque or transfer' }));
+    await waitFor(() => expect(asks()).toHaveLength(1));
+    expect(asks()[0]![1]).toMatchObject({ method: 'POST', body: { outbound_ids: [OB], ask_code: 'CHEQUE_OR_TRANSFER' } });
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Sent to the managers’ list'));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onDone).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('Credit is offered as a call only when the sheet can’t give credit; no charge, no "leave a charge off"', async () => {
+    withPreview({ allowed: true, credit_available: true }, { service_lines: [] });
+    renderSheet();
+    await screen.findByRole('button', { name: 'Cheque or transfer' });
+    expect(screen.queryByRole('button', { name: 'Credit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Leave a charge off' })).toBeNull();
+  });
+
+  it('a blocked munshi gets one Call a manager button', async () => {
+    withPreview({ allowed: false, reason: 'a KATCHI-book bill is a manager decision', reason_code: 'KATCHI', credit_available: false });
+    renderSheet();
+    fireEvent.click(await screen.findByRole('button', { name: 'Call a manager' }));
+    await waitFor(() => expect(asks()).toHaveLength(1));
+    expect(asks()[0]![1].body).toEqual({ outbound_ids: [OB], ask_code: 'CALLED' });
+    expect(screen.queryByRole('button', { name: 'Cheque or transfer' })).toBeNull();
+  });
+
+  it('a manager sees no call buttons', async () => {
+    role = 'MANAGER';
+    permissions = ['outbound.finalize', 'invoices.manage', 'payments.record'];
+    withPreview({ allowed: false, reason: 'the owner has not switched on one-person dispatch', reason_code: 'SOLO_OFF', credit_available: false });
+    renderSheet();
+    await screen.findByRole('button', { name: /Dispatch & Collect/ });
+    expect(screen.queryByRole('button', { name: /Call a manager|Cheque or transfer/ })).toBeNull();
+  });
+
+  it('a refused checkout offers a call with the matching ask', async () => {
+    // What apiFetch throws: `details` is the whole error body, the reason code inside it.
+    const refusal = new ApiError('A manager must finish this truck: this bill would take the party past its approved credit', {
+      code: 'DISPATCH_NEEDS_MANAGER',
+      status: 403,
+      details: { code: 'DISPATCH_NEEDS_MANAGER', message: 'A manager must finish this truck', details: { reason_code: 'OVER_CREDIT_CEILING' } },
+    });
+    withPreview({ allowed: true, credit_available: true }, {}, () => Promise.reject(refusal));
+    renderSheet();
+    fireEvent.click(await screen.findByRole('button', { name: 'On credit' }));
+    fireEvent.click(screen.getByRole('button', { name: /Dispatch on credit/ }));
+    const alert = await screen.findByRole('alert');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Credit' }));
+    await waitFor(() => expect(asks()).toHaveLength(1));
+    expect(asks()[0]![1].body).toEqual({ outbound_ids: [OB], ask_code: 'CREDIT' });
+  });
+
+  it('a failed call says why and keeps the sheet open', async () => {
+    withPreview({ allowed: true, credit_available: false });
+    apiClient.mockImplementation((path: string) => {
+      if (path === ASK) return Promise.reject(new ApiError('Nothing here is waiting for a manager', { code: 'OUTBOUND_NOT_WAITING', status: 409 }));
+      return Promise.resolve(path.endsWith('/checkout-preview') ? { ...PREVIEW, solo: { allowed: true, credit_available: false } } : null);
+    });
+    const { onOpenChange } = renderSheet();
+    fireEvent.click(await screen.findByRole('button', { name: 'Cheque or transfer' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Nothing here is waiting for a manager'));
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 });

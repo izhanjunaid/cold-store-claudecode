@@ -183,6 +183,19 @@ describe('OutboundEventDetailPage — finalize gate', () => {
     expect(screen.getByText('Waiting for a manager to dispatch.')).toBeInTheDocument();
   });
 
+  it('with one-person dispatch on, a munshi is sent to the desk (docs/28 D6)', async () => {
+    const base = apiClient.getMockImplementation()!;
+    apiClient.mockImplementation((path: string, opts?: unknown) =>
+      path === '/v1/facilities/me'
+        ? Promise.resolve({ id: 'f', name: 'F', settings: { dispatch_solo_mode: true } })
+        : base(path, opts),
+    );
+    renderPage();
+    await loaded();
+    expect(await screen.findByText('Check it out at the Dispatch Desk.')).toBeInTheDocument();
+    expect(screen.queryByText('Waiting for a manager to dispatch.')).not.toBeInTheDocument();
+  });
+
   it('shows Finalize & Dispatch with outbound.finalize', async () => {
     role = 'MANAGER';
     permissions = ['outbound.record', 'outbound.finalize'];

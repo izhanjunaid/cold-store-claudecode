@@ -245,3 +245,29 @@ describe('TruckCheckoutSheet', () => {
     await waitFor(() => expect(apiClient.mock.calls.filter(([p, o]) => String(p).endsWith('/checkout-preview') && !o).length).toBeGreaterThan(1));
   });
 });
+
+describe('TruckCheckoutSheet — calling a manager (docs/28 O6)', () => {
+  const asks = () => apiClient.mock.calls.filter(([path]) => path === '/v1/dispatch/ask-manager');
+  beforeEach(() => {
+    permissions = ['outbound.record'];
+  });
+
+  it('the call sends every line of the truck', async () => {
+    renderSheet();
+    await screen.findByText('Bashir', { selector: '[data-group-party]' });
+    // Party A's approval doesn't cover its bills: credit is a call. A loading charge could be left off.
+    expect(screen.getByRole('button', { name: 'Credit' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Leave a charge off' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cheque or transfer' }));
+    await waitFor(() => expect(asks()).toHaveLength(1));
+    expect(asks()[0]![1]).toMatchObject({ method: 'POST', body: { outbound_ids: ['1', '2', '3'], ask_code: 'CHEQUE_OR_TRANSFER' } });
+  });
+
+  it('a truck the munshi may not finish gets one Call a manager button', async () => {
+    preview = { ...preview, solo: { allowed: false, reason: 'DN-2: a withdrawal not dated today is a manager decision', reason_code: 'NOT_TODAY' } };
+    renderSheet();
+    fireEvent.click(await screen.findByRole('button', { name: 'Call a manager' }));
+    await waitFor(() => expect(asks()).toHaveLength(1));
+    expect(asks()[0]![1].body).toEqual({ outbound_ids: ['1', '2', '3'], ask_code: 'CALLED' });
+  });
+});

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { round2 } from '@coldchain/shared';
+import { round2, type ManagerAskCode } from '@coldchain/shared';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
@@ -15,6 +15,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RackPicks, picksTotal, toPickedFrom, type RackPicksValue } from '@/components/outbound/rack-picks';
+import { CallManager, askForRefusal } from './call-manager';
 import {
   Sheet,
   SheetBody,
@@ -101,6 +102,8 @@ export function CheckoutSheet({
   const [picks, setPicks] = useState<RackPicksValue>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A refusal the preview did not foresee (it went stale): the call to a manager it offers.
+  const [refusedAsk, setRefusedAsk] = useState<ManagerAskCode | null>(null);
 
   const {
     data: preview,
@@ -122,6 +125,7 @@ export function CheckoutSheet({
       setSkipped(new Set());
       setPicks({});
       setError(null);
+      setRefusedAsk(null);
     }
   }, [open, outboundId, canCollect, holdsKeys]);
 
@@ -141,6 +145,22 @@ export function CheckoutSheet({
   const modeOffered = (m: Mode) =>
     holdsKeys ? m === 'CREDIT' || canCollect : solo ? m === 'CASH' || (m === 'CREDIT' && creditOffered) : false;
 
+  // Whatever the munshi can't give the buyer, they can call a manager for (docs/28 O6).
+  const askOptions: ManagerAskCode[] =
+    holdsKeys || !preview
+      ? []
+      : !solo
+        ? ['CALLED']
+        : [
+            'CHEQUE_OR_TRANSFER',
+            ...(creditOffered ? [] : (['CREDIT'] as const)),
+            ...(preview.service_lines.length > 0 ? (['LEAVE_CHARGE_OFF'] as const) : []),
+          ];
+  const afterAsk = () => {
+    queryClient.invalidateQueries({ queryKey: qk.outbound.lists }); // the desk shows the call
+    onOpenChange(false);
+  };
+
   const needsReference = mode === 'BANK_TRANSFER' || mode === 'MOBILE_WALLET';
   const pickedFrom = toPickedFrom(picks);
   const overPicked = !!preview && picksTotal(picks) > preview.quantity_withdrawn_bags;
@@ -159,6 +179,7 @@ export function CheckoutSheet({
     const tab = openPdfTab();
     setSubmitting(true);
     setError(null);
+    setRefusedAsk(null);
     try {
       const result = await apiClient<CheckoutResult>(`/v1/outbound-events/${outboundId}/dispatch-and-collect`, {
         method: 'POST',
@@ -184,6 +205,7 @@ export function CheckoutSheet({
         // The bill moved under us: show the new one and make them review it again.
         await queryClient.invalidateQueries({ queryKey: qk.outbound.preview(outboundId) });
       }
+      setRefusedAsk(askForRefusal(e));
       setError(e instanceof Error ? e.message : 'Dispatch failed');
     } finally {
       setSubmitting(false);
@@ -221,6 +243,7 @@ export function CheckoutSheet({
               {creditOffered ? ', or on this party’s approved credit' : ''}. Anything else needs a manager.
             </p>
           )}
+          <CallManager outboundIds={[outboundId]} options={askOptions} onAsked={afterAsk} />
 
           {preview && unweighed.length > 0 && (
             <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -348,9 +371,10 @@ export function CheckoutSheet({
           {error && (
             <div
               role="alert"
-              className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              className="space-y-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
             >
-              {error}
+              <p>{error}</p>
+              {refusedAsk && <CallManager outboundIds={[outboundId]} options={[refusedAsk]} onAsked={afterAsk} />}
             </div>
           )}
         </SheetBody>

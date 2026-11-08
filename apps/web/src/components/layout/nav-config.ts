@@ -37,6 +37,8 @@ export interface NavItem {
    * screens any authenticated user can open (reference data).
    */
   permission?: string | string[];
+  /** A count beside the label: what waits for a manager on the desk (docs/28 D6). */
+  badge?: 'dispatch-waiting';
 }
 
 export interface NavGroup {
@@ -58,7 +60,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Lots', href: '/lots', icon: Boxes },
       { label: 'Rooms', href: '/chambers', icon: Warehouse },
       { label: 'Commodities', href: '/commodities', icon: Sprout, permission: 'commodities.manage' },
-      { label: 'Dispatch Desk', href: '/dispatch', icon: PackageMinus, permission: 'outbound.record' },
+      { label: 'Dispatch Desk', href: '/dispatch', icon: PackageMinus, permission: 'outbound.record', badge: 'dispatch-waiting' },
       { label: 'Gate Pass', href: '/gate', icon: DoorOpen, permission: 'gate_passes.log' },
       // Quality (M6) has no UI yet — do not add a nav item until its page exists,
       // a link that 404s is worse than no link.

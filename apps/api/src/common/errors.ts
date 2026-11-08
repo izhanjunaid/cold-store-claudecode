@@ -1,4 +1,4 @@
-import { GATE_COUNT_TRIES } from '@coldchain/shared';
+import { GATE_COUNT_TRIES, MANAGER_REASON_TEXT, type ManagerReasonCode } from '@coldchain/shared';
 
 export class AppError extends Error {
   constructor(
@@ -159,8 +159,12 @@ export const Errors = {
   TRUCK_PAYMENTS_MISMATCH: (detail: string) =>
     new AppError('TRUCK_PAYMENTS_MISMATCH', `One payment row is needed for each party and book on the truck: ${detail}`, 422, 'payments'),
   // Solo dispatch (C1b): the checkout is a manager's job unless the owner has let the munshi finish a clean truck alone.
-  DISPATCH_NEEDS_MANAGER: (reason: string) =>
-    new AppError('DISPATCH_NEEDS_MANAGER', `A manager must finish this truck: ${reason}`, 403),
+  // The reason travels as a code too (docs/28 D6): the munshi's sheet offers the matching call to a manager.
+  DISPATCH_NEEDS_MANAGER: (code: ManagerReasonCode, reason: string = MANAGER_REASON_TEXT[code]) =>
+    new AppError('DISPATCH_NEEDS_MANAGER', `A manager must finish this truck: ${reason}`, 403, undefined, { reason_code: code }),
+  // A call to a manager on withdrawals none of which is still booked or weighed in this facility.
+  OUTBOUND_NOT_WAITING: () =>
+    new AppError('OUTBOUND_NOT_WAITING', 'Nothing here is waiting for a manager: it was dispatched or cancelled', 409),
   OUTBOUND_ALREADY_LEFT: () =>
     new AppError(
       'OUTBOUND_ALREADY_LEFT',

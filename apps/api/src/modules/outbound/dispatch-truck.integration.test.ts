@@ -127,6 +127,9 @@ function requestFrom(preview: any, mode: (g: any) => string = () => 'CASH') {
 const checkoutTruck = (passId: string, body: unknown, token = managerToken) =>
   call('POST', `/v1/dispatch/trucks/${passId}/dispatch-and-collect`, token, body);
 
+/** The reason a manager is needed, as a code (docs/28 D6). */
+const reasonOf = (r: { body: string }) => JSON.parse(r.body).error?.details?.reason_code;
+
 async function nothingWritten(outboundIds: string[]) {
   for (const id of outboundIds) {
     expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id } })).status).not.toBe('DISPATCHED');
@@ -305,7 +308,7 @@ describe('a truck that is not ready, or changed since it was reviewed', () => {
     const o1 = await onTruck(await lot(partyA, 20), 'LHR-8420', 20, { weigh: false });
     const o2 = await onTruck(await lot(partyA, 10), 'LHR-8420', 10, { weigh: false });
     const off = await checkoutTruck(pass, requestFrom(await truckPreview(pass)), operatorToken);
-    expect([off.statusCode, code(off)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+    expect([off.statusCode, code(off), reasonOf(off)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', 'SOLO_OFF']);
     await nothingWritten([o1, o2]);
 
     await setSolo(true);
@@ -314,7 +317,7 @@ describe('a truck that is not ready, or changed since it was reviewed', () => {
       const fresh = await onTruck(await lot(partyA, 20), 'LHR-8430', 20, { weigh: false });
       const old = await onTruck(await lot(partyA, 10), 'LHR-8430', 10, { weigh: false, date: addDays(businessDate(), -3) });
       const res = await checkoutTruck(pass2, requestFrom(await truckPreview(pass2)), operatorToken);
-      expect([res.statusCode, code(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+      expect([res.statusCode, code(res), reasonOf(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', 'NOT_TODAY']);
       const dn = (await prisma.outboundEvent.findUniqueOrThrow({ where: { id: old } })).dispatchNoteNumber!;
       expect(JSON.parse(res.body).error.message).toContain(dn);
       await nothingWritten([fresh, old]);
@@ -492,9 +495,12 @@ describe('the munshi alone (solo switch on)', () => {
     const o1 = await onTruck(await lot(partyA, 20), 'LHR-9200', 20);
     const o2 = await onTruck(await lot(partyA, 10), 'LHR-9200', 10, { date: addDays(businessDate(), -1) });
     const p = await truckPreview(pass, operatorToken);
-    expect(p.solo.allowed).toBe(false);
+    // The preview names the line and its reason as a code.
+    expect(p.solo).toMatchObject({ allowed: false, reason_code: 'NOT_TODAY' });
+    const dn = (await prisma.outboundEvent.findUniqueOrThrow({ where: { id: o2 } })).dispatchNoteNumber!;
+    expect(p.solo.reason).toContain(dn);
     const res = await checkoutTruck(pass, requestFrom(p), operatorToken);
-    expect([res.statusCode, code(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+    expect([res.statusCode, code(res), reasonOf(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', 'NOT_TODAY']);
     await nothingWritten([o1, o2]);
   });
 
@@ -511,8 +517,65 @@ describe('the munshi alone (solo switch on)', () => {
     const p = await truckPreview(pass, operatorToken);
     expect(p.groups[0].credit_available).toBe(false);
     const res = await checkoutTruck(pass, requestFrom(p, () => 'CREDIT'), operatorToken);
-    expect([res.statusCode, code(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER']);
+    expect([res.statusCode, code(res), reasonOf(res)]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', 'OVER_CREDIT_CEILING']);
     await nothingWritten([o1, o2]);
+  });
+
+  it('a call from the truck sheet stamps every ready line of the truck (docs/28 O6)', async () => {
+    await setSolo(true);
+    const pass = await arrive('LHR-9400');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-9400', 20);
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-9400', 10, { weigh: false });
+    const p = await truckPreview(pass, operatorToken);
+    const res = await call('POST', '/v1/dispatch/ask-manager', operatorToken, {
+      outbound_ids: p.lines.map((l: { outbound_id: string }) => l.outbound_id),
+      ask_code: 'CHEQUE_OR_TRANSFER',
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(JSON.parse(res.body).data.asked).toBe(2);
+    const rows = await prisma.outboundEvent.findMany({ where: { id: { in: [o1, o2] } } });
+    expect(rows.map((r) => r.managerAskCode)).toEqual(['CHEQUE_OR_TRANSFER', 'CHEQUE_OR_TRANSFER']);
+    await nothingWritten([o1, o2]);
+  });
+
+  it('a call stuck behind one row never holds another, so it cannot deadlock a checkout of the same truck (docs/28 O6)', async () => {
+    await setSolo(true);
+    await arrive('LHR-9401');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-9401', 20);
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-9401', 10, { weigh: false });
+    // The checkout locks a truck's withdrawals one after another in id order (`lockLoad`). One statement that
+    // updates every row takes its locks in scan order instead, so a call waiting on one row while holding
+    // another can meet a checkout holding the first and waiting on the second: a deadlock. Hold a lock on
+    // each row in turn and check the call is not holding the other while it waits.
+    for (const blocked of [o1, o2]) {
+      const other = blocked === o1 ? o2 : o1;
+      let release!: () => void;
+      let holding!: () => void;
+      const hold = new Promise<void>((r) => (release = r));
+      const isHolding = new Promise<void>((r) => (holding = r));
+      const blocker = prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM outbound_events WHERE id = ${blocked}::uuid FOR UPDATE`;
+          holding();
+          await hold;
+        },
+        { timeout: 30_000 },
+      );
+      await isHolding;
+      const asking = call('POST', '/v1/dispatch/ask-manager', operatorToken, { outbound_ids: [o1, o2], ask_code: 'CALLED' });
+      await new Promise((r) => setTimeout(r, 500));
+      const probe = await prisma
+        .$transaction(async (tx) => tx.$queryRaw`SELECT id FROM outbound_events WHERE id = ${other}::uuid FOR UPDATE NOWAIT`)
+        .then(
+          () => 'free',
+          (e: unknown) => String(e),
+        );
+      release();
+      await blocker;
+      const res = await asking;
+      expect(probe, `the call held ${other} while it waited on ${blocked}`).toBe('free');
+      expect(res.statusCode, res.body).toBe(200);
+    }
   });
 });
 

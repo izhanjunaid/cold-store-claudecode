@@ -12,6 +12,8 @@ export const qk = {
     /** The desk's day: per-collector totals and the cash waiting to be handed over. */
     day: ['outbound', 'day'] as const,
     list: (filters: ListFilters) => ['outbound', 'list', filters] as const,
+    /** The managers' waiting list (docs/28 D6). Under `lists`, so whatever refreshes the queue refreshes it. */
+    waiting: ['outbound', 'list', 'waiting'] as const,
     preview: (id: string) => ['outbound', 'preview', id] as const,
   },
   lots: {

@@ -26,6 +26,9 @@ import { CashTodayCard } from '@/components/dispatch/cash-today-card';
 import { CheckoutSheet, type CheckoutResult } from '@/components/dispatch/checkout-sheet';
 import { TruckCheckoutSheet, type TruckResult } from '@/components/dispatch/truck-checkout-sheet';
 import { TrucksPanel, checkedOutWhole, type TruckInside } from '@/components/dispatch/trucks-panel';
+import { WaitingCard } from '@/components/dispatch/waiting-card';
+import { askManager, calledAt } from '@/components/dispatch/call-manager';
+import { useWaitingForManager } from '@/hooks/use-waiting-for-manager';
 import { openDispatchNotePdf, openLoadSlipPdf } from '@/components/dispatch/dispatch-pdf';
 import { openInvoicePdf } from '@/components/billing/invoice-pdf';
 
@@ -43,6 +46,9 @@ interface DispatchRow {
   quantity_withdrawn_bags: number;
   vehicle_number: string | null;
   invoice: { id: string; invoice_number: string | null; status: string; total_pkr: number; balance_due_pkr: number } | null;
+  /** When a munshi last called a manager on it (docs/28 O6). */
+  ask_code?: string | null;
+  asked_at?: string | null;
 }
 
 interface LotHit {
@@ -83,7 +89,8 @@ export default function DispatchDeskPage() {
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   const [bookLot, setBookLot] = useState<LotHit | null>(null);
-  const [checkoutId, setCheckoutId] = useState<string | null>(null);
+  // The sheet carries its lot: a row from the waiting card may be older than the queue below.
+  const [checkout, setCheckout] = useState<{ id: string; lotId?: string } | null>(null);
   const [truckCheckoutId, setTruckCheckoutId] = useState<string | null>(null);
   const [cancelId, setCancelId] = useState<string | null>(null);
   // "Add a lot" on a truck card: the next lot found is booked onto that truck's plate.
@@ -127,6 +134,8 @@ export default function DispatchDeskPage() {
     refetchInterval: 15_000,
   });
   const rows = (data?.data ?? []).filter((r) => r.stage !== 'LEFT' && r.stage !== 'CANCELLED');
+  // What a manager must finish, of any date (docs/28 D6, O7). Its key sits under the queue's, so refresh() covers it.
+  const waiting = useWaitingForManager();
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: qk.outbound.lists });
@@ -176,6 +185,15 @@ export default function DispatchDeskPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Dispatch Desk" description="Book, weigh, dispatch and collect — one screen per truck" />
+
+      <WaitingCard
+        rows={waiting.rows}
+        total={waiting.total}
+        trucks={trucks}
+        onCheckout={(r) => setCheckout({ id: r.id, lotId: r.lot_id })}
+        onTruckCheckout={setTruckCheckoutId}
+        onCancel={setCancelId}
+      />
 
       <Card>
         <CardHeader>
@@ -271,7 +289,7 @@ export default function DispatchDeskPage() {
                     weightsShown={weightsShown}
                     withTruck={!!row.vehicle_number && multiLotPlates.has(normalizePlate(row.vehicle_number))}
                     onChanged={refresh}
-                    onCollect={() => setCheckoutId(row.id)}
+                    onCollect={() => setCheckout({ id: row.id, lotId: row.lot_id })}
                     onOpen={() => router.push(`/outbound-events/${row.id}`)}
                     onCancel={() => setCancelId(row.id)}
                   />
@@ -318,12 +336,12 @@ export default function DispatchDeskPage() {
           }}
         />
       )}
-      {checkoutId && (
+      {checkout && (
         <CheckoutSheet
           open
-          onOpenChange={(o) => !o && setCheckoutId(null)}
-          outboundId={checkoutId}
-          lotId={rows.find((r) => r.id === checkoutId)?.lot_id}
+          onOpenChange={(o) => !o && setCheckout(null)}
+          outboundId={checkout.id}
+          lotId={checkout.lotId}
           onDone={afterCheckout}
         />
       )}
@@ -370,6 +388,19 @@ function DispatchRowView({
       onChanged();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not record the weight');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function callManager() {
+    setSaving(true);
+    try {
+      await askManager([row.id], 'CALLED');
+      toast.success('Sent to the managers’ list');
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not call a manager');
     } finally {
       setSaving(false);
     }
@@ -428,7 +459,10 @@ function DispatchRowView({
                 Dispatch &amp; Collect
               </Button>
             ) : (
-              <span className="text-xs text-muted-foreground">Waiting for a manager</span>
+              // The munshi calls a manager: the row goes to the top of the managers' list (docs/28 O6).
+              <Button size="sm" variant="outline" onClick={callManager} disabled={saving}>
+                {row.asked_at ? `Called ${calledAt(row.asked_at)}` : 'Call a manager'}
+              </Button>
             ))}
           {(row.stage === 'DISPATCHED' || row.stage === 'PAID') && (
             <>

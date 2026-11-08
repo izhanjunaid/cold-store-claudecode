@@ -16,7 +16,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 import { useLotPlacements } from '@/components/lot-location';
 import { formatDate, formatCount, formatKg } from '@/lib/format';
-import { useWeightsShown } from '@/hooks/use-reference-data';
+import { useFacility, useWeightsShown } from '@/hooks/use-reference-data';
 
 import { PageSkeleton } from '@/components/page-skeleton';
 import { openDispatchNotePdf } from '@/components/dispatch/dispatch-pdf';
@@ -78,6 +78,7 @@ export default function OutboundEventDetailPage() {
   const { data: location } = useLotPlacements(event?.lot_id ?? '');
   // Weight is optional; a facility that doesn't weigh sees no weight card (docs/27).
   const weightsShown = useWeightsShown();
+  const soloOn = useFacility().data?.settings?.dispatch_solo_mode === true;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -320,7 +321,10 @@ export default function OutboundEventDetailPage() {
       )}
 
       {ready && !canFinalize && (
-        <p className="mb-3 text-sm text-muted-foreground">Waiting for a manager to dispatch.</p>
+        <p className="mb-3 text-sm text-muted-foreground">
+          {/* With one-person dispatch on, the munshi may finish it at the desk, or call a manager from there. */}
+          {soloOn ? 'Check it out at the Dispatch Desk.' : 'Waiting for a manager to dispatch.'}
+        </p>
       )}
 
       <div className="flex flex-wrap gap-3">

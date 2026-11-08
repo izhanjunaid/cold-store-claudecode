@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { useUiStore } from '@/stores/ui.store';
 import { navGroupsForUser } from '@/components/layout/nav-config';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useWaitingForManager } from '@/hooks/use-waiting-for-manager';
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -15,6 +16,8 @@ export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar } = useUiStore();
 
   const groups = navGroupsForUser(user);
+  // What waits for a manager (docs/28 D6): only the manager keys ever ask for it.
+  const waiting = useWaitingForManager().total;
 
   return (
     <aside
@@ -54,12 +57,13 @@ export function Sidebar() {
                 const isActive =
                   pathname === item.href || pathname.startsWith(item.href + '/');
                 const Icon = item.icon;
+                const count = item.badge === 'dispatch-waiting' ? waiting : 0;
                 const link = (
                   <Link
                     href={item.href}
                     aria-current={isActive ? 'page' : undefined}
                     className={cn(
-                      'flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors',
+                      'relative flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors',
                       sidebarCollapsed && 'justify-center px-0 py-2',
                       isActive
                         ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
@@ -68,6 +72,20 @@ export function Sidebar() {
                   >
                     <Icon className="h-4 w-4 shrink-0" aria-hidden />
                     {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                    {count > 0 &&
+                      (sidebarCollapsed ? (
+                        <span
+                          className="absolute right-2 top-1 h-2 w-2 rounded-full bg-amber-500"
+                          aria-label={`${count} waiting for a manager`}
+                        />
+                      ) : (
+                        <span
+                          className="ml-auto rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold leading-5 text-white tabular-nums"
+                          aria-label={`${count} waiting for a manager`}
+                        >
+                          {count}
+                        </span>
+                      ))}
                   </Link>
                 );
                 return (
@@ -75,7 +93,10 @@ export function Sidebar() {
                     {sidebarCollapsed ? (
                       <Tooltip delayDuration={0}>
                         <TooltipTrigger asChild>{link}</TooltipTrigger>
-                        <TooltipContent side="right">{item.label}</TooltipContent>
+                        <TooltipContent side="right">
+                          {item.label}
+                          {count > 0 && ` (${count} waiting)`}
+                        </TooltipContent>
                       </Tooltip>
                     ) : (
                       link

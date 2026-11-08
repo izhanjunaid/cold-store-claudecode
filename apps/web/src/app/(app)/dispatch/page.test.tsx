@@ -102,6 +102,27 @@ const ROWS = [
   row({ id: 'ob-left', dispatch_note_number: 'DN-LEFT', status: 'DISPATCHED', stage: 'LEFT', vehicle_number: 'LHR-4444' }),
 ];
 
+// The managers' waiting list (docs/28 D6): empty unless a test fills it.
+let waitingRows: any[] = [];
+const waitingRow = (over: Record<string, unknown>) => ({
+  id: 'w-1',
+  dispatch_note_number: 'DN-W1',
+  lot_id: 'lot-w1',
+  lot_number: 'LOT-W1',
+  marka: null,
+  owner_party_name: 'Rana Traders',
+  quantity_withdrawn_bags: 12,
+  vehicle_number: 'LHR-5555',
+  outbound_date: localIsoDate(),
+  created_at: '2026-11-08T04:00:00.000Z',
+  created_by_name: 'Munshi',
+  reason_code: 'SOLO_OFF',
+  ask_code: null,
+  asked_at: null,
+  ...over,
+});
+const waitingCalls = () => apiClientList.mock.calls.filter(([p]) => String(p).startsWith('/v1/dispatch/waiting')).length;
+
 let trucks: any[] = [];
 const truck = (over: Record<string, unknown>) => ({
   gate_pass_id: 'pass-1',
@@ -131,9 +152,13 @@ beforeEach(() => {
   permissions = ['outbound.record', 'outbound.finalize', 'invoices.manage', 'payments.record'];
   userLoaded = true;
   trucks = [];
+  waitingRows = [];
   apiClient.mockImplementation((path: string) => Promise.resolve(path === '/v1/dispatch/trucks' ? trucks : {}));
   apiClientList.mockImplementation((path: string) => {
     if (path.startsWith('/v1/outbound-events')) return Promise.resolve({ data: ROWS, meta: { total: ROWS.length, page: 1, per_page: 50 } });
+    if (path.startsWith('/v1/dispatch/waiting')) {
+      return Promise.resolve({ data: waitingRows, meta: { total: waitingRows.length, page: 1, per_page: 200 } });
+    }
 
     if (path.startsWith('/v1/lots')) {
       return Promise.resolve({
@@ -223,7 +248,8 @@ describe('Dispatch Desk', () => {
     renderPage();
     const again = (await screen.findByText('DN-WEIGHED')).closest('tr') as HTMLElement;
     expect(within(again).queryByRole('button', { name: /Dispatch & Collect/ })).not.toBeInTheDocument();
-    expect(within(again).getByText(/Waiting for a manager/)).toBeInTheDocument();
+    // The munshi calls a manager instead (docs/28 O6).
+    expect(within(again).getByRole('button', { name: 'Call a manager' })).toBeInTheDocument();
   });
 
   it('with the owner’s solo switch on, the munshi gets the Dispatch & Collect button too', async () => {
@@ -241,7 +267,7 @@ describe('Dispatch Desk', () => {
     renderPage();
     const weighed = (await screen.findByText('DN-WEIGHED')).closest('tr') as HTMLElement;
     expect(await within(weighed).findByRole('button', { name: /Dispatch & Collect/ })).toBeInTheDocument();
-    expect(within(weighed).queryByText(/Waiting for a manager/)).not.toBeInTheDocument();
+    expect(within(weighed).queryByRole('button', { name: 'Call a manager' })).not.toBeInTheDocument();
   });
 
   it('offers Cancel only while the truck has not been dispatched', async () => {
@@ -420,5 +446,174 @@ describe('Dispatch Desk — trucks with several lots', () => {
     fireEvent.change(screen.getByLabelText('Find a lot'), { target: { value: 'LOT-7' } });
     fireEvent.click(await screen.findByRole('button', { name: /LOT-7/ }, { timeout: 5000 }));
     expect(await screen.findByTestId('withdraw')).toHaveAttribute('data-fixed', 'LHR-2222');
+  });
+});
+
+describe('Dispatch Desk — the munshi calls a manager (docs/28 O6)', () => {
+  it("a munshi's ready row has Call a manager, and shows when it was called", async () => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.startsWith('/v1/outbound-events')
+          ? {
+              data: [
+                row({ id: 'ob-booked', dispatch_note_number: 'DN-BOOKED' }),
+                row({ id: 'ob-called', dispatch_note_number: 'DN-CALLED', ask_code: 'CALLED', asked_at: '2026-11-08T09:05:00.000Z' }),
+              ],
+              meta: { total: 2, page: 1, per_page: 50 },
+            }
+          : { data: [], meta: {} },
+      ),
+    );
+    renderPage();
+    const booked = (await screen.findByText('DN-BOOKED')).closest('tr') as HTMLElement;
+    fireEvent.click(within(booked).getByRole('button', { name: 'Call a manager' }));
+    await waitFor(() =>
+      expect(apiClient).toHaveBeenCalledWith('/v1/dispatch/ask-manager', {
+        method: 'POST',
+        body: { outbound_ids: ['ob-booked'], ask_code: 'CALLED' },
+      }),
+    );
+    const called = screen.getByText('DN-CALLED').closest('tr') as HTMLElement;
+    expect(within(called).getByRole('button', { name: /^Called / })).toBeInTheDocument();
+  });
+
+  it('a call from an earlier day names its day on the desk row', async () => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.startsWith('/v1/outbound-events')
+          ? {
+              data: [row({ id: 'ob-old-call', dispatch_note_number: 'DN-OLDCALL', ask_code: 'CALLED', asked_at: '2026-09-02T09:05:00.000Z' })],
+              meta: { total: 1, page: 1, per_page: 50 },
+            }
+          : { data: [], meta: {} },
+      ),
+    );
+    renderPage();
+    const old = (await screen.findByText('DN-OLDCALL')).closest('tr') as HTMLElement;
+    expect(within(old).getByRole('button', { name: /^Called 2 Sep\w* 2026/ })).toBeInTheDocument();
+  });
+});
+
+describe('Dispatch Desk — waiting for a manager (docs/28 D6)', () => {
+  const card = () => screen.findByRole('region', { name: 'Waiting for a manager' });
+
+  it("a manager sees the waiting card with each row's reason, called rows first", async () => {
+    waitingRows = [
+      waitingRow({
+        id: 'w-call',
+        dispatch_note_number: 'DN-CALL',
+        reason_code: null,
+        ask_code: 'CHEQUE_OR_TRANSFER',
+        asked_at: '2026-11-08T09:05:00.000Z',
+      }),
+      waitingRow({ id: 'w-solo', dispatch_note_number: 'DN-SOLO' }),
+    ];
+    renderPage();
+    const c = await card();
+    expect(within(c).getByText('Waiting for a manager (2)')).toBeInTheDocument();
+    const items = within(c).getAllByRole('listitem');
+    expect(items[0]).toHaveTextContent('DN-CALL');
+    expect(items[0]).toHaveTextContent(/Called .*the buyer pays by cheque or transfer/);
+    expect(items[1]).toHaveTextContent('DN-SOLO');
+    expect(items[1]).toHaveTextContent('the owner has not switched on one-person dispatch');
+  });
+
+  it('the card is hidden for a munshi, and the waiting list is never requested', async () => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    waitingRows = [waitingRow({})];
+    renderPage();
+    await screen.findByText('DN-BOOKED');
+    expect(screen.queryByRole('region', { name: 'Waiting for a manager' })).toBeNull();
+    expect(waitingCalls()).toBe(0);
+  });
+
+  it("a row from before the desk's three days opens the checkout with its lot", async () => {
+    waitingRows = [waitingRow({ id: 'w-old', dispatch_note_number: 'DN-OLD', lot_id: 'lot-old', outbound_date: '2026-09-01' })];
+    renderPage();
+    fireEvent.click(within(await card()).getByRole('button', { name: /Dispatch & Collect/ }));
+    const sheet = await screen.findByTestId('checkout');
+    expect(sheet).toHaveAttribute('data-id', 'w-old');
+    expect(sheet).toHaveAttribute('data-lot', 'lot-old');
+  });
+
+  it('a line on a multi-lot truck inside opens the truck checkout', async () => {
+    trucks = [
+      truck({
+        gate_pass_id: 'pass-7',
+        vehicle_number: 'LHR 5555',
+        lines: [
+          { outbound_id: 'w-1', dispatch_note_number: 'DN-W1', status: 'PENDING', stage: 'BOOKED', lot_number: 'LOT-W1', marka: null, billing_party: { id: 'p', name: 'Rana' }, quantity_withdrawn_bags: 12 },
+          { outbound_id: 'w-2', dispatch_note_number: 'DN-W2', status: 'PENDING', stage: 'BOOKED', lot_number: 'LOT-W2', marka: null, billing_party: { id: 'p', name: 'Rana' }, quantity_withdrawn_bags: 8 },
+        ],
+      }),
+    ];
+    waitingRows = [waitingRow({ vehicle_number: 'LHR-5555' })];
+    renderPage();
+    const c = await card();
+    await waitFor(() => expect(within(c).getByRole('button', { name: 'Check out truck' })).toBeInTheDocument());
+    fireEvent.click(within(c).getByRole('button', { name: 'Check out truck' }));
+    expect(await screen.findByTestId('truck-checkout')).toHaveAttribute('data-pass', 'pass-7');
+  });
+
+  it('old bookings sit under "Booked before today" with a Cancel button', async () => {
+    waitingRows = [
+      waitingRow({ id: 'w-today', dispatch_note_number: 'DN-TODAY' }),
+      waitingRow({ id: 'w-old', dispatch_note_number: 'DN-OLD', outbound_date: '2026-09-01' }),
+    ];
+    renderPage();
+    const c = await card();
+    const old = within(c).getByRole('group', { name: 'Booked before today' });
+    expect(within(old).getByText('DN-OLD')).toBeInTheDocument();
+    expect(within(old).queryByText('DN-TODAY')).toBeNull();
+    expect(within(old).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    const today = within(c).getByText('DN-TODAY').closest('li') as HTMLElement;
+    expect(within(today).queryByRole('button', { name: 'Cancel' })).toBeNull();
+  });
+
+  it('a called booking from an earlier day still shows its date and a Cancel button, and which day it was called', async () => {
+    waitingRows = [
+      waitingRow({
+        id: 'w-stale',
+        dispatch_note_number: 'DN-STALE',
+        outbound_date: '2026-09-01',
+        reason_code: null,
+        ask_code: 'CHEQUE_OR_TRANSFER',
+        asked_at: '2026-09-02T09:05:00.000Z',
+      }),
+      waitingRow({
+        id: 'w-fresh',
+        dispatch_note_number: 'DN-FRESH',
+        reason_code: null,
+        ask_code: 'CREDIT',
+        asked_at: new Date().toISOString(),
+      }),
+    ];
+    renderPage();
+    const c = await card();
+    // Called rows keep their place at the top, not in the "Booked before today" group.
+    expect(within(c).queryByRole('group', { name: 'Booked before today' })).toBeNull();
+    const stale = within(c).getByText('DN-STALE').closest('li') as HTMLElement;
+    expect(stale).toHaveTextContent(/booked for 1 Sep\w* 2026/);
+    expect(stale).toHaveTextContent(/Called 2 Sep\w* 2026/);
+    expect(within(stale).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    // A call made today reads as a time, and a booking dated today cannot be cancelled from here.
+    const fresh = within(c).getByText('DN-FRESH').closest('li') as HTMLElement;
+    expect(fresh).not.toHaveTextContent(/booked for/);
+    expect(fresh).not.toHaveTextContent(/Called \d{1,2} \w{3} \d{4}/);
+    expect(within(fresh).queryByRole('button', { name: 'Cancel' })).toBeNull();
+  });
+
+  it('after a checkout the waiting list is read again', async () => {
+    waitingRows = [waitingRow({})];
+    renderPage();
+    fireEvent.click(within(await card()).getByRole('button', { name: /Dispatch & Collect/ }));
+    const before = waitingCalls();
+    fireEvent.click(await screen.findByRole('button', { name: 'finish checkout' }));
+    await waitFor(() => expect(waitingCalls()).toBeGreaterThan(before));
   });
 });
