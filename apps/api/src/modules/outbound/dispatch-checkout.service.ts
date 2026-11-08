@@ -166,15 +166,24 @@ export class DispatchCheckoutService {
 
   /**
    * A munshi calls a manager (docs/28 O6): stamp what the buyer wants on each withdrawal still booked
-   * or weighed in this facility. Nothing else is locked or read, so the lock order holds; a row
-   * dispatched or cancelled meanwhile is skipped, and a second call overwrites the first.
+   * or weighed in this facility. A row dispatched or cancelled meanwhile is skipped, and a second call
+   * overwrites the first.
+   *
+   * One statement per row, in id order, each committing at once: a call waiting on one row holds no
+   * other, so it cannot sit in a deadlock with a truck checkout, which locks a truck's withdrawals in
+   * id order (`lockLoad`). One statement over all the rows would take its locks in scan order instead.
    */
   async askManager(facilityId: string, body: AskManagerRequestType) {
     const askedAt = new Date();
-    const { count } = await this.prisma.outboundEvent.updateMany({
-      where: { id: { in: body.outbound_ids }, facilityId, status: { in: ['PENDING', 'WEIGHED'] } },
-      data: { managerAskCode: body.ask_code, managerAskAt: askedAt },
-    });
+    let count = 0;
+    // Lower-cased: Postgres orders a uuid by its bytes, which is the order of its lower-case hex.
+    for (const id of [...new Set(body.outbound_ids.map((i) => i.toLowerCase()))].sort()) {
+      const done = await this.prisma.outboundEvent.updateMany({
+        where: { id, facilityId, status: { in: ['PENDING', 'WEIGHED'] } },
+        data: { managerAskCode: body.ask_code, managerAskAt: askedAt },
+      });
+      count += done.count;
+    }
     if (count === 0) throw Errors.OUTBOUND_NOT_WAITING();
     return { asked: count, asked_at: askedAt.toISOString() };
   }

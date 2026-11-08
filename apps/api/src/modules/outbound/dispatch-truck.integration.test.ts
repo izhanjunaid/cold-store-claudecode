@@ -537,6 +537,46 @@ describe('the munshi alone (solo switch on)', () => {
     expect(rows.map((r) => r.managerAskCode)).toEqual(['CHEQUE_OR_TRANSFER', 'CHEQUE_OR_TRANSFER']);
     await nothingWritten([o1, o2]);
   });
+
+  it('a call stuck behind one row never holds another, so it cannot deadlock a checkout of the same truck (docs/28 O6)', async () => {
+    await setSolo(true);
+    await arrive('LHR-9401');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-9401', 20);
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-9401', 10, { weigh: false });
+    // The checkout locks a truck's withdrawals one after another in id order (`lockLoad`). One statement that
+    // updates every row takes its locks in scan order instead, so a call waiting on one row while holding
+    // another can meet a checkout holding the first and waiting on the second: a deadlock. Hold a lock on
+    // each row in turn and check the call is not holding the other while it waits.
+    for (const blocked of [o1, o2]) {
+      const other = blocked === o1 ? o2 : o1;
+      let release!: () => void;
+      let holding!: () => void;
+      const hold = new Promise<void>((r) => (release = r));
+      const isHolding = new Promise<void>((r) => (holding = r));
+      const blocker = prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM outbound_events WHERE id = ${blocked}::uuid FOR UPDATE`;
+          holding();
+          await hold;
+        },
+        { timeout: 30_000 },
+      );
+      await isHolding;
+      const asking = call('POST', '/v1/dispatch/ask-manager', operatorToken, { outbound_ids: [o1, o2], ask_code: 'CALLED' });
+      await new Promise((r) => setTimeout(r, 500));
+      const probe = await prisma
+        .$transaction(async (tx) => tx.$queryRaw`SELECT id FROM outbound_events WHERE id = ${other}::uuid FOR UPDATE NOWAIT`)
+        .then(
+          () => 'free',
+          (e: unknown) => String(e),
+        );
+      release();
+      await blocker;
+      const res = await asking;
+      expect(probe, `the call held ${other} while it waited on ${blocked}`).toBe('free');
+      expect(res.statusCode, res.body).toBe(200);
+    }
+  });
 });
 
 describe('the load slip and the gate receipt', () => {
