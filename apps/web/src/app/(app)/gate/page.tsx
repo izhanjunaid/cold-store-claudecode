@@ -340,9 +340,10 @@ export default function GatePassConsolePage() {
       setOutwardErrCode(errCode);
       setOutwardTriesLeft(triesLeftOf(err));
       if (errCode && OVERRIDABLE_CODES.has(errCode)) setOverrideOffered(true);
-      // A booking not yet checked out holds the truck whatever a manager writes: drop an override
-      // that an earlier miss on the count offered.
-      if (errCode === 'GATE_OUTWARD_NOT_DISPATCHED') setOverrideOffered(false);
+      // A booking not yet checked out holds the truck whatever a manager writes, and a named line of a truck that
+      // carries others is refused whatever a manager writes (release by plate): drop an override that an
+      // earlier miss on the count offered.
+      if (errCode === 'GATE_OUTWARD_NOT_DISPATCHED' || errCode === 'GATE_NAMED_LINE_ON_FULL_TRUCK') setOverrideOffered(false);
       setOutwardErr(err instanceof Error ? err.message : 'Failed to clear outward');
     } finally {
       setOutwardLoading(false);
@@ -576,7 +577,7 @@ export default function GatePassConsolePage() {
               </div>
               {canManager && (outwardModal.count_attempts?.length ?? 0) > 0 && (
                 <div className="rounded-md border border-amber-300 p-3 text-sm">
-                  <p className="font-medium">Earlier counts on this pass</p>
+                  <p className="font-medium">Earlier counts on this truck</p>
                   <ul className="mt-1 space-y-0.5 text-muted-foreground">
                     {outwardModal.count_attempts!.map((a) => (
                       <li key={a.created_at}>
@@ -656,7 +657,8 @@ export default function GatePassConsolePage() {
                       {outwardTriesLeft == null
                         ? 'Recount, or call a manager.'
                         : outwardTriesLeft > 0
-                          ? `Try ${GATE_COUNT_TRIES - outwardTriesLeft} of ${GATE_COUNT_TRIES}, recount.`
+                          ? // Recounting cannot help a truck nothing was booked for: the plate is what is wrong.
+                            `Try ${GATE_COUNT_TRIES - outwardTriesLeft} of ${GATE_COUNT_TRIES}${outwardErrCode === 'GATE_OUTWARD_UNMATCHED_LOAD' ? '.' : ', recount.'}`
                           : `Try ${GATE_COUNT_TRIES} of ${GATE_COUNT_TRIES} — call a manager.`}
                     </p>
                   )}
