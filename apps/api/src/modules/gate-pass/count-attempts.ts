@@ -69,13 +69,15 @@ export async function attemptsByPlate(
   const byPlate = new Map<string, CountAttempt[]>();
   const wanted = [...new Set(plates.filter(Boolean))];
   if (wanted.length === 0) return byPlate;
+  // No join to `users` here: it is row-level-secured by the request's facility, and a raw query on the plain client
+  // runs without that setting (the facility-scope extension stamps it for model operations and interactive
+  // transactions only). The counters are named by a model query below instead.
   const rows = await db.$queryRawUnsafe<
-    { plate: string; declared: number; expected: number; created_at: Date; counted_by_name: string | null }[]
+    { plate: string; declared: number; expected: number; created_at: Date; created_by: string }[]
   >(
     `SELECT a.plate, a.declared_quantity::int AS declared, a.expected_quantity::int AS expected,
-            a.created_at, u.name AS counted_by_name
+            a.created_at, a.created_by
        FROM gate_count_attempts a
-       LEFT JOIN users u ON u.id = a.created_by
       WHERE a.facility_id = $1::uuid
         AND a.plate = ANY($2::text[])
         AND a.created_at > COALESCE(
@@ -88,13 +90,20 @@ export async function attemptsByPlate(
     facilityId,
     wanted,
   );
+  if (rows.length === 0) return byPlate;
+  const names = new Map(
+    (await db.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.created_by))] } }, select: { id: true, name: true } })).map(
+      (u) => [u.id, u.name] as const,
+    ),
+  );
   for (const r of rows) {
     const list = byPlate.get(r.plate) ?? [];
+    const name = names.get(r.created_by);
     list.push({
       declaredQuantity: r.declared,
       expectedQuantity: r.expected,
       createdAt: r.created_at,
-      countedBy: r.counted_by_name ? { name: r.counted_by_name } : null,
+      countedBy: name ? { name } : null,
     });
     byPlate.set(r.plate, list);
   }
@@ -133,8 +142,8 @@ export class KeptRefusal extends Error {
 
 /**
  * Run `fn` in a transaction. A `KeptRefusal` thrown inside commits everything written so far — the
- * wrong count it records, and on the one-step route the pass — then the wrapped error is thrown to
- * the caller. Any other error rolls back as before.
+ * wrong count it records — then the wrapped error is thrown to the caller. Any other error rolls back
+ * as before.
  */
 export async function withKeptRefusals<T>(
   prisma: PrismaClient,

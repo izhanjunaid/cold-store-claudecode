@@ -105,7 +105,7 @@ test('three wrong counts lock the truck for the guard; a manager releases it', a
   await expect(mgrReady).toBeVisible({ timeout: 30_000 });
   await mgrReady.getByRole('button', { name: 'Release' }).click();
   const mgrDialog = page.getByRole('dialog');
-  await expect(mgrDialog.getByText('Earlier counts on this pass')).toBeVisible();
+  await expect(mgrDialog.getByText('Earlier counts on this truck')).toBeVisible();
   await expect(mgrDialog.getByText(/counted 41, dispatch said 50/)).toBeVisible();
   await mgrDialog.getByLabel(/bags counted/i).fill('50');
   await mgrDialog.getByRole('button', { name: /^clear outward$/i }).click();

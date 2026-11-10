@@ -628,9 +628,11 @@ describe('wrong counts are saved, and three of them lock the truck', () => {
     expect(listed.find((p) => p.id === second)?.count_attempts).toHaveLength(2);
     expect((await get(`/v1/gate-passes/${second}`, securityToken)).count_attempts).toBeNull();
 
-    // Once the truck is released those counts no longer count, so the pass left behind lists none.
+    // Once the truck is released those counts no longer count, so the pass left behind lists none, while the
+    // pass that left keeps its own as the record of what was typed on it.
     expect((await miss(first, 50, managerToken)).statusCode).toBe(200);
     expect((await get(`/v1/gate-passes/${second}`, managerToken)).count_attempts).toEqual([]);
+    expect((await get(`/v1/gate-passes/${first}`, managerToken)).count_attempts?.map((a) => a.declared_quantity)).toEqual([41, 42]);
   });
 });
 
