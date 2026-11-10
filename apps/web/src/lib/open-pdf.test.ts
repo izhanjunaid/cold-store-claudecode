@@ -163,3 +163,61 @@ describe('the tab while the PDF renders, and when it cannot be shown', () => {
     await expect(openPdf('/v1/x/pdf', 'paper')).rejects.toThrow(/allow pop-ups/i);
   });
 });
+
+// A PDF fetch used to send the raw access token and give up on a 401, so a paper asked for on an expired
+// sign-in failed where every other request quietly refreshed. It now shares api-client's refresh.
+describe('an expired sign-in while a PDF is fetched', () => {
+  const tab = { location: { href: '' }, close: vi.fn() };
+  const pdfOk = { ok: true, status: 200, blob: async () => new Blob(['%PDF']) } as Response;
+  const refreshed = {
+    ok: true,
+    json: async () => ({ success: true, data: { access_token: 'new', refresh_token: 'r2' } }),
+  } as Response;
+  const refusedRefresh = { ok: false, json: async () => ({ success: false }) } as Response;
+
+  /** The API: the PDF route answers only a request that carries the new token; the refresh route answers `refresh`. */
+  const api = (refresh: Response) =>
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (String(url).endsWith('/v1/auth/refresh')) return refresh;
+      const auth = (init?.headers as Record<string, string> | undefined)?.['Authorization'];
+      return auth === 'Bearer new' ? pdfOk : ({ ok: false, status: 401 } as Response);
+    });
+  const calls = (spy: ReturnType<typeof api>, suffix: string) => spy.mock.calls.filter(([u]) => String(u).endsWith(suffix)).length;
+
+  beforeEach(() => {
+    tab.location.href = '';
+    tab.close.mockReset();
+    localStorage.setItem('access_token', 'old');
+    localStorage.setItem('refresh_token', 'r1');
+    localStorage.setItem('facility_id', 'facility');
+    URL.createObjectURL = vi.fn(() => 'blob:paper');
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it('refreshes once and asks again, as every other request does', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    const spy = api(refreshed);
+
+    await openPdf('/v1/x/pdf', 'paper');
+
+    expect(tab.location.href).toBe('blob:paper');
+    expect(calls(spy, '/v1/x/pdf')).toBe(2);
+    expect(calls(spy, '/v1/auth/refresh')).toBe(1);
+    expect(localStorage.getItem('access_token')).toBe('new');
+  });
+
+  it('a sign-in that cannot be refreshed ends the session and still closes the waiting tab', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    vi.spyOn(console, 'error').mockImplementation(() => {}); // jsdom cannot navigate to /login
+    const spy = api(refusedRefresh);
+
+    await expect(openPdf('/v1/x/pdf', 'paper')).rejects.toThrow('Could not open the paper (401)');
+
+    expect(tab.close).toHaveBeenCalled();
+    expect(calls(spy, '/v1/x/pdf')).toBe(1); // no second ask without a new token
+    expect(localStorage.getItem('access_token')).toBeNull(); // the session is over: api-client sends the user to sign in
+  });
+});

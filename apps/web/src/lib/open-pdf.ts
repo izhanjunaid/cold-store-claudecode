@@ -10,6 +10,8 @@
  * hands it in.
  */
 
+import { refreshSession } from './api-client';
+
 /**
  * A blank tab, opened at once; null when the browser refused it. It says it is waiting, so a slow
  * render does not look like a dead page.
@@ -37,14 +39,20 @@ export function openPdfTab(): Window | null {
  */
 export async function fetchPdfBlobUrl(path: string, what: string): Promise<string> {
   const base = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3001';
-  const token = localStorage.getItem('access_token');
-  const facilityId = localStorage.getItem('facility_id');
-  const res = await fetch(`${base}${path}`, {
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
-    },
-  });
+  const send = () => {
+    const token = localStorage.getItem('access_token');
+    const facilityId = localStorage.getItem('facility_id');
+    return fetch(`${base}${path}`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(facilityId ? { 'X-Facility-ID': facilityId } : {}),
+      },
+    });
+  };
+  let res = await send();
+  // An expired sign-in: refresh once and ask again, as every other request does. When it cannot be refreshed
+  // the person is sent to sign in, and this still fails below so the caller closes its waiting tab.
+  if (res.status === 401 && localStorage.getItem('access_token') && (await refreshSession())) res = await send();
   if (!res.ok) throw new Error(`Could not open the ${what} (${res.status})`);
   return URL.createObjectURL(await res.blob());
 }

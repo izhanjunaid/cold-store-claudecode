@@ -13,8 +13,11 @@
 //   node scripts/check-business-date.mjs <dir>...     check other directories instead
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
+// fileURLToPath, not the URL's pathname: that one keeps a space or a non-ASCII letter percent-encoded, so the
+// default scan looked for "no such directory" under such a path (check-pdf-tabs.mjs does the same).
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN = process.argv.length > 2 ? process.argv.slice(2) : ['apps/api/src', 'apps/web/src'];
 
 const RULES = [
