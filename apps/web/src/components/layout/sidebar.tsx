@@ -72,18 +72,19 @@ export function Sidebar() {
                   >
                     <Icon className="h-4 w-4 shrink-0" aria-hidden />
                     {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                    {/* The count is said in visually hidden text: an aria-label on a role-less span is not reliably read. */}
                     {count > 0 &&
                       (sidebarCollapsed ? (
-                        <span
-                          className="absolute right-2 top-1 h-2 w-2 rounded-full bg-amber-500"
-                          aria-label={`${count} waiting for a manager`}
-                        />
+                        <>
+                          <span className="absolute right-2 top-1 h-2 w-2 rounded-full bg-amber-500" aria-hidden />
+                          <span className="sr-only">
+                            {item.label}, {count} waiting for a manager
+                          </span>
+                        </>
                       ) : (
-                        <span
-                          className="ml-auto rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold leading-5 text-white tabular-nums"
-                          aria-label={`${count} waiting for a manager`}
-                        >
+                        <span className="ml-auto rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold leading-5 text-white tabular-nums">
                           {count}
+                          <span className="sr-only"> waiting for a manager</span>
                         </span>
                       ))}
                   </Link>
