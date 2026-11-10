@@ -25,20 +25,6 @@ export const LogInwardRequest = z.object({
 });
 export type LogInwardRequestType = z.infer<typeof LogInwardRequest>;
 
-export const LogOutwardRequest = z.object({
-  vehicle_number: vehicleNumber,
-  driver_name: z.string().trim().min(1).max(100).optional(),
-  driver_phone: z.string().trim().min(7).max(20).optional(),
-  outbound_event_id: z.string().uuid().optional(),
-  credit_authorization: z.boolean().optional(),
-  // Bags/crates the guard counted on the truck; 0 for an empty truck. Bounded so a typo cannot overflow
-  // the saved wrong count.
-  declared_quantity: z.number().int().nonnegative().max(MAX_COUNT).optional(),
-  override_reason: overrideReason.optional(),
-  notes: z.string().optional(),
-});
-export type LogOutwardRequestType = z.infer<typeof LogOutwardRequest>;
-
 export const LinkLotRequest = z.object({
   lot_id: z.string().uuid(),
 });

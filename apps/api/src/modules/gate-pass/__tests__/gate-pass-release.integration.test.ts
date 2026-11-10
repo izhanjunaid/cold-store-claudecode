@@ -387,6 +387,20 @@ describe('a truck still being loaded cannot leave', () => {
     expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: sent.id } })).gatePassId).toBeNull();
   });
 
+  it('names every line still to be dispatched, in the plural', async () => {
+    const b1 = await book(20, 'LHR-9107');
+    const b2 = await book(15, 'LHR-9107');
+    const pass = await arrive('LHR-9107');
+
+    const out = await release(pass, { declared_quantity: 0 });
+    expect([out.statusCode, code(out)]).toEqual([422, 'GATE_OUTWARD_NOT_DISPATCHED']);
+    const message = JSON.parse(out.body).error.message as string;
+    expect(message).toMatch(/^Withdrawals /);
+    expect(message).toContain(await dnOfRow(b1));
+    expect(message).toContain(await dnOfRow(b2));
+    expect(message).toMatch(/have not been dispatched — they cannot leave yet$/);
+  });
+
   it('a cancelled booking does not hold the truck', async () => {
     const booked = await book(20, 'LHR-9106');
     const cancel = await app.inject({
@@ -507,30 +521,32 @@ describe('wrong counts are saved, and three of them lock the truck', () => {
     expect((await miss(pass, 50, managerToken)).statusCode).toBe(200);
   });
 
-  it('a refused one-step log-and-release keeps its pass and its try, and is not tied to the withdrawal named', async () => {
+  it('a refused release that names a withdrawal keeps its pass and its try, and the pass is not tied to the withdrawal named', async () => {
     const named = await dispatched(50, 'LHR-9208');
     await pay(named.invoiceId);
-    const unpaid = await dispatched(30, 'LHR-9208'); // the same truck, billed and not paid
-    await finalizeInvoice(unpaid.invoiceId);
+    const pass = await arrive('LHR-9208');
 
-    const logged = await app.inject({
+    const wrong = await release(pass, { outbound_event_id: named.id, declared_quantity: 45 }, managerToken);
+    expect([wrong.statusCode, code(wrong)]).toEqual([422, 'GATE_OUTWARD_COUNT_MISMATCH']);
+    expect(await prisma.gatePass.findUniqueOrThrow({ where: { id: pass } })).toMatchObject({ status: 'ARRIVED', relatedOutboundId: null });
+    expect(await attempts({ gatePassId: pass })).toBe(1);
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: named.id } })).gatePassId).toBeNull();
+
+    // The pass does not remember the withdrawal the manager named: a later release is the whole truck, by plate.
+    const bare = await release(pass, { declared_quantity: 50 });
+    expect(bare.statusCode, bare.body).toBe(200);
+    expect(data(bare).outbound_ids).toEqual([named.id]);
+  });
+
+  it('the one-step log-and-release route is gone (docs/28 O13)', async () => {
+    const res = await app.inject({
       method: 'POST',
       url: '/v1/gate-passes/outward',
       headers: authHeaders(managerToken),
-      payload: { vehicle_number: 'LHR-9208', outbound_event_id: named.id, declared_quantity: 45 },
+      payload: { vehicle_number: 'LHR-9216', declared_quantity: 5 },
     });
-    expect([logged.statusCode, code(logged)]).toEqual([422, 'GATE_OUTWARD_COUNT_MISMATCH']);
-    const passes = await prisma.gatePass.findMany({ where: { facilityId: TEST_FACILITY_ID, vehicleNumber: 'LHR-9208' } });
-    expect(passes).toHaveLength(1);
-    expect(passes[0]).toMatchObject({ status: 'ARRIVED', relatedOutboundId: null });
-    expect(await attempts({ gatePassId: passes[0]!.id })).toBe(1);
-    const rows = await prisma.outboundEvent.findMany({ where: { id: { in: [named.id, unpaid.id] } } });
-    expect(rows.every((o) => o.gatePassId === null)).toBe(true);
-
-    // The pass does not remember the withdrawal the manager named: a guard's release still checks the
-    // whole truck by plate, so the unpaid one holds it. (A stored link let a guard release just the paid one.)
-    const bare = await release(passes[0]!.id, { declared_quantity: 50 });
-    expect([bare.statusCode, code(bare)]).toEqual([422, 'GATE_OUTWARD_BLOCKED']);
+    expect(res.statusCode).toBe(404);
+    expect(await prisma.gatePass.count({ where: { facilityId: TEST_FACILITY_ID, vehicleNumber: 'LHR-9216' } })).toBe(0);
   });
 
   it('two passes of one plate cannot both take the last try', async () => {
@@ -562,10 +578,13 @@ describe('wrong counts are saved, and three of them lock the truck', () => {
 
   it('a plate with no letter or digit in it is refused at the gate, so no truck escapes the tries', async () => {
     // "--" normalizes to nothing: it could match no load and would never count its tries.
-    for (const url of ['/v1/gate-passes/inward', '/v1/gate-passes/outward']) {
-      const res = await app.inject({ method: 'POST', url, headers: authHeaders(securityToken), payload: { vehicle_number: '--' } });
-      expect([res.statusCode, code(res)], url).toEqual([400, 'VALIDATION_ERROR']);
-    }
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/inward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: '--' },
+    });
+    expect([res.statusCode, code(res)]).toEqual([400, 'VALIDATION_ERROR']);
   });
 
   it('a count too large to store is a plain refusal, not a server error', async () => {
@@ -592,10 +611,31 @@ describe('wrong counts are saved, and three of them lock the truck', () => {
     const listed = data<(Attempts & { id: string })[]>(await get('/v1/gate-passes?active=true', managerToken));
     expect(listed.find((p) => p.id === pass)?.count_attempts).toHaveLength(1);
   });
+
+  it("the manager's list is per truck, as the lock is: a second pass lists the first pass's counts, and none that no longer count", async () => {
+    const { pass: first } = await loaded('LHR-9214');
+    await miss(first, 41);
+    await miss(first, 42);
+    const second = await arrive('LHR-9214');
+    type Attempts = { count_attempts: { declared_quantity: number }[] | null };
+    const get = async (url: string, token: string) => data<Attempts>(await app.inject({ method: 'GET', url, headers: authHeaders(token) }));
+
+    // The truck is locked by two counts on one pass and one on another: the manager sees all of them.
+    expect((await get(`/v1/gate-passes/${second}`, managerToken)).count_attempts?.map((a) => a.declared_quantity)).toEqual([41, 42]);
+    const listed = data<(Attempts & { id: string })[]>(
+      await app.inject({ method: 'GET', url: '/v1/gate-passes?active=true', headers: authHeaders(managerToken) }),
+    );
+    expect(listed.find((p) => p.id === second)?.count_attempts).toHaveLength(2);
+    expect((await get(`/v1/gate-passes/${second}`, securityToken)).count_attempts).toBeNull();
+
+    // Once the truck is released those counts no longer count, so the pass left behind lists none.
+    expect((await miss(first, 50, managerToken)).statusCode).toBe(200);
+    expect((await get(`/v1/gate-passes/${second}`, managerToken)).count_attempts).toEqual([]);
+  });
 });
 
 describe('a withdrawal leaves on one truck only', () => {
-  it('once released, it cannot clear a second truck — by plate, by explicit id, or through POST /outward', async () => {
+  it('once released, it cannot clear a second truck — by plate or by explicit id', async () => {
     const ob = await dispatched(40, 'LHR-6100');
     await pay(ob.invoiceId);
     const first = await arrive('LHR-6100');
@@ -608,14 +648,6 @@ describe('a withdrawal leaves on one truck only', () => {
 
     const byId = await release(second, { outbound_event_id: ob.id, declared_quantity: 40 }, managerToken);
     expect([byId.statusCode, code(byId)]).toEqual([409, 'GATE_OUTWARD_ALREADY_USED']);
-
-    const logged = await app.inject({
-      method: 'POST',
-      url: '/v1/gate-passes/outward',
-      headers: authHeaders(managerToken),
-      payload: { vehicle_number: 'LHR-6100', outbound_event_id: ob.id, declared_quantity: 40 },
-    });
-    expect([logged.statusCode, code(logged)]).toEqual([409, 'GATE_OUTWARD_ALREADY_USED']);
   });
 
   it('two trucks with the same plate released at once: exactly one takes the load', async () => {
@@ -653,6 +685,27 @@ describe('a named withdrawal', () => {
     // By plate, both loads are checked, and the unpaid one holds the truck.
     const byPlate = await release(pass, { declared_quantity: 25 });
     expect([byPlate.statusCode, code(byPlate)]).toEqual([422, 'GATE_OUTWARD_INVOICE_NOT_FINAL']);
+  });
+
+  it('on a truck that carries two lots is refused: the truck is released by its plate, which checks both (docs/28 O12)', async () => {
+    const a = await dispatched(10, 'LHR-6260');
+    await pay(a.invoiceId);
+    const b = await dispatched(15, 'LHR-6260');
+    await pay(b.invoiceId);
+    const pass = await arrive('LHR-6260');
+
+    const named = await release(pass, { outbound_event_id: a.id, declared_quantity: 10 }, managerToken);
+    expect([named.statusCode, code(named)]).toEqual([409, 'GATE_NAMED_LINE_ON_FULL_TRUCK']);
+    expect(JSON.parse(named.body).error.message).toMatch(/2 lots/);
+    // Nothing left and nothing was stamped: the other lot is not left looking open on a truck that drove off.
+    const rows = await prisma.outboundEvent.findMany({ where: { id: { in: [a.id, b.id] } } });
+    expect(rows.every((o) => o.gatePassId === null)).toBe(true);
+    expect((await prisma.gatePass.findUniqueOrThrow({ where: { id: pass } })).status).toBe('ARRIVED');
+
+    // By plate the same truck goes, and both lots are stamped, counted and checked for payment.
+    const byPlate = await release(pass, { declared_quantity: 25 });
+    expect(byPlate.statusCode, byPlate.body).toBe(200);
+    expect([...data(byPlate).outbound_ids].sort()).toEqual([a.id, b.id].sort());
   });
 
   it('must be dispatched', async () => {

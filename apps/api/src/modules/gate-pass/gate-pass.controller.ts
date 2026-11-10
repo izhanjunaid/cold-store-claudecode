@@ -5,7 +5,6 @@ import {
   GatePassListQuery,
   LinkLotRequest,
   LogInwardRequest,
-  LogOutwardRequest,
 } from '@coldchain/shared';
 import { sendSuccess } from '../../common/response';
 import { Errors } from '../../common/errors';
@@ -39,23 +38,6 @@ export async function gatePassRoutes(app: FastifyInstance) {
       const data = await service.logInward(
         request.user!.facilityId,
         request.user!.userId,
-        body,
-      );
-      return sendSuccess(reply.status(201), data);
-    },
-  });
-
-  app.route({
-    method: 'POST',
-    url: '/v1/gate-passes/outward',
-    preHandler: [app.authenticate, app.requirePermission('gate_passes.log')],
-    schema: { body: LogOutwardRequest },
-    handler: async (request, reply) => {
-      const body = request.body as z.infer<typeof LogOutwardRequest>;
-      const data = await service.logOutward(
-        request.user!.facilityId,
-        request.user!.userId,
-        request.user!.role,
         body,
       );
       return sendSuccess(reply.status(201), data);
