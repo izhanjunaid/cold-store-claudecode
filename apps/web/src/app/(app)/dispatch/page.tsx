@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Search, Truck } from 'lucide-react';
-import { addDays, localIsoDate, normalizePlate } from '@coldchain/shared';
+import { addDays, localIsoDate, MANAGER_ALLOW_TEXT, normalizePlate, type ManagerAllowCode } from '@coldchain/shared';
 import { apiClient, apiClientList } from '@/lib/api-client';
 import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
@@ -49,6 +49,8 @@ interface DispatchRow {
   /** When a munshi last called a manager on it (docs/28 O6). */
   ask_code?: string | null;
   asked_at?: string | null;
+  /** What a manager allowed today (docs/28 O8-O10). */
+  allows?: ManagerAllowCode[];
 }
 
 interface LotHit {
@@ -137,6 +139,19 @@ export default function DispatchDeskPage() {
   // What a manager must finish, of any date (docs/28 D6, O7). Its key sits under the queue's, so refresh() covers it.
   const waiting = useWaitingForManager();
 
+  // A manager allows what a munshi asked for, or takes it back with an empty list (docs/28 O8-O11). The error goes
+  // back to the dialog or button that asked, so it can say why.
+  const allow = async (ids: string[], allows: ManagerAllowCode[]) => {
+    try {
+      await apiClient('/v1/dispatch/allow', { method: 'POST', body: { outbound_ids: ids, allows } });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not change what is allowed');
+      throw e;
+    }
+    toast.success(allows.length > 0 ? 'Allowed for today: the desk can finish it' : 'Taken back');
+    refresh();
+  };
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: qk.outbound.lists });
     queryClient.invalidateQueries({ queryKey: qk.outbound.day }); // cash may have just been taken
@@ -189,10 +204,12 @@ export default function DispatchDeskPage() {
       <WaitingCard
         rows={waiting.rows}
         total={waiting.total}
+        listed={waiting.listed}
         trucks={trucks}
         onCheckout={(r) => setCheckout({ id: r.id, lotId: r.lot_id })}
         onTruckCheckout={setTruckCheckoutId}
         onCancel={setCancelId}
+        onAllow={allow}
       />
 
       <Card>
@@ -458,6 +475,9 @@ function DispatchRowView({
               <>
                 {/* A munshi who can finish it still sees that a manager was called, and when. */}
                 {row.asked_at && <span className="text-xs text-muted-foreground">Called {calledAt(row.asked_at)}</span>}
+                {(row.allows ?? []).length > 0 && (
+                  <span className="text-xs text-emerald-800">Allowed: {row.allows!.map((a) => MANAGER_ALLOW_TEXT[a]).join(', ')}</span>
+                )}
                 <Button size="sm" onClick={onCollect}>
                   Dispatch &amp; Collect
                 </Button>

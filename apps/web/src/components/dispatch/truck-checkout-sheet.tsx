@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { localIsoDate, round2, type ManagerAskCode } from '@coldchain/shared';
+import { localIsoDate, MANAGER_ALLOW_TEXT, round2, type ManagerAllowCode, type ManagerAskCode } from '@coldchain/shared';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
@@ -23,8 +23,11 @@ interface TruckGroup {
   book_type: 'PACCI' | 'KATCHI';
   outbound_ids: string[];
   total_pkr: number;
-  /** For the munshi alone: does the party's standing approval cover all its bills on this truck? */
+  /** For the munshi alone: does the party's standing approval cover all its bills on this truck, or did a manager allow credit? */
   credit_available: boolean;
+  /** What a manager allowed on every line of this party and book today (docs/28 O8-O10): a cheque or credit is the group's. */
+  allows?: ManagerAllowCode[];
+  allowed_by_name?: string | null;
 }
 
 export interface TruckPreview {
@@ -98,7 +101,13 @@ export function TruckCheckoutSheet({
   const paymentOf = (g: TruckGroup): Payment => pay[groupKey(g)] ?? { mode: defaultMode, reference: '', chequeDate: '' };
   const setPayment = (g: TruckGroup, patch: Partial<Payment>) => setPay((p) => ({ ...p, [groupKey(g)]: { ...paymentOf(g), ...patch } }));
   const modeOffered = (g: TruckGroup, m: Mode) =>
-    holdsKeys ? m === 'CREDIT' || canCollect : solo ? m === 'CASH' || (m === 'CREDIT' && g.credit_available) : false;
+    holdsKeys
+      ? m === 'CREDIT' || canCollect
+      : solo
+        ? m === 'CASH' || (m === 'CREDIT' && g.credit_available) || (m !== 'CREDIT' && (g.allows ?? []).includes('CHEQUE_OR_TRANSFER'))
+        : false;
+  // A charge is left off one line at a time: the manager's keys, or that line's own allowance (docs/28 O11).
+  const skipsOpen = (l: CheckoutPreview) => holdsKeys || (solo && (l.allows ?? []).includes('LEAVE_CHARGE_OFF'));
 
   // The server's arithmetic (invoiceTotals): subtotal to the paisa, then GST on it.
   const lineTotal = (l: CheckoutPreview) => {
@@ -132,10 +141,14 @@ export function TruckCheckoutSheet({
       : !solo
         ? ['CALLED']
         : [
-            'CHEQUE_OR_TRANSFER',
+            // Only what is still missing: a group allowed a cheque, credit or a line's charge needs no call for it.
+            ...(preview.groups.some((g) => !(g.allows ?? []).includes('CHEQUE_OR_TRANSFER')) ? (['CHEQUE_OR_TRANSFER'] as const) : []),
             ...(preview.groups.some((g) => !g.credit_available) ? (['CREDIT'] as const) : []),
-            ...(lines.some((l) => l.service_lines.length > 0) ? (['LEAVE_CHARGE_OFF'] as const) : []),
+            ...(lines.some((l) => l.service_lines.length > 0 && !(l.allows ?? []).includes('LEAVE_CHARGE_OFF')) ? (['LEAVE_CHARGE_OFF'] as const) : []),
           ];
+  // What a manager allowed today, named once (the lines and groups carry who).
+  const allowedBy = [...preview?.groups ?? [], ...lines].find((x) => (x.allows ?? []).length > 0)?.allowed_by_name ?? null;
+  const anyAllowed = [...preview?.groups ?? [], ...lines].some((x) => (x.allows ?? []).length > 0);
   const afterAsk = () => {
     queryClient.invalidateQueries({ queryKey: qk.outbound.lists }); // the desk shows the call
     onOpenChange(false);
@@ -222,6 +235,11 @@ export function TruckCheckoutSheet({
               Checking out this truck needs a manager{preview.solo.reason ? ` — ${preview.solo.reason}` : ''}.
             </p>
           )}
+          {solo && anyAllowed && (
+            <p className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+              {allowedBy ?? 'A manager'} allowed some of what was asked for today; what is open is marked on each party and bill.
+            </p>
+          )}
           <CallManager outboundIds={lineIds} options={askOptions} onAsked={afterAsk} />
 
           {preview?.groups.map((g) => {
@@ -257,7 +275,7 @@ export function TruckCheckoutSheet({
                           <Checkbox
                             id={`svc-${key}`}
                             checked={!off}
-                            disabled={!holdsKeys}
+                            disabled={!skipsOpen(l)}
                             onCheckedChange={(c) =>
                               setSkipped((prev) => {
                                 const next = new Set(prev);
