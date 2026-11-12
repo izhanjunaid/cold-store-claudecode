@@ -9,7 +9,8 @@ const lotLocationSelect = {
   },
 } as const;
 
-// This pass's wrong counts, oldest first (docs/28 D4); the counter's name is for the manager's list.
+// This pass's own wrong counts, oldest first (docs/28 D4): the record a pass that has left keeps. A truck still
+// inside lists what its lock counts instead (`attemptsByPlate`).
 export const countAttemptsInclude = {
   select: {
     declaredQuantity: true,

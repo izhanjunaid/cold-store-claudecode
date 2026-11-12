@@ -183,17 +183,45 @@ describe('OutboundEventDetailPage — finalize gate', () => {
     expect(screen.getByText('Waiting for a manager to dispatch.')).toBeInTheDocument();
   });
 
-  it('with one-person dispatch on, a munshi is sent to the desk (docs/28 D6)', async () => {
+  /** One-person dispatch on, and the checkout's own verdict for this withdrawal (`undefined` = the preview fails). */
+  function soloOnWith(solo: { allowed: boolean; reason?: string; credit_available?: boolean } | undefined) {
     const base = apiClient.getMockImplementation()!;
-    apiClient.mockImplementation((path: string, opts?: unknown) =>
-      path === '/v1/facilities/me'
-        ? Promise.resolve({ id: 'f', name: 'F', settings: { dispatch_solo_mode: true } })
-        : base(path, opts),
-    );
+    apiClient.mockImplementation((path: string, opts?: unknown) => {
+      if (path === '/v1/facilities/me') return Promise.resolve({ id: 'f', name: 'F', settings: { dispatch_solo_mode: true } });
+      if (path === `/v1/outbound-events/${EVENT_ID}/checkout-preview`) {
+        return solo ? Promise.resolve({ solo: { credit_available: false, ...solo } }) : Promise.reject(new Error('preview down'));
+      }
+      return base(path, opts);
+    });
+  }
+
+  it('with one-person dispatch on, a munshi who can finish it is sent to the desk (docs/28 D6)', async () => {
+    soloOnWith({ allowed: true });
     renderPage();
     await loaded();
     expect(await screen.findByText('Check it out at the Dispatch Desk.')).toBeInTheDocument();
     expect(screen.queryByText('Waiting for a manager to dispatch.')).not.toBeInTheDocument();
+  });
+
+  // The desk cannot finish a KATCHI, per-ton or old withdrawal for a munshi: do not send them there.
+  it.each([
+    'a KATCHI-book bill is a manager decision',
+    'a withdrawal not dated today is a manager decision',
+    'a charge priced by the weight is a manager decision',
+  ])('with one-person dispatch on, a munshi who cannot finish it is told why a manager must: %s', async (reason) => {
+    soloOnWith({ allowed: false, reason });
+    renderPage();
+    await loaded();
+    expect(await screen.findByText(`Waiting for a manager to dispatch: ${reason}.`)).toBeInTheDocument();
+    expect(screen.queryByText('Check it out at the Dispatch Desk.')).not.toBeInTheDocument();
+  });
+
+  it('if the checkout preview cannot be read, the page does not promise the desk', async () => {
+    soloOnWith(undefined);
+    renderPage();
+    await loaded();
+    expect(await screen.findByText('Waiting for a manager to dispatch.')).toBeInTheDocument();
+    expect(screen.queryByText('Check it out at the Dispatch Desk.')).not.toBeInTheDocument();
   });
 
   it('shows Finalize & Dispatch with outbound.finalize', async () => {

@@ -455,9 +455,13 @@ function DispatchRowView({
             (canDispatch && withTruck ? (
               <span className="text-xs text-muted-foreground">Check out with the truck</span>
             ) : canDispatch ? (
-              <Button size="sm" onClick={onCollect}>
-                Dispatch &amp; Collect
-              </Button>
+              <>
+                {/* A munshi who can finish it still sees that a manager was called, and when. */}
+                {row.asked_at && <span className="text-xs text-muted-foreground">Called {calledAt(row.asked_at)}</span>}
+                <Button size="sm" onClick={onCollect}>
+                  Dispatch &amp; Collect
+                </Button>
+              </>
             ) : (
               // The munshi calls a manager: the row goes to the top of the managers' list (docs/28 O6).
               <Button size="sm" variant="outline" onClick={callManager} disabled={saving}>

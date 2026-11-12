@@ -66,6 +66,17 @@ function redirectToLogin() {
   window.location.assign(`/login?${params.toString()}`);
 }
 
+/**
+ * A request met an expired access token: refresh it once. True means ask again with the new token. When the
+ * session cannot be refreshed it is over, so the person is sent to sign in and this is false. Shared with
+ * `fetchPdfBlobUrl` (lib/open-pdf.ts), which reads a PDF the way it must (raw bytes, base read at call time).
+ */
+export async function refreshSession(): Promise<boolean> {
+  if (await tryRefreshTokens()) return true;
+  redirectToLogin();
+  return false;
+}
+
 async function apiFetch(path: string, options: ApiOptions = {}, isRetry = false) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
   const facilityId =
@@ -96,9 +107,7 @@ async function apiFetch(path: string, options: ApiOptions = {}, isRetry = false)
     typeof window !== 'undefined' &&
     token
   ) {
-    const refreshed = await tryRefreshTokens();
-    if (refreshed) return apiFetch(path, options, true);
-    redirectToLogin();
+    if (await refreshSession()) return apiFetch(path, options, true);
   }
 
   const data = await res.json();

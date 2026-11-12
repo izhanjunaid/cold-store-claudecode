@@ -51,3 +51,48 @@ describe('apiClient request headers', () => {
     expect(init.body).toBe(JSON.stringify({ name: 'x' }));
   });
 });
+
+// Characterization of the sign-in refresh that open-pdf now shares (refreshSession).
+describe('an expired access token', () => {
+  const ok = { ok: true, status: 200, json: async () => ({ success: true, data: { fine: true } }) };
+  beforeEach(() => {
+    localStorage.setItem('access_token', 'old');
+    localStorage.setItem('refresh_token', 'r1');
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it('is refreshed once and the request is sent again', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/v1/auth/refresh')) {
+        return { ok: true, json: async () => ({ success: true, data: { access_token: 'new', refresh_token: 'r2' } }) };
+      }
+      return (init?.headers as Record<string, string>)['Authorization'] === 'Bearer new'
+        ? ok
+        : { ok: false, status: 401, json: async () => ({ success: false, error: { message: 'expired' } }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiClient('/v1/lots')).resolves.toEqual({ fine: true });
+    expect(fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/v1/lots'))).toHaveLength(2);
+    expect(localStorage.getItem('access_token')).toBe('new');
+  });
+
+  it('a refresh that fails ends the session', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {}); // jsdom cannot navigate to /login
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (url: string) =>
+        String(url).endsWith('/v1/auth/refresh')
+          ? { ok: false, json: async () => ({ success: false }) }
+          : { ok: false, status: 401, json: async () => ({ success: false, error: { message: 'expired' } }) },
+      ),
+    );
+
+    await expect(apiClient('/v1/lots')).rejects.toThrow('expired');
+    expect(localStorage.getItem('access_token')).toBeNull();
+  });
+});

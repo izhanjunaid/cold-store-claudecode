@@ -329,10 +329,28 @@ export const Errors = {
       'Credit authorization can only be granted by MANAGER or higher',
       403,
     ),
-  GATE_OUTWARD_NOT_DISPATCHED: (dn: string) =>
-    new AppError('GATE_OUTWARD_NOT_DISPATCHED', `Withdrawal ${dn} has not been dispatched — it cannot leave yet`, 422),
-  GATE_OUTWARD_ALREADY_USED: (dn: string) =>
-    new AppError('GATE_OUTWARD_ALREADY_USED', `Withdrawal ${dn} already left on another truck`, 409),
+  GATE_OUTWARD_NOT_DISPATCHED: (dns: string[]) =>
+    new AppError(
+      'GATE_OUTWARD_NOT_DISPATCHED',
+      dns.length === 1
+        ? `Withdrawal ${dns[0]} has not been dispatched — it cannot leave yet`
+        : `Withdrawals ${dns.join(', ')} have not been dispatched — they cannot leave yet`,
+      422,
+    ),
+  GATE_OUTWARD_ALREADY_USED: (dns: string[]) =>
+    new AppError(
+      'GATE_OUTWARD_ALREADY_USED',
+      dns.length === 1 ? `Withdrawal ${dns[0]} already left on another truck` : `Withdrawals ${dns.join(', ')} already left on another truck`,
+      409,
+    ),
+  // A manager named one withdrawal of a truck that carries several: only the whole truck, by its plate, is
+  // counted and checked for payment, so the named line cannot go alone (docs/28 O12).
+  GATE_NAMED_LINE_ON_FULL_TRUCK: (lots: number) =>
+    new AppError(
+      'GATE_NAMED_LINE_ON_FULL_TRUCK',
+      `This truck carries ${lots} lots: clear the dispatch-note box and release it by its plate`,
+      409,
+    ),
   GATE_OUTWARD_PLATE_MISMATCH: (dn: string) =>
     new AppError(
       'GATE_OUTWARD_PLATE_MISMATCH',

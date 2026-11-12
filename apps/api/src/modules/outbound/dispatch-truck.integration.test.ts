@@ -127,8 +127,15 @@ function requestFrom(preview: any, mode: (g: any) => string = () => 'CASH') {
 const checkoutTruck = (passId: string, body: unknown, token = managerToken) =>
   call('POST', `/v1/dispatch/trucks/${passId}/dispatch-and-collect`, token, body);
 
-/** The reason a manager is needed, as a code (docs/28 D6). */
-const reasonOf = (r: { body: string }) => JSON.parse(r.body).error?.details?.reason_code;
+/**
+ * The reason a manager is needed, as a code (docs/28 D6). The refusal's `details` holds that code and nothing
+ * else: a munshi must never be handed a ceiling, an exposure or any other figure they may not see.
+ */
+const reasonOf = (r: { body: string }) => {
+  const details = JSON.parse(r.body).error?.details as Record<string, unknown> | undefined;
+  expect(Object.keys(details ?? {})).toEqual(['reason_code']);
+  return details?.['reason_code'];
+};
 
 async function nothingWritten(outboundIds: string[]) {
   for (const id of outboundIds) {

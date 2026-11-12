@@ -18,15 +18,19 @@ vi.mock('@/stores/auth.store', () => ({
     return selector ? selector(state) : state;
   },
 }));
-vi.mock('@/stores/ui.store', () => ({ useUiStore: () => ({ sidebarCollapsed: false, toggleSidebar: vi.fn() }) }));
+let collapsed = false;
+vi.mock('@/stores/ui.store', () => ({ useUiStore: () => ({ sidebarCollapsed: collapsed, toggleSidebar: vi.fn() }) }));
 
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { Sidebar } from './sidebar';
 
 function renderSidebar() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <Sidebar />
+      <TooltipProvider>
+        <Sidebar />
+      </TooltipProvider>
     </QueryClientProvider>,
   );
 }
@@ -37,6 +41,7 @@ const waiting = (total: number) => Promise.resolve({ data: [], meta: { total, pa
 describe('the sidebar count of what waits for a manager', () => {
   beforeEach(() => {
     apiClientList.mockReset();
+    collapsed = false;
     role = 'MANAGER';
     permissions = ['outbound.record', 'outbound.finalize', 'invoices.manage'];
   });
@@ -47,6 +52,22 @@ describe('the sidebar count of what waits for a manager', () => {
     const desk = screen.getByRole('link', { name: /Dispatch Desk/ });
     await waitFor(() => expect(desk).toHaveTextContent('3'));
     expect(apiClientList).toHaveBeenCalledWith('/v1/dispatch/waiting');
+  });
+
+  // Visually hidden text, not an aria-label on a role-less span: that is not reliably read by assistive tech.
+  it('the count says in words what it counts, in text a screen reader reads', async () => {
+    apiClientList.mockReturnValue(waiting(3));
+    renderSidebar();
+    const desk = screen.getByRole('link', { name: /Dispatch Desk/ });
+    await waitFor(() => expect(desk).toHaveTextContent('3 waiting for a manager'));
+  });
+
+  it('collapsed, the dot is silent to the eye and still says what waits, with the link named', async () => {
+    collapsed = true;
+    apiClientList.mockReturnValue(waiting(3));
+    renderSidebar();
+    const desk = await screen.findByRole('link', { name: /Dispatch Desk.*3 waiting for a manager/ });
+    expect(desk).toBeInTheDocument();
   });
 
   it('no count at zero', async () => {

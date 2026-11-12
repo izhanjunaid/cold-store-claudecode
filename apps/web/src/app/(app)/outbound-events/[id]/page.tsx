@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Ban, FileText, Receipt, Truck } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useCan } from '@/lib/permissions';
+import { qk } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -79,6 +81,17 @@ export default function OutboundEventDetailPage() {
   // Weight is optional; a facility that doesn't weigh sees no weight card (docs/27).
   const weightsShown = useWeightsShown();
   const soloOn = useFacility().data?.settings?.dispatch_solo_mode === true;
+  // With one-person dispatch on, the desk can finish this only if the solo rules allow it (not a KATCHI bill, not
+  // an old date, no per-ton charge): ask the checkout's own preview rather than rebuild the rules here.
+  const askDesk =
+    soloOn && canRecord && !canFinalize && event != null && (event.status === 'PENDING' || event.status === 'WEIGHED');
+  const deskPreview = useQuery({
+    queryKey: qk.outbound.preview(eventId),
+    queryFn: () => apiClient<{ solo?: { allowed: boolean; reason?: string } }>(`/v1/outbound-events/${eventId}/checkout-preview`),
+    enabled: askDesk,
+    staleTime: 0,
+    retry: false,
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -320,10 +333,14 @@ export default function OutboundEventDetailPage() {
         </Card>
       )}
 
-      {ready && !canFinalize && (
+      {ready && !canFinalize && !(askDesk && deskPreview.isLoading) && (
         <p className="mb-3 text-sm text-muted-foreground">
-          {/* With one-person dispatch on, the munshi may finish it at the desk, or call a manager from there. */}
-          {soloOn ? 'Check it out at the Dispatch Desk.' : 'Waiting for a manager to dispatch.'}
+          {/* With one-person dispatch on, a munshi who can finish it does so at the desk; otherwise a manager must. */}
+          {askDesk && deskPreview.data?.solo?.allowed
+            ? 'Check it out at the Dispatch Desk.'
+            : askDesk && deskPreview.data?.solo?.reason
+              ? `Waiting for a manager to dispatch: ${deskPreview.data.solo.reason}.`
+              : 'Waiting for a manager to dispatch.'}
         </p>
       )}
 

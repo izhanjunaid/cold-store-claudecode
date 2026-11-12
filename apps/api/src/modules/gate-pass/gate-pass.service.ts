@@ -7,7 +7,6 @@ import type {
   GatePassResponseType,
   LinkLotRequestType,
   LogInwardRequestType,
-  LogOutwardRequestType,
 } from '@coldchain/shared';
 import {
   addDays,
@@ -22,7 +21,7 @@ import { isBlindRole } from '../../common/blind-count';
 import { lockRow } from '../../common/row-lock';
 import { roleAtLeast } from '../../plugins/auth';
 import { standingCreditCover, type ActiveApproval } from '../credit-approval/credit-approval.service';
-import { KeptRefusal, lockedPlates, recordMiss, triesUsed, withKeptRefusals } from './count-attempts';
+import { attemptsByPlate, KeptRefusal, lockedPlates, recordMiss, triesUsed, withKeptRefusals, type CountAttempt } from './count-attempts';
 import { generateGatePassNumber } from './gate-pass-number';
 import { countAttemptsInclude, GatePassRepository } from './gate-pass.repository';
 import { openLoads, OPEN_LOAD_STAGE_SQL } from './open-load';
@@ -52,7 +51,7 @@ const dnOf = (o: { dispatchNoteNumber: string | null; id: string }) => o.dispatc
  */
 function refuseIfStillLoading(lines: { status: string; dispatchNoteNumber: string | null; id: string }[]): void {
   const open = lines.filter((o) => o.status !== 'DISPATCHED');
-  if (open.length > 0) throw Errors.GATE_OUTWARD_NOT_DISPATCHED(open.map(dnOf).join(', '));
+  if (open.length > 0) throw Errors.GATE_OUTWARD_NOT_DISPATCHED(open.map(dnOf));
 }
 
 const emptyRelease = (): GateReleaseType => ({
@@ -103,45 +102,6 @@ export class GatePassService {
       return row.id;
     });
     return this.getById(facilityId, created);
-  }
-
-  async logOutward(
-    facilityId: string,
-    userId: string,
-    userRole: string,
-    body: LogOutwardRequestType,
-  ): Promise<GatePassResponseType> {
-    // A wrong count is kept (docs/28 D4): it commits with the pass it belongs to, so a refused
-    // release leaves its truck inside and its try counted.
-    return withKeptRefusals(this.prisma, async (tx) => {
-      const passNumber = await generateGatePassNumber(tx, facilityId, new Date());
-      // No `relatedOutboundId` here: a pass that survives a refusal must not carry the withdrawal a manager
-      // named, or a later bare release would take the named path without the manager check. The release
-      // writes the link itself, and the withdrawal reaches clearOutwardInternal through `body`.
-      const row = await tx.gatePass.create({
-        data: {
-          facilityId,
-          passNumber,
-          direction: 'OUTWARD',
-          vehicleNumber: body.vehicle_number,
-          driverName: body.driver_name ?? null,
-          driverPhone: body.driver_phone ?? null,
-          status: 'ARRIVED',
-          notes: body.notes ?? null,
-          createdBy: userId,
-        },
-      });
-      // Auto-clear outward in same call (truck arriving at exit gate) — through
-      // exactly the same checks as clearing a logged pass.
-      const cleared = await this.clearOutwardInternal(tx, facilityId, row.id, userId, userRole, {
-        outbound_event_id: body.outbound_event_id,
-        credit_authorization: body.credit_authorization,
-        declared_quantity: body.declared_quantity,
-        override_reason: body.override_reason,
-        notes: body.notes,
-      });
-      return cleared;
-    });
   }
 
   async linkLot(
@@ -209,7 +169,8 @@ export class GatePassService {
       if (query.date_to) (where.createdAt as Prisma.DateTimeFilter).lt = businessDayStart(addDays(query.date_to, 1));
     }
     const [rows, total] = await this.repo.list(facilityId, where, query.page, query.page_size);
-    const data = rows.map((r) => formatGatePass(r));
+    const attempts = await attemptsByPlate(this.prisma, facilityId, rows.filter(isInside).map((r) => normalizePlate(r.vehicleNumber)));
+    const data = rows.map((r) => formatGatePass(r, countsListed(r, attempts)));
     if (query.active) {
       // A manager is never locked out by wrong counts (docs/28 D4), so only everyone else sees COUNT_LOCKED.
       const previews = await this.releasePreviews(
@@ -230,7 +191,8 @@ export class GatePassService {
   async getById(facilityId: string, id: string): Promise<GatePassResponseType> {
     const row = await this.repo.findById(facilityId, id);
     if (!row) throw Errors.GATE_PASS_NOT_FOUND();
-    return formatGatePass(row);
+    const attempts = await attemptsByPlate(this.prisma, facilityId, isInside(row) ? [normalizePlate(row.vehicleNumber)] : []);
+    return formatGatePass(row, countsListed(row, attempts));
   }
 
   /**
@@ -343,7 +305,8 @@ export class GatePassService {
       },
     });
     if (!row) throw Errors.GATE_PASS_NOT_FOUND();
-    return formatGatePass(row);
+    const attempts = await attemptsByPlate(tx, facilityId, isInside(row) ? [normalizePlate(row.vehicleNumber)] : []);
+    return formatGatePass(row, countsListed(row, attempts));
   }
 
   /**
@@ -395,9 +358,9 @@ export class GatePassService {
       const ob = await tx.outboundEvent.findFirst({ where: { facilityId, id: explicitId }, select: releaseSelect });
       if (!ob) throw Errors.GATE_OUTWARD_NO_OUTBOUND();
       // 3. A named withdrawal must be ready to leave, unused, and booked on this truck.
-      if (ob.status !== 'DISPATCHED' || ob.voidedAt) throw Errors.GATE_OUTWARD_NOT_DISPATCHED(dnOf(ob));
+      if (ob.status !== 'DISPATCHED' || ob.voidedAt) throw Errors.GATE_OUTWARD_NOT_DISPATCHED([dnOf(ob)]);
       if ((ob.gatePassId && ob.gatePassId !== pass.id) || (await this.clearedElsewhere(tx, ob.id, pass.id))) {
-        throw Errors.GATE_OUTWARD_ALREADY_USED(dnOf(ob));
+        throw Errors.GATE_OUTWARD_ALREADY_USED([dnOf(ob)]);
       }
       // No plate on the booking counts as a mismatch: otherwise leaving it blank
       // would be the way around this check.
@@ -409,7 +372,12 @@ export class GatePassService {
       }
       // Naming one withdrawal skips matching the rest of the truck, but not the hold: read the pass's
       // plate unlocked (locking more withdrawals after the named one would break the sorted lock order).
-      refuseIfStillLoading((await openLoads(tx, facilityId, [pass.vehicleNumber])).get(normalizePlate(pass.vehicleNumber)) ?? []);
+      const onTruck = (await openLoads(tx, facilityId, [pass.vehicleNumber])).get(normalizePlate(pass.vehicleNumber)) ?? [];
+      refuseIfStillLoading(onTruck);
+      // Only the whole truck, by its plate, has its count and every payment checked, and every line stamped as
+      // gone. A named line of a truck that carries others would leave them looking open (docs/28 O12).
+      const others = onTruck.filter((o) => o.id !== ob.id);
+      if (others.length > 0) throw Errors.GATE_NAMED_LINE_ON_FULL_TRUCK(others.length + 1);
       outbounds = [ob];
     } else {
       outbounds = await this.matchByPlate(tx, facilityId, pass);
@@ -527,7 +495,7 @@ export class GatePassService {
       where: { id: { in: ids }, OR: [{ gatePassId: null }, { gatePassId: pass.id }] },
       data: { gatePassId: pass.id },
     });
-    if (count !== ids.length) throw Errors.GATE_OUTWARD_ALREADY_USED(outbounds.map(dnOf).join(', '));
+    if (count !== ids.length) throw Errors.GATE_OUTWARD_ALREADY_USED(outbounds.map(dnOf));
 
     const now = new Date();
     const first = [...outbounds].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0]!;
@@ -669,7 +637,22 @@ function formatLotLocation(
   return parts.length > 0 ? `${lot.chamber.name} → ${parts.join(', ')}` : lot.chamber.name;
 }
 
-function formatGatePass(row: any): GatePassResponseType {
+/** A truck still at the gate: its pass is open. */
+const isInside = (row: { status: string }) => row.status === 'ARRIVED' || row.status === 'WEIGHING';
+
+/**
+ * The wrong counts a pass lists (docs/28 D4). A truck still inside lists what its lock counts: the plate's
+ * counts since its last release, across passes, so a manager reads what actually locked it. A pass that has
+ * left keeps its own, as the record of what was typed on it.
+ */
+function countsListed(
+  row: { status: string; vehicleNumber: string; countAttempts?: CountAttempt[] },
+  byPlate: Map<string, CountAttempt[]>,
+): CountAttempt[] {
+  return isInside(row) ? byPlate.get(normalizePlate(row.vehicleNumber)) ?? [] : row.countAttempts ?? [];
+}
+
+function formatGatePass(row: any, attempts: CountAttempt[]): GatePassResponseType {
   const created: Date = row.createdAt;
   const cleared: Date | null = row.clearedAt ?? null;
   const turnaround = cleared ? Math.round((cleared.getTime() - created.getTime()) / 1000) : null;
@@ -712,15 +695,13 @@ function formatGatePass(row: any): GatePassResponseType {
       row.creditAuthorizedAmountPkr != null ? Number(row.creditAuthorizedAmountPkr) : null,
     override_reason: row.overrideReason ?? null,
     outbound_ids: (row.clearedOutbounds ?? []).map((o: { id: string }) => o.id),
-    // This pass's wrong counts. `expected_quantity` is a blind key: the guard keeps only the number they typed.
-    count_attempts: (row.countAttempts ?? []).map(
-      (a: { declaredQuantity: number; expectedQuantity: number; createdAt: Date; countedBy?: { name: string } | null }) => ({
-        declared_quantity: a.declaredQuantity,
-        expected_quantity: a.expectedQuantity,
-        counted_by_name: a.countedBy?.name ?? null,
-        created_at: a.createdAt.toISOString(),
-      }),
-    ),
+    // The wrong counts (see `countsListed`). `expected_quantity` is a blind key: the guard keeps only what they typed.
+    count_attempts: attempts.map((a) => ({
+      declared_quantity: a.declaredQuantity,
+      expected_quantity: a.expectedQuantity,
+      counted_by_name: a.countedBy?.name ?? null,
+      created_at: a.createdAt.toISOString(),
+    })),
     // Every withdrawal the truck carried, for the receipt — names and marks only, never a count.
     withdrawals: (row.clearedOutbounds ?? []).map(
       (o: { dispatchNoteNumber: string | null; lot?: { marka: string | null }; ownerPartySnapshot?: { name: string } | null }) => ({

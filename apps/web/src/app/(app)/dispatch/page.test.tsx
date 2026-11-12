@@ -498,6 +498,36 @@ describe('Dispatch Desk — the munshi calls a manager (docs/28 O6)', () => {
   });
 });
 
+describe('Dispatch Desk — a call, seen by a munshi who can finish the row', () => {
+  it('shows when a manager was called, beside Dispatch & Collect', async () => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    apiClient.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === '/v1/facilities/me'
+          ? { id: 'f', name: 'F', settings: { dispatch_solo_mode: true } }
+          : path === '/v1/dispatch/trucks'
+            ? []
+            : {},
+      ),
+    );
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.startsWith('/v1/outbound-events')
+          ? {
+              data: [row({ id: 'ob-asked', dispatch_note_number: 'DN-ASKED', ask_code: 'CREDIT', asked_at: '2026-09-02T09:05:00.000Z' })],
+              meta: { total: 1, page: 1, per_page: 50 },
+            }
+          : { data: [], meta: {} },
+      ),
+    );
+    renderPage();
+    const asked = (await screen.findByText('DN-ASKED')).closest('tr') as HTMLElement;
+    expect(await within(asked).findByRole('button', { name: /Dispatch & Collect/ })).toBeInTheDocument();
+    expect(within(asked).getByText(/^Called 2 Sep\w* 2026/)).toBeInTheDocument();
+  });
+});
+
 describe('Dispatch Desk — waiting for a manager (docs/28 D6)', () => {
   const card = () => screen.findByRole('region', { name: 'Waiting for a manager' });
 
@@ -546,6 +576,7 @@ describe('Dispatch Desk — waiting for a manager (docs/28 D6)', () => {
       truck({
         gate_pass_id: 'pass-7',
         vehicle_number: 'LHR 5555',
+        ready: true,
         lines: [
           { outbound_id: 'w-1', dispatch_note_number: 'DN-W1', status: 'PENDING', stage: 'BOOKED', lot_number: 'LOT-W1', marka: null, billing_party: { id: 'p', name: 'Rana' }, quantity_withdrawn_bags: 12 },
           { outbound_id: 'w-2', dispatch_note_number: 'DN-W2', status: 'PENDING', stage: 'BOOKED', lot_number: 'LOT-W2', marka: null, billing_party: { id: 'p', name: 'Rana' }, quantity_withdrawn_bags: 8 },
@@ -558,6 +589,25 @@ describe('Dispatch Desk — waiting for a manager (docs/28 D6)', () => {
     await waitFor(() => expect(within(c).getByRole('button', { name: 'Check out truck' })).toBeInTheDocument());
     fireEvent.click(within(c).getByRole('button', { name: 'Check out truck' }));
     expect(await screen.findByTestId('truck-checkout')).toHaveAttribute('data-pass', 'pass-7');
+  });
+
+  it('"Check out truck" on the card is off while the truck is not ready, as on the truck panel', async () => {
+    trucks = [
+      truck({
+        gate_pass_id: 'pass-8',
+        vehicle_number: 'LHR 5555',
+        ready: false,
+        lines: [
+          { outbound_id: 'w-1', dispatch_note_number: 'DN-W1', status: 'PENDING', stage: 'BOOKED', lot_number: 'LOT-W1', marka: null, billing_party: { id: 'p', name: 'Rana' }, quantity_withdrawn_bags: 12 },
+          { outbound_id: 'w-2', dispatch_note_number: 'DN-W2', status: 'DISPUTED', stage: 'BOOKED', lot_number: 'LOT-W2', marka: null, billing_party: { id: 'p', name: 'Rana' }, quantity_withdrawn_bags: 8 },
+        ],
+      }),
+    ];
+    waitingRows = [waitingRow({ vehicle_number: 'LHR-5555' })];
+    renderPage();
+    const c = await card();
+    await waitFor(() => expect(within(c).getByRole('button', { name: 'Check out truck' })).toBeInTheDocument());
+    expect(within(c).getByRole('button', { name: 'Check out truck' })).toBeDisabled();
   });
 
   it('old bookings sit under "Booked before today" with a Cancel button', async () => {

@@ -36,4 +36,19 @@ describe('Errors factory', () => {
     expect(err.statusCode).toBe(400);
     expect(err.field).toBe('email');
   });
+
+  it('the gate names one withdrawal in the singular and several in the plural (docs/28)', () => {
+    expect(Errors.GATE_OUTWARD_NOT_DISPATCHED(['DN-1']).message).toBe('Withdrawal DN-1 has not been dispatched — it cannot leave yet');
+    expect(Errors.GATE_OUTWARD_NOT_DISPATCHED(['DN-1', 'DN-2']).message).toBe(
+      'Withdrawals DN-1, DN-2 have not been dispatched — they cannot leave yet',
+    );
+    expect(Errors.GATE_OUTWARD_ALREADY_USED(['DN-1']).message).toBe('Withdrawal DN-1 already left on another truck');
+    expect(Errors.GATE_OUTWARD_ALREADY_USED(['DN-1', 'DN-2']).message).toBe('Withdrawals DN-1, DN-2 already left on another truck');
+  });
+
+  it('GATE_NAMED_LINE_ON_FULL_TRUCK counts the lots and sends the manager to release by plate', () => {
+    const err = Errors.GATE_NAMED_LINE_ON_FULL_TRUCK(3);
+    expect([err.statusCode, err.code]).toEqual([409, 'GATE_NAMED_LINE_ON_FULL_TRUCK']);
+    expect(err.message).toBe('This truck carries 3 lots: clear the dispatch-note box and release it by its plate');
+  });
 });

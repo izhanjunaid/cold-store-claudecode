@@ -471,17 +471,24 @@ describe('Gate-side quantity & commodity verification (Fix #1)', () => {
     expect(data.owner_party_name).toBeTruthy();
   });
 
-  it('POST /outward: a wrong physical count blocks the guard; a manager may release with a reason', async () => {
+  it('a wrong physical count blocks the guard; a manager may release the same pass with a reason', async () => {
     await cleanup();
     const lot = await createLot(100);
     const ob = await createOutbound(lot.id, 'LHR-Q600');
     await finalizeAndPayInvoice(ob.invoice_id);
+    const inward = await app.inject({
+      method: 'POST',
+      url: '/v1/gate-passes/inward',
+      headers: authHeaders(securityToken),
+      payload: { vehicle_number: 'LHR-Q600' },
+    });
+    const passId = JSON.parse(inward.body).data.id as string;
 
     const blocked = await app.inject({
       method: 'POST',
-      url: '/v1/gate-passes/outward',
+      url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(securityToken),
-      payload: { vehicle_number: 'LHR-Q600', declared_quantity: 90 },
+      payload: { declared_quantity: 90 },
     });
     expect(blocked.statusCode).toBe(422);
     const err = JSON.parse(blocked.body).error;
@@ -496,16 +503,15 @@ describe('Gate-side quantity & commodity verification (Fix #1)', () => {
 
     const out = await app.inject({
       method: 'POST',
-      url: '/v1/gate-passes/outward',
+      url: `/v1/gate-passes/${passId}/outward`,
       headers: authHeaders(managerToken),
       payload: {
-        vehicle_number: 'LHR-Q600',
         outbound_event_id: ob.id,
         declared_quantity: 90,
         override_reason: '10 bags fell off at loading, sent back in',
       },
     });
-    expect(out.statusCode).toBe(201);
+    expect(out.statusCode).toBe(200);
     const data = JSON.parse(out.body).data;
     expect(data.declared_quantity).toBe(90);
     expect(data.authorized_quantity).toBe(100);

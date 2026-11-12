@@ -18,24 +18,29 @@ export default function AcknowledgmentPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // The paper this effect loaded, kept here (not in state) so the cleanup frees the right one.
+    let url: string | null = null;
+    let left = false;
     const load = async () => {
       try {
-        setBlobUrl(await fetchPdfBlobUrl(`/v1/lots/${lotId}/transfer/${transferId}/acknowledgment`, 'transfer acknowledgment'));
+        url = await fetchPdfBlobUrl(`/v1/lots/${lotId}/transfer/${transferId}/acknowledgment`, 'transfer acknowledgment');
+        if (left) URL.revokeObjectURL(url); // the page was left while it loaded
+        else setBlobUrl(url);
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load PDF');
+        if (!left) setError(e instanceof Error ? e.message : 'Failed to load PDF');
       }
     };
     load();
     return () => {
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      left = true;
+      if (url) URL.revokeObjectURL(url);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lotId, transferId]);
 
   if (error) {
     return (
       <div>
-        <p className="mb-4 text-destructive">Failed to load acknowledgment: {error}</p>
+        <p className="mb-4 text-destructive">{error}</p>
         <Button variant="outline" onClick={() => router.push(`/lots/${lotId}`)}>
           Back to Lot
         </Button>

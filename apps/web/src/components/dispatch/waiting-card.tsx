@@ -60,7 +60,7 @@ export function WaitingCard({
         <span className="text-xs text-amber-800">{why(r)}</span>
         <span className="ml-auto flex items-center gap-1">
           {truck ? (
-            <Button size="sm" onClick={() => onTruckCheckout(truck.gate_pass_id)}>
+            <Button size="sm" disabled={!truck.ready} onClick={() => onTruckCheckout(truck.gate_pass_id)}>
               Check out truck
             </Button>
           ) : (
