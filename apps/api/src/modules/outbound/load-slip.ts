@@ -49,6 +49,7 @@ export async function buildLoadSlip(
       status: true,
       quantityWithdrawnBags: true,
       finalizedBy: true,
+      creditAllowedBy: true,
       lot: { select: { lotNumber: true, marka: true, commodity: { select: { name: true } }, billingParty: { select: { id: true, name: true } } } },
       ownerPartySnapshot: { select: { name: true } },
       invoice: {
@@ -113,16 +114,20 @@ export async function buildLoadSlip(
       own.map((l) => Number(l.invoice!.totalPkr) - Number(l.invoice!.amountPaidPkr) + (unclearedByInvoice.get(l.invoice!.id) ?? 0)),
     );
     if (owed <= 0.005) continue;
+    // A munshi who took credit on a manager's allowance (docs/28 O9) is not the authority: the manager who allowed it
+    // is. Read from the stamp the checkout wrote, never from an allowance (it may have expired, or a manager may have
+    // dispatched the row themselves, and then the dispatching manager is the one).
+    const allowedBy = own.find((l) => l.creditAllowedBy)?.creditAllowedBy ?? null;
     const dispatchedBy = own.find((l) => l.finalizedBy)?.finalizedBy ?? null;
     let authorizerId: string | null;
     let standing: boolean;
     if (pass.status === 'CLEARED') {
       const approval = wentOutOn.find((a) => a.partyId === party.id);
-      authorizerId = approval?.approvedBy ?? pass.creditAuthorizedBy ?? dispatchedBy;
+      authorizerId = approval?.approvedBy ?? pass.creditAuthorizedBy ?? allowedBy ?? dispatchedBy;
       standing = approval != null;
     } else {
       const cover = await standingCreditCover(db, facilityId, [{ partyId: party.id }]);
-      authorizerId = cover.covered ? cover.approvals[0]!.approvedBy : dispatchedBy;
+      authorizerId = cover.covered ? cover.approvals[0]!.approvedBy : (allowedBy ?? dispatchedBy);
       standing = cover.covered;
     }
     const authorizer = authorizerId ? await db.user.findUnique({ where: { id: authorizerId }, select: { name: true } }) : null;

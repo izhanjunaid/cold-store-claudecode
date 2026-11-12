@@ -163,6 +163,15 @@ export const Errors = {
   DISPATCH_NEEDS_MANAGER: (code: ManagerReasonCode, reason: string = MANAGER_REASON_TEXT[code]) =>
     new AppError('DISPATCH_NEEDS_MANAGER', `A manager must finish this truck: ${reason}`, 403, undefined, { reason_code: code }),
   // A call to a manager on withdrawals none of which is still booked or weighed in this facility.
+  // A manager tried to allow something on a withdrawal that fails a solo rule (docs/28 O8): the rule is the code, never a figure.
+  ALLOW_DOES_NOT_HELP: (code: ManagerReasonCode) =>
+    new AppError(
+      'ALLOW_DOES_NOT_HELP',
+      `Allowing this does not help: ${MANAGER_REASON_TEXT[code]}. A manager checks it out`,
+      409,
+      undefined,
+      { reason_code: code },
+    ),
   OUTBOUND_NOT_WAITING: () =>
     new AppError('OUTBOUND_NOT_WAITING', 'Nothing here is waiting for a manager: it was dispatched or cancelled', 409),
   OUTBOUND_ALREADY_LEFT: () =>

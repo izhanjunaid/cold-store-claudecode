@@ -5,6 +5,7 @@ import {
   FinalizeOutboundRequest,
   CancelOutboundRequest,
   OutboundListQuery,
+  AllowRequest,
   AskManagerRequest,
   DispatchAndCollectRequest,
   TruckDispatchRequest,
@@ -194,6 +195,28 @@ export async function outboundRoutes(app: FastifyInstance) {
     schema: { body: AskManagerRequest },
     handler: async (request, reply) =>
       sendSuccess(reply, await checkout.askManager(request.user!.facilityId, request.body as z.infer<typeof AskManagerRequest>)),
+  });
+
+  // A manager allows what the munshi asked for, or takes it back with an empty list (docs/28 O8-O11). The manager's
+  // key for the route; the service also wants invoices.manage, as the checkout does.
+  app.route({
+    method: 'POST',
+    url: '/v1/dispatch/allow',
+    preHandler: [app.authenticate, app.requirePermission('outbound.finalize')],
+    schema: { body: AllowRequest },
+    handler: async (request, reply) =>
+      sendSuccess(
+        reply,
+        await checkout.allow(
+          {
+            facilityId: request.user!.facilityId,
+            userId: request.user!.userId,
+            role: request.user!.role,
+            permissions: await app.ensurePermissions(request),
+          },
+          request.body as z.infer<typeof AllowRequest>,
+        ),
+      ),
   });
 
   app.route({

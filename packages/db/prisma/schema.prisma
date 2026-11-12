@@ -861,6 +861,12 @@ model OutboundEvent {
   /// A munshi called a manager on it (0045, docs/28 O6): what the buyer wants, and when.
   managerAskCode        String?        @map("manager_ask_code") @db.VarChar(30)
   managerAskAt          DateTime?      @map("manager_ask_at") @db.Timestamptz()
+  // A manager allows what the munshi asked for, for the business day (docs/28 O8-O10).
+  managerAllows         String[]       @default([]) @map("manager_allows") @db.VarChar(30)
+  managerAllowedBy      String?        @map("manager_allowed_by") @db.Uuid
+  managerAllowedAt      DateTime?      @map("manager_allowed_at") @db.Timestamptz()
+  // Set at checkout, only when the solo door billed on a live CREDIT allowance: the manager who let it go on credit.
+  creditAllowedBy       String?        @map("credit_allowed_by") @db.Uuid
 
   lot                Lot        @relation(fields: [lotId], references: [id])
   facility           Facility   @relation(fields: [facilityId], references: [id])

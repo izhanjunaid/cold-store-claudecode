@@ -5,7 +5,7 @@
  * is what posts, and that two clicks cannot take the money twice — every race asserts the
  * loser (CLAUDE.md).
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from 'vitest';
 import { withGuardsDisabled } from '../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
@@ -976,5 +976,297 @@ describe('waiting for a manager (docs/28 D6, O6, O7)', () => {
     expect((await waiting(managerToken)).statusCode).toBe(200);
     const b = await booked(10, { plate: 'LHR-7060' });
     expect((await ask([b.id], 'CALLED', securityToken)).statusCode).toBe(403);
+  });
+});
+
+describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
+  type Allowed = {
+    id: string;
+    reason_code: string | null;
+    ask_code: string | null;
+    allows: string[];
+    allowed_by_name: string | null;
+    allowed_at: string | null;
+  };
+  const ask = (ids: string[], askCode = 'CHEQUE_OR_TRANSFER') =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/dispatch/ask-manager',
+      headers: authHeaders(operatorToken),
+      payload: { outbound_ids: ids, ask_code: askCode },
+    });
+  const allow = (ids: string[], allows: string[], token = managerToken) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/dispatch/allow',
+      headers: authHeaders(token),
+      payload: { outbound_ids: ids, allows },
+    });
+  const waiting = async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/dispatch/waiting', headers: authHeaders(managerToken) });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = JSON.parse(res.body);
+    return { rows: body.data as Allowed[], total: body.meta.total as number, listed: body.meta.listed as number };
+  };
+  const managerRow = () => prisma.user.findFirstOrThrow({ where: { email: 'manager@coldchain.pk' } });
+  const cheque = (total: number, extra: Record<string, unknown> = {}) => ({
+    expected_total_pkr: total,
+    payment: { mode: 'CHEQUE', reference_number: 'MCB-0001', cheque_date: businessDate() },
+    ...extra,
+  });
+  const credit = (total: number) => ({ expected_total_pkr: total, payment: { mode: 'CREDIT' } });
+  const refused = (r: Res, reason: string) => {
+    const error = JSON.parse(r.body).error;
+    expect([r.statusCode, error?.code, error?.details]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', { reason_code: reason }]);
+  };
+  /** A booked withdrawal of today, 100 bags (the loading charge is Rs 200), that the munshi has called on. */
+  const calledToday = async (plate: string, askCode = 'CHEQUE_OR_TRANSFER') => {
+    const b = await booked(100, { date: businessDate(), plate });
+    expect((await ask([b.id], askCode)).statusCode).toBe(200);
+    return b;
+  };
+  const longAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
+
+  beforeAll(async () => {
+    await setSolo(true);
+  });
+  afterAll(() => setSolo(false));
+  beforeEach(async () => {
+    await prisma.partyCreditApproval.deleteMany({ where: { partyId } });
+  });
+
+  it('only a manager allows: the munshi, the guard and the accountant get 403; an allowance names who gave it and when', async () => {
+    const b = await calledToday('LHR-7101');
+    for (const token of [operatorToken, securityToken, accountantToken]) {
+      expect((await allow([b.id], ['CHEQUE_OR_TRANSFER'], token)).statusCode).toBe(403);
+    }
+    const res = await allow([b.id], ['CHEQUE_OR_TRANSFER']);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(data(res)).toMatchObject({ allowed: 1, allowed_at: expect.any(String) });
+    const row = await prisma.outboundEvent.findUniqueOrThrow({ where: { id: b.id } });
+    expect(row).toMatchObject({ managerAllows: ['CHEQUE_OR_TRANSFER'], managerAllowedBy: (await managerRow()).id });
+    expect(row.managerAllowedAt).toBeTruthy();
+  });
+
+  it("allow stamps only this facility's booked or weighed rows; none left is 409", async () => {
+    const live = await calledToday('LHR-7102');
+    const gone = await weighed(10, { date: businessDate(), plate: 'LHR-7103' });
+    expect((await checkout(gone.id, cash(data(await preview(gone.id)).total_pkr))).statusCode).toBe(200);
+
+    const mixed = await allow([live.id, gone.id], ['CREDIT']);
+    expect(mixed.statusCode, mixed.body).toBe(200);
+    expect(data(mixed).allowed).toBe(1);
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: gone.id } })).managerAllows).toEqual([]);
+
+    const none = await allow([gone.id, '11111111-1111-4111-8111-111111111111'], ['CREDIT']);
+    expect([none.statusCode, code(none)]).toEqual([409, 'OUTBOUND_NOT_WAITING']);
+  });
+
+  it('a row that fails a solo rule cannot be allowed anything: 409 ALLOW_DOES_NOT_HELP, and the rule is named', async () => {
+    const katchi = await booked(10, { date: businessDate(), plate: 'LHR-7104', lotToken: ownerToken, lotExtra: { book_type: 'KATCHI' } });
+    const old = await booked(10, { plate: 'LHR-7105' }); // booked for 2026-09-01
+    for (const [row, reasonCode] of [
+      [katchi, 'KATCHI'],
+      [old, 'NOT_TODAY'],
+    ] as const) {
+      const res = await allow([row.id], ['CHEQUE_OR_TRANSFER']);
+      const error = JSON.parse(res.body).error;
+      expect([res.statusCode, error.code, error.details]).toEqual([409, 'ALLOW_DOES_NOT_HELP', { reason_code: reasonCode }]);
+      expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: row.id } })).managerAllows).toEqual([]);
+    }
+    await setSolo(false);
+    try {
+      const off = await booked(10, { date: businessDate(), plate: 'LHR-7106' });
+      const res = await allow([off.id], ['CREDIT']);
+      expect([res.statusCode, JSON.parse(res.body).error.details]).toEqual([409, { reason_code: 'SOLO_OFF' }]);
+    } finally {
+      await setSolo(true);
+    }
+  });
+
+  it('taking it back clears it', async () => {
+    const b = await calledToday('LHR-7107');
+    expect((await allow([b.id], ['CREDIT'])).statusCode).toBe(200);
+    expect((await allow([b.id], [])).statusCode).toBe(200);
+    expect(await prisma.outboundEvent.findUniqueOrThrow({ where: { id: b.id } })).toMatchObject({
+      managerAllows: [],
+      managerAllowedBy: null,
+      managerAllowedAt: null,
+    });
+  });
+
+  it('cheque, transfer and wallet: refused until allowed, then the munshi takes it, with their own name on the payment', async () => {
+    const b = await calledToday('LHR-7110');
+    const total = data(await preview(b.id, operatorToken)).total_pkr as number;
+    refused(await checkout(b.id, cheque(total), operatorToken), 'PAYMENT_MODE');
+    await untouched(b.lotId, b.id, 100, 'PENDING');
+
+    expect((await allow([b.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+    const ok = await checkout(b.id, cheque(total), operatorToken);
+    expect(ok.statusCode, ok.body).toBe(200);
+    const out = await prisma.outboundEvent.findUniqueOrThrow({ where: { id: b.id } });
+    const pay = await prisma.payment.findFirstOrThrow({ where: { partyId } });
+    expect(pay).toMatchObject({ paymentMethod: 'CHEQUE', createdBy: out.finalizedBy });
+    expect(out.finalizedBy).not.toBe((await managerRow()).id);
+
+    const wallet = await calledToday('LHR-7111');
+    expect((await allow([wallet.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+    const w = await checkout(
+      wallet.id,
+      { expected_total_pkr: total, payment: { mode: 'BANK_TRANSFER', reference_number: 'TRF-77' } },
+      operatorToken,
+    );
+    expect(w.statusCode, w.body).toBe(200);
+  });
+
+  it('credit: refused without an approval, then allowed on this bill; over a standing ceiling too; the manager is the authority', async () => {
+    const b = await calledToday('LHR-7120', 'CREDIT');
+    const total = data(await preview(b.id, operatorToken)).total_pkr as number;
+    refused(await checkout(b.id, credit(total), operatorToken), 'NO_STANDING_CREDIT');
+
+    expect((await allow([b.id], ['CREDIT'])).statusCode).toBe(200);
+    const p = data(await preview(b.id, operatorToken));
+    expect(p.solo).toMatchObject({ allowed: true, credit_available: true });
+    const ok = await checkout(b.id, credit(total), operatorToken);
+    expect(ok.statusCode, ok.body).toBe(200);
+    const inv = await prisma.invoice.findFirstOrThrow({ where: { outboundEventId: b.id } });
+    expect(Number(inv.totalPkr) - Number(inv.amountPaidPkr)).toBeCloseTo(total, 2);
+    const row = await prisma.outboundEvent.findUniqueOrThrow({ where: { id: b.id } });
+    expect(row.creditAllowedBy).toBe((await managerRow()).id);
+
+    // A standing approval too small for the bill: the munshi alone is stopped at the ceiling, the allowance is not.
+    const approved = await app.inject({
+      method: 'POST',
+      url: `/v1/parties/${partyId}/credit-approval`,
+      headers: authHeaders(managerToken),
+      payload: { max_outstanding_pkr: 1 },
+    });
+    expect(approved.statusCode, approved.body).toBe(201);
+    const big = await calledToday('LHR-7121', 'CREDIT');
+    const bigTotal = data(await preview(big.id, operatorToken)).total_pkr as number;
+    refused(await checkout(big.id, credit(bigTotal), operatorToken), 'OVER_CREDIT_CEILING');
+    expect((await allow([big.id], ['CREDIT'])).statusCode).toBe(200);
+    const done = await checkout(big.id, credit(bigTotal), operatorToken);
+    expect(done.statusCode, done.body).toBe(200);
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: big.id } })).creditAllowedBy).toBe((await managerRow()).id);
+  });
+
+  it('a manager who finishes the row themselves is the authority, not the one who allowed it', async () => {
+    const b = await calledToday('LHR-7125', 'CREDIT');
+    expect((await allow([b.id], ['CREDIT'])).statusCode).toBe(200);
+    const total = data(await preview(b.id)).total_pkr as number;
+    const res = await checkout(b.id, credit(total)); // the manager's own checkout
+    expect(res.statusCode, res.body).toBe(200);
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: b.id } })).creditAllowedBy).toBeNull();
+  });
+
+  it('leaving a charge off: refused until allowed, then the munshi may', async () => {
+    const b = await calledToday('LHR-7130', 'LEAVE_CHARGE_OFF');
+    const full = data(await preview(b.id, operatorToken)).total_pkr as number;
+    const skip = { skip_service_charge_ids: [loadingChargeId] };
+    refused(await checkout(b.id, cash(full - 200, skip), operatorToken), 'SKIP_CHARGE');
+
+    expect((await allow([b.id], ['LEAVE_CHARGE_OFF'])).statusCode).toBe(200);
+    const ok = await checkout(b.id, cash(full - 200, skip), operatorToken);
+    expect(ok.statusCode, ok.body).toBe(200);
+    const inv = await prisma.invoice.findFirstOrThrow({ where: { outboundEventId: b.id }, include: { lineItems: true } });
+    expect(inv.lineItems.some((l) => l.serviceChargeId === loadingChargeId)).toBe(false);
+  });
+
+  it('allowing one thing lifts only that thing', async () => {
+    const b = await calledToday('LHR-7135', 'LEAVE_CHARGE_OFF');
+    expect((await allow([b.id], ['CHEQUE_OR_TRANSFER', 'CREDIT'])).statusCode).toBe(200);
+    const full = data(await preview(b.id, operatorToken)).total_pkr as number;
+    refused(await checkout(b.id, cash(full - 200, { skip_service_charge_ids: [loadingChargeId] }), operatorToken), 'SKIP_CHARGE');
+  });
+
+  it("an allowance from an earlier day lifts nothing, and a taken-back one refuses with the ask's code", async () => {
+    const b = await calledToday('LHR-7140');
+    const total = data(await preview(b.id, operatorToken)).total_pkr as number;
+    expect((await allow([b.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+    await prisma.outboundEvent.update({ where: { id: b.id }, data: { managerAllowedAt: longAgo(2) } });
+    refused(await checkout(b.id, cheque(total), operatorToken), 'PAYMENT_MODE');
+
+    expect((await allow([b.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+    expect((await allow([b.id], [])).statusCode).toBe(200);
+    refused(await checkout(b.id, cheque(total), operatorToken), 'PAYMENT_MODE');
+    await untouched(b.lotId, b.id, 100, 'PENDING');
+  });
+
+  it('the waiting list puts allowed rows last and counts only the rest; an old allowance is a called row again', async () => {
+    const first = await calledToday('LHR-7150');
+    const second = await calledToday('LHR-7151');
+    const old = await calledToday('LHR-7152');
+    expect((await allow([second.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+    expect((await allow([old.id], ['CREDIT'])).statusCode).toBe(200);
+    await prisma.outboundEvent.update({ where: { id: old.id }, data: { managerAllowedAt: longAgo(3) } });
+
+    const { rows, total, listed } = await waiting();
+    const ids = rows.map((r) => r.id);
+    // `second` is allowed and sorts after the rows that still wait, though it was called before `old`.
+    expect(ids.indexOf(second.id)).toBeGreaterThan(ids.indexOf(first.id));
+    expect(ids.indexOf(second.id)).toBeGreaterThan(ids.indexOf(old.id));
+    expect(rows.find((r) => r.id === second.id)).toMatchObject({
+      allows: ['CHEQUE_OR_TRANSFER'],
+      allowed_by_name: expect.any(String),
+      allowed_at: expect.any(String),
+    });
+    expect(rows.find((r) => r.id === old.id)).toMatchObject({ allows: [], allowed_by_name: null, allowed_at: null });
+    // The count is what still needs a manager; `listed` is every row on the list.
+    expect(listed).toBe(rows.length);
+    expect(total).toBe(rows.filter((r) => r.allows.length === 0).length);
+    expect(total).toBe(listed - 1);
+  });
+
+  it('the preview names what is allowed and by whom, and carries no figure', async () => {
+    const b = await calledToday('LHR-7160');
+    expect((await allow([b.id], ['CHEQUE_OR_TRANSFER', 'LEAVE_CHARGE_OFF'])).statusCode).toBe(200);
+    const solo = data(await preview(b.id, operatorToken)).solo;
+    expect(Object.keys(solo).sort()).toEqual(['allowed', 'allowed_at', 'allowed_by_name', 'allows', 'credit_available']);
+    expect(solo).toMatchObject({ allowed: true, credit_available: false, allows: ['CHEQUE_OR_TRANSFER', 'LEAVE_CHARGE_OFF'] });
+    expect(solo.allowed_by_name).toBe((await managerRow()).name);
+  });
+
+  it('an allowance taken back while the checkout waits for the row is checked again under the lock', async () => {
+    const b = await calledToday('LHR-7180');
+    const total = data(await preview(b.id, operatorToken)).total_pkr as number;
+    expect((await allow([b.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+
+    let release!: () => void;
+    let holding!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    const isHolding = new Promise<void>((r) => (holding = r));
+    // Hold the row: the checkout passes its pre-check (the allowance is live) and then waits for the lock. While it
+    // waits, the allowance is taken back and committed, as another manager's request would.
+    const blocker = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM outbound_events WHERE id = ${b.id}::uuid FOR UPDATE`;
+        holding();
+        await hold;
+        await tx.$executeRaw`UPDATE outbound_events SET manager_allows = ARRAY[]::varchar[], manager_allowed_at = NULL, manager_allowed_by = NULL WHERE id = ${b.id}::uuid`;
+      },
+      { timeout: 30_000 },
+    );
+    await isHolding;
+    const checking = checkout(b.id, cheque(total), operatorToken);
+    await new Promise((r) => setTimeout(r, 700));
+    release();
+    await blocker;
+
+    refused(await checking, 'PAYMENT_MODE');
+    await untouched(b.lotId, b.id, 100, 'PENDING');
+    expect(await prisma.payment.count({ where: { partyId } })).toBe(0);
+  });
+
+  it('the desk list carries what is allowed, today only', async () => {
+    const b = await calledToday('LHR-7170');
+    expect((await allow([b.id], ['CREDIT'])).statusCode).toBe(200);
+    const queue = async () =>
+      data<Allowed[]>(
+        await app.inject({ method: 'GET', url: '/v1/outbound-events?status=PENDING,WEIGHED', headers: authHeaders(operatorToken) }),
+      ).find((r) => r.id === b.id)!;
+    expect((await queue()).allows).toEqual(['CREDIT']);
+    await prisma.outboundEvent.update({ where: { id: b.id }, data: { managerAllowedAt: longAgo(2) } });
+    expect((await queue()).allows).toEqual([]);
   });
 });
