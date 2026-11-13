@@ -119,6 +119,10 @@ const waitingRow = (over: Record<string, unknown>) => ({
   reason_code: 'SOLO_OFF',
   ask_code: null,
   asked_at: null,
+  allows: [],
+  allowed_by_name: null,
+  allowed_at: null,
+  settled: false,
   ...over,
 });
 const waitingCalls = () => apiClientList.mock.calls.filter(([p]) => String(p).startsWith('/v1/dispatch/waiting')).length;
@@ -157,7 +161,10 @@ beforeEach(() => {
   apiClientList.mockImplementation((path: string) => {
     if (path.startsWith('/v1/outbound-events')) return Promise.resolve({ data: ROWS, meta: { total: ROWS.length, page: 1, per_page: 50 } });
     if (path.startsWith('/v1/dispatch/waiting')) {
-      return Promise.resolve({ data: waitingRows, meta: { total: waitingRows.length, page: 1, per_page: 200 } });
+      return Promise.resolve({
+        data: waitingRows,
+        meta: { total: waitingRows.filter((r) => !r.settled).length, listed: waitingRows.length, page: 1, per_page: 200 },
+      });
     }
 
     if (path.startsWith('/v1/lots')) {
@@ -665,5 +672,213 @@ describe('Dispatch Desk — waiting for a manager (docs/28 D6)', () => {
     const before = waitingCalls();
     fireEvent.click(await screen.findByRole('button', { name: 'finish checkout' }));
     await waitFor(() => expect(waitingCalls()).toBeGreaterThan(before));
+  });
+});
+
+// A manager allows what the munshi asked for, from the card (docs/28 O8-O11).
+describe('Dispatch Desk — Allow, on the waiting card', () => {
+  const card = () => screen.findByRole('region', { name: 'Waiting for a manager' });
+  const ALLOW = '/v1/dispatch/allow';
+  const allowPosts = () => apiClient.mock.calls.filter(([path]) => path === ALLOW);
+  const called = (over: Record<string, unknown> = {}) =>
+    waitingRow({
+      reason_code: null,
+      ask_code: 'CHEQUE_OR_TRANSFER',
+      asked_at: new Date().toISOString(),
+      ...over,
+    });
+  const readyLine = (id: string, dn: string, status = 'PENDING') => ({
+    outbound_id: id,
+    dispatch_note_number: dn,
+    status,
+    stage: 'BOOKED',
+    lot_number: `LOT-${dn}`,
+    marka: null,
+    billing_party: { id: 'p', name: 'Rana' },
+    quantity_withdrawn_bags: 12,
+  });
+  beforeEach(() => {
+    apiClient.mockImplementation((path: string) =>
+      Promise.resolve(path === ALLOW ? { allowed: 1, allowed_at: new Date().toISOString() } : path === '/v1/dispatch/trucks' ? trucks : {}),
+    );
+  });
+
+  it('a manager allows a called row: the dialog ticks what the buyer wants, and the allowance is posted', async () => {
+    waitingRows = [called({ id: 'w-ch', dispatch_note_number: 'DN-CH' })];
+    renderPage();
+    const row = (await within(await card()).findByText('DN-CH')).closest('li') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: /^Allow/ }));
+
+    const dialog = await screen.findByRole('dialog');
+    // Only what the munshi asked for is offered (docs/28 O8): the server refuses anything more.
+    expect(within(dialog).getByRole('checkbox', { name: 'Cheque or transfer' })).toBeChecked();
+    expect(within(dialog).queryByRole('checkbox', { name: 'Credit on this bill' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('checkbox', { name: 'Leaving charges off' })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Allow' }));
+
+    await waitFor(() => expect(allowPosts()).toHaveLength(1));
+    expect(allowPosts()[0]![1]).toEqual({ method: 'POST', body: { outbound_ids: ['w-ch'], allows: ['CHEQUE_OR_TRANSFER'] } });
+  });
+
+  it('a call with no particular ask ticks nothing, and Allow waits for a choice', async () => {
+    waitingRows = [called({ id: 'w-c', dispatch_note_number: 'DN-C', ask_code: 'CALLED' })];
+    renderPage();
+    const row = (await within(await card()).findByText('DN-C')).closest('li') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: /^Allow/ }));
+    const dialog = await screen.findByRole('dialog');
+    // A plain call says nothing in particular: all three are offered, none ticked, and the manager chooses.
+    for (const name of ['Cheque or transfer', 'Credit on this bill', 'Leaving charges off']) {
+      expect(within(dialog).getByRole('checkbox', { name })).not.toBeChecked();
+    }
+    expect(within(dialog).getByRole('button', { name: 'Allow' })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Leaving charges off' }));
+    expect(within(dialog).getByRole('button', { name: 'Allow' })).toBeEnabled();
+  });
+
+  it('a line on a multi-lot truck inside allows every ready line of that truck', async () => {
+    trucks = [
+      truck({
+        gate_pass_id: 'pass-9',
+        vehicle_number: 'LHR 5555',
+        ready: true,
+        lines: [readyLine('w-1', 'DN-W1'), readyLine('w-2', 'DN-W2', 'WEIGHED')],
+      }),
+    ];
+    waitingRows = [called({ id: 'w-1', dispatch_note_number: 'DN-W1', vehicle_number: 'LHR-5555' })];
+    renderPage();
+    const c = await card();
+    await waitFor(() => expect(within(c).getByRole('button', { name: 'Check out truck' })).toBeInTheDocument());
+    fireEvent.click(within(c).getByRole('button', { name: /^Allow/ }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(allowPosts()).toHaveLength(1));
+    expect(allowPosts()[0]![1].body.outbound_ids).toEqual(['w-1', 'w-2']);
+  });
+
+  it('a row called again after it was allowed waits among the others, and the dialog keeps what was allowed ticked beside the new ask', async () => {
+    waitingRows = [
+      called({
+        id: 'w-again',
+        dispatch_note_number: 'DN-AGAIN',
+        ask_code: 'CHEQUE_OR_TRANSFER',
+        allows: ['CREDIT'],
+        allowed_by_name: 'Shahid Iqbal',
+        allowed_at: new Date().toISOString(),
+        settled: false,
+      }),
+    ];
+    renderPage();
+    const c = await card();
+    expect(within(c).getByText('Waiting for a manager (1)')).toBeInTheDocument();
+    expect(within(c).queryByRole('group', { name: 'Allowed — the desk can finish these' })).not.toBeInTheDocument();
+    const row = within(c).getByText('DN-AGAIN').closest('li') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: /^Allow/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('checkbox', { name: 'Credit on this bill' })).toBeChecked();
+    expect(within(dialog).getByRole('checkbox', { name: 'Cheque or transfer' })).toBeChecked();
+    expect(within(dialog).queryByRole('checkbox', { name: 'Leaving charges off' })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(allowPosts()).toHaveLength(1));
+    expect(allowPosts()[0]![1].body.allows.sort()).toEqual(['CHEQUE_OR_TRANSFER', 'CREDIT']);
+  });
+
+  it("on a truck of two parties, Allow covers only the clicked row's party, never the other's bills", async () => {
+    const party = (id: string) => ({ id, name: id });
+    trucks = [
+      truck({
+        gate_pass_id: 'pass-10',
+        vehicle_number: 'LHR 5555',
+        ready: true,
+        lines: [
+          { ...readyLine('a-1', 'DN-A1'), billing_party: party('pa') },
+          { ...readyLine('a-2', 'DN-A2'), billing_party: party('pa') },
+          { ...readyLine('b-1', 'DN-B1'), billing_party: party('pb') },
+        ],
+      }),
+    ];
+    waitingRows = [called({ id: 'a-1', dispatch_note_number: 'DN-A1', vehicle_number: 'LHR-5555' })];
+    renderPage();
+    const c = await card();
+    await waitFor(() => expect(within(c).getByRole('button', { name: 'Check out truck' })).toBeInTheDocument());
+    fireEvent.click(within(c).getByRole('button', { name: /^Allow/ }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(allowPosts()).toHaveLength(1));
+    expect(allowPosts()[0]![1].body.outbound_ids).toEqual(['a-1', 'a-2']);
+  });
+
+  it('a row that fails a solo rule has no Allow: a manager checks it out', async () => {
+    waitingRows = [waitingRow({ id: 'w-k', dispatch_note_number: 'DN-K', reason_code: 'KATCHI' })];
+    renderPage();
+    const row = (await within(await card()).findByText('DN-K')).closest('li') as HTMLElement;
+    expect(within(row).queryByRole('button', { name: /^Allow/ })).not.toBeInTheDocument();
+  });
+
+  it('allowed rows sit in their own group, are not counted, and Take back posts an empty list', async () => {
+    waitingRows = [
+      called({ id: 'w-wait', dispatch_note_number: 'DN-WAIT' }),
+      called({
+        id: 'w-ok',
+        dispatch_note_number: 'DN-OK',
+        allows: ['CHEQUE_OR_TRANSFER'],
+        allowed_by_name: 'Shahid Iqbal',
+        allowed_at: new Date().toISOString(),
+        settled: true,
+      }),
+    ];
+    renderPage();
+    const c = await card();
+    expect(within(c).getByText('Waiting for a manager (1)')).toBeInTheDocument();
+    const group = within(c).getByRole('group', { name: 'Allowed — the desk can finish these' });
+    expect(within(group).getByText('DN-OK')).toBeInTheDocument();
+    expect(within(group).getByText(/Allowed by Shahid Iqbal/)).toHaveTextContent('cheque or transfer');
+    expect(within(group).queryByText('DN-WAIT')).not.toBeInTheDocument();
+    expect(within(group).queryByRole('button', { name: /^Allow/ })).not.toBeInTheDocument();
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Take back' }));
+    await waitFor(() => expect(allowPosts()).toHaveLength(1));
+    expect(allowPosts()[0]![1]).toEqual({ method: 'POST', body: { outbound_ids: ['w-ok'], allows: [] } });
+  });
+
+  it('a card whose only row is allowed still shows, so Take back stays reachable, while the count reads 0', async () => {
+    waitingRows = [
+      called({ id: 'w-only', dispatch_note_number: 'DN-ONLY', allows: ['CREDIT'], allowed_by_name: 'Shahid Iqbal', allowed_at: new Date().toISOString(), settled: true }),
+    ];
+    renderPage();
+    const c = await card();
+    expect(within(c).getByText('Waiting for a manager (0)')).toBeInTheDocument();
+    expect(within(c).getByRole('button', { name: 'Take back' })).toBeInTheDocument();
+  });
+
+  it('a failed allowance says why and keeps the dialog open', async () => {
+    waitingRows = [called({ id: 'w-f', dispatch_note_number: 'DN-F' })];
+    apiClient.mockImplementation((path: string) =>
+      path === ALLOW
+        ? Promise.reject(new Error('Allowing this does not help: a KATCHI-book bill is a manager decision. A manager checks it out'))
+        : Promise.resolve(path === '/v1/dispatch/trucks' ? trucks : {}),
+    );
+    renderPage();
+    const row = (await within(await card()).findByText('DN-F')).closest('li') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: /^Allow/ }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Allow' }));
+    expect(await within(dialog).findByText(/does not help/)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it("the munshi's desk row says what a manager allowed", async () => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+    apiClient.mockImplementation((path: string) =>
+      Promise.resolve(path === '/v1/facilities/me' ? { id: 'f', name: 'F', settings: { dispatch_solo_mode: true } } : path === '/v1/dispatch/trucks' ? [] : {}),
+    );
+    apiClientList.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.startsWith('/v1/outbound-events')
+          ? { data: [row({ id: 'ob-al', dispatch_note_number: 'DN-AL', allows: ['CHEQUE_OR_TRANSFER', 'CREDIT'] })], meta: { total: 1, page: 1, per_page: 50 } }
+          : { data: [], meta: {} },
+      ),
+    );
+    renderPage();
+    const tr = (await screen.findByText('DN-AL')).closest('tr') as HTMLElement;
+    expect(await within(tr).findByText('Allowed: cheque or transfer, credit on this bill')).toBeInTheDocument();
   });
 });

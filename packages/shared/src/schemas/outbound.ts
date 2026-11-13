@@ -164,6 +164,27 @@ export const AskManagerRequest = z.object({
 export type AskManagerRequestType = z.infer<typeof AskManagerRequest>;
 
 /**
+ * What a manager may allow a munshi to do on a called withdrawal (docs/28 O8): the three things a munshi
+ * asks for and the solo door refuses. Never a solo rule (the switch, KATCHI, an old date, a per-ton charge):
+ * those stay a manager's checkout. An allowance lasts the business day it was given (O10).
+ */
+export const MANAGER_ALLOW_CODES = ['CHEQUE_OR_TRANSFER', 'CREDIT', 'LEAVE_CHARGE_OFF'] as const;
+export type ManagerAllowCode = (typeof MANAGER_ALLOW_CODES)[number];
+
+export const MANAGER_ALLOW_TEXT: Record<ManagerAllowCode, string> = {
+  CHEQUE_OR_TRANSFER: 'cheque or transfer',
+  CREDIT: 'credit on this bill',
+  LEAVE_CHARGE_OFF: 'leaving charges off',
+};
+
+/** POST /v1/dispatch/allow — one withdrawal, or every ready line of a truck. An empty `allows` takes it back. */
+export const AllowRequest = z.object({
+  outbound_ids: z.array(z.string().uuid()).min(1).max(TRUCK_MAX_LINES),
+  allows: z.array(z.enum(MANAGER_ALLOW_CODES)).max(MANAGER_ALLOW_CODES.length),
+});
+export type AllowRequestType = z.infer<typeof AllowRequest>;
+
+/**
  * POST /v1/dispatch/trucks/:passId/dispatch-and-collect — check out every weighed withdrawal on a
  * truck in one transaction: each line its own bill (the total it showed is what posts), and one
  * payment row per (billing party, book) on the truck. The line cap is checked by the service so

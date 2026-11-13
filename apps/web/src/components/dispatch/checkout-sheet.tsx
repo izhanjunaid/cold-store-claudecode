@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { round2, type ManagerAskCode } from '@coldchain/shared';
+import { MANAGER_ALLOW_TEXT, round2, type ManagerAllowCode, type ManagerAskCode } from '@coldchain/shared';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { can } from '@/lib/permissions';
 import { qk } from '@/lib/query-keys';
@@ -50,8 +50,18 @@ export interface CheckoutPreview {
   gst_rate: number;
   gst_amount_pkr: number;
   total_pkr: number;
+  /** On a truck's line: what a manager allowed this withdrawal today (a charge left off is a line's), and who. */
+  allows?: ManagerAllowCode[];
+  allowed_by_name?: string | null;
   /** May the munshi finish this truck alone (the owner's solo switch)? Booleans and a reason only. */
-  solo?: { allowed: boolean; reason?: string; credit_available: boolean };
+  solo?: {
+    allowed: boolean;
+    reason?: string;
+    credit_available: boolean;
+    /** What a manager allowed today (docs/28 O8-O10), and who: words and a name, never a figure. */
+    allows?: ManagerAllowCode[];
+    allowed_by_name?: string | null;
+  };
 }
 
 export interface CheckoutResult {
@@ -141,20 +151,27 @@ export function CheckoutSheet({
   // standing approval covers, with every charge kept. The server enforces the same rules.
   const solo = !holdsKeys && !!preview?.solo?.allowed;
   const canFinish = holdsKeys || solo;
+  // What a manager has allowed today opens exactly that up for the munshi (docs/28 O8-O11).
+  const allows = solo ? (preview?.solo?.allows ?? []) : [];
   const creditOffered = holdsKeys || (solo && !!preview?.solo?.credit_available);
   const modeOffered = (m: Mode) =>
-    holdsKeys ? m === 'CREDIT' || canCollect : solo ? m === 'CASH' || (m === 'CREDIT' && creditOffered) : false;
+    holdsKeys
+      ? m === 'CREDIT' || canCollect
+      : solo
+        ? m === 'CASH' || (m === 'CREDIT' && creditOffered) || (m !== 'CREDIT' && allows.includes('CHEQUE_OR_TRANSFER'))
+        : false;
+  const skipsOpen = holdsKeys || allows.includes('LEAVE_CHARGE_OFF');
 
-  // Whatever the munshi can't give the buyer, they can call a manager for (docs/28 O6).
+  // Whatever the munshi can't give the buyer, they can call a manager for (docs/28 O6): not what is already allowed.
   const askOptions: ManagerAskCode[] =
     holdsKeys || !preview
       ? []
       : !solo
         ? ['CALLED']
         : [
-            'CHEQUE_OR_TRANSFER',
+            ...(allows.includes('CHEQUE_OR_TRANSFER') ? [] : (['CHEQUE_OR_TRANSFER'] as const)),
             ...(creditOffered ? [] : (['CREDIT'] as const)),
-            ...(preview.service_lines.length > 0 ? (['LEAVE_CHARGE_OFF'] as const) : []),
+            ...(preview.service_lines.length > 0 && !allows.includes('LEAVE_CHARGE_OFF') ? (['LEAVE_CHARGE_OFF'] as const) : []),
           ];
   const afterAsk = () => {
     queryClient.invalidateQueries({ queryKey: qk.outbound.lists }); // the desk shows the call
@@ -240,7 +257,10 @@ export function CheckoutSheet({
           {solo && (
             <p className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800">
               You can finish this truck yourself: cash in full
-              {creditOffered ? ', or on this party’s approved credit' : ''}. Anything else needs a manager.
+              {creditOffered && !allows.includes('CREDIT') ? ', or on this party’s approved credit' : ''}. Anything else needs a
+              manager.
+              {allows.length > 0 &&
+                ` ${preview?.solo?.allowed_by_name ?? 'A manager'} allowed ${allows.map((a) => MANAGER_ALLOW_TEXT[a]).join(', ')} today.`}
             </p>
           )}
           <CallManager outboundIds={[outboundId]} options={askOptions} onAsked={afterAsk} />
@@ -272,7 +292,7 @@ export function CheckoutSheet({
                       <Checkbox
                         id={`svc-${l.service_charge_id}`}
                         checked={!off}
-                        disabled={solo}
+                        disabled={!skipsOpen}
                         onCheckedChange={(c) =>
                           setSkipped((prev) => {
                             const next = new Set(prev);

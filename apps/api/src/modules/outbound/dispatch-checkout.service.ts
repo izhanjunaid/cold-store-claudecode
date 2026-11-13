@@ -8,8 +8,11 @@ import {
   sumMoney,
   MANAGER_REASON_TEXT,
   TRUCK_MAX_LINES,
+  type AllowRequestType,
   type AskManagerRequestType,
+  type ManagerAskCode,
   type DispatchAndCollectRequestType,
+  type ManagerAllowCode,
   type ManagerReasonCode,
   type OutboundListQueryType,
   type TruckDispatchRequestType,
@@ -23,6 +26,7 @@ import { previewInvoiceFromOutbound } from '../invoice/invoice.builder';
 import { invoiceTotals } from '../invoice/invoice-totals';
 import type { InvoiceService } from '../invoice/invoice.service';
 import type { PaymentService } from '../payment/payment.service';
+import { allowedOnEvery, liveAllows, soloAskRefusal } from './allowance';
 import type { OutboundService } from './outbound.service';
 import { isReadyToDispatch } from './reservation';
 import { loadSoloContext, soloRefusal } from './solo-rule';
@@ -152,6 +156,8 @@ export class DispatchCheckoutService {
         // A munshi's call to a manager (docs/28 O6): the desk shows it on the row.
         ask_code: o.managerAskCode,
         asked_at: o.managerAskAt ? o.managerAskAt.toISOString() : null,
+        // What a manager has allowed today (docs/28 O8-O10): the munshi's row says so.
+        allows: [...liveAllows(o)],
         invoice: o.invoice && {
           id: o.invoice.id,
           invoice_number: o.invoice.invoiceNumber,
@@ -189,6 +195,51 @@ export class DispatchCheckoutService {
   }
 
   /**
+   * A manager allows what the munshi asked for (docs/28 O8-O11), or takes it back with an empty list. Only a
+   * withdrawal the munshi could finish but for the ask may be allowed anything: one that fails a solo rule (the
+   * switch, KATCHI, an old date, a per-ton charge) is a manager's checkout, so allowing it is refused, naming the
+   * rule. One statement per row in id order, as `askManager`, so it holds no second row lock while it waits.
+   */
+  async allow(caller: CheckoutCaller, body: AllowRequestType) {
+    if (!caller.permissions.has('invoices.manage')) throw Errors.FORBIDDEN('Missing permission: invoices.manage');
+    const { facilityId } = caller;
+    const allows = [...new Set(body.allows)];
+    const ids = [...new Set(body.outbound_ids.map((i) => i.toLowerCase()))].sort();
+    const waiting = { facilityId, status: { in: ['PENDING', 'WEIGHED'] as ('PENDING' | 'WEIGHED')[] } };
+    if (allows.length > 0) {
+      const ctx = await loadSoloContext(this.prisma, facilityId);
+      const rows = await this.prisma.outboundEvent.findMany({
+        where: { id: { in: ids }, ...waiting },
+        select: { outboundDate: true, managerAskCode: true, managerAllows: true, managerAllowedAt: true, lot: { select: { bookType: true } } },
+      });
+      for (const r of rows) {
+        const refusal = soloRefusal(ctx, r.lot, r.outboundDate);
+        if (refusal) throw Errors.ALLOW_DOES_NOT_HELP(refusal);
+      }
+      // Only what the munshi asked for (docs/28 O8): a code is allowed if it is the ask, or already allowed today (an
+      // allowance replaces the list, so what was allowed before is kept), or if the call was a plain one that said
+      // nothing in particular (the manager chooses). A row nobody called about has nothing to allow.
+      for (const r of rows) {
+        const live = liveAllows(r);
+        for (const code of allows) {
+          if (!live.has(code) && r.managerAskCode !== 'CALLED' && r.managerAskCode !== code) throw Errors.ALLOW_NOT_ASKED(r.managerAskCode as ManagerAskCode | null);
+        }
+      }
+    }
+    const allowedAt = allows.length > 0 ? new Date() : null;
+    let count = 0;
+    for (const id of ids) {
+      const done = await this.prisma.outboundEvent.updateMany({
+        where: { id, ...waiting },
+        data: { managerAllows: { set: allows }, managerAllowedBy: allowedAt ? caller.userId : null, managerAllowedAt: allowedAt },
+      });
+      count += done.count;
+    }
+    if (count === 0) throw Errors.OUTBOUND_NOT_WAITING();
+    return { allowed: count, allowed_at: allowedAt ? allowedAt.toISOString() : null };
+  }
+
+  /**
    * The managers' waiting list (docs/28 D6, O7): every withdrawal still booked or weighed, of any date,
    * that the munshi may not finish alone (the solo rules, the same function the checkout asks) or that
    * a munshi called a manager on. Called ones first, then newest first, so old forgotten bookings
@@ -206,11 +257,25 @@ export class DispatchCheckoutService {
       },
       orderBy: [{ managerAskAt: { sort: 'desc', nulls: 'last' } }, { outboundDate: 'desc' }, { createdAt: 'desc' }],
     });
-    const rows = ready
-      .map((o) => ({ o, reason: soloRefusal(ctx, o.lot, o.outboundDate) }))
+    const today = businessDate();
+    const listedRows = ready
+      .map((o) => {
+        const reason = soloRefusal(ctx, o.lot, o.outboundDate);
+        const allows = liveAllows(o, today);
+        // Settled: a manager allowed it today, nothing since asked for more, and no solo rule fails now. Then the desk
+        // can finish it, so it is not what waits (the count), though it stays listed with Take back. A newer call than
+        // the allowance (the buyer changed their mind), a solo rule that has started failing, or an allowance from an
+        // earlier day leave it waiting: a manager has something to read again.
+        const settled =
+          allows.size > 0 && reason === null && (!o.managerAskAt || (o.managerAllowedAt != null && o.managerAllowedAt >= o.managerAskAt));
+        return { o, reason, allows, settled };
+      })
       .filter(({ o, reason }) => reason !== null || o.managerAskAt !== null);
+    const rows = [...listedRows.filter((r) => !r.settled), ...listedRows.filter((r) => r.settled)];
+    const shown = rows.slice(0, WAITING_CAP);
+    const names = await this.namesOf(this.prisma, shown.flatMap(({ o, allows }) => (allows.size > 0 && o.managerAllowedBy ? [o.managerAllowedBy] : [])));
     return {
-      data: rows.slice(0, WAITING_CAP).map(({ o, reason }) => ({
+      data: shown.map(({ o, reason, allows, settled }) => ({
         id: o.id,
         dispatch_note_number: o.dispatchNoteNumber,
         lot_id: o.lotId,
@@ -225,25 +290,48 @@ export class DispatchCheckoutService {
         reason_code: reason,
         ask_code: o.managerAskCode,
         asked_at: o.managerAskAt ? o.managerAskAt.toISOString() : null,
+        allows: [...allows],
+        allowed_by_name: allows.size > 0 && o.managerAllowedBy ? (names.get(o.managerAllowedBy) ?? null) : null,
+        allowed_at: allows.size > 0 && o.managerAllowedAt ? o.managerAllowedAt.toISOString() : null,
+        settled,
       })),
-      meta: { total: rows.length, page: 1, per_page: WAITING_CAP },
+      // `total` is what still needs a manager (the badge); `listed` is every row on the list, the allowed ones included.
+      meta: { total: rows.filter((r) => !r.settled).length, listed: rows.length, page: 1, per_page: WAITING_CAP },
     };
+  }
+
+  /** Names by user id, through a model query: `users` is row-level-secured, so no raw join (CLAUDE.md). */
+  private async namesOf(db: PrismaClient | Prisma.TransactionClient, ids: string[]) {
+    const wanted = [...new Set(ids)];
+    if (wanted.length === 0) return new Map<string, string>();
+    const users = await db.user.findMany({ where: { id: { in: wanted } }, select: { id: true, name: true } });
+    return new Map(users.map((u) => [u.id, u.name] as const));
   }
 
   /** The bill a booked withdrawal will carry, before anything is written. */
   async preview(facilityId: string, id: string) {
-    const { bill, lot, outboundDate } = await this.priceLine(facilityId, id);
+    const { bill, lot, outboundDate, allowance } = await this.priceLine(facilityId, id);
     // Whether the munshi may finish this truck alone, as booleans and a reason: never the party's
-    // ceiling or exposure. Credit is offered only if this bill fits under the approved ceiling.
+    // ceiling or exposure. Credit is offered if this bill fits under the approved ceiling, or a manager allowed it.
     const verdict = await this.soloVerdict(this.prisma, facilityId, lot, outboundDate);
+    const live = liveAllows(allowance);
     const creditAvailable =
       verdict.allowed &&
-      verdict.creditApproved &&
-      (await standingCreditCover(this.prisma, facilityId, [{ partyId: lot.billingPartyId, unbilled: bill.total_pkr }])).covered;
+      (live.has('CREDIT') ||
+        (verdict.creditApproved &&
+          (await standingCreditCover(this.prisma, facilityId, [{ partyId: lot.billingPartyId, unbilled: bill.total_pkr }])).covered));
+    const by = live.size > 0 && allowance.managerAllowedBy ? (await this.namesOf(this.prisma, [allowance.managerAllowedBy])).get(allowance.managerAllowedBy) : undefined;
     return {
       ...bill,
       solo: verdict.allowed
-        ? { allowed: true, credit_available: creditAvailable }
+        ? {
+            allowed: true,
+            credit_available: creditAvailable,
+            // What a manager allowed today, and who: names and words, never a figure.
+            allows: [...live],
+            allowed_by_name: by ?? null,
+            allowed_at: live.size > 0 && allowance.managerAllowedAt ? allowance.managerAllowedAt.toISOString() : null,
+          }
         : { allowed: false, reason: MANAGER_REASON_TEXT[verdict.code], reason_code: verdict.code, credit_available: false },
     };
   }
@@ -309,7 +397,12 @@ export class DispatchCheckoutService {
       gst_amount_pkr: gstAmount,
       total_pkr: total,
     };
-    return { bill, lot: ob.lot, outboundDate: ob.outboundDate };
+    return {
+      bill,
+      lot: ob.lot,
+      outboundDate: ob.outboundDate,
+      allowance: { managerAllows: ob.managerAllows, managerAllowedAt: ob.managerAllowedAt, managerAllowedBy: ob.managerAllowedBy },
+    };
   }
 
   /** The trucks inside the gate, one per plate (its newest pass), each with what is on it. */
@@ -363,21 +456,43 @@ export class DispatchCheckoutService {
       if (verdict.creditApproved) approved.add(p.lot.billingPartyId);
     }
 
+    // What a manager allowed today, per line (docs/28 O8-O10), and who: names and words, never a figure.
+    const liveOf = new Map(priced.map((p) => [p.bill.outbound_id, liveAllows(p.allowance)] as const));
+    const byOf = new Map(priced.map((p) => [p.bill.outbound_id, p.allowance.managerAllowedBy] as const));
+    const names = await this.namesOf(
+      this.prisma,
+      priced.flatMap((p) => (liveOf.get(p.bill.outbound_id)!.size > 0 && p.allowance.managerAllowedBy ? [p.allowance.managerAllowedBy] : [])),
+    );
+    const nameOf = (id: string) => (liveOf.get(id)!.size > 0 && byOf.get(id) ? (names.get(byOf.get(id)!) ?? null) : null);
+
     const groups = [];
     for (const g of groupBills(priced.map((p) => p.bill))) {
-      // Credit is offered only if every bill of the party on this truck fits under its ceiling together.
+      // A payment mode or credit is the group's: allowed only where every line of the party and book carries it.
+      const allows = allowedOnEvery(g.outbound_ids.map((id) => liveOf.get(id)!));
+      allows.delete('LEAVE_CHARGE_OFF'); // a line's, not the group's
+      // Credit is offered if every bill of the party on this truck fits under its ceiling together, or a manager allowed it.
       const creditAvailable =
         solo.allowed &&
-        approved.has(g.billing_party.id) &&
-        (await standingCreditCover(this.prisma, facilityId, [{ partyId: g.billing_party.id, unbilled: g.total_pkr }])).covered;
-      groups.push({ ...g, credit_available: creditAvailable });
+        (allows.has('CREDIT') ||
+          (approved.has(g.billing_party.id) &&
+            (await standingCreditCover(this.prisma, facilityId, [{ partyId: g.billing_party.id, unbilled: g.total_pkr }])).covered));
+      groups.push({
+        ...g,
+        credit_available: creditAvailable,
+        allows: [...allows],
+        allowed_by_name: allows.size > 0 ? (g.outbound_ids.map(nameOf).find((n) => n != null) ?? null) : null,
+      });
     }
 
     return {
       gate_pass_id: pass.id,
       pass_number: pass.passNumber,
       vehicle_number: pass.vehicleNumber,
-      lines: priced.map((p) => p.bill),
+      lines: priced.map((p) => ({
+        ...p.bill,
+        allows: [...liveOf.get(p.bill.outbound_id)!],
+        allowed_by_name: nameOf(p.bill.outbound_id),
+      })),
       not_ready: lines.filter((l) => NOT_READY.has(l.status)).map(dnOf),
       groups,
       total_pkr: sumMoney(priced.map((p) => p.bill.total_pkr)),
@@ -445,17 +560,56 @@ export class DispatchCheckoutService {
       if (!verdict.allowed) return refuse(verdict.code, `${dnOf(l)}: ${MANAGER_REASON_TEXT[verdict.code]}`);
       if (verdict.creditApproved) approved.add(l.lot.billingParty.id);
     }
-    if (body.lines.some((l) => (l.skip_service_charge_ids ?? []).length > 0)) {
-      return refuse('SKIP_CHARGE');
-    }
-    for (const p of body.payments) {
-      if (p.mode === 'CREDIT') {
-        if (!approved.has(p.billing_party_id)) return refuse('NO_STANDING_CREDIT', 'a party on this truck has no standing credit approval');
-      } else if (p.mode !== 'CASH') {
-        return refuse('PAYMENT_MODE');
-      }
-    }
+    // Beyond cash in full: what the munshi asks for is theirs only where a manager allowed it today (docs/28 O8).
+    const ready = lines.filter((x) => isReadyToDispatch(x.status));
+    const { live } = await this.allowancesOf(this.prisma, ready.map((l) => l.id));
+    const refusal = this.truckAskRefusal(lines, body, approved, live);
+    if (refusal) return refuse(refusal.code, refusal.text);
     return true;
+  }
+
+  /**
+   * The munshi's asks on a truck against what is allowed today: a charge left off is a line's, a payment mode or
+   * credit a (party, book) group's and needs every line of the group allowed. The first thing refused, as the
+   * single checkout names it (the skipped charge first); one function for the pre-check and the re-check under the locks.
+   */
+  private truckAskRefusal(
+    lines: OpenLoadLine[],
+    body: TruckDispatchRequestType,
+    approved: ReadonlySet<string>,
+    live: ReadonlyMap<string, ReadonlySet<ManagerAllowCode>>,
+  ): { code: ManagerReasonCode; text?: string } | null {
+    const none: ReadonlySet<ManagerAllowCode> = new Set();
+    for (const l of body.lines) {
+      const skips = (l.skip_service_charge_ids ?? []).length > 0;
+      if (skips && soloAskRefusal({ skips, mode: 'CASH' }, true, live.get(l.outbound_id) ?? none)) return { code: 'SKIP_CHARGE' };
+    }
+    const ready = lines.filter((x) => isReadyToDispatch(x.status));
+    for (const p of body.payments) {
+      const group = ready.filter((l) => l.lot.billingParty.id === p.billing_party_id && l.lot.bookType === p.book_type);
+      const code = soloAskRefusal(
+        { skips: false, mode: p.mode },
+        approved.has(p.billing_party_id),
+        allowedOnEvery(group.map((l) => live.get(l.id) ?? none)),
+      );
+      if (code) return { code, text: code === 'NO_STANDING_CREDIT' ? 'a party on this truck has no standing credit approval' : undefined };
+    }
+    return null;
+  }
+
+  /**
+   * What a manager has allowed on these withdrawals today, read by id (a plain read, never through `openLoads()`:
+   * that SQL is shared with the gate's locked plate query), and who gave it.
+   */
+  private async allowancesOf(db: PrismaClient | Prisma.TransactionClient, ids: string[]) {
+    const rows = await db.outboundEvent.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, managerAllows: true, managerAllowedAt: true, managerAllowedBy: true },
+    });
+    return {
+      live: new Map(rows.map((r) => [r.id, liveAllows(r)] as const)),
+      by: new Map(rows.map((r) => [r.id, r.managerAllowedBy] as const)),
+    };
   }
 
   private async runTruck(
@@ -471,10 +625,36 @@ export class DispatchCheckoutService {
     // checked out on its own meanwhile, or this truck sent twice, shows up here as what it is.
     if (!(await lockRow(tx, 'gate_passes', passId, facilityId))) throw Errors.GATE_PASS_NOT_FOUND();
     await this.lockLoad(tx, facilityId, body.lines.map((l) => l.outbound_id));
-    checkTruckRequest((await this.truckLoad(tx, facilityId, passId)).lines, body);
-    // Solo credit: each party's credit lock, in party order, before any of its bills post.
+    const loaded = (await this.truckLoad(tx, facilityId, passId)).lines;
+    checkTruckRequest(loaded, body);
+
+    // The munshi's asks, again, now every row is locked: a manager may have taken an allowance back, or the day may
+    // have turned, since the pre-check (docs/28 O10). Credit a manager allowed is theirs to let go: no ceiling, and they
+    // are the authority on those lines. The same function the pre-check used.
+    const creditAllowedBy = new Map<string, string>();
+    const allowedParties = new Set<string>();
+    if (solo) {
+      const ready = loaded.filter((l) => isReadyToDispatch(l.status));
+      const allowances = await this.allowancesOf(tx, ready.map((l) => l.id));
+      const approved = new Set<string>();
+      for (const partyId of new Set(body.payments.filter((p) => p.mode === 'CREDIT').map((p) => p.billing_party_id))) {
+        if ((await findActiveApproval(tx, facilityId, partyId)) != null) approved.add(partyId);
+      }
+      const refusal = this.truckAskRefusal(loaded, body, approved, allowances.live);
+      if (refusal) throw Errors.DISPATCH_NEEDS_MANAGER(refusal.code, refusal.text);
+      for (const p of body.payments.filter((x) => x.mode === 'CREDIT')) {
+        const group = ready.filter((l) => l.lot.billingParty.id === p.billing_party_id && l.lot.bookType === p.book_type);
+        if (!allowedOnEvery(group.map((l) => allowances.live.get(l.id) ?? new Set())).has('CREDIT')) continue;
+        allowedParties.add(p.billing_party_id);
+        for (const l of group) {
+          const by = allowances.by.get(l.id);
+          if (by) creditAllowedBy.set(l.id, by);
+        }
+      }
+    }
+    // Solo credit on a standing approval: each party's credit lock, in party order, before any of its bills post.
     const creditParties = solo
-      ? [...new Set(body.payments.filter((p) => p.mode === 'CREDIT').map((p) => p.billing_party_id))].sort()
+      ? [...new Set(body.payments.filter((p) => p.mode === 'CREDIT').map((p) => p.billing_party_id))].filter((id) => !allowedParties.has(id)).sort()
       : [];
     for (const partyId of creditParties) await advisoryXactLock(tx, `${facilityId}:party-credit:${partyId}`);
 
@@ -494,6 +674,8 @@ export class DispatchCheckoutService {
           { nameLine: true },
         ),
       );
+      const stampBy = creditAllowedBy.get(line.outbound_id);
+      if (stampBy) await tx.outboundEvent.update({ where: { id: line.outbound_id }, data: { creditAllowedBy: stampBy } });
     }
     // Every bill is in the ledger: each solo credit party must still sit under its ceiling with all of them.
     for (const partyId of creditParties) {
@@ -574,18 +756,24 @@ export class DispatchCheckoutService {
 
     const ob = await this.prisma.outboundEvent.findFirst({
       where: { id, facilityId: caller.facilityId },
-      select: { outboundDate: true, lot: { select: { bookType: true, billingPartyId: true } } },
+      select: {
+        outboundDate: true,
+        managerAllows: true,
+        managerAllowedAt: true,
+        lot: { select: { bookType: true, billingPartyId: true } },
+      },
     });
     if (!ob) throw Errors.OUTBOUND_NOT_FOUND();
 
     const verdict = await this.soloVerdict(this.prisma, caller.facilityId, ob.lot, ob.outboundDate);
     if (!verdict.allowed) return refuse(verdict.code);
-    if ((body.skip_service_charge_ids ?? []).length > 0) return refuse('SKIP_CHARGE');
-    if (body.payment.mode === 'CREDIT') {
-      if (!verdict.creditApproved) return refuse('NO_STANDING_CREDIT');
-    } else if (body.payment.mode !== 'CASH') {
-      return refuse('PAYMENT_MODE');
-    }
+    // Beyond cash in full: what the munshi asks for is theirs only if a manager allowed it today (docs/28 O8).
+    const refusal = soloAskRefusal(
+      { skips: (body.skip_service_charge_ids ?? []).length > 0, mode: body.payment.mode },
+      verdict.creditApproved,
+      liveAllows(ob),
+    );
+    if (refusal) return refuse(refusal);
     return true;
   }
 
@@ -626,6 +814,22 @@ export class DispatchCheckoutService {
     const soloCredit = solo && body.payment.mode === 'CREDIT';
     if (soloCredit) await advisoryXactLock(tx, `${facilityId}:party-credit:${locked.billingPartyId}`);
 
+    // The munshi's ask, again, now the row is locked: a manager may have taken the allowance back, or the day
+    // may have turned, since the pre-check (docs/28 O10). The same function the pre-check used.
+    let creditAllowedBy: string | null = null;
+    if (solo) {
+      const fresh = await tx.outboundEvent.findUniqueOrThrow({
+        where: { id },
+        select: { managerAllows: true, managerAllowedAt: true, managerAllowedBy: true },
+      });
+      const live = liveAllows(fresh);
+      const creditApproved = soloCredit && (await findActiveApproval(tx, facilityId, locked.billingPartyId)) != null;
+      const refusal = soloAskRefusal({ skips: (body.skip_service_charge_ids ?? []).length > 0, mode: body.payment.mode }, creditApproved, live);
+      if (refusal) throw Errors.DISPATCH_NEEDS_MANAGER(refusal);
+      // Credit on a manager's say: this bill is theirs to let go, so no ceiling, and they are the authority on the slip.
+      if (soloCredit && live.has('CREDIT')) creditAllowedBy = fresh.managerAllowedBy;
+    }
+
     const done = await this.dispatchLine(tx, caller, {
       outboundId: id,
       expectedTotal: body.expected_total_pkr,
@@ -633,9 +837,11 @@ export class DispatchCheckoutService {
       pickedFrom: body.picked_from?.map((p) => ({ rackId: p.rack_id, bags: p.bags })),
       notes: body.notes,
     });
+    if (creditAllowedBy) await tx.outboundEvent.update({ where: { id }, data: { creditAllowedBy } });
 
-    // The bill is in the ledger now, so the party's exposure includes it: it must still sit under the ceiling.
-    if (soloCredit) {
+    // The bill is in the ledger now, so the party's exposure includes it: it must still sit under the ceiling,
+    // unless a manager allowed this credit.
+    if (soloCredit && !creditAllowedBy) {
       const cover = await standingCreditCover(tx, facilityId, [{ partyId: done.billingPartyId }]);
       if (!cover.covered) throw Errors.DISPATCH_NEEDS_MANAGER('OVER_CREDIT_CEILING');
     }

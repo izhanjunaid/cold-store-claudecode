@@ -1,4 +1,4 @@
-import { GATE_COUNT_TRIES, MANAGER_REASON_TEXT, type ManagerReasonCode } from '@coldchain/shared';
+import { GATE_COUNT_TRIES, MANAGER_ASK_TEXT, MANAGER_REASON_TEXT, type ManagerAskCode, type ManagerReasonCode } from '@coldchain/shared';
 
 export class AppError extends Error {
   constructor(
@@ -162,7 +162,27 @@ export const Errors = {
   // The reason travels as a code too (docs/28 D6): the munshi's sheet offers the matching call to a manager.
   DISPATCH_NEEDS_MANAGER: (code: ManagerReasonCode, reason: string = MANAGER_REASON_TEXT[code]) =>
     new AppError('DISPATCH_NEEDS_MANAGER', `A manager must finish this truck: ${reason}`, 403, undefined, { reason_code: code }),
-  // A call to a manager on withdrawals none of which is still booked or weighed in this facility.
+  // A manager tried to allow something on a withdrawal that fails a solo rule (docs/28 O8): the rule is the code, never a figure.
+  ALLOW_DOES_NOT_HELP: (code: ManagerReasonCode) =>
+    new AppError(
+      'ALLOW_DOES_NOT_HELP',
+      `Allowing this does not help: ${MANAGER_REASON_TEXT[code]}. A manager checks it out`,
+      409,
+      undefined,
+      { reason_code: code },
+    ),
+  // A manager tried to allow more than the munshi asked for (docs/28 O8). `ask_code` is the munshi's own call, null if there was none.
+  ALLOW_NOT_ASKED: (ask: ManagerAskCode | null) =>
+    new AppError(
+      'ALLOW_NOT_ASKED',
+      ask === null
+        ? 'The munshi has not called a manager on this withdrawal: there is nothing to allow'
+        : `The munshi asked for ${MANAGER_ASK_TEXT[ask]}: allow that, not more`,
+      409,
+      undefined,
+      { ask_code: ask },
+    ),
+  // A call to a manager, or an allowance, on withdrawals none of which is still booked or weighed in this facility.
   OUTBOUND_NOT_WAITING: () =>
     new AppError('OUTBOUND_NOT_WAITING', 'Nothing here is waiting for a manager: it was dispatched or cancelled', 409),
   OUTBOUND_ALREADY_LEFT: () =>

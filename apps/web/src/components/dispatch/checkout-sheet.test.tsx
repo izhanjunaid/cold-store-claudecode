@@ -422,3 +422,86 @@ describe('CheckoutSheet — calling a manager (docs/28 O6)', () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 });
+
+// A manager allows what the munshi asked for, for the day (docs/28 O8-O11): the sheet opens exactly that up.
+describe('CheckoutSheet — what a manager allowed', () => {
+  const withSolo = (solo: Record<string, unknown>) =>
+    apiClient.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (opts?.method === 'POST') return Promise.resolve(RESULT);
+      if (path.endsWith('/checkout-preview')) return Promise.resolve({ ...PREVIEW, solo: { credit_available: false, ...solo } });
+      return Promise.resolve(null);
+    });
+  const allowed = (allows: string[], over: Record<string, unknown> = {}) => ({
+    allowed: true,
+    allows,
+    allowed_by_name: 'Shahid Iqbal',
+    allowed_at: new Date().toISOString(),
+    ...over,
+  });
+  beforeEach(() => {
+    role = 'OPERATOR';
+    permissions = ['outbound.record'];
+  });
+
+  it('an allowed cheque: cheque, transfer and wallet are offered, the note says who allowed it, and the cheque goes in the body', async () => {
+    withSolo(allowed(['CHEQUE_OR_TRANSFER']));
+    renderSheet();
+    expect(await screen.findByText(/Shahid Iqbal allowed cheque or transfer/)).toBeInTheDocument();
+    for (const name of ['Cash', 'Bank transfer', 'Cheque', 'Mobile wallet']) expect(screen.getByRole('button', { name })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'On credit' })).toBeDisabled();
+    // What is allowed is no longer a call.
+    expect(screen.queryByRole('button', { name: 'Cheque or transfer' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cheque' }));
+    fireEvent.change(screen.getByLabelText('Cheque number'), { target: { value: 'MCB-0042' } });
+    fireEvent.change(screen.getByLabelText('Cheque date'), { target: { value: '2026-11-12' } });
+    fireEvent.click(screen.getByRole('button', { name: /Dispatch & Collect Rs\s?5,200/ }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]![1].body).toEqual({
+      expected_total_pkr: 5200,
+      payment: { mode: 'CHEQUE', reference_number: 'MCB-0042', cheque_date: '2026-11-12' },
+    });
+  });
+
+  it('an allowed credit: On credit is offered with no "not offered" note, and it is not a call any more', async () => {
+    withSolo(allowed(['CREDIT'], { credit_available: true }));
+    renderSheet();
+    expect(await screen.findByText(/Shahid Iqbal allowed credit on this bill/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'On credit' })).toBeEnabled();
+    expect(screen.queryByText(/On credit is not offered/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Credit' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'On credit' }));
+    fireEvent.click(screen.getByRole('button', { name: /Dispatch on credit/ }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]![1].body.payment).toEqual({ mode: 'CREDIT' });
+  });
+
+  it('allowed leaving a charge off: the charge toggles open, the body names what was left off', async () => {
+    withSolo(allowed(['LEAVE_CHARGE_OFF']));
+    renderSheet();
+    const loading = await screen.findByLabelText(/Loading/);
+    expect(loading).toBeEnabled();
+    fireEvent.click(loading);
+    fireEvent.click(screen.getByRole('button', { name: /Dispatch & Collect Rs\s?5,000/ }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]![1].body).toEqual({ expected_total_pkr: 5000, skip_service_charge_ids: ['sc1'], payment: { mode: 'CASH' } });
+    expect(screen.queryByRole('button', { name: 'Leave a charge off' })).not.toBeInTheDocument();
+  });
+
+  it('what is not allowed is still a call, and still locked', async () => {
+    withSolo(allowed(['CHEQUE_OR_TRANSFER']));
+    renderSheet();
+    await screen.findByText(/Shahid Iqbal allowed cheque or transfer/);
+    expect(screen.getByRole('button', { name: 'Credit' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Leave a charge off' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Loading/)).toBeDisabled();
+  });
+
+  it('nothing allowed: the sheet is as it was (cash, calls for the rest)', async () => {
+    withSolo({ allowed: true, allows: [], allowed_by_name: null, allowed_at: null });
+    renderSheet();
+    await screen.findByText(/finish this truck yourself/i);
+    expect(screen.queryByText(/allowed/)).not.toBeInTheDocument();
+    for (const name of ['Bank transfer', 'Cheque', 'Mobile wallet']) expect(screen.getByRole('button', { name })).toBeDisabled();
+  });
+});

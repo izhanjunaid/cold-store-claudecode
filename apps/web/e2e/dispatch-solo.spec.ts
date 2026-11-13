@@ -228,3 +228,59 @@ test('a munshi calls a manager for a cheque buyer; the manager finishes it from 
   const ob = (await (await request.get(`${API_URL}/v1/outbound-events/${id}`, { headers: await authHeaders('MANAGER') })).json()).data;
   expect(ob.status).toBe('DISPATCHED');
 });
+
+test('a munshi asks for credit; a manager allows it; the munshi finishes on credit; the slip names the manager (docs/28 O8-O10)', async ({
+  page,
+  request,
+  loginAs,
+}) => {
+  test.setTimeout(300_000);
+  const truck = plate();
+  const { id } = await weighedTruck(request, truck, { label: 'Solo Allow' });
+  const inward = await request.post(`${API_URL}/v1/gate-passes/inward`, { headers: await authHeaders('SECURITY'), data: { vehicle_number: truck } });
+  expect(inward.ok(), await inward.text()).toBeTruthy();
+  const passId = (await inward.json()).data.id as string;
+  await page.route('**/dispatch-note', (route) => route.fulfill({ status: 200, contentType: 'application/pdf', body: '%PDF-1.4\n%%EOF' }));
+
+  // ── 1. The munshi: the buyer wants credit, and this party has no approval, so it is a call.
+  await loginAs('OPERATOR');
+  await page.goto('/dispatch');
+  const row = page.locator('tr', { hasText: truck });
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await row.getByRole('button', { name: /Dispatch & Collect/ }).click();
+  await page.getByRole('button', { name: 'Credit', exact: true }).click();
+  await expect(page.getByText('Sent to the managers’ list').first()).toBeVisible({ timeout: 20_000 });
+
+  // ── 2. The manager allows it from the card: the dialog already ticks credit.
+  await loginAs('MANAGER');
+  await page.goto('/dispatch');
+  const card = page.getByRole('region', { name: 'Waiting for a manager' });
+  const item = card.locator('li', { hasText: truck });
+  await expect(item).toContainText('the buyer wants credit', { timeout: 30_000 });
+  await item.getByRole('button', { name: /^Allow/ }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('checkbox', { name: 'Credit on this bill' })).toBeChecked();
+  await dialog.getByRole('button', { name: 'Allow', exact: true }).click();
+  const allowed = card.getByRole('group', { name: 'Allowed — the desk can finish these' });
+  await expect(allowed.locator('li', { hasText: truck })).toContainText('Allowed by', { timeout: 30_000 });
+
+  // ── 3. The munshi, again: the desk row says what is allowed, and the sheet offers credit.
+  await loginAs('OPERATOR');
+  await page.goto('/dispatch');
+  await expect(row).toContainText('Allowed: credit on this bill', { timeout: 30_000 });
+  await row.getByRole('button', { name: /Dispatch & Collect/ }).click();
+  await page.getByRole('button', { name: 'On credit' }).click();
+  await page.getByRole('button', { name: /Dispatch on credit/ }).click();
+  await expect(page.getByText(/Dispatched — bill on credit/i).first()).toBeVisible({ timeout: 30_000 });
+  const ob = (await (await request.get(`${API_URL}/v1/outbound-events/${id}`, { headers: await authHeaders('MANAGER') })).json()).data;
+  expect(ob.status).toBe('DISPATCHED');
+
+  // ── 4. The slip names the manager who let it go on credit, not the munshi who dispatched it
+  // (the seeded manager and munshi: packages/db/prisma/seed.ts).
+  const slip = await request.get(`${API_URL}/v1/dispatch/trucks/${passId}/load-slip?format=html`, { headers: await authHeaders('MANAGER') });
+  expect(slip.ok()).toBeTruthy();
+  const html = await slip.text();
+  const credit = html.slice(html.indexOf('Released on credit'));
+  expect(credit).toContain('Shahid Iqbal');
+  expect(credit).not.toContain('Waseem Khan');
+});

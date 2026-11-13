@@ -271,3 +271,85 @@ describe('TruckCheckoutSheet — calling a manager (docs/28 O6)', () => {
     expect(asks()[0]![1].body).toEqual({ outbound_ids: ['1', '2', '3'], ask_code: 'CALLED' });
   });
 });
+
+// A manager allows what the munshi asked for, for the day (docs/28 O8-O11): a payment mode or credit is a
+// (party, book) group's, leaving a charge off is a line's.
+describe('TruckCheckoutSheet — what a manager allowed', () => {
+  const groupOf = (name: string) => screen.getByText(name, { selector: '[data-group-party]' }).closest('[data-group]') as HTMLElement;
+  const allowedGroup = (over: Record<string, unknown>) => ({
+    ...preview.groups[0],
+    ...over,
+  });
+  beforeEach(() => {
+    permissions = ['outbound.record'];
+  });
+
+  it('an allowed cheque opens Cheque, Bank transfer and Mobile wallet for that party only, with the note saying who allowed it', async () => {
+    preview = {
+      ...preview,
+      groups: [allowedGroup({ allows: ['CHEQUE_OR_TRANSFER'], allowed_by_name: 'Shahid Iqbal' }), preview.groups[1]],
+    };
+    renderSheet();
+    await screen.findByText('Haji Sahib', { selector: '[data-group-party]' });
+    for (const name of ['Cash', 'Bank transfer', 'Cheque', 'Mobile wallet']) expect(within(groupOf('Haji Sahib')).getByRole('button', { name })).toBeEnabled();
+    expect(within(groupOf('Bashir')).getByRole('button', { name: 'Cheque' })).toBeDisabled();
+    expect(screen.getByText(/Shahid Iqbal allowed/)).toBeInTheDocument();
+    // Not a call any more for what is allowed everywhere it is needed... Bashir's group still lacks it:
+    expect(screen.getByRole('button', { name: 'Cheque or transfer' })).toBeInTheDocument();
+  });
+
+  it('with every group allowed a cheque, the call for it goes away, and the cheque is sent', async () => {
+    preview = {
+      ...preview,
+      groups: preview.groups.map((g: Record<string, unknown>) => ({ ...g, allows: ['CHEQUE_OR_TRANSFER'], allowed_by_name: 'Shahid Iqbal' })),
+    };
+    renderSheet();
+    await screen.findByText('Haji Sahib', { selector: '[data-group-party]' });
+    expect(screen.queryByRole('button', { name: 'Cheque or transfer' })).not.toBeInTheDocument();
+    fireEvent.click(within(groupOf('Haji Sahib')).getByRole('button', { name: 'Cheque' }));
+    fireEvent.change(screen.getByLabelText('Cheque number — Haji Sahib'), { target: { value: 'MCB-77' } });
+    fireEvent.change(screen.getByLabelText('Cheque date — Haji Sahib'), { target: { value: '2026-11-12' } });
+    fireEvent.click(screen.getByRole('button', { name: /Check out truck/ }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]![1].body.payments[0]).toEqual({
+      billing_party_id: 'pa',
+      book_type: 'PACCI',
+      mode: 'CHEQUE',
+      reference_number: 'MCB-77',
+      cheque_date: '2026-11-12',
+    });
+  });
+
+  it("an allowed charge is a line's: its toggle opens, the other line's stays shut", async () => {
+    preview = {
+      ...preview,
+      lines: [
+        { ...preview.lines[0], allows: ['LEAVE_CHARGE_OFF'], allowed_by_name: 'Shahid Iqbal' },
+        bill('4', A, 800, 40),
+        preview.lines[1],
+        preview.lines[2],
+      ],
+      groups: [{ ...preview.groups[0], outbound_ids: ['1', '2', '4'] }, preview.groups[1]],
+    };
+    renderSheet();
+    const toggles = await screen.findAllByLabelText(/Loading/);
+    expect(toggles).toHaveLength(2);
+    expect(toggles[0]).toBeEnabled();
+    expect(toggles[1]).toBeDisabled();
+    fireEvent.click(toggles[0]!);
+    fireEvent.click(screen.getByRole('button', { name: /Check out truck/ }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]![1].body.lines[0]).toEqual({ outbound_id: '1', expected_total_pkr: 1000, skip_service_charge_ids: ['svc-1'] });
+  });
+
+  it('allowed credit shows as available for that party, with no Credit call needed', async () => {
+    preview = {
+      ...preview,
+      groups: [allowedGroup({ credit_available: true, allows: ['CREDIT'], allowed_by_name: 'Shahid Iqbal' }), preview.groups[1]],
+    };
+    renderSheet();
+    await screen.findByText('Haji Sahib', { selector: '[data-group-party]' });
+    expect(within(groupOf('Haji Sahib')).getByRole('button', { name: 'On credit' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Credit' })).not.toBeInTheDocument();
+  });
+});

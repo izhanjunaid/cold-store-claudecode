@@ -4,7 +4,7 @@
  * receipt per (billing party, book) — or nothing is. Every refusal asserts nothing was written;
  * every race asserts the loser (CLAUDE.md).
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from 'vitest';
 import { withGuardsDisabled } from '../../test/financial-guards';
 import { getTestApp, closeTestApp, loginAsRole, authHeaders, TEST_FACILITY_ID } from '../../test/helpers';
 import { PrismaClient } from '@coldchain/db';
@@ -844,5 +844,258 @@ describe('plates take 30 characters', () => {
       vehicle_number: `${thirty}X`,
     });
     expect([res.statusCode, code(res)]).toEqual([400, 'VALIDATION_ERROR']);
+  });
+});
+
+// A manager allows what the munshi asked for, for a whole truck (docs/28 O8-O11): a payment mode or credit is a
+// (party, book) group's and needs every line of the group allowed; leaving a charge off is a line's.
+describe('a manager allows what the munshi asked for — a truck (docs/28 O8-O11)', () => {
+  const allow = (ids: string[], allows: string[], token = managerToken) => call('POST', '/v1/dispatch/allow', token, { outbound_ids: ids, allows });
+  /** The munshi's call from the truck sheet stamps every line with what the buyer wants. */
+  const callFor = async (ids: string[], ask: string) =>
+    expect((await call('POST', '/v1/dispatch/ask-manager', operatorToken, { outbound_ids: ids, ask_code: ask })).statusCode).toBe(200);
+  const userRow = (email: string) => prisma.user.findFirstOrThrow({ where: { email } });
+  const refused = (r: { statusCode: number; body: string }, reason: string) => {
+    const error = JSON.parse(r.body).error;
+    expect([r.statusCode, error?.code, error?.details]).toEqual([403, 'DISPATCH_NEEDS_MANAGER', { reason_code: reason }]);
+  };
+  const withCheques = (req: ReturnType<typeof requestFrom>, partyId?: string) => ({
+    ...req,
+    payments: req.payments.map((x: { billing_party_id: string }) =>
+      !partyId || x.billing_party_id === partyId ? { ...x, mode: 'CHEQUE', reference_number: 'CHQ-7', cheque_date: businessDate() } : x,
+    ),
+  });
+
+  beforeEach(async () => {
+    await setSolo(true);
+    await prisma.partyCreditApproval.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+  });
+  afterEach(() => setSolo(false));
+
+  it("a party's cheque needs every one of its lines allowed", async () => {
+    const pass = await arrive('LHR-7201');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-7201', 20);
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-7201', 10);
+    await callFor([o1, o2], 'CHEQUE_OR_TRANSFER');
+    const req = withCheques(requestFrom(await truckPreview(pass, operatorToken)));
+    refused(await checkoutTruck(pass, req, operatorToken), 'PAYMENT_MODE');
+
+    expect((await allow([o1], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+    const partial = await truckPreview(pass, operatorToken);
+    expect(partial.groups[0].allows).toEqual([]); // one line of the two is not the party's cheque
+    refused(await checkoutTruck(pass, req, operatorToken), 'PAYMENT_MODE');
+    await nothingWritten([o1, o2]);
+
+    expect((await allow([o1, o2], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+    const all = await truckPreview(pass, operatorToken);
+    expect(all.groups[0].allows).toEqual(['CHEQUE_OR_TRANSFER']);
+    const ok = await checkoutTruck(pass, req, operatorToken);
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect((await prisma.payment.findFirstOrThrow({ where: { partyId: partyA } })).paymentMethod).toBe('CHEQUE');
+  });
+
+  it("credit is a party's: one party on credit by a manager's say, the other paying cash, and only the first's lines carry the authority", async () => {
+    const pass = await arrive('LHR-7202');
+    const oa = await onTruck(await lot(partyA, 20), 'LHR-7202', 20);
+    const ob = await onTruck(await lot(partyB, 15), 'LHR-7202', 15);
+    await callFor([oa, ob], 'CREDIT');
+    const req = requestFrom(await truckPreview(pass, operatorToken), (g) => (g.billing_party.id === partyB ? 'CREDIT' : 'CASH'));
+    refused(await checkoutTruck(pass, req, operatorToken), 'NO_STANDING_CREDIT');
+
+    expect((await allow([oa], ['CREDIT'])).statusCode).toBe(200); // the wrong party's line: no help for B
+    refused(await checkoutTruck(pass, req, operatorToken), 'NO_STANDING_CREDIT');
+
+    expect((await allow([ob], ['CREDIT'])).statusCode).toBe(200);
+    const p = await truckPreview(pass, operatorToken);
+    expect(p.groups.find((g: { billing_party: { id: string } }) => g.billing_party.id === partyB)).toMatchObject({ credit_available: true, allows: ['CREDIT'] });
+    const ok = await checkoutTruck(pass, req, operatorToken);
+    expect(ok.statusCode, ok.body).toBe(200);
+    const manager = await userRow('manager@coldchain.pk');
+    const rows = await prisma.outboundEvent.findMany({ where: { id: { in: [oa, ob] } } });
+    expect(rows.find((r) => r.id === ob)!.creditAllowedBy).toBe(manager.id);
+    expect(rows.find((r) => r.id === oa)!.creditAllowedBy).toBeNull(); // paid cash: nothing was let go
+  });
+
+  it('leaving a charge off is a line’s: allowed on one line, refused on the other', async () => {
+    const charge = await prisma.serviceCharge.create({
+      data: { facilityId: TEST_FACILITY_ID, name: `Truck-Flat-${Date.now()}`, unitType: 'FLAT', unitPricePkr: 100, applyAtDispatch: true },
+    });
+    try {
+      const pass = await arrive('LHR-7203');
+      const o1 = await onTruck(await lot(partyA, 20), 'LHR-7203', 20);
+      const o2 = await onTruck(await lot(partyA, 10), 'LHR-7203', 10);
+      await callFor([o1, o2], 'LEAVE_CHARGE_OFF');
+      const p = await truckPreview(pass, operatorToken);
+      const requestSkipping = (id: string) => {
+        const req = requestFrom(p);
+        return {
+          ...req,
+          lines: p.lines.map((l: { outbound_id: string; total_pkr: number }) =>
+            l.outbound_id === id
+              ? { outbound_id: l.outbound_id, expected_total_pkr: l.total_pkr - 100, skip_service_charge_ids: [charge.id] }
+              : { outbound_id: l.outbound_id, expected_total_pkr: l.total_pkr },
+          ),
+          payments: req.payments,
+        };
+      };
+      refused(await checkoutTruck(pass, requestSkipping(o1), operatorToken), 'SKIP_CHARGE');
+
+      expect((await allow([o1], ['LEAVE_CHARGE_OFF'])).statusCode).toBe(200);
+      refused(await checkoutTruck(pass, requestSkipping(o2), operatorToken), 'SKIP_CHARGE');
+      const ok = await checkoutTruck(pass, requestSkipping(o1), operatorToken);
+      expect(ok.statusCode, ok.body).toBe(200);
+      const inv = await prisma.invoice.findFirstOrThrow({ where: { outboundEventId: o1 }, include: { lineItems: true } });
+      expect(inv.lineItems.some((l) => l.serviceChargeId === charge.id)).toBe(false);
+    } finally {
+      await cleanup();
+      await prisma.serviceCharge.delete({ where: { id: charge.id } });
+    }
+  });
+
+  it('an allowance a line loses between the review and the checkout refuses the whole truck, writing nothing', async () => {
+    const pass = await arrive('LHR-7204');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-7204', 20);
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-7204', 10);
+    await callFor([o1, o2], 'CHEQUE_OR_TRANSFER');
+    expect((await allow([o1, o2], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+    const req = withCheques(requestFrom(await truckPreview(pass, operatorToken)));
+    expect((await allow([o2], [])).statusCode).toBe(200); // taken back on one line
+    refused(await checkoutTruck(pass, req, operatorToken), 'PAYMENT_MODE');
+    await nothingWritten([o1, o2]);
+  });
+
+  it('an allowance taken back while the truck checkout waits for its rows is checked again under the locks', async () => {
+    const pass = await arrive('LHR-7207');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-7207', 20);
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-7207', 10);
+    await callFor([o1, o2], 'CHEQUE_OR_TRANSFER');
+    expect((await allow([o1, o2], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+    const req = withCheques(requestFrom(await truckPreview(pass, operatorToken)));
+
+    let release!: () => void;
+    let holding!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    const isHolding = new Promise<void>((r) => (holding = r));
+    const blocker = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM outbound_events WHERE id = ${o2}::uuid FOR UPDATE`;
+        holding();
+        await hold;
+        await tx.$executeRaw`UPDATE outbound_events SET manager_allows = ARRAY[]::varchar[], manager_allowed_at = NULL, manager_allowed_by = NULL WHERE id = ${o2}::uuid`;
+      },
+      { timeout: 30_000 },
+    );
+    await isHolding;
+    const checking = checkoutTruck(pass, req, operatorToken);
+    await new Promise((r) => setTimeout(r, 700));
+    release();
+    await blocker;
+
+    refused(await checking, 'PAYMENT_MODE');
+    await nothingWritten([o1, o2]);
+  });
+
+  it('allowing a truck any line of which fails a solo rule is refused, naming the rule', async () => {
+    const pass = await arrive('LHR-7205');
+    const fresh = await onTruck(await lot(partyA, 20), 'LHR-7205', 20);
+    const old = await onTruck(await lot(partyA, 10), 'LHR-7205', 10, { date: addDays(businessDate(), -3) });
+    void pass;
+    const res = await allow([fresh, old], ['CHEQUE_OR_TRANSFER']);
+    const error = JSON.parse(res.body).error;
+    expect([res.statusCode, error.code, error.details]).toEqual([409, 'ALLOW_DOES_NOT_HELP', { reason_code: 'NOT_TODAY' }]);
+  });
+
+  it('allow holds one row lock at a time, so it cannot deadlock a checkout of the same truck', async () => {
+    await arrive('LHR-7206');
+    const o1 = await onTruck(await lot(partyA, 20), 'LHR-7206', 20);
+    const o2 = await onTruck(await lot(partyA, 10), 'LHR-7206', 10);
+    await callFor([o1, o2], 'CREDIT');
+    for (const blocked of [o1, o2]) {
+      const other = blocked === o1 ? o2 : o1;
+      let release!: () => void;
+      let holding!: () => void;
+      const hold = new Promise<void>((r) => (release = r));
+      const isHolding = new Promise<void>((r) => (holding = r));
+      const blocker = prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM outbound_events WHERE id = ${blocked}::uuid FOR UPDATE`;
+          holding();
+          await hold;
+        },
+        { timeout: 30_000 },
+      );
+      await isHolding;
+      const allowing = allow([o1, o2], ['CREDIT']);
+      await new Promise((r) => setTimeout(r, 500));
+      const probe = await prisma
+        .$transaction(async (tx) => tx.$queryRaw`SELECT id FROM outbound_events WHERE id = ${other}::uuid FOR UPDATE NOWAIT`)
+        .then(
+          () => 'free',
+          (e: unknown) => String(e),
+        );
+      release();
+      await blocker;
+      const res = await allowing;
+      expect(probe, `allow held ${other} while it waited on ${blocked}`).toBe('free');
+      expect(res.statusCode, res.body).toBe(200);
+    }
+  });
+});
+
+describe('the load slip names who let credit go (docs/28 O9)', () => {
+  const allow = (ids: string[], allows: string[], token: string) => call('POST', '/v1/dispatch/allow', token, { outbound_ids: ids, allows });
+  const userName = async (email: string) => (await prisma.user.findFirstOrThrow({ where: { email } })).name;
+  const creditPart = async (pass: string) => {
+    const res = await call('GET', `/v1/dispatch/trucks/${pass}/load-slip?format=html`, managerToken);
+    expect(res.statusCode, res.body).toBe(200);
+    return res.body.slice(res.body.indexOf('Released on credit'));
+  };
+  /** A truck of party B's single line, booked and (optionally) allowed credit by the owner. */
+  const onCredit = async (plate: string) => {
+    const pass = await arrive(plate);
+    const id = await onTruck(await lot(partyB, 15), plate, 15);
+    expect((await call('POST', '/v1/dispatch/ask-manager', operatorToken, { outbound_ids: [id], ask_code: 'CREDIT' })).statusCode).toBe(200);
+    return { pass, id };
+  };
+
+  beforeEach(async () => {
+    await setSolo(true);
+    await prisma.partyCreditApproval.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
+  });
+  afterEach(() => setSolo(false));
+
+  it('credit the munshi took on a manager’s allowance is that manager’s on the slip, not the munshi’s', async () => {
+    const t = await onCredit('LHR-7301');
+    expect((await allow([t.id], ['CREDIT'], ownerToken)).statusCode).toBe(200);
+    const req = requestFrom(await truckPreview(t.pass, operatorToken), () => 'CREDIT');
+    const res = await checkoutTruck(t.pass, req, operatorToken);
+    expect(res.statusCode, res.body).toBe(200);
+
+    const credit = await creditPart(t.pass);
+    expect(credit).toContain(await userName('admin@coldchain.pk'));
+    expect(credit).not.toContain(await userName('operator@coldchain.pk'));
+  });
+
+  it('an allowance that had expired, then a manager’s own credit checkout, names the manager who dispatched', async () => {
+    const t = await onCredit('LHR-7302');
+    expect((await allow([t.id], ['CREDIT'], ownerToken)).statusCode).toBe(200);
+    await prisma.outboundEvent.update({ where: { id: t.id }, data: { managerAllowedAt: new Date(Date.now() - 2 * 86_400_000) } });
+    const res = await checkoutTruck(t.pass, requestFrom(await truckPreview(t.pass), () => 'CREDIT'));
+    expect(res.statusCode, res.body).toBe(200);
+
+    const credit = await creditPart(t.pass);
+    expect(credit).toContain(await userName('manager@coldchain.pk'));
+    expect(credit).not.toContain(await userName('admin@coldchain.pk'));
+  });
+
+  it('a manager who dispatches an allowed row themselves is named, not the one who allowed it', async () => {
+    const t = await onCredit('LHR-7303');
+    expect((await allow([t.id], ['CREDIT'], ownerToken)).statusCode).toBe(200);
+    const res = await checkoutTruck(t.pass, requestFrom(await truckPreview(t.pass), () => 'CREDIT')); // the manager's own
+    expect(res.statusCode, res.body).toBe(200);
+
+    const credit = await creditPart(t.pass);
+    expect(credit).toContain(await userName('manager@coldchain.pk'));
+    expect(credit).not.toContain(await userName('admin@coldchain.pk'));
   });
 });
