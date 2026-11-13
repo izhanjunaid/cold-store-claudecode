@@ -987,6 +987,7 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
     allows: string[];
     allowed_by_name: string | null;
     allowed_at: string | null;
+    settled: boolean;
   };
   const ask = (ids: string[], askCode = 'CHEQUE_OR_TRANSFER') =>
     app.inject({
@@ -1048,7 +1049,7 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
     expect(row.managerAllowedAt).toBeTruthy();
   });
 
-  it("allow stamps only this facility's booked or weighed rows; none left is 409", async () => {
+  it('allow stamps only booked or weighed rows; an id that is no withdrawal here, or none still waiting, is 409', async () => {
     const live = await calledToday('LHR-7102');
     const gone = await weighed(10, { date: businessDate(), plate: 'LHR-7103' });
     expect((await checkout(gone.id, cash(data(await preview(gone.id)).total_pkr))).statusCode).toBe(200);
@@ -1082,6 +1083,17 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
     } finally {
       await setSolo(true);
     }
+  });
+
+  it('the service itself wants invoices.manage as well: a caller holding outbound.finalize alone is refused', async () => {
+    const b = await calledToday('LHR-7199');
+    const svc = new DispatchCheckoutService(prisma, null as never, null as never, null as never);
+    const caller = (keys: string[]) => ({ facilityId: TEST_FACILITY_ID, userId: 'u', role: 'MANAGER', permissions: new Set(keys) });
+    await expect(svc.allow(caller(['outbound.finalize']), { outbound_ids: [b.id], allows: ['CREDIT'] })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      message: 'Missing permission: invoices.manage',
+    });
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: b.id } })).managerAllows).toEqual([]);
   });
 
   it('taking it back clears it', async () => {
@@ -1216,6 +1228,35 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
     expect(listed).toBe(rows.length);
     expect(total).toBe(rows.filter((r) => r.allows.length === 0).length);
     expect(total).toBe(listed - 1);
+  });
+
+  it('a call made after the allowance puts the row back on what waits: the buyer changed what they want', async () => {
+    const b = await calledToday('LHR-7190', 'CREDIT');
+    expect((await allow([b.id], ['CREDIT'])).statusCode).toBe(200);
+    let { rows, total, listed } = await waiting();
+    expect(rows.find((r) => r.id === b.id)).toMatchObject({ settled: true, allows: ['CREDIT'] });
+    expect(total).toBe(listed - rows.filter((r) => r.settled).length);
+
+    // The buyer now wants a cheque instead: a newer call than the allowance, so a manager has something to read.
+    expect((await ask([b.id], 'CHEQUE_OR_TRANSFER')).statusCode).toBe(200);
+    ({ rows, total, listed } = await waiting());
+    expect(rows.find((r) => r.id === b.id)).toMatchObject({ settled: false, ask_code: 'CHEQUE_OR_TRANSFER', allows: ['CREDIT'] });
+    expect(total).toBe(rows.filter((r) => !r.settled).length);
+    expect(listed).toBe(rows.length);
+  });
+
+  it('a solo rule that starts failing after the allowance puts the row back on what waits', async () => {
+    const b = await calledToday('LHR-7191');
+    expect((await allow([b.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+    await setSolo(false); // the owner switches one-person dispatch off
+    try {
+      const { rows, total } = await waiting();
+      expect(rows.find((r) => r.id === b.id)).toMatchObject({ settled: false, reason_code: 'SOLO_OFF' });
+      expect(total).toBe(rows.filter((r) => !r.settled).length);
+      expect(rows.filter((r) => r.settled).every((r) => r.reason_code === null)).toBe(true);
+    } finally {
+      await setSolo(true);
+    }
   });
 
   it('the preview names what is allowed and by whom, and carries no figure', async () => {

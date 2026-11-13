@@ -122,6 +122,7 @@ const waitingRow = (over: Record<string, unknown>) => ({
   allows: [],
   allowed_by_name: null,
   allowed_at: null,
+  settled: false,
   ...over,
 });
 const waitingCalls = () => apiClientList.mock.calls.filter(([p]) => String(p).startsWith('/v1/dispatch/waiting')).length;
@@ -162,7 +163,7 @@ beforeEach(() => {
     if (path.startsWith('/v1/dispatch/waiting')) {
       return Promise.resolve({
         data: waitingRows,
-        meta: { total: waitingRows.filter((r) => !(r.allows ?? []).length).length, listed: waitingRows.length, page: 1, per_page: 200 },
+        meta: { total: waitingRows.filter((r) => !r.settled).length, listed: waitingRows.length, page: 1, per_page: 200 },
       });
     }
 
@@ -749,6 +750,56 @@ describe('Dispatch Desk — Allow, on the waiting card', () => {
     expect(allowPosts()[0]![1].body.outbound_ids).toEqual(['w-1', 'w-2']);
   });
 
+  it('a row called again after it was allowed waits among the others, and the dialog keeps what was allowed ticked beside the new ask', async () => {
+    waitingRows = [
+      called({
+        id: 'w-again',
+        dispatch_note_number: 'DN-AGAIN',
+        ask_code: 'CHEQUE_OR_TRANSFER',
+        allows: ['CREDIT'],
+        allowed_by_name: 'Shahid Iqbal',
+        allowed_at: new Date().toISOString(),
+        settled: false,
+      }),
+    ];
+    renderPage();
+    const c = await card();
+    expect(within(c).getByText('Waiting for a manager (1)')).toBeInTheDocument();
+    expect(within(c).queryByRole('group', { name: 'Allowed — the desk can finish these' })).not.toBeInTheDocument();
+    const row = within(c).getByText('DN-AGAIN').closest('li') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: /^Allow/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('checkbox', { name: 'Credit on this bill' })).toBeChecked();
+    expect(within(dialog).getByRole('checkbox', { name: 'Cheque or transfer' })).toBeChecked();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(allowPosts()).toHaveLength(1));
+    expect(allowPosts()[0]![1].body.allows.sort()).toEqual(['CHEQUE_OR_TRANSFER', 'CREDIT']);
+  });
+
+  it("on a truck of two parties, Allow covers only the clicked row's party, never the other's bills", async () => {
+    const party = (id: string) => ({ id, name: id });
+    trucks = [
+      truck({
+        gate_pass_id: 'pass-10',
+        vehicle_number: 'LHR 5555',
+        ready: true,
+        lines: [
+          { ...readyLine('a-1', 'DN-A1'), billing_party: party('pa') },
+          { ...readyLine('a-2', 'DN-A2'), billing_party: party('pa') },
+          { ...readyLine('b-1', 'DN-B1'), billing_party: party('pb') },
+        ],
+      }),
+    ];
+    waitingRows = [called({ id: 'a-1', dispatch_note_number: 'DN-A1', vehicle_number: 'LHR-5555' })];
+    renderPage();
+    const c = await card();
+    await waitFor(() => expect(within(c).getByRole('button', { name: 'Check out truck' })).toBeInTheDocument());
+    fireEvent.click(within(c).getByRole('button', { name: /^Allow/ }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(allowPosts()).toHaveLength(1));
+    expect(allowPosts()[0]![1].body.outbound_ids).toEqual(['a-1', 'a-2']);
+  });
+
   it('a row that fails a solo rule has no Allow: a manager checks it out', async () => {
     waitingRows = [waitingRow({ id: 'w-k', dispatch_note_number: 'DN-K', reason_code: 'KATCHI' })];
     renderPage();
@@ -765,6 +816,7 @@ describe('Dispatch Desk — Allow, on the waiting card', () => {
         allows: ['CHEQUE_OR_TRANSFER'],
         allowed_by_name: 'Shahid Iqbal',
         allowed_at: new Date().toISOString(),
+        settled: true,
       }),
     ];
     renderPage();
@@ -783,7 +835,7 @@ describe('Dispatch Desk — Allow, on the waiting card', () => {
 
   it('a card whose only row is allowed still shows, so Take back stays reachable, while the count reads 0', async () => {
     waitingRows = [
-      called({ id: 'w-only', dispatch_note_number: 'DN-ONLY', allows: ['CREDIT'], allowed_by_name: 'Shahid Iqbal', allowed_at: new Date().toISOString() }),
+      called({ id: 'w-only', dispatch_note_number: 'DN-ONLY', allows: ['CREDIT'], allowed_by_name: 'Shahid Iqbal', allowed_at: new Date().toISOString(), settled: true }),
     ];
     renderPage();
     const c = await card();

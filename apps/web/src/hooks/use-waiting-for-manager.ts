@@ -27,6 +27,11 @@ export interface WaitingRow {
   allows: ManagerAllowCode[];
   allowed_by_name: string | null;
   allowed_at: string | null;
+  /**
+   * The desk can finish it: a manager allowed it today, nothing since asked for more, no solo rule fails now. Only a
+   * settled row leaves the count; a newer call or a failing rule puts it back among the rows that wait.
+   */
+  settled: boolean;
 }
 
 /**

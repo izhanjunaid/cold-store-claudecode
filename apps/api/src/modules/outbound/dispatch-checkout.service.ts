@@ -249,15 +249,23 @@ export class DispatchCheckoutService {
     });
     const today = businessDate();
     const listedRows = ready
-      .map((o) => ({ o, reason: soloRefusal(ctx, o.lot, o.outboundDate), allows: liveAllows(o, today) }))
+      .map((o) => {
+        const reason = soloRefusal(ctx, o.lot, o.outboundDate);
+        const allows = liveAllows(o, today);
+        // Settled: a manager allowed it today, nothing since asked for more, and no solo rule fails now. Then the desk
+        // can finish it, so it is not what waits (the count), though it stays listed with Take back. A newer call than
+        // the allowance (the buyer changed their mind), a solo rule that has started failing, or an allowance from an
+        // earlier day leave it waiting: a manager has something to read again.
+        const settled =
+          allows.size > 0 && reason === null && (!o.managerAskAt || (o.managerAllowedAt != null && o.managerAllowedAt >= o.managerAskAt));
+        return { o, reason, allows, settled };
+      })
       .filter(({ o, reason }) => reason !== null || o.managerAskAt !== null);
-    // A row a manager has allowed today sits last: the desk can finish it, so it is not what waits (the count),
-    // though it stays listed with Take back. An allowance from an earlier day is history: a called row again.
-    const rows = [...listedRows.filter((r) => r.allows.size === 0), ...listedRows.filter((r) => r.allows.size > 0)];
+    const rows = [...listedRows.filter((r) => !r.settled), ...listedRows.filter((r) => r.settled)];
     const shown = rows.slice(0, WAITING_CAP);
     const names = await this.namesOf(this.prisma, shown.flatMap(({ o, allows }) => (allows.size > 0 && o.managerAllowedBy ? [o.managerAllowedBy] : [])));
     return {
-      data: shown.map(({ o, reason, allows }) => ({
+      data: shown.map(({ o, reason, allows, settled }) => ({
         id: o.id,
         dispatch_note_number: o.dispatchNoteNumber,
         lot_id: o.lotId,
@@ -275,9 +283,10 @@ export class DispatchCheckoutService {
         allows: [...allows],
         allowed_by_name: allows.size > 0 && o.managerAllowedBy ? (names.get(o.managerAllowedBy) ?? null) : null,
         allowed_at: allows.size > 0 && o.managerAllowedAt ? o.managerAllowedAt.toISOString() : null,
+        settled,
       })),
       // `total` is what still needs a manager (the badge); `listed` is every row on the list, the allowed ones included.
-      meta: { total: rows.filter((r) => r.allows.size === 0).length, listed: rows.length, page: 1, per_page: WAITING_CAP },
+      meta: { total: rows.filter((r) => !r.settled).length, listed: rows.length, page: 1, per_page: WAITING_CAP },
     };
   }
 

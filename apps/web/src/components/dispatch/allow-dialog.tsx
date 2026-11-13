@@ -14,9 +14,14 @@ const LABEL: Record<ManagerAllowCode, string> = {
   LEAVE_CHARGE_OFF: 'Leaving charges off',
 };
 
-/** What a call asked for, ticked up front: the manager confirms or changes it. A plain call ticks nothing. */
-const ticked = (ask: ManagerAskCode | null): ManagerAllowCode[] =>
-  ask && ask !== 'CALLED' && (MANAGER_ALLOW_CODES as readonly string[]).includes(ask) ? [ask as ManagerAllowCode] : [];
+/**
+ * What a call asked for, ticked up front, together with what is already allowed (an allowance replaces the list, so
+ * leaving the earlier ones out would take them back): the manager confirms or changes it. A plain call ticks nothing new.
+ */
+const ticked = (ask: ManagerAskCode | null, already: ManagerAllowCode[]): ManagerAllowCode[] => {
+  const asked = ask && ask !== 'CALLED' && (MANAGER_ALLOW_CODES as readonly string[]).includes(ask) ? [ask as ManagerAllowCode] : [];
+  return MANAGER_ALLOW_CODES.filter((c) => already.includes(c) || asked.includes(c));
+};
 
 /**
  * A manager allows what the munshi asked for (docs/28 O8-O11): the munshi then finishes the checkout. It lasts
@@ -27,6 +32,7 @@ export function AllowDialog({
   onOpenChange,
   title,
   ask,
+  already,
   onAllow,
 }: {
   open: boolean;
@@ -34,16 +40,19 @@ export function AllowDialog({
   /** What is being allowed: the dispatch note and the truck. */
   title: string;
   ask: ManagerAskCode | null;
+  /** What a manager has already allowed on it today. */
+  already: ManagerAllowCode[];
   onAllow: (allows: ManagerAllowCode[]) => Promise<void>;
 }) {
-  const [picked, setPicked] = useState<ManagerAllowCode[]>(ticked(ask));
+  const [picked, setPicked] = useState<ManagerAllowCode[]>(ticked(ask, already));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (open) {
-      setPicked(ticked(ask));
+      setPicked(ticked(ask, already));
       setError(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, ask]);
 
   async function submit() {

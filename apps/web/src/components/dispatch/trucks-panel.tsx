@@ -13,6 +13,7 @@ export interface TruckLine {
   lot_number: string;
   marka: string | null;
   billing_party: { id: string; name: string };
+  book_type?: string;
   quantity_withdrawn_bags: number | null;
   /** The withdrawal's date: one before today may be a booking left from an earlier visit of this plate. */
   outbound_date?: string;

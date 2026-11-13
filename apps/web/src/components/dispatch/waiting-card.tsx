@@ -57,17 +57,28 @@ export function WaitingCard({
   if (rows.length === 0) return null;
   const today = localIsoDate();
   const before = (r: WaitingRow) => r.outbound_date < today;
-  const isAllowed = (r: WaitingRow) => r.allows.length > 0;
+  // Settled, not merely allowed: a newer call, or a rule that has started failing, puts the row back among those that wait.
+  const isAllowed = (r: WaitingRow) => r.settled;
   // A called row keeps its place at the top; only an uncalled one goes to the "Booked before today" group.
   const isOld = (r: WaitingRow) => !isAllowed(r) && !r.asked_at && before(r);
   const truckOf = (r: WaitingRow) =>
     r.vehicle_number
       ? trucks.find((t) => checkedOutWhole(t) && normalizePlate(t.vehicle_number) === normalizePlate(r.vehicle_number!))
       : undefined;
-  // What an allowance covers: this withdrawal, or every ready line of the truck it rides on.
+  // What an allowance covers: this withdrawal, or the ready lines of the truck it rides on that are this party's and
+  // book's. A cheque or credit is the (party, book) group's, so it never reaches another party's bills on the truck.
   const idsOf = (r: WaitingRow) => {
     const truck = truckOf(r);
-    return truck ? truck.lines.filter((l) => l.status === 'PENDING' || l.status === 'WEIGHED').map((l) => l.outbound_id) : [r.id];
+    const mine = truck?.lines.find((l) => l.outbound_id === r.id);
+    if (!truck || !mine) return [r.id];
+    return truck.lines
+      .filter(
+        (l) =>
+          (l.status === 'PENDING' || l.status === 'WEIGHED') &&
+          l.billing_party.id === mine.billing_party.id &&
+          (l.book_type ?? null) === (mine.book_type ?? null),
+      )
+      .map((l) => l.outbound_id);
   };
 
   const item = (r: WaitingRow) => {
@@ -162,6 +173,7 @@ export function WaitingCard({
           onOpenChange={(o) => !o && setAllowing(null)}
           title={`${allowing.dispatch_note_number ?? allowing.lot_number}${allowing.vehicle_number ? ` · ${allowing.vehicle_number}` : ''}`}
           ask={allowing.ask_code}
+          already={allowing.allows}
           onAllow={(allows) => onAllow(idsOf(allowing), allows)}
         />
       )}

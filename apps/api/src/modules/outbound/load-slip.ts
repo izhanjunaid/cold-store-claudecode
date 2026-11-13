@@ -102,7 +102,8 @@ export async function buildLoadSlip(
   // What each party still owes on these bills, and who let it leave owing. Once the truck has left,
   // the gate's own record: the standing approval it went out on, else the manager who authorized the
   // credit there. While it is inside: the party's standing approval when it covers what the party owes,
-  // else whoever dispatched the bill (a manager — the solo door takes no credit an approval does not cover).
+  // else the manager who allowed it to a munshi (credit_allowed_by, stamped at the checkout), else whoever dispatched
+  // the bill (a manager: the solo door takes credit only on a standing approval or a manager's allowance).
   const wentOutOn =
     pass.status === 'CLEARED' && pass.creditApprovalIds.length > 0
       ? await db.partyCreditApproval.findMany({ where: { id: { in: pass.creditApprovalIds } }, select: { partyId: true, approvedBy: true } })
