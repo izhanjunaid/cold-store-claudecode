@@ -1,6 +1,15 @@
 # ColdChain — Build Progress
 
 ## Current Status
+- **C3 part 4 — Allow (docs/28 O8-O11): a manager allows what the munshi asked for, and the munshi finishes the checkout.**
+  - **Where it stands:** built on `feat/c3-allow`, cut from `main` at `9e8451f`, 2026-11-12 → 13. Migration **0046** (46 in all), expand-only. Not tagged or promoted.
+  - **What changed:**
+    - **The route:** `POST /v1/dispatch/allow` (`outbound.finalize` + `invoices.manage`) allows cheque or transfer, credit on this bill, or leaving charges off on a called withdrawal (every ready line of that party on a truck), or takes it back with an empty list. A row that fails a solo rule cannot be allowed anything (409 `ALLOW_DOES_NOT_HELP`). An allowance is live the Lahore business day it was given.
+    - **The checkout:** `soloAskRefusal()` is the one function for the pre-check and the re-check under the row locks, so a take-back or midnight in between is caught. Allowed credit has no ceiling and stamps `credit_allowed_by`, which the load slip names. A truck's cheque or credit is the (party, book) group's and needs every line allowed; a charge left off is a line's.
+    - **The screens:** the card gets Allow… (a dialog that ticks what was asked), an "Allowed — the desk can finish these" group with Take back, off the count; the sheets open exactly what is allowed; the munshi's row says so. A row leaves the count only when *settled* (allowed today, no newer call, no solo rule failing).
+  - **Verified (2026-11-13, head `5a197a2`):** `final-verify.ps1` ALL=0: api 306 unit, 1,061 integration (4 skipped) on a fresh database, web 524 unit, typecheck, build, guardrails; migration repair on 46 migrations. **E2E on a production build:** `dispatch-solo` 5/5 (incl. the new test: a munshi asks for credit, a manager allows it, the munshi finishes on credit, the slip names the manager), `dispatch-desk` 3/3, `dispatch-truck` 2/2, `gate-count` 3/3. **Browser check** (Playwright in real Chromium; the extension subagent stalled; screenshots read by eye): the card, the dialog, the allowed group with Take back, the munshi's sheet with cheque, transfer and wallet open. Every piece was written test first; the under-lock re-check is proved by a held-row test and a removed-check mutation.
+  - **Whole-branch review (Opus):** 0 Critical, 2 Important, both fixed test first: a row left the count even after a newer call or a failing rule (now `settled`), and Allow on a multi-party truck covered every party's lines (now one party's). Minors are deferred at the end of docs/28 part 4.
+  - **For the owner:** this closes the cash-handover limit for allowed checkouts (the cash is in the munshi's own handover). The gate still needs a manager's credit OK for a truck leaving on credit without a standing approval (O9).
 - **C3 leftovers (docs/28 "Leftovers closed", O12, O13): every minor deferred after the three C3 reviews, closed in one PR.**
   - **Where it stands:** built on `feat/c3-leftovers`, cut from `main` at `4e101df`, 2026-11-10. No migration (still 45). Not tagged or promoted.
   - **What changed:**
