@@ -1,4 +1,4 @@
-import { GATE_COUNT_TRIES, MANAGER_REASON_TEXT, type ManagerReasonCode } from '@coldchain/shared';
+import { GATE_COUNT_TRIES, MANAGER_ASK_TEXT, MANAGER_REASON_TEXT, type ManagerAskCode, type ManagerReasonCode } from '@coldchain/shared';
 
 export class AppError extends Error {
   constructor(
@@ -170,6 +170,17 @@ export const Errors = {
       409,
       undefined,
       { reason_code: code },
+    ),
+  // A manager tried to allow more than the munshi asked for (docs/28 O8). `ask_code` is the munshi's own call, null if there was none.
+  ALLOW_NOT_ASKED: (ask: ManagerAskCode | null) =>
+    new AppError(
+      'ALLOW_NOT_ASKED',
+      ask === null
+        ? 'The munshi has not called a manager on this withdrawal: there is nothing to allow'
+        : `The munshi asked for ${MANAGER_ASK_TEXT[ask]}: allow that, not more`,
+      409,
+      undefined,
+      { ask_code: ask },
     ),
   // A call to a manager, or an allowance, on withdrawals none of which is still booked or weighed in this facility.
   OUTBOUND_NOT_WAITING: () =>

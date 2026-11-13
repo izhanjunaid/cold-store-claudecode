@@ -1054,7 +1054,7 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
     const gone = await weighed(10, { date: businessDate(), plate: 'LHR-7103' });
     expect((await checkout(gone.id, cash(data(await preview(gone.id)).total_pkr))).statusCode).toBe(200);
 
-    const mixed = await allow([live.id, gone.id], ['CREDIT']);
+    const mixed = await allow([live.id, gone.id], ['CHEQUE_OR_TRANSFER']);
     expect(mixed.statusCode, mixed.body).toBe(200);
     expect(data(mixed).allowed).toBe(1);
     expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: gone.id } })).managerAllows).toEqual([]);
@@ -1098,7 +1098,7 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
 
   it('taking it back clears it', async () => {
     const b = await calledToday('LHR-7107');
-    expect((await allow([b.id], ['CREDIT'])).statusCode).toBe(200);
+    expect((await allow([b.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
     expect((await allow([b.id], [])).statusCode).toBe(200);
     expect(await prisma.outboundEvent.findUniqueOrThrow({ where: { id: b.id } })).toMatchObject({
       managerAllows: [],
@@ -1186,7 +1186,7 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
   });
 
   it('allowing one thing lifts only that thing', async () => {
-    const b = await calledToday('LHR-7135', 'LEAVE_CHARGE_OFF');
+    const b = await calledToday('LHR-7135', 'CALLED'); // a plain call: the manager chooses what to allow
     expect((await allow([b.id], ['CHEQUE_OR_TRANSFER', 'CREDIT'])).statusCode).toBe(200);
     const full = data(await preview(b.id, operatorToken)).total_pkr as number;
     refused(await checkout(b.id, cash(full - 200, { skip_service_charge_ids: [loadingChargeId] }), operatorToken), 'SKIP_CHARGE');
@@ -1210,7 +1210,7 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
     const second = await calledToday('LHR-7151');
     const old = await calledToday('LHR-7152');
     expect((await allow([second.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
-    expect((await allow([old.id], ['CREDIT'])).statusCode).toBe(200);
+    expect((await allow([old.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
     await prisma.outboundEvent.update({ where: { id: old.id }, data: { managerAllowedAt: longAgo(3) } });
 
     const { rows, total, listed } = await waiting();
@@ -1228,6 +1228,33 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
     expect(listed).toBe(rows.length);
     expect(total).toBe(rows.filter((r) => r.allows.length === 0).length);
     expect(total).toBe(listed - 1);
+  });
+
+  it('a manager allows only what the munshi asked for: another thing is refused, a plain call lets them choose, an uncalled row has nothing to allow (O8)', async () => {
+    // Asked for credit: a cheque, or a charge left off, is not what was asked for.
+    const credit = await calledToday('LHR-7195', 'CREDIT');
+    for (const extra of [['CHEQUE_OR_TRANSFER'], ['CREDIT', 'LEAVE_CHARGE_OFF']]) {
+      const res = await allow([credit.id], extra);
+      const error = JSON.parse(res.body).error;
+      expect([res.statusCode, error.code, error.details]).toEqual([409, 'ALLOW_NOT_ASKED', { ask_code: 'CREDIT' }]);
+    }
+    expect((await prisma.outboundEvent.findUniqueOrThrow({ where: { id: credit.id } })).managerAllows).toEqual([]);
+    expect((await allow([credit.id], ['CREDIT'])).statusCode).toBe(200);
+
+    // The buyer then asks for a cheque too: it can be allowed, and what was allowed before is kept (an allowance replaces the list).
+    expect((await ask([credit.id], 'CHEQUE_OR_TRANSFER')).statusCode).toBe(200);
+    expect((await allow([credit.id], ['CREDIT', 'LEAVE_CHARGE_OFF'])).statusCode).toBe(409);
+    expect((await allow([credit.id], ['CREDIT', 'CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
+
+    // A plain call says nothing in particular: the manager chooses what to allow.
+    const plain = await calledToday('LHR-7196', 'CALLED');
+    expect((await allow([plain.id], ['CHEQUE_OR_TRANSFER', 'LEAVE_CHARGE_OFF'])).statusCode).toBe(200);
+
+    // A withdrawal nobody called about has nothing to allow; taking back is always possible.
+    const quiet = await booked(10, { date: businessDate(), plate: 'LHR-7197' });
+    const nothing = await allow([quiet.id], ['CREDIT']);
+    expect([nothing.statusCode, JSON.parse(nothing.body).error.code, JSON.parse(nothing.body).error.details]).toEqual([409, 'ALLOW_NOT_ASKED', { ask_code: null }]);
+    expect((await allow([quiet.id], [])).statusCode).toBe(200);
   });
 
   it('a call made after the allowance puts the row back on what waits: the buyer changed what they want', async () => {
@@ -1260,7 +1287,7 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
   });
 
   it('the preview names what is allowed and by whom, and carries no figure', async () => {
-    const b = await calledToday('LHR-7160');
+    const b = await calledToday('LHR-7160', 'CALLED');
     expect((await allow([b.id], ['CHEQUE_OR_TRANSFER', 'LEAVE_CHARGE_OFF'])).statusCode).toBe(200);
     const solo = data(await preview(b.id, operatorToken)).solo;
     expect(Object.keys(solo).sort()).toEqual(['allowed', 'allowed_at', 'allowed_by_name', 'allows', 'credit_available']);
@@ -1301,12 +1328,12 @@ describe('a manager allows what the munshi asked for (docs/28 O8-O11)', () => {
 
   it('the desk list carries what is allowed, today only', async () => {
     const b = await calledToday('LHR-7170');
-    expect((await allow([b.id], ['CREDIT'])).statusCode).toBe(200);
+    expect((await allow([b.id], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
     const queue = async () =>
       data<Allowed[]>(
         await app.inject({ method: 'GET', url: '/v1/outbound-events?status=PENDING,WEIGHED', headers: authHeaders(operatorToken) }),
       ).find((r) => r.id === b.id)!;
-    expect((await queue()).allows).toEqual(['CREDIT']);
+    expect((await queue()).allows).toEqual(['CHEQUE_OR_TRANSFER']);
     await prisma.outboundEvent.update({ where: { id: b.id }, data: { managerAllowedAt: longAgo(2) } });
     expect((await queue()).allows).toEqual([]);
   });

@@ -24,6 +24,13 @@ const ticked = (ask: ManagerAskCode | null, already: ManagerAllowCode[]): Manage
 };
 
 /**
+ * What the manager may choose from (docs/28 O8): the munshi's ask, and what is already allowed. After a plain call that
+ * asked for nothing in particular, all three; the manager decides.
+ */
+const choices = (ask: ManagerAskCode | null, already: ManagerAllowCode[]): readonly ManagerAllowCode[] =>
+  ask === 'CALLED' ? MANAGER_ALLOW_CODES : MANAGER_ALLOW_CODES.filter((c) => c === ask || already.includes(c));
+
+/**
  * A manager allows what the munshi asked for (docs/28 O8-O11): the munshi then finishes the checkout. It lasts
  * today; it covers only these things, never a rule the owner keeps for a manager. Errors stay in the dialog.
  */
@@ -78,7 +85,7 @@ export function AllowDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          {MANAGER_ALLOW_CODES.map((code) => (
+          {choices(ask, already).map((code) => (
             <div key={code} className="flex items-center gap-2">
               <Checkbox
                 id={`allow-${code}`}

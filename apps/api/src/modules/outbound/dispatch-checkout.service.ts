@@ -10,6 +10,7 @@ import {
   TRUCK_MAX_LINES,
   type AllowRequestType,
   type AskManagerRequestType,
+  type ManagerAskCode,
   type DispatchAndCollectRequestType,
   type ManagerAllowCode,
   type ManagerReasonCode,
@@ -209,11 +210,20 @@ export class DispatchCheckoutService {
       const ctx = await loadSoloContext(this.prisma, facilityId);
       const rows = await this.prisma.outboundEvent.findMany({
         where: { id: { in: ids }, ...waiting },
-        select: { outboundDate: true, lot: { select: { bookType: true } } },
+        select: { outboundDate: true, managerAskCode: true, managerAllows: true, managerAllowedAt: true, lot: { select: { bookType: true } } },
       });
       for (const r of rows) {
         const refusal = soloRefusal(ctx, r.lot, r.outboundDate);
         if (refusal) throw Errors.ALLOW_DOES_NOT_HELP(refusal);
+      }
+      // Only what the munshi asked for (docs/28 O8): a code is allowed if it is the ask, or already allowed today (an
+      // allowance replaces the list, so what was allowed before is kept), or if the call was a plain one that said
+      // nothing in particular (the manager chooses). A row nobody called about has nothing to allow.
+      for (const r of rows) {
+        const live = liveAllows(r);
+        for (const code of allows) {
+          if (!live.has(code) && r.managerAskCode !== 'CALLED' && r.managerAskCode !== code) throw Errors.ALLOW_NOT_ASKED(r.managerAskCode as ManagerAskCode | null);
+        }
       }
     }
     const allowedAt = allows.length > 0 ? new Date() : null;

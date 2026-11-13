@@ -851,6 +851,9 @@ describe('plates take 30 characters', () => {
 // (party, book) group's and needs every line of the group allowed; leaving a charge off is a line's.
 describe('a manager allows what the munshi asked for — a truck (docs/28 O8-O11)', () => {
   const allow = (ids: string[], allows: string[], token = managerToken) => call('POST', '/v1/dispatch/allow', token, { outbound_ids: ids, allows });
+  /** The munshi's call from the truck sheet stamps every line with what the buyer wants. */
+  const callFor = async (ids: string[], ask: string) =>
+    expect((await call('POST', '/v1/dispatch/ask-manager', operatorToken, { outbound_ids: ids, ask_code: ask })).statusCode).toBe(200);
   const userRow = (email: string) => prisma.user.findFirstOrThrow({ where: { email } });
   const refused = (r: { statusCode: number; body: string }, reason: string) => {
     const error = JSON.parse(r.body).error;
@@ -873,6 +876,7 @@ describe('a manager allows what the munshi asked for — a truck (docs/28 O8-O11
     const pass = await arrive('LHR-7201');
     const o1 = await onTruck(await lot(partyA, 20), 'LHR-7201', 20);
     const o2 = await onTruck(await lot(partyA, 10), 'LHR-7201', 10);
+    await callFor([o1, o2], 'CHEQUE_OR_TRANSFER');
     const req = withCheques(requestFrom(await truckPreview(pass, operatorToken)));
     refused(await checkoutTruck(pass, req, operatorToken), 'PAYMENT_MODE');
 
@@ -894,6 +898,7 @@ describe('a manager allows what the munshi asked for — a truck (docs/28 O8-O11
     const pass = await arrive('LHR-7202');
     const oa = await onTruck(await lot(partyA, 20), 'LHR-7202', 20);
     const ob = await onTruck(await lot(partyB, 15), 'LHR-7202', 15);
+    await callFor([oa, ob], 'CREDIT');
     const req = requestFrom(await truckPreview(pass, operatorToken), (g) => (g.billing_party.id === partyB ? 'CREDIT' : 'CASH'));
     refused(await checkoutTruck(pass, req, operatorToken), 'NO_STANDING_CREDIT');
 
@@ -919,6 +924,7 @@ describe('a manager allows what the munshi asked for — a truck (docs/28 O8-O11
       const pass = await arrive('LHR-7203');
       const o1 = await onTruck(await lot(partyA, 20), 'LHR-7203', 20);
       const o2 = await onTruck(await lot(partyA, 10), 'LHR-7203', 10);
+      await callFor([o1, o2], 'LEAVE_CHARGE_OFF');
       const p = await truckPreview(pass, operatorToken);
       const requestSkipping = (id: string) => {
         const req = requestFrom(p);
@@ -950,6 +956,7 @@ describe('a manager allows what the munshi asked for — a truck (docs/28 O8-O11
     const pass = await arrive('LHR-7204');
     const o1 = await onTruck(await lot(partyA, 20), 'LHR-7204', 20);
     const o2 = await onTruck(await lot(partyA, 10), 'LHR-7204', 10);
+    await callFor([o1, o2], 'CHEQUE_OR_TRANSFER');
     expect((await allow([o1, o2], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
     const req = withCheques(requestFrom(await truckPreview(pass, operatorToken)));
     expect((await allow([o2], [])).statusCode).toBe(200); // taken back on one line
@@ -961,6 +968,7 @@ describe('a manager allows what the munshi asked for — a truck (docs/28 O8-O11
     const pass = await arrive('LHR-7207');
     const o1 = await onTruck(await lot(partyA, 20), 'LHR-7207', 20);
     const o2 = await onTruck(await lot(partyA, 10), 'LHR-7207', 10);
+    await callFor([o1, o2], 'CHEQUE_OR_TRANSFER');
     expect((await allow([o1, o2], ['CHEQUE_OR_TRANSFER'])).statusCode).toBe(200);
     const req = withCheques(requestFrom(await truckPreview(pass, operatorToken)));
 
@@ -1001,6 +1009,7 @@ describe('a manager allows what the munshi asked for — a truck (docs/28 O8-O11
     await arrive('LHR-7206');
     const o1 = await onTruck(await lot(partyA, 20), 'LHR-7206', 20);
     const o2 = await onTruck(await lot(partyA, 10), 'LHR-7206', 10);
+    await callFor([o1, o2], 'CREDIT');
     for (const blocked of [o1, o2]) {
       const other = blocked === o1 ? o2 : o1;
       let release!: () => void;
@@ -1045,6 +1054,7 @@ describe('the load slip names who let credit go (docs/28 O9)', () => {
   const onCredit = async (plate: string) => {
     const pass = await arrive(plate);
     const id = await onTruck(await lot(partyB, 15), plate, 15);
+    expect((await call('POST', '/v1/dispatch/ask-manager', operatorToken, { outbound_ids: [id], ask_code: 'CREDIT' })).statusCode).toBe(200);
     return { pass, id };
   };
 

@@ -710,14 +710,14 @@ describe('Dispatch Desk — Allow, on the waiting card', () => {
     fireEvent.click(within(row).getByRole('button', { name: /^Allow/ }));
 
     const dialog = await screen.findByRole('dialog');
+    // Only what the munshi asked for is offered (docs/28 O8): the server refuses anything more.
     expect(within(dialog).getByRole('checkbox', { name: 'Cheque or transfer' })).toBeChecked();
-    expect(within(dialog).getByRole('checkbox', { name: 'Credit on this bill' })).not.toBeChecked();
-    expect(within(dialog).getByRole('checkbox', { name: 'Leaving charges off' })).not.toBeChecked();
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Credit on this bill' }));
+    expect(within(dialog).queryByRole('checkbox', { name: 'Credit on this bill' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('checkbox', { name: 'Leaving charges off' })).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Allow' }));
 
     await waitFor(() => expect(allowPosts()).toHaveLength(1));
-    expect(allowPosts()[0]![1]).toEqual({ method: 'POST', body: { outbound_ids: ['w-ch'], allows: ['CHEQUE_OR_TRANSFER', 'CREDIT'] } });
+    expect(allowPosts()[0]![1]).toEqual({ method: 'POST', body: { outbound_ids: ['w-ch'], allows: ['CHEQUE_OR_TRANSFER'] } });
   });
 
   it('a call with no particular ask ticks nothing, and Allow waits for a choice', async () => {
@@ -726,6 +726,10 @@ describe('Dispatch Desk — Allow, on the waiting card', () => {
     const row = (await within(await card()).findByText('DN-C')).closest('li') as HTMLElement;
     fireEvent.click(within(row).getByRole('button', { name: /^Allow/ }));
     const dialog = await screen.findByRole('dialog');
+    // A plain call says nothing in particular: all three are offered, none ticked, and the manager chooses.
+    for (const name of ['Cheque or transfer', 'Credit on this bill', 'Leaving charges off']) {
+      expect(within(dialog).getByRole('checkbox', { name })).not.toBeChecked();
+    }
     expect(within(dialog).getByRole('button', { name: 'Allow' })).toBeDisabled();
     fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Leaving charges off' }));
     expect(within(dialog).getByRole('button', { name: 'Allow' })).toBeEnabled();
@@ -771,6 +775,7 @@ describe('Dispatch Desk — Allow, on the waiting card', () => {
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('checkbox', { name: 'Credit on this bill' })).toBeChecked();
     expect(within(dialog).getByRole('checkbox', { name: 'Cheque or transfer' })).toBeChecked();
+    expect(within(dialog).queryByRole('checkbox', { name: 'Leaving charges off' })).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Allow' }));
     await waitFor(() => expect(allowPosts()).toHaveLength(1));
     expect(allowPosts()[0]![1].body.allows.sort()).toEqual(['CHEQUE_OR_TRANSFER', 'CREDIT']);
