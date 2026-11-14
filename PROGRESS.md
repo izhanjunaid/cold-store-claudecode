@@ -1,8 +1,35 @@
 # ColdChain — Build Progress
 
 ## Current Status
+- **v0.9.0 tagged on 2026-11-13 (`main` at `cd4f1a1`). NOT promoted: `:stable` is still v0.6.2, and promoting is the owner's call.**
+  - **The release:** the owner lifted owner-only tagging for this one tag (2026-11-10). The Release workflow (run 43411741862) passed all four jobs: test; publish of `:v0.9.0` and `:latest`; the smoke test of the images; and the package, published as the GitHub Release "ColdChain v0.9.0" with `ColdChain-v0.9.0.zip`. 46 migrations. The last Promote to stable ran on 2026-10-10 (v0.6.2).
+  - **What a promote would ship (everything since v0.6.2):**
+    - v0.7.0 custom tariffs (#42);
+    - v0.8.0 fast dispatch (#43);
+    - C2 truck checkout (#44);
+    - weight optional (#45);
+    - C3 parts 1–4 and the leftovers (#46–#50).
+    - The entries below down to v0.8.0 that say "not tagged" are all in v0.9.0.
+  - **Before anyone promotes:**
+    1. **The tariff-setup redesign:** the client found v0.7.0's setup form confusing, and the redesign waits on the client's information.
+    2. **Cancel forgotten old bookings** with the docs/28 "Before promoting" query. With one-person dispatch off, every booked withdrawal is on the managers' waiting list from day one.
+    3. **Ask the client to try a real print** after the promote. PDF printing was broken on a client box until #47.
+    4. **Tell the owner what changes on the box with no switch:**
+       - standing credit counts every uncleared cheque of the party;
+       - the guard sees no weights and no money owed (a refused release says only "Payment pending");
+       - a truck carrying a booked, undispatched withdrawal cannot leave;
+       - three wrong counts lock a truck until a manager releases it;
+       - weights still show but are no longer required.
+
+       Every new feature switch starts off. Cash tracking goes on before solo dispatch.
+    5. Known limits and deferred minors: docs/26 "Known limits" and the end of docs/28.
 - **C3 part 4 — Allow (docs/28 O8-O11): a manager allows what the munshi asked for, and the munshi finishes the checkout.**
-  - **Where it stands:** built on `feat/c3-allow`, cut from `main` at `9e8451f`, 2026-11-12 → 13. Migration **0046** (46 in all), expand-only. Not tagged or promoted.
+  - **Where it stands:** on `main` since 2026-11-13, PR #50 (squash `cd4f1a1`), in v0.9.0. Migration **0046** (46 in all), expand-only.
+  - **Codex review's P2, fixed before the merge:** an allowance is limited to what the munshi asked for (409 `ALLOW_NOT_ASKED`; after a plain call the manager chooses). Re-verified on the merged head `4a7330f`:
+    - api: 306 unit, 1,062 integration (4 skipped);
+    - web: 524 unit;
+    - e2e: `dispatch-solo` 5/5, `dispatch-desk` 3/3, `dispatch-truck` 2/2;
+    - CI `build-and-test` green.
   - **What changed:**
     - **The route:** `POST /v1/dispatch/allow` (`outbound.finalize` + `invoices.manage`) allows cheque or transfer, credit on this bill, or leaving charges off on a called withdrawal (every ready line of that party on a truck), or takes it back with an empty list. A row that fails a solo rule cannot be allowed anything (409 `ALLOW_DOES_NOT_HELP`). An allowance is live the Lahore business day it was given.
     - **The checkout:** `soloAskRefusal()` is the one function for the pre-check and the re-check under the row locks, so a take-back or midnight in between is caught. Allowed credit has no ceiling and stamps `credit_allowed_by`, which the load slip names. A truck's cheque or credit is the (party, book) group's and needs every line allowed; a charge left off is a line's.
@@ -11,7 +38,7 @@
   - **Whole-branch review (Opus):** 0 Critical, 2 Important, both fixed test first: a row left the count even after a newer call or a failing rule (now `settled`), and Allow on a multi-party truck covered every party's lines (now one party's). Minors are deferred at the end of docs/28 part 4.
   - **For the owner:** this closes the cash-handover limit for allowed checkouts (the cash is in the munshi's own handover). The gate still needs a manager's credit OK for a truck leaving on credit without a standing approval (O9).
 - **C3 leftovers (docs/28 "Leftovers closed", O12, O13): every minor deferred after the three C3 reviews, closed in one PR.**
-  - **Where it stands:** built on `feat/c3-leftovers`, cut from `main` at `4e101df`, 2026-11-10. No migration (still 45). Not tagged or promoted.
+  - **Where it stands:** on `main` since 2026-11-12, PR #49 (squash `9e8451f`), in v0.9.0. No migration (still 45).
   - **What changed:**
     - **Gate:** a truck inside lists the plate's wrong counts since its last release, the rows its lock counts (a pass that has left keeps its own); the guard's "Try N of 3." drops "recount" for a truck nothing was booked for; several held dispatch notes read in the plural; a dispatch note named on a truck that carries other lots is refused, 409 `GATE_NAMED_LINE_ON_FULL_TRUCK` (owner decision O12); the one-step `POST /v1/gate-passes/outward` is deleted (O13).
     - **Papers:** a PDF fetch refreshes an expired sign-in once (`refreshSession()`, shared with `apiFetch`); the transfer acknowledgment page shows its error once and frees its paper; `check-business-date.mjs` finds its root under a path with a space.
@@ -28,7 +55,7 @@
     - **Web:** a "Waiting for a manager (N)" card heads the desk (old bookings under "Booked before today" with Cancel; a multi-lot truck opens the truck checkout) and `NavItem.badge` puts the count beside Dispatch Desk, both for holders of the manager keys only. The munshi's desk row and both sheets offer the calls; a stale-preview refusal offers the matching call.
   - **Verified (2026-11-08, review-fixed head `886e229`):** `final-verify.ps1` ALL=0: api 291 unit, 1,029 integration (4 skipped) on a fresh database, web 487 unit, typecheck, build, guardrails; migration repair on 45 migrations. **E2E on a production build:** `dispatch-solo` 4/4 (incl. the new call-then-finish test; its old `'Cheque'` locator matched the new "Cheque or transfer" button and is now exact), `dispatch-desk` 3/3, `dispatch-truck` 2/2, `gate-count` 3/3, `season-aslam` 1/1. **Browser check** (Playwright in real Chromium, the Chrome extension was not connected; screenshots read by eye): the munshi's call on the desk row and from the sheet, the manager's count, card, "Booked before today" and Cancel from the card, on solo off and solo on.
   - **Whole-branch review (Opus):** 0 Critical, 1 Important, fixed with a failing test first (`886e229`): a called booking from an earlier day sat at the top of the card with no date and no Cancel, and "Called 14:05" read as today's. The minors it deferred (the badge's accessible name, the withdrawal page's desk hint, and three small test and copy gaps) were closed on 2026-11-10 (the leftovers entry above); two false docs statements the review found were corrected.
-  - **For the owner:** with one-person dispatch off (how a client box starts) every booked withdrawal waits, so on day one the count includes forgotten old bookings; cancel them first (docs/28 "Before promoting"). A manager who checks out a munshi's cash counts that cash in their own handover; "Allow" is the fix and is deferred.
+  - **For the owner:** with one-person dispatch off (how a client box starts) every booked withdrawal waits, so on day one the count includes forgotten old bookings; cancel them first (docs/28 "Before promoting"). A manager who checks out a munshi's cash counts that cash in their own handover; "Allow" fixed that (part 4 above).
 - **C3 part 2 — papers (docs/28): every PDF button opens its tab on the click, PDFs load from the right address in production, and the gate's manager box takes a dispatch note number.**
   - **Where it stands:** built on `feat/c3-papers`, cut from `main` at `e2102f4`, 2026-11-06 → 07. Web only: no API change, no migration (still 44). Part 3 (the manager queue) is designed in docs/28 and not built.
   - **A find while planning (fixed): PDF printing very likely failed on the live box.** A production build sets `NEXT_PUBLIC_API_URL=""` (one address behind Caddy, only port 80 published). `api-client.ts` reads it with `??`, so the app worked; all eleven PDF handlers read it with `||`, which turned `""` into `localhost:3001`, which nothing serves on a client box. The parchi handler had this since v0.6.2 and swallowed its error. Checked in the shipped chunks of a build with the variable empty: no `localhost:3001` and no raw variable read left.
