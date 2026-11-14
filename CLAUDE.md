@@ -1,119 +1,102 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code in this repository. This file is the short core that every session loads. Area detail (the why, the history, the exact helpers) lives in `.claude/rules/*.md` and loads by itself when a matching file is read or edited.
 
 ## Project Overview
 
-**ColdChain** is an operational management platform for agricultural cold storage facilities integrated into Pakistan's mandi (wholesale market) supply chain. MVP targets a single facility in Lahore. The system is **fully implemented and in production-hardening**: 13 development phases have shipped (party/chamber, inbound/lots, ownership transfer, outbound/dispatch, billing, financial ledger, full accounting, gate pass/peshgi, reporting, admin/polish, configurability, production deployment + accounting audit remediation). `docs/01-15` are the original design spec and remain the reference for intent; `docs/16` is a post-implementation audit. **`PROGRESS.md` is the live source of truth for current phase, active task, and blockers — read it before assuming what is or isn't built. `TESTING.md` has test strategy and live pass counts.**
+**ColdChain** is an operational management platform for agricultural cold storage facilities in Pakistan's mandi (wholesale market) supply chain. One facility in Lahore runs it in production. The system is fully built and in production-hardening.
+
+- **`PROGRESS.md` is the live source of truth** for the current phase, active task and blockers. Read only its `## Current Status` section (the first ~245 lines; the file is 150 KB). **`TESTING.md`** has the test strategy and live pass counts.
+- `docs/01-15` are the original design spec and remain the reference for intent. Later docs record audits and features as built (see the map below).
 
 ## Architecture (as built)
 
-- **Monorepo layout**: `apps/api` (Fastify, port 3001), `apps/web` (Next.js, port 3000), `packages/db` (Prisma schema + migrations), `packages/shared` (Zod schemas/types shared by api+web), `packages/ui` (shared shadcn component library, ~126 components)
-- **Layered backend**: Controllers → Services → Repositories → Prisma, organized by domain under `apps/api/src/modules/<domain>/`
-- **Multi-tenant**: every table namespaced by `facility_id`; requests scoped via `X-Facility-ID` header
-- **Audit-first**: append-only `audit_log`; DB-level triggers additionally enforce immutability on posted journal entries and financial tables (see Gotchas)
-- **Dual ledger**: `book_type` enum (`KATCHI` vs `PACCI`) — KATCHI is mutable informal records (write: OWNER only, read: MANAGER+), PACCI is immutable official records and the default everywhere
-- **REST API versioned**: all endpoints under `/v1/`
-- **RBAC roles**: OWNER, MANAGER, ACCOUNTANT, OPERATOR, SECURITY (see `docs/07_user_roles_permissions.md`)
+- **Monorepo**: `apps/api` (Fastify, port 3001), `apps/web` (Next.js, port 3000), `packages/db` (Prisma schema + migrations), `packages/shared` (Zod schemas/types shared by api + web). The shadcn components live in `apps/web/src/components/ui`; `packages/ui` is an empty stub.
+- **Layered backend**: Controllers → Services → Repositories → Prisma, by domain under `apps/api/src/modules/<domain>/`.
+- **Multi-tenant**: every table namespaced by `facility_id`; requests scoped via the `X-Facility-ID` header.
+- **Audit-first**: append-only `audit_log`; DB triggers also make posted journal entries and financial tables immutable.
+- **Dual ledger**: `book_type` enum. KATCHI is mutable informal records (write: OWNER only, read: MANAGER+). PACCI is immutable official records and the default everywhere.
+- **REST API**: all endpoints under `/v1/`.
+- **RBAC roles**: OWNER, MANAGER, ACCOUNTANT, OPERATOR, SECURITY (`docs/07_user_roles_permissions.md`).
 
-## Gotchas
+## Rules that apply everywhere
 
-- **"Room" in the UI = `chamber` in code/DB/API.** Phase 14 restructured chambers as Rooms containing Racks, but only user-facing labels changed — routes stay `/v1/chambers`, the Prisma model stays `Chamber`, and settings keys stay `chamber_capacity_warning_pct`. Racks live in `racks` / `lot_rack_placements` / `lot_movements` (migration 0005): a lot's bags may span several racks of its room, unallocated bags are "Unplaced", rack capacity only warns (hard capacity stays at room level), and inter-room moves are whole-lot only (single `Lot.chamberId` FK is authoritative).
+Each line is the rule; the named rule file has the reasons and the detail. Read the rule file before working in its area if it has not loaded.
 
-- **Route authorization is the permission matrix, not `requireMinRole`.** Phase 15 replaced the numeric role hierarchy with an owner-configurable registry (51 keys as of fast-dispatch Phase C1) (`packages/shared/src/permissions.ts`); guard routes with `app.requirePermission('<key>')` (CI fails on any `requireMinRole(` in `apps/api/src/modules`). Each key's `defaultMinRole` mirrors the old threshold, so defaults are behaviour-identical. A few controls stay fixed seniority rules **outside** the matrix and still use `roleAtLeast` (`apps/api/src/plugins/auth.ts`): KATCHI read/write, backdating/future dates/third-party release, booking a plate that is no truck inside the gate when `book_only_trucks_inside` is on (docs/28 D2), and at the gate credit auth, mismatch overrides, the no-self-release exemption and never being locked out after three wrong counts (D4). Owner overrides live in the hidden `settings.permissions` key (with `notifications_state`) — both stripped from facility responses. Web gates with `can(user, key)` (`apps/web/src/lib/permissions.ts`); `hasMinRole` survives only for those fixed rules (the KATCHI toggles, the withdrawal form's third-party checkbox and trucks-inside rule, the gate's manager credit/override controls).
+**Naming**
+- **"Room" in the UI = `chamber` in code, DB and API.** Only labels changed: routes stay `/v1/chambers`, the model stays `Chamber`, settings keys stay `chamber_*`. Racks live in `racks` / `lot_rack_placements` / `lot_movements`. A lot's bags may span several racks of its room, unallocated bags are "Unplaced", rack capacity only warns (hard capacity is at room level), and inter-room moves are whole-lot only (`Lot.chamberId` is authoritative).
 
-- **Advisory locks must go through `advisoryXactLock()`** (`apps/api/src/common/advisory-lock.ts`). Prisma's `$queryRaw` cannot deserialise `void`, so `SELECT pg_advisory_xact_lock(...)` throws — and the workaround that was used everywhere, `SELECT 1 AS _lock WHERE pg_advisory_xact_lock(...) IS NOT NULL OR TRUE`, **acquires no lock at all**: PostgreSQL folds the `OR TRUE` and never evaluates the call. Every document-number generator used it, so numbering was protected only by its unique constraints (phase/20 fixed all ten). CI fails on any raw `pg_advisory_*` outside the helper. When writing a concurrency test, **assert the loser** — the lot-number test asserting "all 5 concurrent creates succeed" stayed green throughout the years the lock did nothing.
+**API** (`.claude/rules/api.md`)
+- Guard routes with `app.requirePermission('<key>')` (registry: `packages/shared/src/permissions.ts`), never `requireMinRole(` (fails CI). A few fixed seniority rules stay outside the matrix and use `roleAtLeast`: KATCHI, backdating, and the gate's manager controls. Web gates with `can(user, key)`.
+- Advisory locks only through `advisoryXactLock()` (`apps/api/src/common/advisory-lock.ts`); a raw `pg_advisory_*` fails CI. In a concurrency test, assert the loser.
+- Raw SQL never touches a row-level-secured table (`users`, `facilities`, `refresh_tokens`, `audit_log`, `otp_codes`); read those through model queries. The integration suite runs as the table owner and cannot show the failure.
+- Server "today" is `businessDate()` (Asia/Karachi, `packages/shared/src/fiscal.ts`), never `setHours(0,0,0,0)` or `toISOString().slice(0,10)`. Web form defaults use `localIsoDate()`. Plates compare through `normalizePlate()`.
 
-- **Raw SQL never touches a row-level-secured table (`users`, `facilities`, `refresh_tokens`, `audit_log`, `otp_codes`).** Their policies read `current_setting('app.facility_id', true)::uuid`, and `plugins/facility-scope.ts` stamps that setting only for model operations and interactive transactions: `$queryRaw` / `$queryRawUnsafe` on the plain client runs without it. Under the restricted app role such a join returns no rows, or throws `22P02` when a pooled connection still holds an empty setting. The integration suite connects as the table owner, who bypasses RLS, so no suite would show it. Read those tables through model queries (`db.user.findMany(...)`), as `attemptsByPlate` does for the gate's counter names; a raw query on gate, outbound or other tables without a policy is fine.
-- **Everything a release needs done to a client's database goes in `packages/db/prisma/deploy.ts`** — never a new hand-run backfill script. That file is what the compose `migrate` one-shot runs (`db:deploy`), and it is the only thing standing between a client box and a permanently wedged migration history: it adopts the phase-13 baseline on pre-rebaseline boxes, clears failed migrations (a single failure otherwise blocks every future update with P3009, forever), runs `migrate deploy`, then calls `syncChartOfAccounts()` to insert accounts the release introduced. New account codes need only a `CHART_OF_ACCOUNTS` entry — the three `backfill-*.ts` scripts this replaced were never run by any updater, so boxes migrated cleanly and then failed at runtime on a missing account. `syncChartOfAccounts` is INSERT-only by design: owners rename and re-parent their own accounts, so it must never upsert.
+**Dispatch and the gate** (`.claude/rules/dispatch-gate.md`)
+- **The gate guard (SECURITY) counts blind.** Any new response field carrying bags, a weight or an amount owed on a truck must be added to `BLIND_KEYS` (`apps/api/src/common/blind-count.ts`), and no error the guard can trigger may spell such a figure out. Web renders these with `formatCount()` / `formatKg()`.
+- Anything that takes bags off a lot subtracts `openReservation()`. Lock order everywhere: gate_passes → outbound_events → lots → placements.
+- A truck is its plate and its load is `openLoads()`; write no other plate query. Bills price through `invoiceTotals()`.
+- **Weight is optional everywhere; never make it required again.** Read a lot's weight only through `recordedKg()`; what may be dispatched is `isReadyToDispatch()`.
+- Credit at the gate is `standingCreditCover()`; solo dispatch rules are `soloRefusal()`. Never fix a munshi refusal by granting `outbound.finalize` / `invoices.manage` / `payments.record`.
 
-- **The updater runs migrations BEFORE swapping app containers** (`compose run --rm migrate`, then `up -d`). There is exactly one: `update.ps1`, run nightly by a Scheduled Task — Windows is the client platform, and `install.ps1` delegates to it so first install and update share one code path. The parallel Linux scripts (`bootstrap.sh`, `update.sh`, `provision-client.sh`, `backup.sh`, `restore.sh`) were **deleted**: nothing ever invoked them, no Linux box exists, and keeping them meant writing every deployment fix twice with only one copy ever tested. Ad-hoc backup/restore is `backup.ps1` (or double-click `backup.bat`) and `restore.ps1`. A database that can't be updated leaves the previous version running instead of taking the store offline. `docker-compose.yml`, `Caddyfile`, `scripts/app-role.sql` and `update.ps1` ride inside the api image and are extracted with `docker cp` on each update, so changing them reaches clients — but they are a **matched pair with the image**, and every rollback path must revert both together (an old api image has no `db:deploy` script, so a new compose file plus an old image never starts). Client boxes track `:stable`, moved only by the manual `promote.yml` workflow; `:latest` moves on every CI release and must not be pointed at a live facility.
+**Accounting** (`.claude/rules/accounting.md`)
+- One of everything, never re-derived: account codes only in `SYSTEM_ACCOUNTS`; post only through `JournalEntryService.postInTransaction`, reverse only through `reverseInTransaction`; statements read `modules/accounting/ledger.ts`; receivables post to the party's `control_account_code`.
+- Test cleanup that touches posted financial rows wraps with `withGuardsDisabled`, only in suite setup or teardown (`beforeAll`/`afterAll`), never inside a test.
 
-- **Trunk is `main`; releases are tag-then-promote.** Branch from `main` → PR → CI green → merge → `git tag vX.Y.Z main && git push origin vX.Y.Z` (that publishes `:vX.Y.Z` + `:latest` and smoke-tests the images) → run the **Promote to stable** workflow, which retags by digest. Client boxes track `:stable` only and pick it up that night; `:latest` moves on every release and must never point at a facility. `main` is protected — no direct pushes, `build-and-test` must pass. This exists because the default branch used to be `phase/00-foundation`, 164 commits behind: `workflow_dispatch` only fires from the default branch (so `promote.yml` was unrunnable) and `ci.yml`'s `main` triggers pointed at a branch that did not exist (so PR CI never ran).
+**Database, updates and releases** (`.claude/rules/database-release.md`)
+- Real migrations are in `packages/db/prisma/migrations/`. `packages/db/migrations/` is a legacy leftover; add nothing there.
+- **Releases are expand-only**: new columns nullable or defaulted, each `ALTER TYPE … ADD VALUE` alone in its file, constraints `NOT VALID` first, drops wait one release.
+- Anything a release must do to a client database goes in `packages/db/prisma/deploy.ts`, never a hand-run script. `syncChartOfAccounts()` is INSERT-only.
+- `docker-compose.yml`, `Caddyfile`, `scripts/app-role.sql` and `update.ps1` ship inside the api image and are a matched pair with it; a rollback reverts both.
+- **Trunk is `main` (protected).** Branch → PR → CI green → squash merge → tag `vX.Y.Z` → **Promote to stable** workflow. Client boxes track `:stable` only; `:latest` must never point at a facility.
+- **CI gates `pnpm build` and the integration suite, not just unit tests.** Run `pnpm build` before calling work done: only `next build` catches a `page.tsx` that exports more than `default` and metadata.
 
-- **CI gates the build and the integration suite, not just unit tests.** `pnpm test` is unit-only (`apps/api/vitest.config.ts` excludes `*.integration.test.ts`), so CI applies migrations via `db:deploy`, seeds, and runs `test:integration` separately — otherwise 530 accounting tests gate nothing. **`pnpm build` is not optional either: only `next build` enforces the App Router rule that a `page.tsx` may export nothing but `default` and its metadata members.** A helper exported for a colocated test kept CI red from phase/22 to phase/26 while typecheck and unit tests stayed green, and would have made a release publish nothing. `scripts/verify-migration-repair.sh` covers `deploy.ts`'s repair path, which no vitest suite can reach — it reproduces the wedged history first and fails if the failure stops reproducing.
+**Web** (`.claude/rules/web.md`)
+- Never run `next build` while `next dev` is up for the same app: they share `apps/web/.next/` and the build blanks the dev server. Recover with `rm -rf apps/web/.next` and restart.
+- Every PDF opens through `openPdf()` (`apps/web/src/lib/open-pdf.ts`), with the tab opened before any `await`. `NEXT_PUBLIC_API_URL` is read with `??`, never `||`.
+- If `node_modules` is hollow after a build on Windows (`Cannot find module 'next/dist/...'`), repair with `pnpm install --frozen-lockfile --force`.
 
-- **`next build` and `next dev` share `apps/web/.next/` — running one while the other is live corrupts the running dev server.** Both scripts point at the same output directory (`apps/web/package.json`), so a `next build` (e.g. the CLAUDE.md-mandated build gate, or a CI-style verification build) kicked off while a `next dev` session is still serving overwrites its manifests mid-flight. The dev server process stays alive and keeps answering requests, but every static chunk 404s and the page renders blank — a symptom (blank page, missing `main-app.js`/`layout.css`) that looks nothing like its cause. Fix: stop the dev server before building, or afterward `rm -rf apps/web/.next` and restart `next dev` (a plain reload is not enough). Hit live during the UI-revamp module 2 session (2026-09-02): a backgrounded verification build silently blanked a `next dev` server that had been running for hours on a non-default port.
-- **On Windows, `next build` and `next dev` can empty `node_modules` — the web `build`/`dev` scripts now guard against it.** `output: 'standalone'` makes a build write directory junctions into `apps/web/.next/standalone` that point at the real `node_modules/.pnpm/<pkg>` folders (next, react, react-dom, postcss, picocolors, scheduler, …). Next 14.2.35's `recursiveDelete` (`dist/lib/recursive-delete.js`, run on `.next` by both `next build` and `next dev`) follows a link to decide whether it is a directory and then recurses *into the target*, so the **next** build or dev start deletes the real packages. The symptom is `Cannot find module 'next/dist/...'` (or `.../jest-worker/processChild.js`) right after a build that worked, and `node_modules/.pnpm/next@…/node_modules/next` holding no files; the same 16 packages every time. `rimraf` and PowerShell 5.1 `Remove-Item -Recurse` on `.next` follow the same junctions. `apps/web/package.json` `build` and `dev` therefore first run `node -e "require('fs').rmSync('.next/standalone',{recursive:true,force:true})"` (Node's `rmSync` unlinks a junction without following it; a no-op on Linux, CI and Docker). A box that is already hollow is repaired with `pnpm install --frozen-lockfile --force` (about 3 minutes; a plain `pnpm install` does not notice). Reproduced on demand and fixed 2026-10-19, after four unexplained wipes.
-- **Server "today" is `businessDate()` (Asia/Karachi), never `setHours(0,0,0,0)` or `toISOString().slice(0,10)`.** The container runs in UTC, so both of those put the facility's day boundary at 05:00 in Lahore: the backdating window, a future-date check or the gate's same-day match would misjudge every entry between midnight and 05:00. `packages/shared/src/fiscal.ts` holds `businessDate()`, `businessDayStart()` and `businessHour()` for server rules, and `localIsoDate()` for web form defaults. A "now" default that needs testing takes `now` as a parameter (`startOfToday(now)`, `defaultReversalDate(original, now)`, `isDigestDue(…, now)`). `scripts/check-business-date.mjs` fails CI on `new Date().toISOString().slice(0, 10)` and `toIsoDate(new Date())` (v0.8.0 removed 22 of them, one of which refused a night-time JE reversal). Plates compare through `normalizePlate()` (letters and digits only), never `===`.
-- **A withdrawal holds its bags from booking until dispatch or cancel; a truck's withdrawals are stamped with `outbound_events.gate_pass_id` when it leaves.** Anything that takes bags off a lot (a new withdrawal, a partial ownership transfer) must subtract `openReservation()` (`apps/api/src/modules/outbound/reservation.ts`). Finalize locks the withdrawal, then the lot, and re-reads the lot under the lock. Lock order everywhere: gate_passes → outbound_events → lots → placements. Never lock a lot and then an existing withdrawal. `lots.current_balance_bags >= 0` is a DB CHECK (0038).
-- **Every PDF opens through `openPdf()` (`apps/web/src/lib/open-pdf.ts`), and the tab opens before any `await`.** Chrome blocks a tab opened after a slow PDF render or checkout POST, so a handler calls `openPdf` (or `openPdfTab()` on the click, handing the tab on) first and the blank tab is filled when the PDF arrives and closed if it fails. The helper reads `NEXT_PUBLIC_API_URL` with `??`, never `||`: a production build sets it to `""` (one address behind Caddy), and `||` turned that into `localhost:3001`, so every PDF button failed on a client box until docs/28 Part 2. `scripts/check-pdf-tabs.mjs` (CI) fails on `window.open(` and on any read of `NEXT_PUBLIC_API_URL` outside `lib/open-pdf.ts` and `lib/api-client.ts`.
-- **A truck is its plate, and its load is read by `openLoads()`** (`apps/api/src/modules/gate-pass/open-load.ts`). The gate's "Ready to leave" preview, the desk's trucks, the truck checkout and the load slip all call it, so they agree on a truck's lines.
-  - The gate release has its own locked plate query (`matchByPlate`). It reads the same lines through the shared `OPEN_LOAD_STAGE_SQL`, so the two cannot drift: write no third plate query. A truck carrying any line not yet dispatched is refused (`GATE_OUTWARD_NOT_DISPATCHED`, no override, before the count is compared), because the gate used to match only dispatched lines and let a loaded truck with a booked withdrawal out on a count of 0 (docs/28 D3).
-  - A guard has `GATE_COUNT_TRIES` (3, in `@coldchain/shared`) wrong counts **per truck, not per pass**: `triesUsed()` counts `gate_count_attempts` rows for the normalized plate since that plate's last release, so logging the truck in again starts nothing over. A wrong count is saved by `refuseWrongCount`, and the refusal is a `KeptRefusal` that `withKeptRefusals` commits before it throws: a plain `throw` inside the release transaction would roll the saved count back with everything else. The plate's advisory lock is what stops two passes of an empty truck taking the last try together (a loaded truck is serialized by its withdrawal rows). Only a manager releases a locked truck, and a manager is never locked. `expected_quantity` is a blind key.
-  - Nothing links a withdrawal to a pass at booking: a mistyped plate means a lot on no truck. The pass does not remember the withdrawal a manager named either (only the request names one), so a bare release always checks the whole truck by plate. A manager naming one dispatch note on a truck whose plate carries other lots is refused (409 `GATE_NAMED_LINE_ON_FULL_TRUCK`): only the plate release counts, checks the payment of and stamps every lot. There is no one-step log-and-release route (deleted, docs/28 O13): every release is `POST /gate-passes/:id/outward`.
-  - A truck still inside lists (`count_attempts`, managers only) the plate's wrong counts since its last release, the same rows the lock counts (`attemptsByPlate`); a pass that has left lists its own, as the record.
-  - The truck checkout (`DispatchCheckoutService.truckDispatchAndCollect`) locks the pass, then **every** withdrawal (sorted), then **every** lot (sorted) via `lockLoad`. Only then does it re-read and check the load, before it dispatches any line. A truck sent twice therefore answers `OUTBOUND_ALREADY_FINALIZED`, which the desk treats as done.
-  - Locking a line's rows one at a time inside the loop deadlocks two trucks carrying partials of the same lots. A retry hides the deadlock, which is why the test counts the checkout runs. The checkout preview and the bill it builds price through one function, `invoiceTotals()` (`modules/invoice/invoice-totals.ts`). Re-deriving that arithmetic brings back the half-paisa "total changed" loop.
-- **Weight is optional everywhere (owner decision, docs/27). Never make it required again.**
-  - **Storage:** a lot with no weight stores `accepted_weight_kg = 0`. The column stays NOT NULL so an older image can still read every lot after a rollback. Read a lot's weight only through `recordedKg()` (`apps/api/src/common/weight.ts`), which turns 0 into null; never use `Number()`.
-  - **The switch:** `hide_weights` is the screen's "We weigh produce", stored inverted. A facility that never saved it shows weights; `provision.ts` stores `true` for new client boxes. It hides every weight box and weight line. The web reads it through `useWeightsShown()`.
-  - **One dispatch rule:** what may be dispatched is `isReadyToDispatch()` (PENDING or WEIGHED, `outbound/reservation.ts`). Every check uses it, the solo door's included, so a booked line meets the same rules a weighed one does. Only a legacy DISPUTED row waits.
-  - **Per-ton charges:** a service charge priced per ton is the one thing that needs a weight. Both checkouts refuse an unweighed one after the manager's skips (`OUTBOUND_WEIGHT_REQUIRED`, never billed at zero). Hiding weights is refused while one is active, and none can be made active while weights are hidden.
-- **The gate guard (SECURITY) counts bags blind, and the API enforces it.** A global `preSerialization` hook (`apps/api/src/plugins/blind-redaction.ts`, registered in `app.ts` **and** in `test/helpers.ts`, which builds its own app) nulls every stock-quantity field in anything sent to the SECURITY role; the field list is `BLIND_KEYS` in `apps/api/src/common/blind-count.ts`. Since v0.8.0 it also holds the **weights** and the **money owed at the gate** (`outstanding_pkr`, `credit_authorized_amount_pkr`), because either turns back into the count (owner decision). **A new response field that carries bags on a lot, rack, room or withdrawal, a weight, or an amount owed on a truck must be added there**, or the guard can read it — and an error message the guard can trigger must not spell such a figure out either (a release refused for payment tells the guard only "Payment pending"; the gate page gives the next step). Test it by naming the fields, never by reading `BLIND_KEYS` (that check passes whatever the list says). Documents with the count inside text or a PDF (invoices, the placement slip) use `app.forbidBlindRole` instead (403 `BLIND_ROLE_FORBIDDEN`); a PDF built in a controller from service data never passes the hook, so blank the quantity there (see the gate receipt). Web code must render these as `formatCount(n)` / `formatKg(n)` (a dash for `null`), never `n.toLocaleString()`. This is a role check, not a permission key.
-- **Credit approval at the gate has one helper, and solo dispatch is a narrow door, not a permission grant.** `standingCreditCover()` (`modules/credit-approval/credit-approval.service.ts`) decides whether a party's standing approval holds a bill — its ledger exposure on both books plus **every** cheque of the party's not yet cleared (the ledger already counts those paid), never just the ones on this truck; the gate preview, the gate release **and** the solo checkout all call it, so the guard is never shown READY for a truck the release then refuses. With `dispatch_solo_mode` on, `dispatch-and-collect` lets a caller holding only `outbound.record` finish a PACCI truck dated today, with no weight-priced default charge, on cash in full or approved credit (`DispatchCheckoutService.authorize`); everything else is 403 `DISPATCH_NEEDS_MANAGER`. Never "fix" a munshi refusal by granting `outbound.finalize` / `invoices.manage` / `payments.record`: those also unlock discounts, credit notes and dishonouring. Turn `cash_tracking_from` on before the solo switch, or nobody counts the cash. The solo rules are one function, `soloRefusal()` (`modules/outbound/solo-rule.ts`): the checkout, both previews and the managers' waiting list (`GET /v1/dispatch/waiting`, docs/28 part 3) all ask it, and every refusal carries its code (`details.reason_code`, codes in `@coldchain/shared`). A munshi who can't finish a truck calls a manager (`POST /v1/dispatch/ask-manager`); the checkout itself never stores a refusal. A manager can then Allow what was asked for (`POST /v1/dispatch/allow`, docs/28 part 4): only cheque-or-transfer, credit on this bill or leaving charges off, never a solo rule, live the Lahore business day (`liveAllows()`), and re-checked under the row locks by the same `soloAskRefusal()` the pre-check uses. Allowed credit has no ceiling and stamps `credit_allowed_by`, which the load slip names; read allowances by id, never through `openLoads()`.
-- **Financial guard triggers** (Prisma migration `0002_financial_audit_and_integrity_guards`) enforce ledger/JE immutability at the DB level. Integration test cleanup that deletes or updates posted financial rows must wrap with `withGuardsDisabled` or the trigger will reject it.
-- **Accounting has one of everything (docs/25 §2) — use it, never re-derive it.**
-  - **Accounts.** Code literals live only in `SYSTEM_ACCOUNTS` (`packages/shared/src/accounting-accounts.ts`) and the seed. `scripts/check-account-literals.mjs` fails CI on a literal anywhere else; its allowlist only shrinks.
-  - **Chart flags.** What an owner-created account may need is a flag on its chart row, and those flags are the rule:
-    - `is_cash_equivalent`: every "paid from" picker, `assertCashAccount`, and the cash-flow statement.
-    - `allow_manual_posting` and `requires_party`: enforced by the posting engine.
-  - **Posting and reversing.** Post only through `JournalEntryService.postInTransaction`. Reverse only through `reverseInTransaction`: the mirror inherits the original's source and is never dated before it. A cancelled document gets `voided_at`/`voided_by`/`void_reason`, never a tag in `notes`.
-  - **Reading the ledger.** Statements, aging and sub-ledger tie-outs read `apps/api/src/modules/accounting/ledger.ts` (`accountBalances`, `partyBalances`, `classify`), not their own journal-line queries.
-  - **AR control accounts.** Receivables post to the party's stamped `control_account_code`, never to an account derived from its type. The type locks once the party has postings.
-- **Releases are expand-only.** The old image keeps running against the migrated database until the swap, and after any failed update.
-  - New columns are nullable, defaulted, or filled by a trigger.
-  - Each `ALTER TYPE … ADD VALUE` sits alone in its own migration file.
-  - New constraints are added `NOT VALID`, then validated only where the existing data passes (otherwise a warning, never a failed deploy).
-  - Drops wait one release. Migration 0035 (v0.6.1) is the one exception and not a precedent: no facility ever ran v0.6.0, because the client was reinstalled fresh on v0.6.1 (docs/25 §10).
-  - `deploy.ts` records every run in `deploy_runs`, and Settings → Software shows a failed one. A failure after the migrations have applied leaves nothing pending, so the migration count cannot show it.
-- **Two migration-looking directories exist under `packages/db`**: `prisma/migrations/` is the real, active Prisma migration history — use it. `migrations/` contains a single legacy `0001_foundation.sql` from before Prisma Migrate was adopted; don't add new migrations there.
-- **E2E requires test-mode flags**: the API must run with `ALLOW_TEST_RESET=1` and non-production `NODE_ENV` for `POST /v1/_test/reset` to work. `pnpm e2e` sets this up automatically — no manual server launch needed.
-- **Branch model**: `main` is the trunk (see above). The UI-revamp density pass was split into six `ui-revamp/0N-*` branches — Foundation (`00`) plus five domain modules (`01` accounting core, `02` payroll/fixed-assets/expenses, `03` billing/receivables/parties/loans, `04` operations, `05` admin/settings/auth) — each PR'd back to `main` individually as its module finishes. As of 2026-11-10 `00`–`03` are merged, `04` (operations) is still open (`ui-revamp/04-operations`), and `05` has no commits of its own: start it from `main`. Squash-merged feature branches are deleted once merged (a branch's tip equal to its merged PR's head), so `git branch -r` shows only what is still live. Create worktrees **outside** the repo (`git worktree add C:\wt\cold-store-<name> <branch>`), never under `.claude/worktrees/`: each carries its own `node_modules` (~40k files), and VS Code's watcher, search, git and TS server plus Defender crawl every one of them. Remove them with `cmd /c rmdir /s /q`, not PowerShell 5.1 `Remove-Item -Recurse` (it follows pnpm junctions). Confirm the current branch (`git branch --show-current`) before starting work; several lines coexist. Two older parallel lines once tracked here (`redesign/ui-replatform`, `feat/world-class-financials`) are now fully merged into `main` — a worktree still checked out on either is stale leftover, not active work.
+**Branches and worktrees**
+- Confirm the branch first (`git branch --show-current`). Squash-merged branches are deleted, so `git branch -r` shows only what is live.
+- `ui-revamp/04-operations` is the one unmerged UI-revamp module (one commit ahead of `main`, no open PR). Module `05` (admin/settings/auth) has no commits: start it from `main`.
+- Create worktrees **outside** the repo (`git worktree add C:\wt\cold-store-<name> <branch>`), never under `.claude/worktrees/`. Remove them with `cmd /c rmdir /s /q`, not PowerShell `Remove-Item -Recurse` (it follows pnpm junctions).
 
-## Modules (11)
+## Modules
 
 | # | Module | What it does |
 |---|--------|-------------|
 | M1 | Party Management | Farmers, traders, arhtis, buyers — profiles, credit limits, ledgers |
-| M2 | Inbound & Lot | Produce intake, lot creation, weigh-in, chamber assignment, storage receipt |
-| M3 | Ownership Transfer | Mid-storage ownership changes (full/partial) with complete chain history |
-| M4 | Outbound & Dispatch | Withdrawals, weigh-out, invoice generation, dispatch notes |
-| M5 | Billing Engine | Configurable rates (seasonal/monthly/daily per bag), service charges, invoices |
+| M2 | Inbound & Lot | Produce intake, lot creation, weigh-in, room assignment, storage receipt |
+| M3 | Ownership Transfer | Mid-storage ownership changes (full/partial) with chain history |
+| M4 | Outbound & Dispatch | Withdrawals, weigh-out, invoices, dispatch notes |
+| M5 | Billing Engine | Configurable rates and tariffs, service charges, invoices |
 | M6 | Quality & Spoilage | Inspections, damage records, lot quantity adjustments |
-| M7 | Financial Ledger | AR/AP, payment recording, receivables aging, credit limit enforcement |
-| M8 | Chamber Management | Physical chamber tracking, capacity, occupancy |
-| M9 | Reporting | Dashboards, aging reports, commodity inventory, financial summaries |
-| M10 | Gate Pass | Security — vehicle inward/outward logging linked to operations |
-| M11 | Peshgi (Loans) | Informal cash advances to farmers/arhtis and automated recovery |
+| M7 | Financial Ledger | AR/AP, payments, receivables aging, credit limits, full accounting |
+| M8 | Chamber Management | Rooms and racks, capacity, occupancy |
+| M9 | Reporting | Dashboards, aging, inventory, financial statements |
+| M10 | Gate Pass | Vehicle inward/outward logging linked to operations |
+| M11 | Peshgi (Loans) | Cash advances to farmers/arhtis and automated recovery |
 
 ## Documentation Map (`docs/`)
 
 | File | Contents |
 |------|---------|
-| `01_domain_exploration.md` | Mandi ecosystem actors, produce lifecycle, pain points |
-| `02_scope_definition.md` | MVP boundaries, in/out of scope, module list |
-| `03_PRD.md` | Product requirements, personas, 80+ feature specs, success metrics |
-| `04_BRD.md` | Business requirements and stakeholder needs |
-| `05_functional_specs.md` | Feature-by-feature functional breakdown |
-| `06_system_architecture.md` | Tech stack, logical/deployment architecture, component design |
+| `01`–`05` | Domain exploration, scope, PRD, BRD, functional specs |
+| `06_system_architecture.md` | Tech stack, logical/deployment architecture |
 | `07_user_roles_permissions.md` | RBAC roles and permission matrix |
-| `08_data_model.md` | Database schema — entities, relationships, indexes, constraints |
+| `08_data_model.md` | Schema — entities, relationships, indexes, constraints |
 | `09_accounting_spec.md` | Chart of accounts, journal entry patterns, dual ledger rules |
-| `10_api_design.md` | RESTful API spec — 19 endpoint groups, error codes, examples |
-| `11_non_functional_requirements.md` | Performance (<500ms API), security (OWASP), availability (99.5%) |
-| `12_e2e_workflows.md` | End-to-end user workflows across modules |
-| `13_screen_inventory.md` | UI/UX screens to build |
-| `14_state_machines.md` | Status transitions for lots, invoices, transfers |
-| `15_accounting_audit.md` | Audit trail and reconciliation rules |
-| `16_accounting_module_audit.md` | Post-implementation accounting audit (2026-07-06/07) — findings + remediation status |
-| `17_accounting_audit_phase19.md` | Second accounting audit (2026-07-24/25, phase/19) — CoA, opening balances, statements, payments/invoices/peshgi; 17 findings + fixes |
-| `18_accounting_remediation_phase20.md` | Third audit + remediation (2026-07-25, phase/20) — payroll, fixed assets, cash/cheque, tax, expenses, concurrency; the advisory-lock defect; cost-side reversal |
-| `19_employee_advances_phase21.md` | Employee advances (2026-07-26/30, phase/21) — account 1230, JE-22/23, recovery rides inside payroll JEs, one-active-advance concurrency lock, reversal must unwind recoveries |
-| `25_accounting_consolidation.md` | Final accounting audit + fix program (2026-09-24 → 10-09, v0.6.0/v0.6.1): 136 findings, owner decisions, the invariants the code follows (registry, chart flags, one posting/reversal/ledger path), manual-posting matrix, and §10 what merged and what was deliberately left |
-| `26_fast_dispatch.md` | Fast dispatch (v0.8.0): owner decisions D1–D4, what Phase 0, A, B, the guard's blind count, C1 and the release round changed, the owner switches (all off by default), upgrade notes (migrations 0038–0042, account 6105, `:stable` held), and what is still to build (C2, C3) |
-| `27_weight_optional.md` | Weight optional everywhere (C3 part 1, on `main` since 2026-10-31): the "We weigh produce" setting, "not weighed" stored as 0, the one dispatch rule, per-ton charges as the one thing that needs a weight |
-| `28_c3.md` | The rest of C3 (2026-11): gate safety (a booked truck can't leave, wrong counts saved and limited to three, the "Book only trucks inside" switch), papers (every PDF tab opens first, dispatch-note box at the gate) and the manager waiting list; owner decisions, flow diagrams, known limits |
+| `10_api_design.md` | REST API spec, error codes, examples |
+| `11`–`14` | Non-functional requirements, E2E workflows, screen inventory, state machines |
+| `15`–`19` | Accounting audit rules, then the audits and remediations of phases 13–21 (employee advances in `19`) |
+| `20_audit_backlog.md` | Audit backlog; the Phase 29 pre-update queries |
+| `21`, `22` | Chart-of-accounts hardening (phase 23); extensible statements (phase 24) |
+| `23_client_rollout_v0.4.0.md` | Client rollout and the update pipeline |
+| `24_ui_density_spec.md` | UI density spec for the UI revamp |
+| `25_accounting_consolidation.md` | Final accounting audit and fix program: 136 findings, owner decisions, the invariants the code follows (§2), what was deliberately left (§10) |
+| `26_fast_dispatch.md` | Fast dispatch (v0.8.0): owner decisions D1–D4, the owner switches, upgrade notes |
+| `27_weight_optional.md` | Weight optional everywhere |
+| `28_c3.md` | Gate safety, papers (PDF tabs), the managers' waiting list, Allow; owner decisions, known limits |
 
 ## Domain Terminology
 
@@ -121,20 +104,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |------|---------|
 | **Mandi** | Agricultural wholesale market |
 | **Arhti** | Commission agent / middleman in mandi trade |
+| **Munshi** | The desk clerk who books withdrawals and dispatches trucks |
 | **Peshgi** | Informal cash advance/loan given to farmers or arhtis |
 | **Katchi** | Informal/rough ledger (mutable records) |
 | **Pacci** | Official/final ledger (immutable records) |
 | **Parchi** | Storage receipt given at inbound |
-| **Chamber** | Refrigerated storage room within the cold store |
+| **Chamber** | Refrigerated storage room ("Room" on screen) |
 | **Lot** | A discrete batch of produce from one party, tracked through its lifecycle |
-| **Marka** | Identification mark (name/initials/symbol) painted or stamped on a lot's bardana (gunny sacks) or crates so operators and security can tell whose stack is whose. Not unique; does not change on ownership transfer |
+| **Marka** | Identification mark painted or stamped on a lot's sacks or crates. Not unique; does not change on ownership transfer |
 
 ## graphify
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+A knowledge graph of this codebase is at `graphify-out/` (generated, not in git).
 
-Rules:
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- For codebase questions, when `graphify-out/graph.json` exists, first run `graphify query "<question>"`. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for one concept.
+- Read `graphify-out/GRAPH_REPORT.md` only for a broad architecture review, or when the commands above do not surface enough.
+- After modifying code, run `graphify update .` (AST-only, no API cost; about 2.5 minutes, run it detached).
