@@ -10,7 +10,7 @@ paths:
 
 Reference: `docs/25_accounting_consolidation.md` (the invariants, §2; what was deliberately left, §10), `docs/09_accounting_spec.md`.
 
-- **Financial guard triggers** (Prisma migration `0002_financial_audit_and_integrity_guards`) enforce ledger/JE immutability at the DB level. Integration test cleanup that deletes or updates posted financial rows must wrap with `withGuardsDisabled` or the trigger will reject it. `withGuardsDisabled` is global `ALTER TABLE` DDL, not session state: call it in `afterAll` only, never mid-test.
+- **Financial guard triggers** (Prisma migration `0002_financial_audit_and_integrity_guards`) enforce ledger/JE immutability at the DB level. Integration test cleanup that deletes or updates posted financial rows must wrap with `withGuardsDisabled` or the trigger will reject it. `withGuardsDisabled` is global `ALTER TABLE` DDL, not session state: call it only in suite setup or teardown (`beforeAll`/`afterAll`, as `coa-guardrails` clears stale fixtures before its tests), never inside a test, where it stalls every other connection in the suite.
 - **Accounting has one of everything (docs/25 §2) — use it, never re-derive it.**
   - **Accounts.** Code literals live only in `SYSTEM_ACCOUNTS` (`packages/shared/src/accounting-accounts.ts`) and the seed. `scripts/check-account-literals.mjs` fails CI on a literal anywhere else; its allowlist only shrinks.
   - **Chart flags.** What an owner-created account may need is a flag on its chart row, and those flags are the rule:

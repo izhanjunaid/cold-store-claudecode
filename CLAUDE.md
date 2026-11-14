@@ -41,7 +41,7 @@ Each line is the rule; the named rule file has the reasons and the detail. Read 
 
 **Accounting** (`.claude/rules/accounting.md`)
 - One of everything, never re-derived: account codes only in `SYSTEM_ACCOUNTS`; post only through `JournalEntryService.postInTransaction`, reverse only through `reverseInTransaction`; statements read `modules/accounting/ledger.ts`; receivables post to the party's `control_account_code`.
-- Test cleanup that touches posted financial rows wraps with `withGuardsDisabled`, in `afterAll` only.
+- Test cleanup that touches posted financial rows wraps with `withGuardsDisabled`, only in suite setup or teardown (`beforeAll`/`afterAll`), never inside a test.
 
 **Database, updates and releases** (`.claude/rules/database-release.md`)
 - Real migrations are in `packages/db/prisma/migrations/`. `packages/db/migrations/` is a legacy leftover; add nothing there.

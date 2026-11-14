@@ -51,7 +51,7 @@ const exists = async (code: string) =>
  * entry is immutable by trigger and the JE-line FK is ON DELETE RESTRICT, so
  * the account cannot be removed until the entry is gone — hence
  * withGuardsDisabled, which is global ALTER TABLE DDL across 12 tables and
- * belongs in afterAll only, never mid-test.
+ * belongs only in suite setup or teardown (beforeAll/afterAll), never inside a test.
  */
 async function cleanup() {
   const lines = await prisma.journalEntryLine.findMany({
