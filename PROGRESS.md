@@ -19,7 +19,8 @@
        - the guard sees no weights and no money owed (a refused release says only "Payment pending");
        - a truck carrying a booked, undispatched withdrawal cannot leave;
        - three wrong counts lock a truck until a manager releases it;
-       - weights still show but are no longer required.
+       - weights still show but are no longer required;
+       - the digest hour now means Lahore time (re-check Settings → Notifications, docs/26).
 
        Every new feature switch starts off. Cash tracking goes on before solo dispatch.
     5. Known limits and deferred minors: docs/26 "Known limits" and the end of docs/28.
