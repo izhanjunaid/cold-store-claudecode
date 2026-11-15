@@ -27,7 +27,7 @@ Paths are relative to the repository root. `schema` means `packages/db/prisma/sc
 7. **Settings have no history and no start date.** A change applies at once and silently. (C-1, High)
 8. **Printed papers cannot be changed per store.** No address, phone, logo, wording, language choice, numbering or copy count. (D-1, D-2, High)
 9. **A new client's old records cannot be loaded.** There is no import of parties, stock in the rooms or unpaid bills. (O-1, High)
-10. **The speed figures on file are not real.** The old benchmark mostly measured refusals from the rate limiter. Several reports load a store's whole history into memory. (F-1, F-2, High)
+10. **The dashboard and the receivables aging report stop working on a big store.** With about 33,000 bills they fail with a server error. I reproduced this on generated season data. The speed figures previously on file were not real: the old benchmark mostly measured refusals from the rate limiter. (F-0 Critical, F-1, F-2 High)
 
 ---
 
@@ -167,6 +167,7 @@ The accounting core is the strongest part of the product. One posting path, one 
 
 | ID | Seriousness | Finding | Why it matters | Where | Sure |
 |---|---|---|---|---|---|
+| F-0 | **Critical** | The dashboard and the receivables aging report fail with a server error once the store has more than 32,767 bills that touch the receivable accounts. The code lists every bill's ID in one database question, and the database driver allows at most 32,767 values. | Found by the timing run, not by reading. A busy store reaches this in one or two seasons. From that day the owner's first screen and his "who owes what" report show an error, and nothing in the 1,000+ tests can catch it because no test has that much data. | `api/invoice/receivables.ts:106-107` (`id: { in: [...invoiceNet.keys()] }`); error seen: "too many bind variables in prepared statement, expected maximum of 32767" | Checked, reproduced |
 | F-1 | High | The speed figures on file are not real. The benchmark fires about 900 requests a second at an API that allows 100 a minute per client, and it does not check for refusals. Its "p95" is the 97.5th percentile. | The project has no true record of how fast any screen is. | `scripts/perf-baseline.ts:78-102`; `apps/api/src/app.ts:70-75`; `phases/phase-11-baseline.json` (about 900 requests/s) | Checked |
 | F-2 | High | Reports that load a store's whole history into memory: receivables aging, the party statement (then filters by date in memory), the dashboard (all active lots plus the full aging), the general ledger (no paging), the cash-flow statement, surcharge suggestions. | Fast on a test database, slow after two seasons. The party statement is opened all day. | `api/invoice/receivables.ts:67-79,157-229`; `api/reporting/reports/dashboard.ts:63-73,139`; `api/accounting/gl.service.ts:46-63`; `api/accounting/cash-flow.service.ts:95-105` | Survey |
 | F-3 | Medium | The truck preview on the dispatch desk prices each line one after another, about five queries per line. Plate matching uses a text function that no index supports. The desk list filters on dates that have no index. Ledger lines have no combined index on party and account. | The desk is the busiest screen. | `api/outbound/dispatch-checkout.service.ts:110,438-485`; `api/gate-pass/open-load.ts:60-72`; `schema:1144-1147` | Survey |
@@ -209,4 +210,40 @@ The accounting core is the strongest part of the product. One posting path, one 
 
 ## Measurements
 
-To be filled by the timing run (generated season-sized data on a local database). See `docs/32_redesign_plan.md` for the method.
+Taken 2026-11-16 on the 8 GB Windows development machine, API and PostgreSQL 16 on the same machine, v0.9.0 code.
+
+**Data.** A separate local database (`coldchain_perf`) filled by `scripts/perf-seed.sql`: 2,000 parties, 30,000 lots (6,000 still in the rooms), 48,000 dispatched withdrawals each with a finalised bill and journal entry, 40,800 cash receipts, 177,600 ledger lines. Debits equal credits. The rows are generated, not real, and were inserted directly; they carry no rack placements, gate passes or PDFs.
+
+**Method.** `scripts/perf-time.mjs` asks for each screen 7 times, one request at a time, as the owner. It reports the middle and the slowest time and treats any answer other than success as a failure.
+
+| Screen or report | Median ms | Slowest ms | Size kB |
+|---|---|---|---|
+| Lot search (munshi) | 315 | 509 | 21 |
+| Lot list, active | 31 | 36 | 53 |
+| Lot page | 9 | 11 | 1 |
+| Party search | 13 | 17 | 10 |
+| Party ledger | 19 | 26 | 12 |
+| Party statement | 18 | 25 | 12 |
+| Dispatch desk queue | 68 | 81 | 21 |
+| Dispatch desk trucks | 7 | 11 | 0 |
+| Waiting for a manager | 14 | 15 | 0 |
+| Gate, trucks inside | 8 | 17 | 0 |
+| Invoice list | 16 | 24 | 26 |
+| Payment list | 14 | 15 | 18 |
+| **Dashboard** | **fails** | | |
+| Report: lot aging | 12 | 18 | 13 |
+| **Report: receivables aging** | **fails** | | |
+| Report: stock by commodity | 13 | 19 | 1 |
+| Report: seasonal summary | 1,057 | 1,164 | 0 |
+| Trial balance | 184 | 197 | 4 |
+| Profit and loss | 146 | 155 | 1 |
+| Balance sheet | 251 | 497 | 1 |
+| Cash flow | 1,803 | 1,881 | 1 |
+| General ledger, farmers' receivable account, one month | 1,538 | 1,668 | 3,289 |
+
+**What this shows.**
+- The munshi's screens are fast, with one exception: lot search takes a third of a second. It is typed into all day.
+- The dashboard and the receivables aging report **stop working** on this data (finding F-0).
+- Cash flow, the general ledger and the seasonal summary take one to two seconds. The general ledger sends 3.3 MB for one account for one month, because it has no paging.
+
+**Not measured.** PDF printing (the browser engine does not render on this machine). The dispatch desk with trucks inside (the generated data has no open trucks). A single client with thousands of bills (each generated party has about 24), which is where the party statement would slow down. Several users at once.
