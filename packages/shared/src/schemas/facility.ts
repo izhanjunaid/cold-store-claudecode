@@ -141,6 +141,20 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
   book_only_trucks_inside: false,
 };
 
+/** One saved change of one business setting and the day it takes effect (docs/32 section 2.2). */
+export const SettingVersion = z.object({
+  id: z.string().uuid(),
+  key: z.string(),
+  value: z.unknown(),
+  effective_from: z.string(),
+  note: z.string().nullable(),
+  saved_at: z.string(),
+  saved_by_name: z.string().nullable(),
+  in_force: z.boolean(),
+  is_baseline: z.boolean().optional(),
+});
+export type SettingVersionType = z.infer<typeof SettingVersion>;
+
 export const UpdateFacilityRequest = z.object({
   name: z.string().min(1).max(200).optional(),
   address: z.string().nullable().optional(),
@@ -148,6 +162,13 @@ export const UpdateFacilityRequest = z.object({
   phone: z.string().max(20).nullable().optional(),
   gst_number: z.string().max(50).nullable().optional(),
   settings: FacilitySettings.partial().extend({ email: EmailSettingsUpdate.optional() }).optional(),
+  /** The day the business settings in this save take effect (today when omitted; never a past day). */
+  effective_from: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  /** Why the change was made; kept with it in the history. */
+  note: z.string().max(500).optional(),
 });
 export type UpdateFacilityRequestType = z.infer<typeof UpdateFacilityRequest>;
 
@@ -159,6 +180,8 @@ export const FacilityResponse = z.object({
   phone: z.string().nullable(),
   gst_number: z.string().nullable(),
   settings: FacilitySettings.extend({ email: EmailSettingsResponse }),
+  /** Changes saved for a day still ahead. `settings` above is what is in force now. */
+  pending_settings: z.array(SettingVersion).default([]),
 });
 export type FacilityResponseType = z.infer<typeof FacilityResponse>;
 

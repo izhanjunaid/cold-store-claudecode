@@ -388,6 +388,7 @@ model Facility {
   partyLoans       PartyLoan[]
   gatePasses       GatePass[]
   creditApprovals  PartyCreditApproval[]
+  settingVersions  FacilitySettingVersion[]
   cashHandovers    CashHandover[]
   gateCountAttempts GateCountAttempt[]
 
@@ -445,6 +446,7 @@ model User {
   employeeAdvancesCreated  EmployeeAdvance[]         @relation("EmployeeAdvanceCreatedBy")
   advanceRecoveriesCreated EmployeeAdvanceRecovery[] @relation("EmployeeAdvanceRecoveryCreatedBy")
   gatePassesCreated        GatePass[]                @relation("GatePassCreatedBy")
+  settingVersions          FacilitySettingVersion[]  @relation("SettingVersionAuthor")
   gateCountAttempts        GateCountAttempt[]        @relation("GateCountAttemptBy")
   lotMovements             LotMovement[]             @relation("LotMovementMovedBy")
 
@@ -590,6 +592,26 @@ model PartyCreditApproval {
 
   @@index([facilityId, partyId], map: "party_credit_approvals_party_idx")
   @@map("party_credit_approvals")
+}
+
+/// One saved change of one business setting and the day it takes effect (0049, docs/32 2.2).
+/// facilities.settings holds what is in force now; this table is the history and what is coming.
+model FacilitySettingVersion {
+  id            String    @id @default(uuid()) @db.Uuid
+  facilityId    String    @map("facility_id") @db.Uuid
+  key           String    @db.VarChar(60)
+  value         Json
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  note          String?   @db.Text
+  createdBy     String?   @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  appliedAt     DateTime? @map("applied_at") @db.Timestamptz()
+
+  facility Facility @relation(fields: [facilityId], references: [id])
+  author   User?    @relation("SettingVersionAuthor", fields: [createdBy], references: [id])
+
+  @@index([facilityId, key, effectiveFrom], map: "facility_setting_versions_key_idx")
+  @@map("facility_setting_versions")
 }
 
 /// A manager's count of the cash a collector took (0042): the CASH receipts not yet handed

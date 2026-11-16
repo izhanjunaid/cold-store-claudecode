@@ -28,8 +28,20 @@ export async function facilityRoutes(app: FastifyInstance) {
     schema: { body: UpdateFacilityRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof UpdateFacilityRequest>;
-      const data = await service.updateFacility(request.user!.facilityId, body);
+      const data = await service.updateFacility(request.user!.facilityId, body, request.user!.userId);
       return sendSuccess(reply, data);
+    },
+  });
+
+  // GET /v1/facilities/me/settings/history — every saved change of the business settings.
+  app.route({
+    method: 'GET',
+    url: '/v1/facilities/me/settings/history',
+    preHandler: [app.authenticate, app.requirePermission('settings.manage')],
+    schema: { querystring: z.object({ key: z.string().max(60).optional() }) },
+    handler: async (request, reply) => {
+      const { key } = request.query as { key?: string };
+      return sendSuccess(reply, await service.settingsHistory(request.user!.facilityId, key));
     },
   });
 

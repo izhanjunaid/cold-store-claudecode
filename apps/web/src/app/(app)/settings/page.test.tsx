@@ -79,3 +79,46 @@ describe('Settings — Book only trucks inside the gate (docs/28 D2)', () => {
     expect(patchedSettings()).toMatchObject({ book_only_trucks_inside: true });
   });
 });
+
+describe('Settings — dated changes (docs/32 section 2.2)', () => {
+  const patchBody = () => {
+    const call = apiClient.mock.calls.find(([p, o]) => p === '/v1/facilities/me' && (o as { method?: string })?.method === 'PATCH');
+    return (call?.[1] as { body: Record<string, unknown> } | undefined)?.body;
+  };
+
+  it('sends no date when "Takes effect from" is left empty (the change starts today)', async () => {
+    renderPage();
+    await switchBox();
+    fireEvent.click(screen.getAllByRole('button', { name: /save settings/i })[0]!);
+    await waitFor(() => expect(patchBody()).toBeDefined());
+    expect(patchBody()).not.toHaveProperty('effective_from');
+  });
+
+  it('sends the chosen day and the note', async () => {
+    const { container } = renderPage();
+    await switchBox();
+    fireEvent.change(container.querySelector('input[type="date"][min]')!, { target: { value: '2099-07-01' } });
+    fireEvent.change(screen.getByText(/Note \(optional\)/i).parentElement!.querySelector('input')!, { target: { value: 'new tax year' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /save settings/i })[0]!);
+    await waitFor(() => expect(patchBody()).toBeDefined());
+    expect(patchBody()).toMatchObject({ effective_from: '2099-07-01', note: 'new tax year' });
+  });
+
+  it('lists a change that has not started yet', async () => {
+    apiClient.mockImplementation((path: string) => {
+      if (path === '/v1/facilities/me') {
+        return Promise.resolve({
+          ...facility(),
+          pending_settings: [
+            { id: 'v1', key: 'gst_default_rate', value: 8, effective_from: '2099-07-01', note: null, saved_at: '', saved_by_name: 'Owner', in_force: false },
+          ],
+        });
+      }
+      return Promise.resolve([]);
+    });
+    renderPage();
+    expect(await screen.findByText(/Changes that have not started yet/i)).toBeInTheDocument();
+    expect(screen.getByText('Sales tax rate (%)')).toBeInTheDocument();
+    expect(screen.getByText('2099-07-01')).toBeInTheDocument();
+  });
+});

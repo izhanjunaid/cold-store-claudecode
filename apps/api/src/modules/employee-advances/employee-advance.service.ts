@@ -21,6 +21,7 @@ import { JournalEntryService } from '../accounting/journal-entry.service';
 import { buildJE22EmployeeAdvanceIssued } from './templates/je-22-employee-advance-issued';
 import { buildJE23EmployeeAdvanceWriteOff } from './templates/je-23-employee-advance-write-off';
 import { buildJE31EmployeeAdvanceRepayment } from './templates/je-31-employee-advance-repayment';
+import { settingsOn } from '../facility/settings-store';
 
 type Tx = Prisma.TransactionClient;
 
@@ -55,8 +56,7 @@ export class EmployeeAdvanceService {
       // Capped at one month's pay: basic salary for SALARIED, the facility's standard
       // working days' wage for DAILY_WAGE — the same figure a payroll draft pre-fills,
       // so the cap matches what the employee will actually earn that month (C-19).
-      const facility = await tx.facility.findUniqueOrThrow({ where: { id: facilityId }, select: { settings: true } });
-      const { standard_working_days } = resolveFacilitySettings(facility.settings).payroll;
+      const { standard_working_days } = (await settingsOn(tx, facilityId)).payroll;
       const monthlyPay =
         employee.employeeType === 'SALARIED'
           ? Number(employee.basicSalaryPkr ?? 0)

@@ -5,6 +5,7 @@ import { computeStorageCharge, billingPeriodStart } from '../invoice/storage-cha
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { buildJE25RevenueAccrual, type AccrualLotShare } from './templates/je-25-revenue-accrual';
 import type { JournalEntryService } from './journal-entry.service';
+import { settingsOn } from '../facility/settings-store';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -86,8 +87,7 @@ export class RevenueAccrualService {
   ) {}
 
   private async startDate(db: Db, facilityId: string): Promise<Date | null> {
-    const facility = await db.facility.findUnique({ where: { id: facilityId }, select: { settings: true } });
-    const start = resolveFacilitySettings(facility?.settings ?? null).revenue_accrual.start_date;
+    const start = (await settingsOn(db, facilityId)).revenue_accrual.start_date;
     return start ? fromIsoDate(start) : null;
   }
 

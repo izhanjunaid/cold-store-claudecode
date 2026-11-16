@@ -3,6 +3,7 @@ import { invoiceTotals } from './invoice-totals';
 import { computeStorageCharge, billingPeriodStart } from './storage-charge';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 import { resolveFacilitySettings } from '../facility/facility.service';
+import { settingsOn } from '../facility/settings-store';
 
 const builderInclude = {
   lot: { select: { lotNumber: true } },
@@ -71,10 +72,9 @@ export async function priceStorageInvoice(
 
   // GST default: pre-fill from facility settings when GST-registered.
   // Still editable per invoice while DRAFT (PATCH /v1/invoices/:id).
-  const facility = await tx.facility.findUnique({
-    where: { id: params.facilityId },
-  });
-  const settings = resolveFacilitySettings(facility?.settings ?? null);
+  // Read for the bill's own date (docs/32 2.2): a rate that starts on 1 July is not
+  // charged on a bill dated in June, whenever that bill is made.
+  const settings = await settingsOn(tx, params.facilityId, params.periodEnd);
   // The informal book carries no sales tax: nothing settles KATCHI output tax,
   // so charging it would only grow a liability no return ever clears (docs/25 R-06).
   const gstRate = settings.gst_registered && params.bookType === 'PACCI' ? settings.gst_default_rate : 0;

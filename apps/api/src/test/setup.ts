@@ -20,6 +20,9 @@ beforeAll(async () => {
   // rejecting lots as outside the season window.
   //
   // A fixture must assert its own preconditions, not hope the row is absent.
+  // Every file starts with no saved setting versions (docs/32 2.2), so a fixture that
+  // writes facilities.settings directly is what every date reads.
+  await prisma.facilitySettingVersion.deleteMany({ where: { facilityId: TEST_FACILITY_ID } });
   await prisma.facility.upsert({
     where: { id: TEST_FACILITY_ID },
     update: { name: 'Test Facility', city: 'Lahore', settings: { backdating_max_days: null } },

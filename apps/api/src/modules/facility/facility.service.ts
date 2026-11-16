@@ -1,6 +1,7 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import {
   DEFAULT_FACILITY_SETTINGS,
+  businessDate,
   fiscalYearStart,
   fromIsoDate,
   toIsoDate,
@@ -11,6 +12,7 @@ import {
 import { Errors } from '../../common/errors';
 import { PeriodLockService } from '../accounting/period-lock.service';
 import { encryptSecret } from '../../common/crypto';
+import { applyDueSettings, BASELINE_DATE, settingsOn, UNDATED_SETTINGS_KEYS } from './settings-store';
 
 // Top-level settings keys that are managed by dedicated endpoints and must never
 // appear in facility responses or be writable through PATCH /v1/facilities/me
@@ -45,6 +47,51 @@ function mergeSettings(
   return merged as unknown as FacilitySettingsType;
 }
 
+/** JSON with object keys sorted, so two equal settings values compare equal however they were built. */
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${stable(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+type VersionRow = {
+  id: string;
+  key: string;
+  value: Prisma.JsonValue;
+  effectiveFrom: Date;
+  note: string | null;
+  createdAt: Date;
+  appliedAt: Date | null;
+  author: { name: string } | null;
+};
+
+function formatVersion(v: VersionRow) {
+  return {
+    id: v.id,
+    key: v.key,
+    value: v.value as unknown,
+    effective_from: toIsoDate(v.effectiveFrom),
+    note: v.note,
+    saved_at: v.createdAt.toISOString(),
+    saved_by_name: v.author?.name ?? null,
+    in_force: v.appliedAt !== null,
+  };
+}
+
+const VERSION_SELECT = {
+  id: true,
+  key: true,
+  value: true,
+  effectiveFrom: true,
+  note: true,
+  createdAt: true,
+  appliedAt: true,
+  author: { select: { name: true } },
+} as const;
+
 function format(row: {
   id: string;
   name: string;
@@ -53,7 +100,7 @@ function format(row: {
   phone: string | null;
   gstNumber: string | null;
   settings: Prisma.JsonValue;
-}): FacilityResponseType {
+}, pending: VersionRow[] = []): FacilityResponseType {
   const merged = mergeSettings(row.settings, undefined) as unknown as Record<string, unknown>;
   for (const key of INTERNAL_SETTINGS_KEYS) delete merged[key];
 
@@ -73,6 +120,7 @@ function format(row: {
     phone: row.phone,
     gst_number: row.gstNumber,
     settings: merged as unknown as FacilityResponseType['settings'],
+    pending_settings: pending.map(formatVersion),
   };
 }
 
@@ -80,17 +128,50 @@ export class FacilityService {
   constructor(private prisma: PrismaClient) {}
 
   async getFacility(facilityId: string): Promise<FacilityResponseType> {
+    await applyDueSettings(this.prisma, facilityId);
     const row = await this.prisma.facility.findUnique({ where: { id: facilityId } });
     if (!row) throw Errors.AUTH_INVALID('Facility not found');
-    return format(row);
+    return format(row, await this.pending(facilityId));
+  }
+
+  /** Changes saved for a day still ahead, soonest first. */
+  private pending(facilityId: string): Promise<VersionRow[]> {
+    return this.prisma.facilitySettingVersion.findMany({
+      where: { facilityId, appliedAt: null },
+      orderBy: [{ effectiveFrom: 'asc' }, { createdAt: 'asc' }],
+      select: VERSION_SELECT,
+    });
+  }
+
+  /** Every saved change of the business settings, newest first: what was in force and from when. */
+  async settingsHistory(facilityId: string, key?: string) {
+    const rows = await this.prisma.facilitySettingVersion.findMany({
+      where: { facilityId, ...(key ? { key } : {}) },
+      orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
+      select: VERSION_SELECT,
+    });
+    return rows.map((v) => ({ ...formatVersion(v), is_baseline: toIsoDate(v.effectiveFrom) === BASELINE_DATE }));
   }
 
   async updateFacility(
     facilityId: string,
     patch: UpdateFacilityRequestType,
+    userId?: string,
   ): Promise<FacilityResponseType> {
+    await applyDueSettings(this.prisma, facilityId);
     const existing = await this.prisma.facility.findUnique({ where: { id: facilityId } });
     if (!existing) throw Errors.AUTH_INVALID('Facility not found');
+
+    // The day the business settings in this save take effect. Never a past day: papers
+    // already made were priced with what was in force then, and stay that way.
+    const today = businessDate();
+    const effectiveFrom = patch.effective_from ?? today;
+    if (effectiveFrom < today) {
+      throw Errors.VALIDATION_ERROR('A setting cannot take effect on a past date', 'effective_from');
+    }
+    // What will be in force on that day as things stand (a change already waiting included).
+    const inForce = (await settingsOn(this.prisma, facilityId, effectiveFrom)) as unknown as Record<string, unknown>;
+    const versions: Prisma.FacilitySettingVersionCreateManyInput[] = [];
 
     const data: Prisma.FacilityUpdateInput = {};
     if (patch.name !== undefined) data.name = patch.name;
@@ -111,7 +192,7 @@ export class FacilityService {
       const newFyStart = patch.settings.fiscal_year_start_month;
       if (
         newFyStart !== undefined &&
-        newFyStart !== resolveFacilitySettings(existing.settings).fiscal_year_start_month &&
+        newFyStart !== inForce['fiscal_year_start_month'] &&
         (await this.prisma.journalEntry.count({ where: { facilityId, postingStatus: 'POSTED' }, take: 1 })) > 0
       ) {
         throw Errors.VALIDATION_ERROR(
@@ -124,7 +205,7 @@ export class FacilityService {
       // one is active (docs/27). Compared on the resolved value: the Settings page sends every key.
       if (
         patch.settings.hide_weights === true &&
-        !resolveFacilitySettings(existing.settings).hide_weights &&
+        !inForce['hide_weights'] &&
         (await this.prisma.serviceCharge.count({ where: { facilityId, isActive: true, unitType: 'PER_TON' } })) > 0
       ) {
         throw Errors.VALIDATION_ERROR(
@@ -139,7 +220,7 @@ export class FacilityService {
       const accrualStart = patch.settings.revenue_accrual?.start_date;
       if (accrualStart) {
         const fyMonth =
-          patch.settings.fiscal_year_start_month ?? resolveFacilitySettings(existing.settings).fiscal_year_start_month;
+          patch.settings.fiscal_year_start_month ?? (inForce['fiscal_year_start_month'] as number);
         const start = fromIsoDate(accrualStart);
         if (toIsoDate(fiscalYearStart(start, fyMonth)) !== accrualStart) {
           throw Errors.VALIDATION_ERROR(
@@ -170,12 +251,52 @@ export class FacilityService {
         settingsPatch['email'] = passwordEnc ? { ...emailPublic, [SMTP_PASSWORD_ENC_KEY]: passwordEnc } : emailPublic;
       }
 
+      // Each business setting that changes is saved as a dated version. One dated
+      // today goes into the stored settings as well; one dated ahead waits.
+      const known = new Set(
+        (
+          await this.prisma.facilitySettingVersion.findMany({ where: { facilityId }, distinct: ['key'], select: { key: true } })
+        ).map((v) => v.key),
+      );
+      const now = new Date();
+      for (const [key, value] of Object.entries(settingsPatch)) {
+        if (value === undefined || UNDATED_SETTINGS_KEYS.includes(key)) continue;
+        if (stable(value) === stable(inForce[key])) {
+          delete settingsPatch[key];
+          continue;
+        }
+        if (!known.has(key)) {
+          const before = (resolveFacilitySettings(existing.settings) as unknown as Record<string, unknown>)[key];
+          versions.push({
+            facilityId,
+            key,
+            value: (before ?? null) as Prisma.InputJsonValue,
+            effectiveFrom: fromIsoDate(BASELINE_DATE),
+            note: 'Value before the first saved change',
+            appliedAt: now,
+          });
+        }
+        versions.push({
+          facilityId,
+          key,
+          value: value as Prisma.InputJsonValue,
+          effectiveFrom: fromIsoDate(effectiveFrom),
+          note: patch.note ?? null,
+          createdBy: userId ?? null,
+          appliedAt: effectiveFrom <= today ? now : null,
+        });
+        if (effectiveFrom > today) delete settingsPatch[key];
+      }
+
       data.settings = mergeSettings(
         existing.settings,
         settingsPatch as Partial<FacilitySettingsType>,
       ) as unknown as Prisma.InputJsonValue;
     }
-    const updated = await this.prisma.facility.update({ where: { id: facilityId }, data });
-    return format(updated);
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.facility.update({ where: { id: facilityId }, data }),
+      this.prisma.facilitySettingVersion.createMany({ data: versions }),
+    ]);
+    return format(updated, await this.pending(facilityId));
   }
 }

@@ -17,13 +17,13 @@ import { resolveFacilitySettings } from '../facility/facility.service';
 import type { JournalEntryService } from '../accounting/journal-entry.service';
 import { postedEntryNumber } from '../accounting/journal-entry.service';
 import { buildJE28CashVariance } from '../accounting/templates/je-28-cash-variance';
+import { settingsOn } from '../facility/settings-store';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
 /** The first business day whose cash is tracked, or null while tracking is off. */
 async function trackingFrom(db: Db, facilityId: string): Promise<string | null> {
-  const facility = await db.facility.findUnique({ where: { id: facilityId }, select: { settings: true } });
-  return resolveFacilitySettings(facility?.settings ?? null).cash_tracking_from;
+  return (await settingsOn(db, facilityId)).cash_tracking_from;
 }
 
 export type PendingCash = {

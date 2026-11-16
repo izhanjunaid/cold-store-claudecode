@@ -1,17 +1,17 @@
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { businessDate, toIsoDate, type ManagerReasonCode } from '@coldchain/shared';
 import { resolveFacilitySettings } from '../facility/facility.service';
+import { settingsOn } from '../facility/settings-store';
 
 /** What the solo rules read once per facility, not once per withdrawal. */
 export type SoloContext = { soloOn: boolean; perTonCharges: number; today: string };
 
 export async function loadSoloContext(db: PrismaClient | Prisma.TransactionClient, facilityId: string): Promise<SoloContext> {
-  const facility = await db.facility.findUnique({ where: { id: facilityId }, select: { settings: true } });
   const perTonCharges = await db.serviceCharge.count({
     where: { facilityId, isActive: true, applyAtDispatch: true, unitType: 'PER_TON', unitPricePkr: { gt: 0 } },
   });
   return {
-    soloOn: resolveFacilitySettings(facility?.settings ?? null).dispatch_solo_mode,
+    soloOn: (await settingsOn(db, facilityId)).dispatch_solo_mode,
     perTonCharges,
     today: businessDate(),
   };

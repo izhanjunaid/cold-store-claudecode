@@ -139,6 +139,23 @@ Tests: a setting changed from a future date does not affect a bill dated before 
 
 Clients will notice: a "takes effect from" date and a history on the Settings screen. No rule changes.
 
+**Stage 1 as built (2026-11-17, branch `redesign/stage-1-dated-settings`, on top of Stage 0).**
+
+- New table `facility_setting_versions` (migration 0049): one row for each saved change of a business setting, with the day it takes effect, who saved it, when, and a note. Every row goes to the audit log.
+- The stored settings (`facilities.settings`) stay "what is in force now". This differs from the first sketch in 2.2 ("existing values become version 1"): no copy is made at update time. Instead, the first time a setting is changed, the value it replaces is stored as a "before" row. The reason: about 17 test files, the installer and the previous version of the app all write or read the stored settings directly, and they keep working unchanged.
+- A change dated today applies at once. A change dated ahead waits and is applied on its day (checked whenever settings are read or saved, and by the background timer). A past date is refused.
+- Saving the Settings screen without changing a value writes nothing to the history.
+- The code reads settings through one function, `settingsOn(store, day)`. A bill reads the tax in force on the bill's own date. A payroll run reads the rules of the month it pays. Live rules (backdating limit, solo dispatch, weights, capacity warning, surcharge, cash tracking) read today.
+- Mail and notification settings and the permission overrides carry no date. They are not business rules.
+- The Settings screen has "Takes effect from", a note, a list of changes that have not started yet, and a history.
+
+Tests: `dated-settings.integration.test.ts` (applies today, keeps the old value, audit log, no version when nothing changed, waits when dated ahead, past date refused, applied on its day, a bill dated before the change is not affected) and three tests on the Settings screen. Checked: API integration 1,073 passed (4 skipped), API unit 306, web 527, `pnpm build` green.
+
+Known limits:
+- Five places that only choose how numbers are printed (`number_format` on PDFs) still read the stored settings directly. They show today's value, which is right for a print made today.
+- A change dated ahead cannot be deleted. To cancel it, save the old value again for the same date; the later save wins.
+- A setting written straight into the database (not through the screen) has no history row, so a read for a past day returns the current value for it.
+
 ### Stage 2 — Goods and units (2.4)
 Unit name, weight per unit and space factor on goods; the goods list and revenue accounts per store; every screen and paper shows the goods' unit; room capacity counts mixed goods.
 
@@ -230,8 +247,8 @@ The three stores, taken from the research:
 | Research: domain brief, glossary, questionnaire | Done 2026-11-16 | `redesign/domain-and-audit` | `docs/29`, `docs/30` |
 | Audit | Done 2026-11-16 | same | `docs/31`; timings on generated data |
 | Redesign plan | Approved 2026-11-16 ("go ahead"); section 5 not answered, recommended defaults in use | same | this file |
-| 0 Stop the losses | Built 2026-11-16, **not merged** | `redesign/stage-0-stop-losses` | see "Stage 0 as built"; general-ledger paging moved to Stage 10 |
-| 1 Dated settings | Not started | | |
+| 0 Stop the losses | Built 2026-11-16, PR #53 open, CI green, **not merged** | `redesign/stage-0-stop-losses` | see "Stage 0 as built"; general-ledger paging moved to Stage 10 |
+| 1 Dated settings | Built 2026-11-17, **not merged** | `redesign/stage-1-dated-settings` (on top of Stage 0) | see "Stage 1 as built" |
 | 2 Goods and units | Not started | | |
 | 3 Rent | Not started | | |
 | 4 Client terms, arhti, peshgi | Not started | | |
