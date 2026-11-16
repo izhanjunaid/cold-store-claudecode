@@ -119,11 +119,13 @@ Clients will notice:
 | Lot search speed | Text-search indexes (migration 0048) and owners resolved to ids first. | existing lot search tests |
 | F-1 false benchmark | `scripts/perf-baseline.ts` removed. `pnpm perf:time` runs `scripts/perf-time.mjs`. | |
 
-Measured on the same generated season (median): lot search 315 ms → about 35 ms; dashboard and receivables aging: server error → about 1 s.
+Measured on the same generated season (median, this 8 GB machine): lot search 315 ms → 37 ms; dashboard: server error → about 2 s; receivables aging: server error → about 3 s. The database statement behind both takes 1.3 s; the rest is the report code around it.
+
+Checked on 2026-11-16: API integration tests (1,031 passed, 4 skipped, run in four parts because the machine ran short of memory on a single run), API unit tests 306, web tests 524, `pnpm build` green.
 
 Left for later, with the reason:
 - **Paging the general ledger.** The screen exports its rows to a spreadsheet file, so paging needs the export reworked too. One month of the farmers' account is 1.5 s; a full year is 8 s and 16 MB. Moved to Stage 10's speed work.
-- **The dashboard at about 1 s.** It still adds up the whole season to find the overdue amount. Stage 3 (rent tracked per lot, bills that know what is still open) removes the cause.
+- **The dashboard at about 2 s and aging at about 3 s.** They still add up the whole season to find what is open. Stage 3 (rent tracked per lot, bills that know what is still open) removes the cause.
 - **Monthly rent at a change of owner.** Seller and buyer are each billed their own period rounded up to whole months, so a lot sold mid-month pays one month more in total than a lot that was not sold. This is how a full transfer already worked. Stage 3 settles it with the "billed up to" date.
 - **T-3** (the seller's bill stays a draft until someone finalises it) is unchanged. It now applies to partial transfers too. The dashboard lists these drafts.
 - If a seller's draft season bill is later deleted, the lot stays marked as season-billed. Stage 3 replaces the mark with the bill itself.

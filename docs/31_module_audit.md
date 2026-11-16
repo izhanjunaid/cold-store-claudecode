@@ -210,6 +210,8 @@ The accounting core is the strongest part of the product. One posting path, one 
 
 ## Measurements
 
+> **After Stage 0 (2026-11-16):** lot search 37 ms; dashboard about 2 s and receivables aging about 3 s (both failed before). The other rows are unchanged. The table below is the "before" record.
+
 Taken 2026-11-16 on the 8 GB Windows development machine, API and PostgreSQL 16 on the same machine, v0.9.0 code.
 
 **Data.** A separate local database (`coldchain_perf`) filled by `scripts/perf-seed.sql`: 2,000 parties, 30,000 lots (6,000 still in the rooms), 48,000 dispatched withdrawals each with a finalised bill and journal entry, 40,800 cash receipts, 177,600 ledger lines. Debits equal credits. The rows are generated, not real, and were inserted directly; they carry no rack placements, gate passes or PDFs.
