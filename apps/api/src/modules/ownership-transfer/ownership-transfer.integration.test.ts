@@ -50,6 +50,45 @@ async function createLot(quantity = 100) {
   };
 }
 
+const RATE_PLAN_SEASONAL = '00000000-0000-0000-0000-000000000501';
+
+async function datedLot(ratePlanId: string, quantity: number, inboundDate: string) {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/lots',
+    headers: authHeaders(operatorToken),
+    payload: {
+      owner_party_id: fromPartyId, commodity_id: POTATO_ID, rate_plan_id: ratePlanId, chamber_id: CHAMBER_A,
+      quantity_bags: quantity, accepted_weight_kg: quantity * 20, inbound_date: inboundDate,
+    },
+  });
+  expect(res.statusCode).toBe(201);
+  return JSON.parse(res.body).data as { id: string; lot_number: string };
+}
+
+function transfer(lotId: string, payload: Record<string, unknown>) {
+  return app.inject({ method: 'POST', url: `/v1/lots/${lotId}/transfer`, headers: authHeaders(managerToken), payload });
+}
+
+/** Withdraw and dispatch `bags` of the lot; returns the withdrawal's invoice. */
+async function withdrawAll(lotId: string, bags: number, date: string) {
+  const ob = await app.inject({
+    method: 'POST',
+    url: '/v1/outbound-events',
+    headers: authHeaders(operatorToken),
+    payload: { lot_id: lotId, withdrawal_type: 'FULL', quantity_withdrawn_bags: bags, outbound_date: date },
+  });
+  expect(ob.statusCode).toBe(201);
+  const fin = await app.inject({
+    method: 'POST',
+    url: `/v1/outbound-events/${JSON.parse(ob.body).data.id}/finalize`,
+    headers: authHeaders(managerToken),
+    payload: {},
+  });
+  expect(fin.statusCode).toBe(200);
+  return prisma.invoice.findUniqueOrThrow({ where: { id: JSON.parse(fin.body).data.invoice_id } });
+}
+
 async function createParty(name: string, phone: string): Promise<string> {
   const res = await app.inject({
     method: 'POST',
@@ -243,6 +282,50 @@ describe('Ownership Transfer', () => {
     expect(inv.period_end).toBe('2026-05-20');
     // MONTHLY_PER_BAG: Apr15->May20 = 35 days -> ceil(35/30) = 2 months
     expect(inv.line_items[0].amount_pkr).toBe(80 * 100 * 2);
+  });
+
+  // docs/31 T-1: the rent on the bags sold, from arrival to the sale day, was billed to nobody.
+  it('PARTIAL transfer: bills the seller for the rent on the bags sold, up to the transfer date', async () => {
+    const lot = await datedLot(RATE_PLAN, 50, '2026-04-01'); // MONTHLY_PER_BAG, rate 100
+    const res = await transfer(lot.id, { transfer_type: 'PARTIAL', to_party_id: toPartyId, quantity_bags: 10, effective_date: '2026-04-15' });
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body).data;
+    expect(body.accrued_invoice_id).toBeTruthy();
+
+    const inv = await prisma.invoice.findUniqueOrThrow({ where: { id: body.accrued_invoice_id }, include: { lineItems: true } });
+    expect(inv.status).toBe('DRAFT');
+    expect(inv.billingPartyId).toBe(fromPartyId);
+    expect(inv.lotId).toBe(lot.id);
+    expect(inv.periodStart.toISOString().slice(0, 10)).toBe('2026-04-01');
+    expect(inv.periodEnd.toISOString().slice(0, 10)).toBe('2026-04-15');
+    // 10 bags, Apr 1 -> Apr 15 = 14 days -> 1 month
+    expect(Number(inv.lineItems[0]!.amountPkr)).toBe(10 * 100);
+  });
+
+  // docs/31 T-2: a seasonal fee is flat per bag, so it is owed once — not by seller and buyer both.
+  it('Seasonal rent: the seller is billed the season at the transfer and the buyer is not billed it again', async () => {
+    for (const type of ['FULL', 'PARTIAL'] as const) {
+      const lot = await datedLot(RATE_PLAN_SEASONAL, 80, '2026-04-01'); // SEASONAL_PER_BAG, rate 50
+      const bags = type === 'FULL' ? 80 : 30;
+      const res = await transfer(lot.id, {
+        transfer_type: type, to_party_id: toPartyId, effective_date: '2026-04-15', ...(type === 'PARTIAL' ? { quantity_bags: bags } : {}),
+      });
+      expect(res.statusCode).toBe(201);
+      const body = JSON.parse(res.body).data;
+      const sellerBill = await prisma.invoice.findUniqueOrThrow({ where: { id: body.accrued_invoice_id } });
+      expect(Number(sellerBill.subTotalPkr)).toBe(bags * 50);
+
+      const buyerLotId = body.child_lot_id ?? lot.id;
+      const buyerBill = await withdrawAll(buyerLotId, bags, '2026-05-20');
+      expect(buyerBill.billingPartyId).toBe(toPartyId);
+      expect(Number(buyerBill.subTotalPkr)).toBe(0);
+
+      // A second sale of the same bags bills nobody the season again.
+      if (type === 'PARTIAL') {
+        const rest = await withdrawAll(lot.id, 50, '2026-05-20');
+        expect(Number(rest.subTotalPkr)).toBe(50 * 50); // the seller's own remaining bags, once
+      }
+    }
   });
 
   it('PARTIAL transfer: creates child lot with -T1 suffix, decrements parent, writes two events', async () => {

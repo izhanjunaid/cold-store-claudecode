@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient, BookType } from '@coldchain/db';
-import { AR_CONTROL_ACCOUNTS, round2, sumMoney, toIsoDate } from '@coldchain/shared';
+import { AR_CONTROL_ACCOUNTS, SYSTEM_ACCOUNTS, round2, sumMoney, toIsoDate } from '@coldchain/shared';
 import { partyBalances, postedLinesWhere } from '../accounting/ledger';
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -28,12 +28,35 @@ export async function arBalances(
   return new Map([...sums].map(([party, s]) => [party, round2(s.debit - s.credit)]));
 }
 
-/** Everything a party owes across both books — what a credit limit is measured against. */
+/**
+ * The party's unpaid peshgi (cash advances) on one book, from the ledger. Peshgi has
+ * its own account, outside the receivable controls, so a statement and an "amount
+ * owed" built on those alone left it out (docs/31 A-1, P-2).
+ */
+export async function peshgiOutstanding(
+  db: Db,
+  args: { facilityId: string; book: BookType; partyId: string; asOf?: Date },
+): Promise<number> {
+  const sums = await partyBalances(db, {
+    facilityId: args.facilityId,
+    book: args.book,
+    accounts: [SYSTEM_ACCOUNTS.PESHGI_LOANS],
+    to: args.asOf,
+    partyId: args.partyId,
+  });
+  const s = sums.get(args.partyId);
+  return s ? round2(s.debit - s.credit) : 0;
+}
+
+/** Everything a party owes across both books, peshgi included — what a credit limit is measured against. */
 export async function creditExposure(db: Db, facilityId: string, partyId: string): Promise<number> {
-  const [pacci, katchi] = await Promise.all(
-    (['PACCI', 'KATCHI'] as const).map((book) => arBalances(db, { facilityId, book, partyId })),
+  const parts = await Promise.all(
+    (['PACCI', 'KATCHI'] as const).flatMap((book) => [
+      arBalances(db, { facilityId, book, partyId }).then((m) => m.get(partyId) ?? 0),
+      peshgiOutstanding(db, { facilityId, book, partyId }),
+    ]),
   );
-  return round2((pacci!.get(partyId) ?? 0) + (katchi!.get(partyId) ?? 0));
+  return sumMoney(parts);
 }
 
 export type OpenItem = {
@@ -64,64 +87,71 @@ export async function openItems(
   db: Db,
   args: { facilityId: string; book: BookType; asOf: Date; partyId?: string },
 ): Promise<OpenItem[]> {
-  const lines = await db.journalEntryLine.findMany({
-    where: {
-      ...postedLinesWhere({ facilityId: args.facilityId, book: args.book, to: args.asOf }),
-      accountCode: { in: [...AR_CONTROL_ACCOUNTS] },
-      partyId: args.partyId ?? { not: null },
-    },
-    select: {
-      partyId: true,
-      debitAmount: true,
-      creditAmount: true,
-      journalEntry: { select: { sourceTable: true, sourceId: true, entryDate: true, entryNumber: true } },
-    },
-  });
-
-  const creditNoteIds = [...new Set(lines.filter((l) => l.journalEntry.sourceTable === 'credit_notes').map((l) => l.journalEntry.sourceId))];
-  const creditNotes = await db.creditNote.findMany({
-    where: { id: { in: creditNoteIds } },
-    select: { id: true, originalInvoiceId: true },
-  });
-  const invoiceOfCreditNote = new Map(creditNotes.map((c) => [c.id, c.originalInvoiceId]));
-
-  const invoiceNet = new Map<string, number>();
-  const other = new Map<string, OpenItem>();
-  for (const l of lines) {
-    const je = l.journalEntry;
-    const amount = Number(l.debitAmount) - Number(l.creditAmount);
-    const invoiceId =
-      je.sourceTable === 'invoices' ? je.sourceId : je.sourceTable === 'credit_notes' ? invoiceOfCreditNote.get(je.sourceId) : undefined;
-    if (invoiceId) {
-      invoiceNet.set(invoiceId, (invoiceNet.get(invoiceId) ?? 0) + amount);
-    } else if (je.sourceTable !== 'payments') {
-      const key = `${l.partyId}:${je.sourceTable}:${je.sourceId}`;
-      const item = other.get(key) ?? { partyId: l.partyId!, invoiceId: null, reference: je.entryNumber, date: je.entryDate, amountPkr: 0 };
-      item.amountPkr += amount;
-      if (je.entryDate < item.date) item.date = je.entryDate;
-      other.set(key, item);
-    }
-  }
-
-  const invoices = await db.invoice.findMany({
-    where: { id: { in: [...invoiceNet.keys()] } },
-    select: {
-      id: true,
-      billingPartyId: true,
-      invoiceNumber: true,
-      invoiceDate: true,
-      allocations: { where: { voidedAt: null, payment: { paymentDate: { lte: args.asOf } } }, select: { allocatedAmountPkr: true } },
-    },
-  });
-  const items: OpenItem[] = invoices.map((inv) => ({
-    partyId: inv.billingPartyId,
-    invoiceId: inv.id,
-    reference: inv.invoiceNumber,
-    date: inv.invoiceDate,
-    amountPkr: round2((invoiceNet.get(inv.id) ?? 0) - inv.allocations.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0)),
-  }));
-  for (const item of other.values()) items.push({ ...item, amountPkr: round2(item.amountPkr) });
-  return items.filter((i) => Math.abs(i.amountPkr) > 0.005);
+  // One statement, summed in the database. It used to load every receivable line the
+  // store ever posted and add them up here, then name every invoice in one IN list:
+  // seconds on a season of data, and a server error past 32,767 bills, the most bind
+  // variables PostgreSQL takes (docs/31 F-0). Only what is still open comes back.
+  //
+  // The line filter is postedLinesWhere's: POSTED, in the book, up to the date. Raw
+  // SQL is safe here: none of these tables is row-level secured. The day is passed as
+  // text: a date column holds the UTC date part of what Prisma is given, and a Date
+  // bound to raw SQL would be cast in the session's time zone instead.
+  //
+  // Every join's inner side is a table read through its index (invoices, and receipts
+  // by invoice), never a second pass over a sub-result: with a client the planner has
+  // no statistics for yet, that shape took over a minute for 33,000 bills.
+  const asOf = toIsoDate(args.asOf);
+  const partyId = args.partyId ?? null;
+  const rows = await db.$queryRaw<
+    { party_id: string; invoice_id: string | null; reference: string | null; date: Date; amount: unknown }[]
+  >`
+    WITH src AS (
+      SELECT l.party_id, je.source_table, je.source_id,
+             SUM(l.debit_amount - l.credit_amount) AS net,
+             MIN(je.entry_date) AS date,
+             MIN(je.entry_number) AS entry_number
+      FROM journal_entry_lines l
+      JOIN journal_entries je ON je.id = l.journal_entry_id
+      WHERE l.facility_id = ${args.facilityId}::uuid
+        AND je.posting_status = 'POSTED'
+        AND je.book_type = ${args.book}::"BookType"
+        AND je.entry_date <= ${asOf}::date
+        AND l.account_code = ANY(${[...AR_CONTROL_ACCOUNTS]}::varchar[])
+        AND l.party_id IS NOT NULL
+        AND (${partyId}::uuid IS NULL OR l.party_id = ${partyId}::uuid)
+        AND je.source_table <> 'payments'
+      GROUP BY l.party_id, je.source_table, je.source_id
+    ), doc AS (
+      SELECT s.party_id, s.net, s.date, s.entry_number,
+             CASE WHEN s.source_table = 'invoices' THEN s.source_id
+                  WHEN s.source_table = 'credit_notes' THEN cn.original_invoice_id END AS invoice_id
+      FROM src s
+      LEFT JOIN credit_notes cn ON s.source_table = 'credit_notes' AND cn.id = s.source_id
+    ), inv AS (
+      SELECT d.invoice_id, SUM(d.net) AS net
+      FROM doc d
+      WHERE d.invoice_id IS NOT NULL
+      GROUP BY d.invoice_id
+    )
+    SELECT i.billing_party_id AS party_id, i.id AS invoice_id, i.invoice_number AS reference, i.invoice_date AS date,
+           bal.amount
+    FROM inv
+    JOIN invoices i ON i.id = inv.invoice_id
+    CROSS JOIN LATERAL (
+      SELECT inv.net - COALESCE(SUM(a.allocated_amount_pkr), 0) AS amount
+      FROM payment_allocations a
+      JOIN payments p ON p.id = a.payment_id
+      WHERE a.invoice_id = inv.invoice_id AND a.voided_at IS NULL AND p.payment_date <= ${asOf}::date
+    ) bal
+    WHERE ABS(bal.amount) > 0.005
+    UNION ALL
+    SELECT d.party_id, NULL, d.entry_number, d.date, d.net
+    FROM doc d
+    WHERE d.invoice_id IS NULL AND ABS(d.net) > 0.005
+  `;
+  return rows
+    .map((r) => ({ partyId: r.party_id, invoiceId: r.invoice_id, reference: r.reference, date: r.date, amountPkr: round2(Number(r.amount)) }))
+    .filter((i) => Math.abs(i.amountPkr) > 0.005);
 }
 
 export type StatementEntryType =
@@ -219,11 +249,16 @@ export async function partyStatement(
     });
   }
 
+  const peshgi = await peshgiOutstanding(db, { facilityId: args.facilityId, book: args.book, partyId: args.partyId, asOf: args.to });
   return {
     opening_balance_pkr: round2(opening),
     entries: rows,
     total_debit_pkr: sumMoney(rows.map((r) => r.debit_pkr)),
     total_credit_pkr: sumMoney(rows.map((r) => r.credit_pkr)),
     closing_balance_pkr: round2(balance),
+    // The rows above are the receivable accounts and tie to the ledger; peshgi is
+    // owed as well, so the statement closes with it and the total.
+    peshgi_outstanding_pkr: peshgi,
+    total_owed_pkr: round2(balance + peshgi),
   };
 }

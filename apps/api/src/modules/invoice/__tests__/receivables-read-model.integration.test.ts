@@ -103,4 +103,23 @@ describe('AR read model (R-10, R-11, R-12, L-03)', () => {
     const p = await fx.call('GET', `/v1/parties/${partyId}`, fx.tokens.owner);
     expect(p.body.data.over_credit_limit).toBe(true);
   });
+
+  // docs/31 A-1, P-2: peshgi sits on its own account, so "what does this man owe in all" left it out.
+  it('peshgi is counted in what the party owes and shown on the statement', async () => {
+    const partyId = await fx.party('Peshgi Party');
+    await fx.call('PATCH', `/v1/parties/${partyId}`, fx.tokens.owner, { credit_limit_pkr: 1000 });
+    await manualAr(partyId, 250, '2026-07-10');
+    const loan = await fx.call('POST', '/v1/loans/issue', fx.tokens.owner, {
+      party_id: partyId, issue_date: '2026-07-11', principal_pkr: 5000, payment_method: 'CASH',
+    });
+    expect(loan.status).toBe(201);
+
+    const st = await fx.call('GET', `/v1/parties/${partyId}/ledger`, fx.tokens.owner);
+    expect(st.body.data.closing_balance_pkr).toBe(250); // the receivable statement still ties to the ledger
+    expect(st.body.data.peshgi_outstanding_pkr).toBe(5000);
+    expect(st.body.data.total_owed_pkr).toBe(5250);
+
+    const p = await fx.call('GET', `/v1/parties/${partyId}`, fx.tokens.owner);
+    expect(p.body.data.over_credit_limit).toBe(true); // 250 alone is under the limit of 1000
+  });
 });

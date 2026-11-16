@@ -27,6 +27,7 @@ interface DraftInvoiceParams {
   minBillingDays: number;
   tariff?: unknown;
   seasonEndDate?: Date | null;
+  seasonFeeBilled?: boolean;
   createdBy: string;
 }
 
@@ -65,6 +66,7 @@ export async function priceStorageInvoice(
     minBillingDays: params.minBillingDays,
     tariff: params.tariff,
     seasonEndDate: params.seasonEndDate,
+    seasonFeeBilled: params.seasonFeeBilled,
   });
 
   // GST default: pre-fill from facility settings when GST-registered.
@@ -169,6 +171,7 @@ async function outboundBillingParams(
     minBillingDays: ratePlan.minBillingDays,
     tariff: ratePlan.tariff,
     seasonEndDate: ratePlan.seasonEndDate,
+    seasonFeeBilled: lot.seasonFeeBilled,
     createdBy: outbound.createdBy,
   };
 }

@@ -120,6 +120,8 @@ export class RevenueAccrualService {
 
       const plan = lot.ratePlan;
       if (plan.rateType === 'SEASONAL_PER_BAG') {
+        // Already billed in full to the owner who sold the lot: nothing is left to earn on it.
+        if (lot.seasonFeeBilled) continue;
         // A seasonal fee is flat, so it is spread over the season the plan defines.
         if (!plan.seasonEndDate) {
           unaccruable.push({

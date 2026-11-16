@@ -54,8 +54,8 @@ function mapTransferResponse(
     parent_current_balance_bags: parent.currentBalanceBags,
     child_lot_id: child?.id ?? null,
     child_lot_number: child?.lotNumber ?? null,
-    // FULL transfers only: DRAFT invoice billing the outgoing owner for the
-    // pre-transfer accrued period (see buildOwnershipTransferAccruedInvoice).
+    // DRAFT invoice billing the outgoing owner for the rent up to the transfer on
+    // the bags that changed hands; null when their season rent was already billed.
     accrued_invoice_id: accruedInvoiceId,
     notes: transfer.notes,
     created_at: transfer.createdAt.toISOString(),
@@ -124,27 +124,31 @@ export class OwnershipTransferService {
         include: { ratePlan: true },
       });
 
-      if (input.transferType === 'FULL') {
-        // Bill the outgoing owner for the accrued pre-transfer period now —
-        // no outbound event will ever fire for it, since the goods stay put
-        // and only the owner changes (outboundEventId is nullable for
-        // exactly this case). Find where their billing window started: the
-        // latest INITIAL/TRANSFER_IN on this lot, same lookup invoice
-        // builder uses at withdrawal time.
+      // Bill the outgoing owner now for the rent on the bags that change hands, from
+      // where their billing window started (the latest INITIAL/TRANSFER_IN on this
+      // lot, the same lookup the withdrawal invoice uses) to the transfer date. No
+      // withdrawal will ever bill it: the goods stay put and only the owner changes.
+      // A PARTIAL transfer used to skip this, and that rent was billed to nobody
+      // (docs/31 T-1).
+      //
+      // A seasonal fee is flat per bag, so it is owed once. The seller is billed it
+      // here and the lot the buyer holds is marked, so the buyer's withdrawal does
+      // not bill the season again (docs/31 T-2). Bags already marked bill nothing.
+      const seasonal = parentLot.ratePlan.rateType === 'SEASONAL_PER_BAG';
+      const billSeller = async (bags: number) => {
+        if (seasonal && parentLot.seasonFeeBilled) return null;
         const ownershipHistory = await tx.ownershipHistory.findMany({
           where: { lotId: parent.id },
           select: { eventType: true, effectiveDate: true },
         });
-        const accruedPeriodStart = billingPeriodStart({ inboundDate: parentLot.inboundDate, ownershipHistory });
-
-        const accruedInvoice = await buildOwnershipTransferAccruedInvoice(tx, {
+        return buildOwnershipTransferAccruedInvoice(tx, {
           facilityId: input.facilityId,
           lotId: parent.id,
           billingPartyId: parentLot.billingPartyId,
           bookType: parentLot.bookType,
-          periodStart: accruedPeriodStart,
+          periodStart: billingPeriodStart({ inboundDate: parentLot.inboundDate, ownershipHistory }),
           periodEnd: effectiveDate,
-          quantityBags: balance,
+          quantityBags: bags,
           ratePlan: {
             id: parentLot.ratePlan.id,
             rateType: parentLot.ratePlan.rateType,
@@ -155,12 +159,17 @@ export class OwnershipTransferService {
           },
           createdBy: input.operatorId,
         });
+      };
+
+      if (input.transferType === 'FULL') {
+        const accruedInvoice = await billSeller(balance);
 
         const updated = await tx.lot.update({
           where: { id: parent.id },
           data: {
             ownerPartyId: input.toPartyId,
             billingPartyId: input.toPartyId,
+            ...(seasonal ? { seasonFeeBilled: true } : {}),
           },
           include: LOT_INCLUDE_SHAPE_TRANSFER,
         });
@@ -200,7 +209,7 @@ export class OwnershipTransferService {
           { id: updated.id, lotNumber: updated.lotNumber, currentBalanceBags: updated.currentBalanceBags },
           null,
           'FULL',
-          accruedInvoice.id,
+          accruedInvoice?.id ?? null,
         );
       }
 
@@ -212,6 +221,8 @@ export class OwnershipTransferService {
           'quantity_bags',
         );
       }
+
+      const accruedInvoice = await billSeller(qty);
 
       // Decrement parent
       const updatedParent = await tx.lot.update({
@@ -242,6 +253,7 @@ export class OwnershipTransferService {
           inboundDate: effectiveDate,
           entryDate: effectiveDate,
           parentLotId: parent.id,
+          seasonFeeBilled: seasonal,
           status: 'ACTIVE',
           bookType: parentLot.bookType,
           // The physical marka stays on the bags, so the child lot inherits it.
@@ -299,6 +311,7 @@ export class OwnershipTransferService {
         },
         { id: childLot.id, lotNumber: childLot.lotNumber },
         'PARTIAL',
+        accruedInvoice?.id ?? null,
       );
     });
   }

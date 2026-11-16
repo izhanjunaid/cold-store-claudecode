@@ -11,6 +11,8 @@ export interface StorageChargeInput {
   /** TARIFF_PER_BAG only: the plan's rule, and the season end it may refer to. */
   tariff?: unknown;
   seasonEndDate?: Date | null;
+  /** The lot's season rent is already billed (to the owner who sold it): a seasonal plan charges nothing more. */
+  seasonFeeBilled?: boolean;
 }
 
 export interface StorageChargeResult {
@@ -50,6 +52,15 @@ export function computeStorageCharge(input: StorageChargeInput): StorageChargeRe
   const bags = input.quantityBags;
 
   if (input.rateType === 'SEASONAL_PER_BAG') {
+    if (input.seasonFeeBilled) {
+      return {
+        description: `Storage (Seasonal) — ${bags} bags, season rent already billed to the previous owner`,
+        quantity: bags,
+        unitPricePkr: 0,
+        amountPkr: 0,
+        days,
+      };
+    }
     return {
       description: `Storage (Seasonal) — ${bags} bags × Rs.${rate}`,
       quantity: bags,

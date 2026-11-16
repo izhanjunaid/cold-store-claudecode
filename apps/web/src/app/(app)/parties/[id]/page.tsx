@@ -291,7 +291,7 @@ export default function PartyDetailPage() {
   const activeLoans = loans.filter((l) => l.status === 'ACTIVE');
   const activeLoanBalance = activeLoans.reduce((s, l) => s + Number(l.balance_outstanding_pkr), 0);
   // The same exposure the server checks the limit against: both books.
-  const exposure = ledger ? ledger.closing_balance_pkr + katchiOutstanding : null;
+  const exposure = ledger ? ledger.closing_balance_pkr + katchiOutstanding + activeLoanBalance : null;
   const limitUsedPct =
     party.credit_limit_pkr && exposure != null ? Math.round((exposure / party.credit_limit_pkr) * 100) : null;
   // The ceiling reaches only holders of parties.credit_terms; everyone else gets the fact alone.
@@ -543,6 +543,11 @@ export default function PartyDetailPage() {
                     <span className={ledger.closing_balance_pkr > 0 ? 'font-semibold text-destructive' : 'font-semibold text-green-600'}>
                       Outstanding: {formatMoney(ledger.closing_balance_pkr)}
                     </span>
+                    {activeLoanBalance > 0 && (
+                      <span className="font-semibold text-destructive">
+                        With peshgi: {formatMoney(ledger.closing_balance_pkr + activeLoanBalance)}
+                      </span>
+                    )}
                   </div>
                 </>
               )}
