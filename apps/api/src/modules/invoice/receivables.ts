@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient, BookType } from '@coldchain/db';
-import { AR_CONTROL_ACCOUNTS, round2, sumMoney, toIsoDate } from '@coldchain/shared';
+import { AR_CONTROL_ACCOUNTS, SYSTEM_ACCOUNTS, round2, sumMoney, toIsoDate } from '@coldchain/shared';
 import { partyBalances, postedLinesWhere } from '../accounting/ledger';
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -28,12 +28,35 @@ export async function arBalances(
   return new Map([...sums].map(([party, s]) => [party, round2(s.debit - s.credit)]));
 }
 
-/** Everything a party owes across both books — what a credit limit is measured against. */
+/**
+ * The party's unpaid peshgi (cash advances) on one book, from the ledger. Peshgi has
+ * its own account, outside the receivable controls, so a statement and an "amount
+ * owed" built on those alone left it out (docs/31 A-1, P-2).
+ */
+export async function peshgiOutstanding(
+  db: Db,
+  args: { facilityId: string; book: BookType; partyId: string; asOf?: Date },
+): Promise<number> {
+  const sums = await partyBalances(db, {
+    facilityId: args.facilityId,
+    book: args.book,
+    accounts: [SYSTEM_ACCOUNTS.PESHGI_LOANS],
+    to: args.asOf,
+    partyId: args.partyId,
+  });
+  const s = sums.get(args.partyId);
+  return s ? round2(s.debit - s.credit) : 0;
+}
+
+/** Everything a party owes across both books, peshgi included — what a credit limit is measured against. */
 export async function creditExposure(db: Db, facilityId: string, partyId: string): Promise<number> {
-  const [pacci, katchi] = await Promise.all(
-    (['PACCI', 'KATCHI'] as const).map((book) => arBalances(db, { facilityId, book, partyId })),
+  const parts = await Promise.all(
+    (['PACCI', 'KATCHI'] as const).flatMap((book) => [
+      arBalances(db, { facilityId, book, partyId }).then((m) => m.get(partyId) ?? 0),
+      peshgiOutstanding(db, { facilityId, book, partyId }),
+    ]),
   );
-  return round2((pacci!.get(partyId) ?? 0) + (katchi!.get(partyId) ?? 0));
+  return sumMoney(parts);
 }
 
 /**
@@ -243,11 +266,16 @@ export async function partyStatement(
     });
   }
 
+  const peshgi = await peshgiOutstanding(db, { facilityId: args.facilityId, book: args.book, partyId: args.partyId, asOf: args.to });
   return {
     opening_balance_pkr: round2(opening),
     entries: rows,
     total_debit_pkr: sumMoney(rows.map((r) => r.debit_pkr)),
     total_credit_pkr: sumMoney(rows.map((r) => r.credit_pkr)),
     closing_balance_pkr: round2(balance),
+    // The rows above are the receivable accounts and tie to the ledger; peshgi is
+    // owed as well, so the statement closes with it and the total.
+    peshgi_outstanding_pkr: peshgi,
+    total_owed_pkr: round2(balance + peshgi),
   };
 }

@@ -159,5 +159,8 @@ export const PartyLedgerResponse = z.object({
   total_debit_pkr: z.number(),
   total_credit_pkr: z.number(),
   closing_balance_pkr: z.number(),
+  /** Unpaid peshgi on this book, and the closing balance plus it (docs/31 A-1). */
+  peshgi_outstanding_pkr: z.number().default(0),
+  total_owed_pkr: z.number().default(0),
 });
 export type PartyLedgerResponseType = z.infer<typeof PartyLedgerResponse>;

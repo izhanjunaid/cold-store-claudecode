@@ -169,6 +169,12 @@ export default function PartyStatementDetailPage() {
         <Kpi label="Total Debits" value={data?.total_debit_pkr ?? 0} />
         <Kpi label="Total Credits" value={data?.total_credit_pkr ?? 0} />
         <Kpi label="Closing Balance" value={data?.closing_balance_pkr ?? 0} primary />
+        {data?.peshgi_outstanding_pkr ? (
+          <>
+            <Kpi label="Peshgi (advance) unpaid" value={data.peshgi_outstanding_pkr} />
+            <Kpi label="Total owed" value={data.total_owed_pkr} primary />
+          </>
+        ) : null}
       </div>
 
       <DataTable
