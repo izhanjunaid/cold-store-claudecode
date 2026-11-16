@@ -3,6 +3,7 @@ import type { PrismaClient, Prisma } from '@coldchain/db';
 import { businessDate, businessHour, type NotificationSettingsType } from '@coldchain/shared';
 import { resolveFacilitySettings } from '../facility/facility.service';
 import { DigestService } from './digest.service';
+import { applyDueSettings } from '../facility/settings-store';
 
 const TICK_MS = 5 * 60 * 1000; // check every 5 minutes
 const STATE_KEY = 'notifications_state';
@@ -65,6 +66,7 @@ export function startNotificationScheduler(app: FastifyInstance): NodeJS.Timeout
       const today = businessDate(now);
       for (const f of facilities) {
         try {
+          await applyDueSettings(app.prisma, f.id);
           const settings = resolveFacilitySettings(f.settings);
           if (!isDigestDue(settings.notifications, readState(f.settings), now)) continue;
           const result = await digest.sendNow(f.id);

@@ -17,6 +17,7 @@ import { resolveFacilitySettings } from '../facility/facility.service';
 import { accountBalances, classify, postedLinesWhere, type ClassifiableAccount, type Sums } from './ledger';
 import { equityRoles, OWNER_MOVEMENT_SOURCES, type EquityAccountRole } from './equity-accounts';
 import { sliceByRatio, divideByWeight, type RatioWindow } from './equity-allocation';
+import { settingsOn } from '../facility/settings-store';
 
 /**
  * The trial balance's siblings: profit or loss, the balance sheet and the
@@ -201,11 +202,7 @@ export class FinancialStatementsService {
   }
 
   private async fyStartMonth(facilityId: string): Promise<number> {
-    const facility = await this.prisma.facility.findUniqueOrThrow({
-      where: { id: facilityId },
-      select: { settings: true },
-    });
-    return resolveFacilitySettings(facility.settings).fiscal_year_start_month;
+    return (await settingsOn(this.prisma, facilityId)).fiscal_year_start_month;
   }
 
   private async roles(facilityId: string) {

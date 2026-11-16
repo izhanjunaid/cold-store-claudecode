@@ -14,6 +14,7 @@ import { buildJE21SurchargeInvoice } from '../accounting/templates/je-21-late-pa
 import type { JournalEntryService } from '../accounting/journal-entry.service';
 import { receivableParty, RECEIVABLE_PARTY_SELECT } from '../party/receivable-party';
 import { generateInvoiceNumber } from '../invoice/invoice-number';
+import { settingsOn } from '../facility/settings-store';
 
 type Db = Prisma.TransactionClient | PrismaClient;
 
@@ -32,8 +33,7 @@ export class SurchargeService {
   ) {}
 
   private async loadRule(facilityId: string, db: Db) {
-    const facility = await db.facility.findUnique({ where: { id: facilityId } });
-    return resolveFacilitySettings(facility?.settings ?? null).late_payment_surcharge;
+    return (await settingsOn(db, facilityId)).late_payment_surcharge;
   }
 
   /** Months already charged on each overdue invoice. */

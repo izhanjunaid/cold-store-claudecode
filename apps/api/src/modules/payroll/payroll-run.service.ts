@@ -22,6 +22,7 @@ import { resolveFacilitySettings } from '../facility/facility.service';
 import { assertAdvanceCanReopen } from '../employee-advances/employee-advance.service';
 import { buildJE15Payroll } from './templates/je-15-payroll';
 import { buildJE16SalaryPayment } from './templates/je-16-salary-payment';
+import { settingsOn } from '../facility/settings-store';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type Tx = Prisma.TransactionClient;
@@ -101,8 +102,8 @@ export class PayrollRunService {
         3,
       );
 
-      const facility = await tx.facility.findUniqueOrThrow({ where: { id: facilityId }, select: { settings: true } });
-      const settings = resolveFacilitySettings(facility.settings).payroll;
+      // The payroll rules in force in the month being paid, not on the day the run is made.
+      const settings = (await settingsOn(tx, facilityId, new Date(Date.UTC(period_year, period_month - 1, 1)))).payroll;
 
       // Snapshot all active employees of the matching type
       const employeeType = payroll_type === 'MONTHLY_SALARY' ? 'SALARIED' : 'DAILY_WAGE';

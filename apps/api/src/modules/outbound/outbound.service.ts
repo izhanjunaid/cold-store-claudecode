@@ -11,6 +11,7 @@ import { lockRow } from '../../common/row-lock';
 import { addDays, businessDate, normalizePlate } from '@coldchain/shared';
 import { OPEN_OUTBOUND_STATUSES, isReadyToDispatch, openReservation } from './reservation';
 import { recordedKg } from '../../common/weight';
+import { settingsOn } from '../facility/settings-store';
 
 function toNumber(d: { toString(): string } | null | undefined): number | null {
   if (d == null) return null;
@@ -159,10 +160,7 @@ export class OutboundService {
       if (!isManager && params.outboundDate > today) {
         throw Errors.DATE_IN_FUTURE('outbound_date');
       }
-      const facility = await tx.facility.findUnique({
-        where: { id: params.facilityId },
-      });
-      const settings = resolveFacilitySettings(facility?.settings ?? null);
+      const settings = await settingsOn(tx, params.facilityId);
       // C3 D2: with the owner's switch on, anyone below manager books a truck the gate has logged in. The
       // release matches a truck to its load by plate, so a typed plate can hide a load from the gate. Passes
       // are read unlocked: a booking can land on a truck that is leaving at that moment, which only holds

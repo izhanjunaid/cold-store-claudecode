@@ -65,6 +65,7 @@ interface OwnershipEvent {
 }
 
 import { daysInStorage } from './days-in-storage';
+import { settingsOn } from '../facility/settings-store';
 export { daysInStorage };
 
 function toResponse(lot: LotRecord) {
@@ -241,10 +242,7 @@ export class LotService {
 
     // Facility settings drive the capacity-warning, weight-dispute and
     // backdating checks below.
-    const facility = await this.prisma.facility.findUnique({
-      where: { id: input.facilityId },
-    });
-    const settings = resolveFacilitySettings(facility?.settings ?? null);
+    const settings = await settingsOn(this.prisma, input.facilityId);
 
     // 3a. Capacity check (aggregate over ACTIVE lots)
     const agg = await this.repo.sumActiveBalanceByChamber(input.facilityId, input.chamberId);
