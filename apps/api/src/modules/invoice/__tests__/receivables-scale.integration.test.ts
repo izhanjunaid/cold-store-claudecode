@@ -61,14 +61,19 @@ beforeAll(async () => {
              md5('bigje'||s)::uuid, '${inv.createdBy}'::uuid
       FROM ${series}`),
   ]);
-}, 300_000);
+  // A bulk load leaves the planner's statistics saying these tables are as small as
+  // they were a moment ago (empty, on a fresh database), and every join over them is
+  // then planned as if for a handful of rows. A real store grows row by row and
+  // autovacuum keeps the statistics current; a bulk load must refresh them itself.
+  await prisma.$executeRawUnsafe('ANALYZE journal_entries, journal_entry_lines, invoices');
+}, 900_000);
 
 afterAll(async () => {
   await removeBulk();
   await fx.cleanup(prisma);
   await prisma.$disconnect();
   await closeTestApp();
-}, 300_000);
+}, 900_000);
 
 describe('receivables on a big store (docs/31 F-0)', () => {
   it(`ages a client with ${BILLS} open bills and ties to the ledger`, async () => {

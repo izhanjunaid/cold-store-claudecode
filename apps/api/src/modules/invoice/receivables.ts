@@ -96,6 +96,10 @@ export async function openItems(
   // SQL is safe here: none of these tables is row-level secured. The day is passed as
   // text: a date column holds the UTC date part of what Prisma is given, and a Date
   // bound to raw SQL would be cast in the session's time zone instead.
+  //
+  // Every join's inner side is a table read through its index (invoices, and receipts
+  // by invoice), never a second pass over a sub-result: with a client the planner has
+  // no statistics for yet, that shape took over a minute for 33,000 bills.
   const asOf = toIsoDate(args.asOf);
   const partyId = args.partyId ?? null;
   const rows = await db.$queryRaw<
@@ -125,22 +129,21 @@ export async function openItems(
       LEFT JOIN credit_notes cn ON s.source_table = 'credit_notes' AND cn.id = s.source_id
     ), inv AS (
       SELECT d.invoice_id, SUM(d.net) AS net
-      FROM doc d JOIN invoices i ON i.id = d.invoice_id
+      FROM doc d
+      WHERE d.invoice_id IS NOT NULL
       GROUP BY d.invoice_id
-    ), applied AS (
-      SELECT a.invoice_id, SUM(a.allocated_amount_pkr) AS amount
-      FROM payment_allocations a
-      JOIN payments p ON p.id = a.payment_id
-      WHERE a.voided_at IS NULL AND p.payment_date <= ${asOf}::date
-        AND a.invoice_id IN (SELECT invoice_id FROM inv)
-      GROUP BY a.invoice_id
     )
     SELECT i.billing_party_id AS party_id, i.id AS invoice_id, i.invoice_number AS reference, i.invoice_date AS date,
-           inv.net - COALESCE(applied.amount, 0) AS amount
+           bal.amount
     FROM inv
     JOIN invoices i ON i.id = inv.invoice_id
-    LEFT JOIN applied ON applied.invoice_id = inv.invoice_id
-    WHERE ABS(inv.net - COALESCE(applied.amount, 0)) > 0.005
+    CROSS JOIN LATERAL (
+      SELECT inv.net - COALESCE(SUM(a.allocated_amount_pkr), 0) AS amount
+      FROM payment_allocations a
+      JOIN payments p ON p.id = a.payment_id
+      WHERE a.invoice_id = inv.invoice_id AND a.voided_at IS NULL AND p.payment_date <= ${asOf}::date
+    ) bal
+    WHERE ABS(bal.amount) > 0.005
     UNION ALL
     SELECT d.party_id, NULL, d.entry_number, d.date, d.net
     FROM doc d
