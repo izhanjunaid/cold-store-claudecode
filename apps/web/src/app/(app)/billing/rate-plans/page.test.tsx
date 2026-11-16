@@ -76,6 +76,7 @@ describe('RatePlanListPage — custom tariff', () => {
     apiClient.mockReset();
     plans = [];
     apiClient.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (path.startsWith('/v1/parties')) return Promise.resolve([]);
       if (path.startsWith('/v1/commodities')) return Promise.resolve([POTATO]);
       if (path.startsWith('/v1/rate-plans') && !opts?.method) return Promise.resolve(plans);
       return Promise.resolve({});

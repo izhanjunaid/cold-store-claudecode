@@ -44,6 +44,8 @@ export interface RatePlanRef {
   id: string;
   name: string;
   commodity_id: string | null;
+  /** The one client this rate was agreed with; null = the store's ordinary rate. */
+  party_id?: string | null;
   rate_type: string;
   rate_amount_pkr: number;
 }

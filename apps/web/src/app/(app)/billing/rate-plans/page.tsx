@@ -18,6 +18,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 import { DataTable, type DataTableColumn } from '@/components/data-table';
 import { DEFAULT_TARIFF, TariffFields, tariffIssue } from './tariff-fields';
+import { PartyPicker } from '@/components/party/party-picker';
 
 import { formatDate, formatMoney } from '@/lib/format';
 interface RatePlan {
@@ -25,6 +26,8 @@ interface RatePlan {
   name: string;
   commodity_id: string | null;
   commodity_name: string | null;
+  party_id?: string | null;
+  party_name?: string | null;
   rate_type: string;
   rate_amount_pkr: number;
   season_start_date: string | null;
@@ -46,6 +49,8 @@ const SELECT_CLASS =
 interface FormData {
   name: string;
   commodity_id: string;
+  /** The one client this rate was agreed with; empty = every client. */
+  party_id: string;
   rate_type: string;
   rate_amount_pkr: string;
   season_start_date: string;
@@ -57,6 +62,7 @@ interface FormData {
 const EMPTY: FormData = {
   name: '',
   commodity_id: '',
+  party_id: '',
   rate_type: 'SEASONAL_PER_BAG',
   rate_amount_pkr: '',
   season_start_date: '',
@@ -110,6 +116,7 @@ export default function RatePlanListPage() {
     const next: FormData = {
       name: plan.name,
       commodity_id: plan.commodity_id ?? '',
+      party_id: plan.party_id ?? '',
       rate_type: plan.rate_type,
       rate_amount_pkr: String(plan.rate_amount_pkr),
       season_start_date: plan.season_start_date ?? '',
@@ -131,6 +138,8 @@ export default function RatePlanListPage() {
       const rate = parseFloat(form.rate_amount_pkr);
       const minDays = parseInt(form.min_billing_days) || 1;
       const payload: Record<string, unknown> = { name: form.name, commodity_id: form.commodity_id || null };
+      // The client is sent on create, and on edit only when it changed (see below).
+      if (!editingId || form.party_id !== original.party_id) payload['party_id'] = form.party_id || null;
       if (editingId) {
         // Only what changed: a plan that lots already use refuses rate changes, and
         // re-sending the unchanged rates must not make a rename look like one.
@@ -276,6 +285,19 @@ export default function RatePlanListPage() {
                 Name <span className="text-destructive">*</span>
               </Label>
               <Input value={form.name} onChange={(e) => set('name', e.target.value)} required placeholder="e.g. Potato Seasonal 2026" />
+            </div>
+            <div className="space-y-1">
+              <Label>For one client only</Label>
+              <PartyPicker
+                value={form.party_id}
+                onChange={(id) => set('party_id', id)}
+                kind="customer"
+                clearable
+                placeholder="Every client (the store's ordinary rate)"
+              />
+              <p className="text-xs text-muted-foreground">
+                Pick a client when this rate was agreed with him alone. His arrivals then use it without the munshi choosing.
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">

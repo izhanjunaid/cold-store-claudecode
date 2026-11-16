@@ -37,6 +37,7 @@ export async function ratePlanRoutes(app: FastifyInstance) {
         facilityId: request.user!.facilityId,
         name: body.name,
         commodityId: body.commodity_id,
+        partyId: body.party_id,
         rateType: body.rate_type,
         rateAmountPkr: body.rate_amount_pkr,
         seasonStartDate: body.season_start_date,
@@ -71,6 +72,7 @@ export async function ratePlanRoutes(app: FastifyInstance) {
       const result = await service.update(request.user!.facilityId, id, {
         name: body.name,
         commodityId: body.commodity_id,
+        partyId: body.party_id,
         rateAmountPkr: body.rate_amount_pkr,
         seasonStartDate: body.season_start_date,
         seasonEndDate: body.season_end_date,

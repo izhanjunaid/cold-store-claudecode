@@ -563,6 +563,7 @@ model Party {
   bills                  Bill[]
   supplierPayments       SupplierPayment[]
   creditApprovals        PartyCreditApproval[]
+  ownRatePlans           RatePlan[]             @relation("RatePlanParty")
 
   @@index([facilityId, phonePrimary])
   @@index([facilityId, partyType])
@@ -740,6 +741,8 @@ model RatePlan {
   facilityId         String    @map("facility_id") @db.Uuid
   name               String    @db.VarChar(200)
   commodityId        String?   @map("commodity_id") @db.Uuid
+  /// The one client this rate was agreed with; null = the store's ordinary rate (0052).
+  partyId            String?   @map("party_id") @db.Uuid
   rateType           RateType  @map("rate_type")
   rateAmountPkr      Decimal   @map("rate_amount_pkr") @db.Decimal(10, 2)
   seasonStartDate    DateTime? @map("season_start_date") @db.Date
@@ -752,6 +755,7 @@ model RatePlan {
 
   facility     Facility          @relation(fields: [facilityId], references: [id])
   commodity    Commodity?        @relation(fields: [commodityId], references: [id])
+  party        Party?            @relation("RatePlanParty", fields: [partyId], references: [id])
   lots         Lot[]
   invoiceLines InvoiceLineItem[]
 

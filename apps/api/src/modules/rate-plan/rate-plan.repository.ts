@@ -9,7 +9,7 @@ export class RatePlanRepository {
     if (filters.commodityId) where.commodityId = filters.commodityId;
     return this.prisma.ratePlan.findMany({
       where,
-      include: { commodity: { select: { id: true, name: true } } },
+      include: { commodity: { select: { id: true, name: true } }, party: { select: { id: true, name: true } } },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -17,14 +17,14 @@ export class RatePlanRepository {
   findById(facilityId: string, id: string): Promise<unknown> {
     return this.prisma.ratePlan.findFirst({
       where: { id, facilityId },
-      include: { commodity: { select: { id: true, name: true } } },
+      include: { commodity: { select: { id: true, name: true } }, party: { select: { id: true, name: true } } },
     });
   }
 
   create(data: Prisma.RatePlanUncheckedCreateInput): Promise<unknown> {
     return this.prisma.ratePlan.create({
       data,
-      include: { commodity: { select: { id: true, name: true } } },
+      include: { commodity: { select: { id: true, name: true } }, party: { select: { id: true, name: true } } },
     });
   }
 
@@ -32,7 +32,7 @@ export class RatePlanRepository {
     return this.prisma.ratePlan.update({
       where: { id },
       data,
-      include: { commodity: { select: { id: true, name: true } } },
+      include: { commodity: { select: { id: true, name: true } }, party: { select: { id: true, name: true } } },
     });
   }
 
