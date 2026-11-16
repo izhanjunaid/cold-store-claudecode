@@ -188,7 +188,7 @@
       <div class="section-title">Transfer Details</div>
       <table class="fields">
         <tr><td class="label">Effective Date</td><td>{{effectiveDate}}</td></tr>
-        <tr><td class="label">Bags Transferred</td><td style="font-weight:700;font-size:13px">{{quantityBags}}</td></tr>
+        <tr><td class="label">{{#if unitLabel}}{{unitLabel}}{{else}}Bags{{/if}} Transferred</td><td style="font-weight:700;font-size:13px">{{quantityBags}}</td></tr>
         <tr><td class="label">Commodity</td><td>{{commodityName}}{{#if varietyName}} / {{varietyName}}{{/if}}</td></tr>
         {{#if transferPricePkr}}
         <tr><td class="label">Transfer Price</td><td>Rs. {{money transferPricePkr}}</td></tr>

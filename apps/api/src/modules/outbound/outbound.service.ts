@@ -1,3 +1,4 @@
+import { lotUnit } from '../../common/lot-unit';
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { OutboundRepository, type OutboundWithRelations } from './outbound.repository';
@@ -371,7 +372,7 @@ export class OutboundService {
       lotNumber: ob.lot.lotNumber,
       outboundDate: ob.outboundDate.toISOString().slice(0, 10),
       receivingPartyName: ob.receivingParty?.name ?? null,
-      commodityName: '', // will be filled via joined query if needed
+      ...(await lotUnit(this.prisma, ob.lotId)),
       quantityWithdrawnBags: ob.quantityWithdrawnBags,
       // A facility that hides weights prints none (docs/27).
       outboundWeightKg: resolveFacilitySettings(facility?.settings ?? null).hide_weights ? null : toNumber(ob.outboundWeightKg),

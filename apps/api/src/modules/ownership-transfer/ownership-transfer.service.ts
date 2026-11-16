@@ -1,3 +1,4 @@
+import { lotUnit } from '../../common/lot-unit';
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { Errors } from '../../common/errors';
 import { openReservation } from '../outbound/reservation';
@@ -376,6 +377,7 @@ export class OwnershipTransferService {
       toPartyName: transfer.toParty.name,
       toPartyNameUrdu: transfer.toParty.nameUrdu ?? null,
       commodityName: transfer.lot.commodity?.name ?? '',
+      ...(await lotUnit(this.prisma, transfer.lot.id).then(({ unitLabel, unitLabelUrdu }) => ({ unitLabel, unitLabelUrdu }))),
       varietyName: transfer.lot.variety?.name ?? null,
       quantityBags: transfer.quantityBags,
       transferPricePkr: transfer.transferPricePkr ? Number(transfer.transferPricePkr) : null,

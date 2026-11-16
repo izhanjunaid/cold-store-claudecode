@@ -35,7 +35,7 @@ const columns: DataTableColumn<OwnershipTransferRowType>[] = [
   },
   { id: 'from', header: 'From', cell: (t) => t.from_party_name ?? '—', csv: (t) => t.from_party_name ?? '' },
   { id: 'to', header: 'To', cell: (t) => t.to_party_name, csv: (t) => t.to_party_name },
-  { id: 'bags', header: 'Bags', numeric: true, cell: (t) => t.quantity_bags.toLocaleString(), csv: (t) => t.quantity_bags },
+  { id: 'bags', header: 'Quantity', numeric: true, cell: (t) => t.quantity_bags.toLocaleString(), csv: (t) => t.quantity_bags },
   {
     id: 'price',
     header: 'Price (PKR)',

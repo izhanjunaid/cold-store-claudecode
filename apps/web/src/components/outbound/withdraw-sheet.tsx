@@ -35,7 +35,7 @@ export function WithdrawSheet({ open, onOpenChange, lotId, lotNumber, plateSugge
       <SheetContent size="lg">
         <SheetHeader>
           <SheetTitle>{lotNumber ? `New Withdrawal — ${lotNumber}` : 'New Withdrawal'}</SheetTitle>
-          <SheetDescription className="sr-only">Book a withdrawal of stored bags from this lot.</SheetDescription>
+          <SheetDescription className="sr-only">Book a withdrawal of stored goods from this lot.</SheetDescription>
         </SheetHeader>
         {open && (
           <WithdrawForm

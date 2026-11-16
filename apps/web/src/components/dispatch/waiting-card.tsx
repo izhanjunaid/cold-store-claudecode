@@ -16,6 +16,7 @@ import { AllowDialog } from '@/components/dispatch/allow-dialog';
 import { calledAt } from '@/components/dispatch/call-manager';
 import { checkedOutWhole, type TruckInside } from '@/components/dispatch/trucks-panel';
 import type { WaitingRow } from '@/hooks/use-waiting-for-manager';
+import { Units } from '@/lib/units';
 
 /** Why it waits: what the munshi called for, else the solo rule it fails. */
 function why(r: WaitingRow) {
@@ -92,7 +93,7 @@ export function WaitingCard({
         <span className="text-muted-foreground">{r.owner_party_name ?? '—'}</span>
         {r.marka && <span className="rounded bg-secondary px-1.5 py-0.5 text-xs font-semibold">{r.marka}</span>}
         <span className="font-mono">{r.vehicle_number ?? '—'}</span>
-        <span className="tabular-nums">{formatCount(r.quantity_withdrawn_bags)} bags</span>
+        <span className="tabular-nums">{formatCount(r.quantity_withdrawn_bags)} <Units /></span>
         {past && <span className="text-xs text-muted-foreground">booked for {formatDate(r.outbound_date)}</span>}
         <span className="text-xs text-amber-800">{why(r)}</span>
         {allowed && (

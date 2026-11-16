@@ -32,7 +32,7 @@ const cards: ReportCard[] = [
   { title: 'Lot Aging', href: '/reports/lot-aging', icon: Boxes, permission: 'reports.inventory', description: 'Active lots in storage sorted by age, with commodity-specific alert thresholds.' },
   { title: 'Receivables Aging', href: '/reports/receivables-aging', icon: Receipt, permission: 'reports.financial', description: 'Outstanding invoices bucketed 0–30 / 31–60 / 61–90 / 90+ days.' },
   { title: 'Party Statement', href: '/reports/party-statement', icon: FileSpreadsheet, permission: 'reports.financial', description: 'Generate a statement of account for any party, downloadable as PDF.' },
-  { title: 'Commodity Inventory', href: '/reports/commodity-inventory', icon: Warehouse, permission: 'reports.inventory', description: 'Bags by commodity, expandable per-room breakdown.' },
+  { title: 'Commodity Inventory', href: '/reports/commodity-inventory', icon: Warehouse, permission: 'reports.inventory', description: 'Stock by commodity, expandable per-room breakdown.' },
   { title: 'Weight Variance', href: '/reports/weight-variance', icon: Scale, permission: 'reports.inventory', weights: true, description: 'Inbound vs. outbound weight per lot, flagged at ±2% variance.' },
   { title: 'Seasonal Summary', href: '/reports/seasonal-summary', icon: CalendarRange, permission: 'reports.seasonal', description: 'Total inbound, outbound, and revenue across a date range, per commodity.' },
   { title: 'Ownership Transfer Log', href: '/reports/ownership-transfers', icon: ArrowRightLeft, permission: 'reports.inventory', description: 'Timeline of all FULL and PARTIAL ownership transfers across the facility.' },

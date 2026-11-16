@@ -292,7 +292,7 @@ export default function DispatchDeskPage() {
                   <TableHead>Dispatch note</TableHead>
                   <TableHead>Lot / owner</TableHead>
                   <TableHead>Truck</TableHead>
-                  <TableHead className="text-right">Bags</TableHead>
+                  <TableHead className="text-right">Quantity</TableHead>
                   <TableHead>Stage</TableHead>
                   <TableHead className="text-right">Next</TableHead>
                 </TableRow>
@@ -348,7 +348,7 @@ export default function DispatchDeskPage() {
           onOpenChange={(o) => !o && setCancelId(null)}
           eventId={cancelId}
           onCancelled={() => {
-            toast.success('Withdrawal cancelled — its bags are free again.');
+            toast.success('Withdrawal cancelled — its stock is free again.');
             refresh();
           }}
         />

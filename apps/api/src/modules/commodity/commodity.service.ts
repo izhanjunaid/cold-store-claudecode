@@ -5,6 +5,11 @@ interface CommodityRecord {
   id: string;
   name: string;
   unitLabel: string;
+  unitName: string | null;
+  unitNameUrdu: string | null;
+  unitWeightKg: { toString(): string } | null;
+  spaceFactor: { toString(): string };
+  revenueAccountCode: string | null;
   defaultStorageDaysAlert: number | null;
   isActive: boolean;
   varieties?: VarietyRecord[];
@@ -23,6 +28,11 @@ function toCommodityResponse(c: CommodityRecord) {
     name: c.name,
     unit_label: c.unitLabel,
     default_storage_days_alert: c.defaultStorageDaysAlert ?? null,
+    unit_name: c.unitName ?? c.unitLabel,
+    unit_name_urdu: c.unitNameUrdu,
+    unit_weight_kg: c.unitWeightKg ? Number(c.unitWeightKg) : null,
+    space_factor: Number(c.spaceFactor),
+    revenue_account_code: c.revenueAccountCode,
     is_active: c.isActive,
     varieties: c.varieties?.map(v => ({
       id: v.id,
@@ -41,6 +51,22 @@ function toVarietyResponse(v: VarietyRecord) {
   };
 }
 
+export interface CommodityInput {
+  name?: string;
+  unitLabel?: string;
+  unitName?: string;
+  unitNameUrdu?: string | null;
+  unitWeightKg?: number | null;
+  spaceFactor?: number;
+  revenueAccountCode?: string;
+  defaultStorageDaysAlert?: number;
+}
+
+/** Only the fields that were sent. */
+function fields(input: CommodityInput) {
+  return Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined));
+}
+
 export class CommodityService {
   constructor(private readonly repo: CommodityRepository) {}
 
@@ -49,24 +75,26 @@ export class CommodityService {
     return (commodities as CommodityRecord[]).map(toCommodityResponse);
   }
 
-  async create(input: { name: string; unitLabel: string; defaultStorageDaysAlert?: number }) {
-    const commodity = await this.repo.create({
-      name: input.name,
-      unitLabel: input.unitLabel,
-      defaultStorageDaysAlert: input.defaultStorageDaysAlert,
-    });
-    return toCommodityResponse(commodity as CommodityRecord);
+  async create(facilityId: string, input: CommodityInput & { name: string; unitLabel: string }) {
+    await this.assertRevenueAccount(facilityId, input.revenueAccountCode);
+    const commodity = await this.repo.create(fields(input) as never);
+    return toCommodityResponse(commodity as unknown as CommodityRecord);
   }
 
-  async update(id: string, input: { name?: string; unitLabel?: string; defaultStorageDaysAlert?: number }) {
+  async update(facilityId: string, id: string, input: CommodityInput) {
     const commodity = await this.repo.findById(id);
     if (!commodity) throw Errors.VALIDATION_ERROR('Commodity not found');
-    const updated = await this.repo.update(id, {
-      ...(input.name !== undefined && { name: input.name }),
-      ...(input.unitLabel !== undefined && { unitLabel: input.unitLabel }),
-      ...(input.defaultStorageDaysAlert !== undefined && { defaultStorageDaysAlert: input.defaultStorageDaysAlert }),
-    });
-    return toCommodityResponse(updated as CommodityRecord);
+    await this.assertRevenueAccount(facilityId, input.revenueAccountCode);
+    const updated = await this.repo.update(id, fields(input));
+    return toCommodityResponse(updated as unknown as CommodityRecord);
+  }
+
+  /** Rent on these goods posts to this account, so it must be one of the store's revenue accounts. */
+  private async assertRevenueAccount(facilityId: string, code: string | undefined) {
+    if (code === undefined) return;
+    if (!(await this.repo.isRevenueAccount(facilityId, code))) {
+      throw Errors.VALIDATION_ERROR('Choose one of your revenue accounts', 'revenue_account_code');
+    }
   }
 
   async listVarieties(commodityId: string) {

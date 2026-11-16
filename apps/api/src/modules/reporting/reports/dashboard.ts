@@ -56,7 +56,7 @@ export async function getDashboard(
         maxCapacityBags: true,
         lots: {
           where: { status: 'ACTIVE' },
-          select: { currentBalanceBags: true },
+          select: { currentBalanceBags: true, commodity: { select: { spaceFactor: true } } },
         },
       },
     }),
@@ -75,13 +75,15 @@ export async function getDashboard(
 
   const totalBags = bagsAgg._sum.currentBalanceBags ?? 0;
   const chambers = chamberRows.map((c) => {
-    const bags = c.lots.reduce((s, l) => s + l.currentBalanceBags, 0);
+    // A room's load in its capacity units: units x the goods' space factor (docs/32 2.4).
+    const bags = round2(c.lots.reduce((s, l) => s + l.currentBalanceBags * Number(l.commodity.spaceFactor), 0));
     const capacity = c.maxCapacityBags;
     const occupancy_pct = capacity > 0 ? round2((bags / capacity) * 100) : 0;
     return { id: c.id, name: c.name, bags, capacity, occupancy_pct };
   });
   const totalCapacity = chambers.reduce((s, c) => s + c.capacity, 0);
-  const occupancyPct = totalCapacity > 0 ? round2((totalBags / totalCapacity) * 100) : 0;
+  const totalLoad = chambers.reduce((s, c) => s + c.bags, 0);
+  const occupancyPct = totalCapacity > 0 ? round2((totalLoad / totalCapacity) * 100) : 0;
 
   const attentionCandidates = activeLots
     .map((lot) => {

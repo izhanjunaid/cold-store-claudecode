@@ -41,6 +41,7 @@ import {
   toPlacementsPayload,
   type AllocationRow,
 } from '@/components/rack-allocation-editor';
+import { useUnits } from '@/lib/units';
 
 const lotSchema = z
   .object({
@@ -156,6 +157,8 @@ export default function LotCreatePage() {
   const declared = weightsShown ? parseFloat(declaredStr) || 0 : 0;
   const accepted = weightsShown ? parseFloat(acceptedStr) || 0 : 0;
   const qty = parseInt(qtyStr) || 0;
+  // The unit of the goods chosen: bags for potatoes, crates for apples.
+  const unit = useUnits().of(commodityId);
   const bothWeights = declared > 0 && accepted > 0;
   const variancePct = bothWeights ? (Math.abs(accepted - declared) / declared) * 100 : 0;
   const varianceKg = bothWeights ? Math.abs(accepted - declared) : 0;
@@ -354,7 +357,7 @@ export default function LotCreatePage() {
                 label="Quantity"
                 required
                 min={1}
-                suffix="bags"
+                suffix={unit.many}
                 className="xl:col-span-2"
               />
               {weightsShown && (
@@ -473,7 +476,7 @@ export default function LotCreatePage() {
           <FormActions
             meta={
               <>
-                {qty > 0 && <EntryChip label="Bags" value={qty.toLocaleString()} />}
+                {qty > 0 && <EntryChip label={unit.many.charAt(0).toUpperCase() + unit.many.slice(1)} value={qty.toLocaleString()} />}
                 {accepted > 0 && <EntryChip label="Accepted" value={`${accepted.toLocaleString()} kg`} />}
                 {bothWeights && (
                   <EntryChip
@@ -492,7 +495,7 @@ export default function LotCreatePage() {
                 {placedBags > 0 && (
                   <EntryChip
                     label={placedBags > qty ? 'Placed — over quantity' : 'Placed on racks'}
-                    value={`${placedBags.toLocaleString()} bags${unplacedBags > 0 ? ` · ${unplacedBags.toLocaleString()} unplaced` : ''}`}
+                    value={`${placedBags.toLocaleString()} ${unit.many}${unplacedBags > 0 ? ` · ${unplacedBags.toLocaleString()} unplaced` : ''}`}
                     tone={placedBags > qty ? 'destructive' : 'default'}
                   />
                 )}

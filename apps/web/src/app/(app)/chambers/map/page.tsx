@@ -16,6 +16,7 @@ import { UrduText } from '@/components/ui/urdu-text';
 import { cn } from '@/lib/utils';
 import { formatCount } from '@/lib/format';
 import { capacityPct, formatCapacityPct } from '@/components/capacity-bar';
+import { Units } from '@/lib/units';
 
 interface Rack {
   id: string;
@@ -282,7 +283,7 @@ function RoomDrillDownDialog({
                   {lot.marka && (
                     <UrduText className="rounded bg-secondary px-2 py-0.5 text-xs font-semibold">{lot.marka}</UrduText>
                   )}
-                  <span className="ml-auto shrink-0 font-medium tabular-nums">{formatCount(lot.bags)} bags</span>
+                  <span className="ml-auto shrink-0 font-medium tabular-nums">{formatCount(lot.bags)} <Units of={lot.commodity} /></span>
                 </li>
               ))}
             </ul>

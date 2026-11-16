@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { FormActions, EntrySheet, EntryGroup } from '@/components/form';
 
 import { PageSkeleton } from '@/components/page-skeleton';
+import { Units } from '@/lib/units';
 interface Lot {
   id: string;
   lot_number: string;
@@ -64,7 +65,7 @@ export default function TransferNewPage() {
     if (!form.to_party_id) return setError('Select a new owner');
     if (form.transfer_type === 'PARTIAL') {
       const qty = Number(form.quantity_bags);
-      if (!qty || qty <= 0) return setError('Enter bags to transfer');
+      if (!qty || qty <= 0) return setError('Enter the quantity to transfer');
       if (lot && qty >= lot.current_balance_bags)
         return setError(
           `Partial quantity must be less than current balance (${lot.current_balance_bags}). Use FULL for the whole lot.`,
@@ -121,7 +122,7 @@ export default function TransferNewPage() {
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Current Balance</div>
-            <div className="font-medium">{lot.current_balance_bags.toLocaleString()} bags</div>
+            <div className="font-medium">{lot.current_balance_bags.toLocaleString()} <Units of={lot.commodity_name} /></div>
           </div>
         </CardContent>
       </Card>
@@ -152,7 +153,7 @@ export default function TransferNewPage() {
               <p className="mt-1 text-xs text-muted-foreground">
                 {form.transfer_type === 'FULL'
                   ? 'Entire lot + remaining balance moves to new owner.'
-                  : 'Spawns a new child lot for the transferred bags; parent keeps the remainder.'}
+                  : 'Makes a new lot for the quantity transferred; the first lot keeps the rest.'}
               </p>
             </div>
 

@@ -79,7 +79,7 @@ export function RackAllocationEditor({ racks, rows, onChange, totalBags, disable
                 <Input
                   type="number"
                   min={1}
-                  placeholder="Bags"
+                  placeholder="Quantity"
                   value={row.bags}
                   disabled={disabled}
                   onChange={(e) => update(idx, { bags: e.target.value })}
@@ -138,8 +138,8 @@ export function RackAllocationEditor({ racks, rows, onChange, totalBags, disable
               )}
             >
               {remaining < 0
-                ? `${Math.abs(remaining).toLocaleString()} bags over the lot balance`
-                : `${remaining.toLocaleString()} of ${totalBags.toLocaleString()} bags unplaced`}
+                ? `${Math.abs(remaining).toLocaleString()} over the lot balance`
+                : `${remaining.toLocaleString()} of ${totalBags.toLocaleString()} unplaced`}
             </span>
           </div>
 

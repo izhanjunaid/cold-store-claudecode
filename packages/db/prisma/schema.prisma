@@ -659,7 +659,15 @@ model CashHandoverPayment {
 model Commodity {
   id                      String  @id @default(uuid()) @db.Uuid
   name                    String  @unique @db.VarChar(100)
+  /// The unit these goods are counted in, plural ("Bags", "Crates"). Columns named *_bags hold this unit.
   unitLabel               String  @map("unit_label") @db.VarChar(20)
+  /// One unit ("Bag", "Crate"), and the same in Urdu (0050).
+  unitName                String? @map("unit_name") @db.VarChar(20)
+  unitNameUrdu            String? @map("unit_name_urdu") @db.VarChar(40)
+  /// What one unit usually weighs, when known. Not a billing input.
+  unitWeightKg            Decimal? @map("unit_weight_kg") @db.Decimal(8, 2)
+  /// Room one unit takes, in the room's capacity units (1 = the goods the capacity is counted in).
+  spaceFactor             Decimal @default(1) @map("space_factor") @db.Decimal(6, 3)
   defaultStorageDaysAlert Int?    @map("default_storage_days_alert")
   isActive                Boolean @default(true) @map("is_active")
   /// Where this commodity's storage revenue posts, unless a rate plan overrides it.

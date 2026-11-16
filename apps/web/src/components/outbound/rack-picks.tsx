@@ -48,12 +48,12 @@ export function RackPicks({
         {location.placements.map((p) => (
           <div key={p.rack_id} className="flex items-center gap-3 text-sm">
             <span className="w-24 font-medium">{p.rack_name}</span>
-            <span className="w-28 tabular-nums text-muted-foreground">{p.bags.toLocaleString()} bags here</span>
+            <span className="w-28 tabular-nums text-muted-foreground">{p.bags.toLocaleString()} here</span>
             <Input
               type="number"
               min={0}
               max={p.bags}
-              aria-label={`Bags picked from ${p.rack_name}`}
+              aria-label={`Quantity picked from ${p.rack_name}`}
               placeholder="Picked"
               value={value[p.rack_id] ?? ''}
               onChange={(e) => onChange({ ...value, [p.rack_id]: e.target.value })}
