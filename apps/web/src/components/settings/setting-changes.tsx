@@ -24,6 +24,7 @@ const LABEL: Record<string, string> = {
   dispatch_solo_mode: 'Munshi may dispatch alone',
   hide_weights: 'Weights hidden',
   book_only_trucks_inside: 'Book only trucks inside the gate',
+  transfer_rent_rule: 'Rent when goods change owner',
 };
 
 function show(value: unknown): string {

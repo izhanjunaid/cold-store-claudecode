@@ -28,6 +28,7 @@ import type { CreditApproval } from '@/components/party/credit-approval-dialogs'
 import { formatDate, formatMoney, formatCount } from '@/lib/format';
 import { LotWithdrawAction } from '@/components/outbound/lot-withdraw-action';
 import { PageSkeleton } from '@/components/page-skeleton';
+import { BillRentButton } from '@/components/billing/bill-rent-button';
 interface Party {
   id: string;
   name: string;
@@ -311,6 +312,7 @@ export default function PartyDetailPage() {
         description={party.name_urdu ?? undefined}
         actions={
           <>
+            {can(user, 'invoices.manage') && <BillRentButton partyId={party.id} />}
             <Button asChild variant="outline">
               <Link href={`/parties/${party.id}/edit`}>
                 <Pencil className="h-4 w-4" aria-hidden />

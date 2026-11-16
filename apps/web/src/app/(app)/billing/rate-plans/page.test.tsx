@@ -56,14 +56,14 @@ function renderPage() {
   );
 }
 
-const rateInput = () => screen.getByText(/Monthly rate per bag/).parentElement!.querySelector('input') as HTMLInputElement;
+const rateInput = () => screen.getByText(/Price per bag per month/).parentElement!.querySelector('input') as HTMLInputElement;
 const dateInputs = () => Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
 const dateUnder = (label: RegExp) => screen.getByText(label).parentElement!.querySelector('input') as HTMLInputElement;
 
 async function openNewTariffPlan() {
   renderPage();
   fireEvent.click(await screen.findByRole('button', { name: /new rate plan/i }));
-  fireEvent.change(await screen.findByDisplayValue('Seasonal / Bag'), { target: { value: 'TARIFF_PER_BAG' } });
+  fireEvent.click(await screen.findByRole('radio', { name: /Custom rule/ }));
   fireEvent.change(screen.getByPlaceholderText(/Potato Seasonal 2026/), { target: { value: 'Apple tariff' } });
   fireEvent.change(rateInput(), { target: { value: '30' } });
 }
@@ -76,6 +76,7 @@ describe('RatePlanListPage — custom tariff', () => {
     apiClient.mockReset();
     plans = [];
     apiClient.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (path.startsWith('/v1/parties')) return Promise.resolve([]);
       if (path.startsWith('/v1/commodities')) return Promise.resolve([POTATO]);
       if (path.startsWith('/v1/rate-plans') && !opts?.method) return Promise.resolve(plans);
       return Promise.resolve({});
@@ -172,5 +173,67 @@ describe('RatePlanListPage — custom tariff', () => {
     const body = apiClient.mock.calls.find((c) => c[1]?.method === 'PATCH')![1].body;
     expect(body).toMatchObject({ rate_amount_pkr: 31 });
     expect(body).not.toHaveProperty('tariff');
+  });
+});
+
+describe('RatePlanListPage — "How do you charge?" (docs/32 section 2.5)', () => {
+  beforeEach(() => {
+    apiClient.mockReset();
+    plans = [];
+    apiClient.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (path.startsWith('/v1/parties')) return Promise.resolve([]);
+      if (path.startsWith('/v1/commodities')) return Promise.resolve([{ ...POTATO, unit_label: 'Crates', unit_name: 'Crate' }]);
+      if (path.startsWith('/v1/rate-plans') && !opts?.method) return Promise.resolve(plans);
+      return Promise.resolve({});
+    });
+  });
+
+  const open = async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /new rate plan/i }));
+    fireEvent.change(await screen.findByPlaceholderText(/Potato Seasonal 2026/), { target: { value: 'My rate' } });
+  };
+  const price = (label: RegExp) => screen.getByText(label).parentElement!.querySelector('input') as HTMLInputElement;
+  const posted = async () => {
+    fireEvent.click(screen.getByRole('button', { name: /create rate plan/i }));
+    await waitFor(() => expect(apiClient).toHaveBeenCalledWith('/v1/rate-plans', expect.objectContaining({ method: 'POST' })));
+    return apiClient.mock.calls.find((c) => c[1]?.method === 'POST')![1].body;
+  };
+
+  it('offers five ways to charge, starts on "Per season", and asks for the price in the unit of the goods', async () => {
+    await open();
+    expect(screen.getAllByRole('radio').map((r) => r.textContent!.replace(/\..*/, ''))).toHaveLength(5);
+    expect(screen.getByRole('radio', { name: /Per season/ })).toHaveAttribute('aria-checked', 'true');
+    // The store's goods are in crates, so the price is per crate.
+    expect(await screen.findByText(/Price per crate for the season/)).toBeInTheDocument();
+  });
+
+  it('"Per month" shows worked examples and sends a monthly plan', async () => {
+    await open();
+    fireEvent.click(screen.getByRole('radio', { name: /Per month/ }));
+    fireEvent.change(price(/Price per crate per month/), { target: { value: '40' } });
+    // 100 units: 20 days = 1 month, 45 days = 2 months, 100 days = 4 months.
+    expect(screen.getByTestId('example-bills').textContent).toMatch(/20 days = Rs 4,000.*45 days = Rs 8,000.*100 days = Rs 16,000/);
+    expect(await posted()).toMatchObject({ rate_type: 'MONTHLY_PER_BAG', rate_amount_pkr: 40 });
+  });
+
+  it('"Half a month, then months" needs only a price and sends the adhi-month rule, with no rule builder on screen', async () => {
+    await open();
+    fireEvent.click(screen.getByRole('radio', { name: /Half a month, then months/ }));
+    fireEvent.change(price(/Price per crate per month/), { target: { value: '30' } });
+    expect(screen.queryByDisplayValue(/Choose one, then change/)).not.toBeInTheDocument();
+    // 20 days = half a month + 5 days: 100 x (15 + 5) = Rs 2,000.
+    expect(screen.getByTestId('example-bills').textContent).toMatch(/20 days = Rs 2,000/);
+    expect(await posted()).toMatchObject({
+      rate_type: 'TARIFF_PER_BAG',
+      rate_amount_pkr: 30,
+      tariff: { opening: { type: 'BLOCK', days: 15, months_charged: 0.5 } },
+    });
+  });
+
+  it('"Custom rule" opens the full rule builder', async () => {
+    await open();
+    fireEvent.click(screen.getByRole('radio', { name: /Custom rule/ }));
+    expect(await screen.findByDisplayValue(/Choose one, then change/)).toBeInTheDocument();
   });
 });

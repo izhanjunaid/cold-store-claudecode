@@ -22,6 +22,7 @@ import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
 import { useWeightsShown } from '@/hooks/use-reference-data';
 import { openPdf } from '@/lib/open-pdf';
 import { useUnits } from '@/lib/units';
+import { BillRentButton } from '@/components/billing/bill-rent-button';
 
 interface Lot {
   id: string;
@@ -175,6 +176,7 @@ export default function LotDetailPage() {
         crumb={lot.lot_number}
         actions={
           <>
+            {can(user, 'invoices.manage') && canAct && <BillRentButton lotId={id} />}
             {canTransfer && canAct && (
               <Button variant="outline" onClick={() => router.push(`/lots/${id}/transfer/new`)}>
                 <ArrowLeftRight className="h-4 w-4" aria-hidden />

@@ -189,6 +189,23 @@ Tests: the same season billed by old and new code gives the same total per clien
 
 Clients will notice: a new rent setup screen. Existing plans work unchanged. New options appear but are off.
 
+**Stage 3 as built (2026-11-19, branch `redesign/stage-3-rent`, on top of Stage 2).**
+
+- **Rent can be billed for a period, with the goods still in the room** (migration 0051). One action bills one lot, every lot of one client, or every lot, up to a date: the month-end bill of a khata client, the season-end bill, the bill for goods nobody collects. The bills are drafts and are finalised like any other. "Bill rent to today" is on the lot page and the client page.
+- **No day is billed twice.** Every rent bill is "what the whole stay costs per unit, less what the lot's period bills already charged". However a stay is billed in parts, the parts add up to what one bill at the end would have been. This holds for every rent type. What was billed is read from the lot's period bills that are not void, so cancelling a bill needs no second correction.
+- **The store chooses what happens to rent at a change of owner** (Settings): the seller is billed up to that day (as before, the default), or the buyer takes over the rent and pays everything not yet billed when the goods leave.
+- **A rate agreed with one client** (migration 0052). A rate plan can name a client. The arrival form hides other clients' rates and picks his own without the munshi choosing. The server refuses a lot on another client's rate.
+- **"How do you charge?"** on the rent setup screen: per season, per month, half a month then months, per day, custom rule. Each card asks only for a price, named in the unit of the goods, and shows worked example bills for 100 units. The full rule builder shows only behind "Custom rule".
+- **A new rate from today**: "Save as a new rate" in the edit dialog makes a copy of the plan at the new price for new arrivals and closes the old plan to new arrivals. Lots already stored keep the price they arrived under.
+
+Differences from the plan, with the reason:
+- **The three older rent types were not rewritten as tariff rules.** They stay as they are inside the one function that every bill already goes through. Rewriting them risks a changed amount on some existing bill (the two forms treat a zero-day stay differently) and gives the user nothing. The "one engine" aim is met at the point that matters: one function prices every rent bill.
+- **No "rent billed up to" date is stored on the lot.** The amount already billed per unit is worked out from the lot's period bills instead, which cannot go stale.
+- **Period bills are refused while monthly revenue accrual is switched on.** The accrual already books rent month by month; the two together would count rent twice. No client has accrual switched on. Joining the two is left for the accounting pass of Stage 10.
+- The words "per bag" on service charges and on the rule builder are unchanged.
+
+Tests: `rent-period-bills.integration.test.ts` (parts add up for monthly and seasonal rent, a cancelled bill is owed again, partial withdrawal after a bill, a client's lots at once, both change-of-owner rules), `client-rate.integration.test.ts`, four card tests on the rent setup screen. Checked: API integration 1,087 passed (4 skipped), API unit 308, web 537, `pnpm build` green.
+
 ### Stage 4 — Client terms, arhti, peshgi (2.7)
 Payment terms on the client; advance at arrival; arhti default and combined statement; peshgi tied to lots, with the leave rule and the limit.
 
@@ -266,8 +283,8 @@ The three stores, taken from the research:
 | Redesign plan | Approved 2026-11-16 ("go ahead"); section 5 not answered, recommended defaults in use | same | this file |
 | 0 Stop the losses | Done, merged 2026-11-17 (PR #53) | `redesign/stage-0-stop-losses` | see "Stage 0 as built"; general-ledger paging moved to Stage 10 |
 | 1 Dated settings | Built 2026-11-17, PR #54 open, CI green, **not merged** | `redesign/stage-1-dated-settings` (on top of Stage 0) | see "Stage 1 as built" |
-| 2 Goods and units | Built 2026-11-18, **not merged** | `redesign/stage-2-goods-units` (on top of Stage 1) | see "Stage 2 as built" |
-| 3 Rent | Not started | | |
+| 2 Goods and units | Built 2026-11-18, PR #55 open, **not merged** | `redesign/stage-2-goods-units` (on top of Stage 1) | see "Stage 2 as built" |
+| 3 Rent | Built 2026-11-19, **not merged** | `redesign/stage-3-rent` (on top of Stage 2) | see "Stage 3 as built" |
 | 4 Client terms, arhti, peshgi | Not started | | |
 | 5 Tax | Not started | | |
 | 6 Papers, numbers, words, language | Not started | | |

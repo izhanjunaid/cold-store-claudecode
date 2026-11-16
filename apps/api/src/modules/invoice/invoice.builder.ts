@@ -29,6 +29,9 @@ interface DraftInvoiceParams {
   tariff?: unknown;
   seasonEndDate?: Date | null;
   seasonFeeBilled?: boolean;
+  alreadyBilledPerUnitPkr?: number;
+  /** A bill for rent up to a date with the goods still in the room (docs/32 2.6). */
+  rentPeriodBill?: boolean;
   createdBy: string;
 }
 
@@ -68,6 +71,8 @@ export async function priceStorageInvoice(
     tariff: params.tariff,
     seasonEndDate: params.seasonEndDate,
     seasonFeeBilled: params.seasonFeeBilled,
+    alreadyBilledPerUnitPkr: params.alreadyBilledPerUnitPkr,
+    perUnitLine: params.rentPeriodBill,
   });
 
   // GST default: pre-fill from facility settings when GST-registered.
@@ -114,6 +119,7 @@ async function createDraftInvoice(
       amountPaidPkr: 0,
       status: 'DRAFT',
       bookType: params.bookType,
+      rentPeriodBill: params.rentPeriodBill ?? false,
       createdBy: params.createdBy,
       lineItems: {
         create: {
@@ -172,6 +178,7 @@ async function outboundBillingParams(
     tariff: ratePlan.tariff,
     seasonEndDate: ratePlan.seasonEndDate,
     seasonFeeBilled: lot.seasonFeeBilled,
+    alreadyBilledPerUnitPkr: await rentBilledPerUnit(tx, lot, periodStart),
     createdBy: outbound.createdBy,
   };
 }
@@ -201,6 +208,8 @@ export async function previewInvoiceFromOutbound(
 }
 
 interface TransferAccruedInvoiceParams {
+  /** Rent per unit already billed on these units in period bills (see rentBilledPerUnit). */
+  alreadyBilledPerUnitPkr?: number;
   facilityId: string;
   lotId: string;
   billingPartyId: string;
@@ -231,8 +240,8 @@ interface TransferAccruedInvoiceParams {
 export async function buildOwnershipTransferAccruedInvoice(
   tx: Prisma.TransactionClient,
   params: TransferAccruedInvoiceParams,
-): Promise<BuiltInvoice> {
-  return createDraftInvoice(tx, {
+): Promise<BuiltInvoice | null> {
+  const draft: DraftInvoiceParams = {
     facilityId: params.facilityId,
     lotId: params.lotId,
     outboundEventId: null,
@@ -247,6 +256,79 @@ export async function buildOwnershipTransferAccruedInvoice(
     minBillingDays: params.ratePlan.minBillingDays,
     tariff: params.ratePlan.tariff,
     seasonEndDate: params.ratePlan.seasonEndDate,
+    alreadyBilledPerUnitPkr: params.alreadyBilledPerUnitPkr,
     createdBy: params.createdBy,
+  };
+  // Period bills may already have charged everything up to the transfer: then there is no bill.
+  if ((params.alreadyBilledPerUnitPkr ?? 0) > 0 && (await priceStorageInvoice(tx, draft)).charge.amountPkr <= 0) {
+    return null;
+  }
+  return createDraftInvoice(tx, draft);
+}
+
+/**
+ * Rent per unit already billed on a lot's units in the present owner's stay: the lot's
+ * period bills that are not void and end after the stay began, plus what was billed on
+ * these units under another lot number. Derived, never stored, so voiding a period bill
+ * needs no second correction (docs/32 2.6).
+ */
+export async function rentBilledPerUnit(
+  tx: Prisma.TransactionClient,
+  lot: { id: string; rentBilledCarriedPkr: Prisma.Decimal | number },
+  stayStart: Date,
+): Promise<number> {
+  const bills = await tx.invoice.findMany({
+    where: { lotId: lot.id, rentPeriodBill: true, status: { not: 'VOID' }, periodEnd: { gt: stayStart } },
+    select: { lineItems: { where: { lineType: 'STORAGE' }, select: { unitPricePkr: true } } },
   });
+  const billed = bills.reduce((s, b) => s + b.lineItems.reduce((t, l) => t + Number(l.unitPricePkr), 0), 0);
+  return Math.round((billed + Number(lot.rentBilledCarriedPkr)) * 100) / 100;
+}
+
+/**
+ * Bill the rent on a lot's units up to `asOf`, with the goods still in the room: the
+ * month-end bill of a khata client, the season-end bill, the bill for goods nobody
+ * collects. Returns null when nothing more is owed up to that date.
+ *
+ * The bill is the whole stay's rent per unit up to `asOf`, less what earlier period
+ * bills charged. A later withdrawal subtracts the same way, so the parts always add up
+ * to what one bill at the end would have been.
+ */
+export async function buildRentPeriodBill(
+  tx: Prisma.TransactionClient,
+  args: { facilityId: string; lotId: string; asOf: Date; createdBy: string },
+): Promise<BuiltInvoice | null> {
+  const lot = await tx.lot.findFirst({
+    where: { id: args.lotId, facilityId: args.facilityId },
+    include: { ratePlan: true, ownershipHistory: { select: { eventType: true, effectiveDate: true } } },
+  });
+  if (!lot) throw new Error(`Lot ${args.lotId} not found`);
+  if (lot.status !== 'ACTIVE' || lot.currentBalanceBags <= 0) return null;
+
+  const periodStart = billingPeriodStart(lot);
+  if (args.asOf <= periodStart) return null;
+
+  const params: DraftInvoiceParams = {
+    facilityId: args.facilityId,
+    lotId: lot.id,
+    outboundEventId: null,
+    billingPartyId: lot.billingPartyId,
+    bookType: lot.bookType,
+    periodStart,
+    periodEnd: args.asOf,
+    quantityBags: lot.currentBalanceBags,
+    ratePlanId: lot.ratePlan.id,
+    rateType: lot.ratePlan.rateType,
+    rateAmountPkr: Number(lot.ratePlan.rateAmountPkr),
+    minBillingDays: lot.ratePlan.minBillingDays,
+    tariff: lot.ratePlan.tariff,
+    seasonEndDate: lot.ratePlan.seasonEndDate,
+    seasonFeeBilled: lot.seasonFeeBilled,
+    alreadyBilledPerUnitPkr: await rentBilledPerUnit(tx, lot, periodStart),
+    rentPeriodBill: true,
+    createdBy: args.createdBy,
+  };
+  const { charge } = await priceStorageInvoice(tx, params);
+  if (charge.amountPkr <= 0) return null;
+  return createDraftInvoice(tx, params);
 }

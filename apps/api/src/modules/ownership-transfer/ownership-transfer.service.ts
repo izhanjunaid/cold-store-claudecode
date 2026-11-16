@@ -8,8 +8,9 @@ import { mirrorTransferPlacements } from '../lot/placement.service';
 import { renderTransferAcknowledgment } from '../pdf/pdf.service';
 import type { TransferAcknowledgmentData } from '../pdf/pdf.service';
 import { resolveFacilitySettings } from '../facility/facility.service';
-import { buildOwnershipTransferAccruedInvoice } from '../invoice/invoice.builder';
+import { buildOwnershipTransferAccruedInvoice, rentBilledPerUnit } from '../invoice/invoice.builder';
 import { billingPeriodStart } from '../invoice/storage-charge';
+import { settingsOn } from '../facility/settings-store';
 
 export interface CreateTransferInput {
   facilityId: string;
@@ -135,21 +136,37 @@ export class OwnershipTransferService {
       // A seasonal fee is flat per bag, so it is owed once. The seller is billed it
       // here and the lot the buyer holds is marked, so the buyer's withdrawal does
       // not bill the season again (docs/31 T-2). Bags already marked bill nothing.
+      //
+      // The store chooses what happens to rent at a change of owner (docs/32 2.6):
+      //   SELLER_BILLED     the seller is billed up to this day; the buyer's rent starts today.
+      //   BUYER_TAKES_OVER  no bill now; the goods carry their unbilled rent to the buyer,
+      //                     who pays it all when they leave.
+      // Either way a unit is billed each day of its stay once: what period bills already
+      // charged is subtracted (rentBilledPerUnit).
       const seasonal = parentLot.ratePlan.rateType === 'SEASONAL_PER_BAG';
+      const sellerBilled = (await settingsOn(tx, input.facilityId, effectiveDate)).transfer_rent_rule !== 'BUYER_TAKES_OVER';
+      const ownershipHistory = await tx.ownershipHistory.findMany({
+        where: { lotId: parent.id },
+        select: { eventType: true, effectiveDate: true },
+      });
+      const stayStart = billingPeriodStart({
+        inboundDate: parentLot.inboundDate,
+        ownershipHistory,
+        rentStartDate: parentLot.rentStartDate,
+      });
+      const alreadyBilled = await rentBilledPerUnit(tx, parentLot, stayStart);
       const billSeller = async (bags: number) => {
+        if (!sellerBilled) return null;
         if (seasonal && parentLot.seasonFeeBilled) return null;
-        const ownershipHistory = await tx.ownershipHistory.findMany({
-          where: { lotId: parent.id },
-          select: { eventType: true, effectiveDate: true },
-        });
         return buildOwnershipTransferAccruedInvoice(tx, {
           facilityId: input.facilityId,
           lotId: parent.id,
           billingPartyId: parentLot.billingPartyId,
           bookType: parentLot.bookType,
-          periodStart: billingPeriodStart({ inboundDate: parentLot.inboundDate, ownershipHistory }),
+          periodStart: stayStart,
           periodEnd: effectiveDate,
           quantityBags: bags,
+          alreadyBilledPerUnitPkr: alreadyBilled,
           ratePlan: {
             id: parentLot.ratePlan.id,
             rateType: parentLot.ratePlan.rateType,
@@ -161,6 +178,10 @@ export class OwnershipTransferService {
           createdBy: input.operatorId,
         });
       };
+      // What the buyer's lot carries about rent.
+      const buyerRent = sellerBilled
+        ? { rentStartDate: null, rentBilledCarriedPkr: 0, ...(seasonal ? { seasonFeeBilled: true } : {}) }
+        : { rentStartDate: stayStart };
 
       if (input.transferType === 'FULL') {
         const accruedInvoice = await billSeller(balance);
@@ -170,7 +191,7 @@ export class OwnershipTransferService {
           data: {
             ownerPartyId: input.toPartyId,
             billingPartyId: input.toPartyId,
-            ...(seasonal ? { seasonFeeBilled: true } : {}),
+            ...buyerRent,
           },
           include: LOT_INCLUDE_SHAPE_TRANSFER,
         });
@@ -254,7 +275,9 @@ export class OwnershipTransferService {
           inboundDate: effectiveDate,
           entryDate: effectiveDate,
           parentLotId: parent.id,
-          seasonFeeBilled: seasonal,
+          ...(sellerBilled
+            ? { seasonFeeBilled: seasonal }
+            : { rentStartDate: stayStart, rentBilledCarriedPkr: alreadyBilled, seasonFeeBilled: parentLot.seasonFeeBilled }),
           status: 'ACTIVE',
           bookType: parentLot.bookType,
           // The physical marka stays on the bags, so the child lot inherits it.

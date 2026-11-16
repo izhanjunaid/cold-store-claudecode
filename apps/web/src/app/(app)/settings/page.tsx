@@ -57,6 +57,8 @@ export default function SettingsPage() {
   // The business day from which the cash the dispatch desk takes is tracked and handed over; null = not tracked.
   const [cashTrackingFrom, setCashTrackingFrom] = useState<string | null>(null);
   const [dispatchSoloMode, setDispatchSoloMode] = useState(false);
+  // Rent when goods change owner inside the store (docs/32 2.6).
+  const [transferRentRule, setTransferRentRule] = useState<'SELLER_BILLED' | 'BUYER_TAKES_OVER'>('SELLER_BILLED');
   // "We weigh produce": stored inverted, as hide_weights (docs/27).
   const [weighsProduce, setWeighsProduce] = useState(true);
   // "Book only trucks inside the gate" (docs/28 D2).
@@ -91,6 +93,7 @@ export default function SettingsPage() {
         setSurchargeGraceDays(String(f.settings.late_payment_surcharge?.grace_days ?? 30));
         setCashTrackingFrom(f.settings.cash_tracking_from ?? null);
         setDispatchSoloMode(f.settings.dispatch_solo_mode ?? false);
+        setTransferRentRule(f.settings.transfer_rent_rule ?? 'SELLER_BILLED');
         setWeighsProduce(f.settings.hide_weights !== true);
         setBookOnlyTrucksInside(f.settings.book_only_trucks_inside ?? false);
       })
@@ -130,6 +133,7 @@ export default function SettingsPage() {
             },
             cash_tracking_from: cashTrackingFrom,
             dispatch_solo_mode: dispatchSoloMode,
+            transfer_rent_rule: transferRentRule,
             hide_weights: !weighsProduce,
             book_only_trucks_inside: bookOnlyTrucksInside,
           },
@@ -337,6 +341,26 @@ export default function SettingsPage() {
             <label className="flex items-center gap-2.5 text-sm">
               <Checkbox checked={bookOnlyTrucksInside} onCheckedChange={(c) => setBookOnlyTrucksInside(c === true)} />
               Book only trucks inside the gate
+            </label>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Rent when goods change owner inside the store</CardTitle></CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <label className="flex items-start gap-2.5">
+              <input type="radio" name="transfer_rent_rule" className="mt-1" checked={transferRentRule === 'SELLER_BILLED'} onChange={() => setTransferRentRule('SELLER_BILLED')} />
+              <span>
+                <span className="font-medium">The seller is billed up to that day</span>
+                <span className="block text-xs text-muted-foreground">A bill is made to the seller for the rent so far. The buyer&apos;s rent starts that day.</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2.5">
+              <input type="radio" name="transfer_rent_rule" className="mt-1" checked={transferRentRule === 'BUYER_TAKES_OVER'} onChange={() => setTransferRentRule('BUYER_TAKES_OVER')} />
+              <span>
+                <span className="font-medium">The buyer takes over the rent</span>
+                <span className="block text-xs text-muted-foreground">No bill at the sale. The buyer pays all the rent not yet billed when the goods leave.</span>
+              </span>
             </label>
           </CardContent>
         </Card>

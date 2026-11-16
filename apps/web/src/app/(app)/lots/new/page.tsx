@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { localIsoDate } from '@coldchain/shared';
 import { useRouter } from 'next/navigation';
 import { useForm, useWatch } from 'react-hook-form';
@@ -177,13 +177,22 @@ export default function LotCreatePage() {
         : chambers,
     [chambers, commodityId],
   );
+  const ownerPartyId = useWatch({ control, name: 'owner_party_id' });
+  // The store's ordinary rates, and this client's own rate if one was agreed. Never another client's.
   const filteredPlans = useMemo(
     () =>
-      commodityId
-        ? ratePlans.filter((p) => !p.commodity_id || p.commodity_id === commodityId)
-        : ratePlans,
-    [ratePlans, commodityId],
+      ratePlans.filter(
+        (p) => (!commodityId || !p.commodity_id || p.commodity_id === commodityId) && (!p.party_id || p.party_id === ownerPartyId),
+      ),
+    [ratePlans, commodityId, ownerPartyId],
   );
+  // A rate agreed with this client is picked for the munshi (docs/32 2.5); he can still change it.
+  useEffect(() => {
+    if (!ownerPartyId || !commodityId) return;
+    const own = filteredPlans.find((p) => p.party_id === ownerPartyId && p.commodity_id === commodityId)
+      ?? filteredPlans.find((p) => p.party_id === ownerPartyId);
+    if (own) setValue('rate_plan_id', own.id);
+  }, [ownerPartyId, commodityId, filteredPlans, setValue]);
 
   const selectedChamber = chambers.find((c) => c.id === chamberId);
   const capacityPct = selectedChamber

@@ -13,6 +13,15 @@ export interface StorageChargeInput {
   seasonEndDate?: Date | null;
   /** The lot's season rent is already billed (to the owner who sold it): a seasonal plan charges nothing more. */
   seasonFeeBilled?: boolean;
+  /**
+   * Rent per unit already billed on these units for this same stay (period bills made
+   * while the goods were in the room). The charge is what the whole stay costs per unit,
+   * less this: so however often a stay is billed in parts, the parts add up to exactly
+   * what one bill at the end would have been, and no day is billed twice.
+   */
+  alreadyBilledPerUnitPkr?: number;
+  /** Always state the charge as units x a net price per unit (period bills, which are summed later). */
+  perUnitLine?: boolean;
 }
 
 export interface StorageChargeResult {
@@ -34,7 +43,10 @@ export interface StorageChargeResult {
 export function billingPeriodStart(lot: {
   inboundDate: Date;
   ownershipHistory: { eventType: string; effectiveDate: Date }[];
+  /** Set when a buyer took the lot over with its unbilled rent: rent runs from the seller's start. */
+  rentStartDate?: Date | null;
 }): Date {
+  if (lot.rentStartDate) return lot.rentStartDate;
   const starts = lot.ownershipHistory
     .filter((h) => h.eventType === 'INITIAL' || h.eventType === 'TRANSFER_IN')
     .map((h) => h.effectiveDate.getTime());
@@ -42,6 +54,25 @@ export function billingPeriodStart(lot: {
 }
 
 export function computeStorageCharge(input: StorageChargeInput): StorageChargeResult {
+  const whole = wholeStayCharge(input);
+  const billed = input.alreadyBilledPerUnitPkr ?? 0;
+  if (billed <= 0 && !input.perUnitLine) return whole;
+
+  // What one unit owes for the whole stay, less what it was already billed.
+  const perUnit = wholeStayCharge({ ...input, quantityBags: 1 }).amountPkr;
+  const net = Math.max(0, round2(perUnit - billed));
+  return {
+    description:
+      billed > 0 ? `${whole.description}; less Rs.${round2(billed)} per unit already billed` : whole.description,
+    quantity: input.quantityBags,
+    unitPricePkr: net,
+    amountPkr: round2(input.quantityBags * net),
+    days: whole.days,
+  };
+}
+
+/** The rent on these units from the start of the stay to the end date, as one bill. */
+function wholeStayCharge(input: StorageChargeInput): StorageChargeResult {
   if (input.quantityBags <= 0) throw new Error('quantityBags must be positive');
 
   const diffMs = input.periodEnd.getTime() - input.periodStart.getTime();

@@ -8,12 +8,18 @@ import {
   InvoiceListQuery,
 } from '@coldchain/shared';
 import { InvoiceService } from './invoice.service';
+import { RentBillService } from './rent-bill.service';
 import { InvoiceRepository } from './invoice.repository';
 import { sendSuccess } from '../../common/response';
 import { JournalEntryService } from '../accounting/journal-entry.service';
 import { PeriodLockService } from '../accounting/period-lock.service';
 
 const IdParam = z.object({ id: z.string().uuid() });
+const RentBillRequest = z.object({
+  as_of_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  lot_id: z.string().uuid().optional(),
+  party_id: z.string().uuid().optional(),
+});
 const LineIdParam = z.object({ id: z.string().uuid(), lineId: z.string().uuid() });
 
 export async function invoiceRoutes(app: FastifyInstance) {
@@ -24,6 +30,21 @@ export async function invoiceRoutes(app: FastifyInstance) {
     new InvoiceRepository(app.prisma),
     journalEntry,
   );
+
+  // POST /v1/billing/rent-bills — bill rent up to a date with the goods still in the room
+  // (docs/32 2.6): one lot, one client's lots, or every lot. Makes DRAFT bills.
+  const rentBills = new RentBillService(app.prisma);
+  app.route({
+    method: 'POST',
+    url: '/v1/billing/rent-bills',
+    preHandler: [app.authenticate, app.requirePermission('invoices.manage')],
+    schema: { body: RentBillRequest },
+    handler: async (request, reply) => {
+      const body = request.body as z.infer<typeof RentBillRequest>;
+      const data = await rentBills.bill(request.user!.facilityId, request.user!.userId, body);
+      return sendSuccess(reply.status(201), data);
+    },
+  });
 
   // GET /v1/invoices — ACCOUNTANT+
   app.route({

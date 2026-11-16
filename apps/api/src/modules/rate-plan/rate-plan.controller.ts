@@ -37,6 +37,7 @@ export async function ratePlanRoutes(app: FastifyInstance) {
         facilityId: request.user!.facilityId,
         name: body.name,
         commodityId: body.commodity_id,
+        partyId: body.party_id,
         rateType: body.rate_type,
         rateAmountPkr: body.rate_amount_pkr,
         seasonStartDate: body.season_start_date,
@@ -71,6 +72,7 @@ export async function ratePlanRoutes(app: FastifyInstance) {
       const result = await service.update(request.user!.facilityId, id, {
         name: body.name,
         commodityId: body.commodity_id,
+        partyId: body.party_id,
         rateAmountPkr: body.rate_amount_pkr,
         seasonStartDate: body.season_start_date,
         seasonEndDate: body.season_end_date,
@@ -79,6 +81,20 @@ export async function ratePlanRoutes(app: FastifyInstance) {
         isActive: body.is_active,
       });
       return sendSuccess(reply, result);
+    },
+  });
+
+  // POST /v1/rate-plans/:id/new-rate — a new price from today: a new plan for new arrivals.
+  app.route({
+    method: 'POST',
+    url: '/v1/rate-plans/:id/new-rate',
+    preHandler: [app.authenticate, app.requirePermission('rate_plans.manage')],
+    schema: { params: IdParam, body: z.object({ rate_amount_pkr: z.number().positive(), name: z.string().max(200).optional() }) },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as { rate_amount_pkr: number; name?: string };
+      const result = await service.newRate(request.user!.facilityId, id, { rateAmountPkr: body.rate_amount_pkr, name: body.name });
+      return sendSuccess(reply.status(201), result);
     },
   });
 

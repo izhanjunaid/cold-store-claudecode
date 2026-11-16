@@ -7,6 +7,8 @@ export const CreateRatePlanRequest = z
   .object({
     name: z.string().min(1).max(200),
     commodity_id: z.string().uuid().optional().nullable(),
+    /** The one client this rate was agreed with; leave out for the store's ordinary rate. */
+    party_id: z.string().uuid().optional().nullable(),
     rate_type: RateType,
     rate_amount_pkr: z.number().positive(),
     season_start_date: z.string().date().optional(),
@@ -47,6 +49,7 @@ export const CreateRatePlanRequest = z
 export const UpdateRatePlanRequest = z.object({
   name: z.string().min(1).max(200).optional(),
   commodity_id: z.string().uuid().optional().nullable(),
+  party_id: z.string().uuid().optional().nullable(),
   rate_amount_pkr: z.number().positive().optional(),
   season_start_date: z.string().date().optional().nullable(),
   season_end_date: z.string().date().optional().nullable(),
@@ -66,6 +69,8 @@ export const RatePlanResponse = z.object({
   name: z.string(),
   commodity_id: z.string().uuid().nullable(),
   commodity_name: z.string().nullable(),
+  party_id: z.string().uuid().nullable(),
+  party_name: z.string().nullable(),
   rate_type: RateType,
   rate_amount_pkr: z.number(),
   season_start_date: z.string().nullable(),

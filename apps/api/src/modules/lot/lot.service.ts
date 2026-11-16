@@ -269,6 +269,10 @@ export class LotService {
     if (!ratePlan.isActive) {
       throw Errors.VALIDATION_ERROR('Rate plan is inactive', 'rate_plan_id');
     }
+    // A rate agreed with one client prices only the lots he owns or is billed for (docs/32 2.5).
+    if (ratePlan.partyId && ratePlan.partyId !== input.ownerPartyId && ratePlan.partyId !== input.billingPartyId) {
+      throw Errors.VALIDATION_ERROR('This rate plan belongs to another client', 'rate_plan_id');
+    }
     if (ratePlan.commodityId && ratePlan.commodityId !== input.commodityId) {
       throw Errors.VALIDATION_ERROR(
         'Rate plan does not apply to this commodity',
