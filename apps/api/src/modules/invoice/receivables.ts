@@ -36,6 +36,17 @@ export async function creditExposure(db: Db, facilityId: string, partyId: string
   return round2((pacci!.get(partyId) ?? 0) + (katchi!.get(partyId) ?? 0));
 }
 
+/**
+ * PostgreSQL takes at most 32,767 bind variables in one statement, and a store
+ * passes that many bills in a season or two (docs/31 F-0). Any id list that grows
+ * with the store's history is fetched in slices.
+ */
+async function byIds<T>(ids: string[], fetch: (slice: string[]) => Promise<T[]>): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += 10_000) out.push(...(await fetch(ids.slice(i, i + 10_000))));
+  return out;
+}
+
 export type OpenItem = {
   partyId: string;
   /** The invoice, or null for a line that is no document's (opening balance, manual). */
@@ -79,10 +90,9 @@ export async function openItems(
   });
 
   const creditNoteIds = [...new Set(lines.filter((l) => l.journalEntry.sourceTable === 'credit_notes').map((l) => l.journalEntry.sourceId))];
-  const creditNotes = await db.creditNote.findMany({
-    where: { id: { in: creditNoteIds } },
-    select: { id: true, originalInvoiceId: true },
-  });
+  const creditNotes = await byIds(creditNoteIds, (ids) =>
+    db.creditNote.findMany({ where: { id: { in: ids } }, select: { id: true, originalInvoiceId: true } }),
+  );
   const invoiceOfCreditNote = new Map(creditNotes.map((c) => [c.id, c.originalInvoiceId]));
 
   const invoiceNet = new Map<string, number>();
@@ -103,22 +113,36 @@ export async function openItems(
     }
   }
 
-  const invoices = await db.invoice.findMany({
-    where: { id: { in: [...invoiceNet.keys()] } },
-    select: {
-      id: true,
-      billingPartyId: true,
-      invoiceNumber: true,
-      invoiceDate: true,
-      allocations: { where: { voidedAt: null, payment: { paymentDate: { lte: args.asOf } } }, select: { allocatedAmountPkr: true } },
+  // Receipts applied per invoice in one grouped read, then only the invoices
+  // still open are fetched — a season of paid bills never crosses the wire.
+  const applied = await db.paymentAllocation.groupBy({
+    by: ['invoiceId'],
+    where: {
+      invoiceId: { not: null },
+      voidedAt: null,
+      payment: { facilityId: args.facilityId, paymentDate: { lte: args.asOf } },
+      ...(args.partyId ? { invoice: { billingPartyId: args.partyId } } : {}),
     },
+    _sum: { allocatedAmountPkr: true },
   });
+  const open = new Map<string, number>();
+  for (const [id, net] of invoiceNet) open.set(id, net);
+  for (const a of applied) {
+    if (open.has(a.invoiceId!)) open.set(a.invoiceId!, open.get(a.invoiceId!)! - Number(a._sum.allocatedAmountPkr ?? 0));
+  }
+  const openIds = [...open].filter(([, amount]) => Math.abs(round2(amount)) > 0.005).map(([id]) => id);
+  const invoices = await byIds(openIds, (ids) =>
+    db.invoice.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, billingPartyId: true, invoiceNumber: true, invoiceDate: true },
+    }),
+  );
   const items: OpenItem[] = invoices.map((inv) => ({
     partyId: inv.billingPartyId,
     invoiceId: inv.id,
     reference: inv.invoiceNumber,
     date: inv.invoiceDate,
-    amountPkr: round2((invoiceNet.get(inv.id) ?? 0) - inv.allocations.reduce((s, a) => s + Number(a.allocatedAmountPkr), 0)),
+    amountPkr: round2(open.get(inv.id)!),
   }));
   for (const item of other.values()) items.push({ ...item, amountPkr: round2(item.amountPkr) });
   return items.filter((i) => Math.abs(i.amountPkr) > 0.005);
