@@ -84,6 +84,20 @@ export async function ratePlanRoutes(app: FastifyInstance) {
     },
   });
 
+  // POST /v1/rate-plans/:id/new-rate — a new price from today: a new plan for new arrivals.
+  app.route({
+    method: 'POST',
+    url: '/v1/rate-plans/:id/new-rate',
+    preHandler: [app.authenticate, app.requirePermission('rate_plans.manage')],
+    schema: { params: IdParam, body: z.object({ rate_amount_pkr: z.number().positive(), name: z.string().max(200).optional() }) },
+    handler: async (request, reply) => {
+      const { id } = request.params as z.infer<typeof IdParam>;
+      const body = request.body as { rate_amount_pkr: number; name?: string };
+      const result = await service.newRate(request.user!.facilityId, id, { rateAmountPkr: body.rate_amount_pkr, name: body.name });
+      return sendSuccess(reply.status(201), result);
+    },
+  });
+
   app.route({
     method: 'DELETE',
     url: '/v1/rate-plans/:id',

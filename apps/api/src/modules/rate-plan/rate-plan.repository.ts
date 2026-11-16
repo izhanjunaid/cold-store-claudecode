@@ -36,6 +36,17 @@ export class RatePlanRepository {
     });
   }
 
+  /** The plan copied with a new price, and the old one closed to new arrivals, together. */
+  replaceWithNewRate(old: { id: string }, data: Prisma.RatePlanUncheckedCreateInput): Promise<unknown> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.ratePlan.update({ where: { id: old.id }, data: { isActive: false } });
+      return tx.ratePlan.create({
+        data,
+        include: { commodity: { select: { id: true, name: true } }, party: { select: { id: true, name: true } } },
+      });
+    });
+  }
+
   async isInUse(facilityId: string, id: string): Promise<boolean> {
     return (await this.prisma.lot.findFirst({ where: { facilityId, ratePlanId: id }, select: { id: true } })) !== null;
   }

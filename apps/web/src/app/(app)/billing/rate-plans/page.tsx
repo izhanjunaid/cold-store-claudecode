@@ -182,6 +182,23 @@ export default function RatePlanListPage() {
     setShowModal(true);
   };
 
+  // A plan that lots are stored on cannot change its price. This makes a new plan with
+  // the price typed, for arrivals from now on, and closes the old one to new arrivals.
+  const saveAsNewRate = async () => {
+    if (!editingId) return;
+    setSubmitting(true);
+    try {
+      await apiClient(`/v1/rate-plans/${editingId}/new-rate`, { method: 'POST', body: { rate_amount_pkr: parseFloat(form.rate_amount_pkr) } });
+      toast.success('New rate saved. Lots already stored keep the old rate.');
+      setShowModal(false);
+      await fetchPlans();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save the new rate');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -460,6 +477,17 @@ export default function RatePlanListPage() {
                 minDays={parseInt(form.min_billing_days) || 1}
                 seasonEnd={form.season_end_date}
               />
+            )}
+            {editingId && parseFloat(form.rate_amount_pkr) !== parseFloat(original.rate_amount_pkr) && parseFloat(form.rate_amount_pkr) > 0 && (
+              <div className="rounded-md border border-dashed p-3 text-sm">
+                <p className="pb-2 text-muted-foreground">
+                  Changing the price? Lots already stored keep the price they arrived under. Save it as a new rate for
+                  arrivals from today.
+                </p>
+                <Button type="button" variant="outline" size="sm" onClick={saveAsNewRate} disabled={submitting}>
+                  Save as a new rate
+                </Button>
+              </div>
             )}
             {editingId && (
               <label className="flex items-center gap-2.5 text-sm">

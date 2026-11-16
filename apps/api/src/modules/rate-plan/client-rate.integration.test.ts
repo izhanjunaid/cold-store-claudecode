@@ -73,3 +73,31 @@ describe('a rate agreed with one client', () => {
     expect(moved.status).toBe(400);
   });
 });
+
+describe('a new rate from today (docs/32 section 2.5)', () => {
+  it('makes a new plan for new arrivals and leaves stored lots on the price they arrived under', async () => {
+    const client = await fx.party('New Rate Client');
+    const old = await plan({});
+    const stored = await arrive(client, old.id);
+    expect(stored.status).toBe(201);
+
+    // The price of a plan in use cannot be edited…
+    expect((await fx.call('PATCH', `/v1/rate-plans/${old.id}`, fx.tokens.owner, { rate_amount_pkr: 95 })).status).toBe(400);
+    // …it is replaced: a copy at the new price, the old one closed to new arrivals.
+    const r = await fx.call('POST', `/v1/rate-plans/${old.id}/new-rate`, fx.tokens.owner, { rate_amount_pkr: 95 });
+    expect(r.status).toBe(201);
+    plans.push(r.body.data.id);
+    expect(r.body.data).toMatchObject({ rate_amount_pkr: 95, rate_type: 'MONTHLY_PER_BAG', is_active: true });
+
+    const oldNow = (await fx.call('GET', `/v1/rate-plans/${old.id}`, fx.tokens.owner)).body.data;
+    expect(oldNow).toMatchObject({ rate_amount_pkr: 80, is_active: false });
+    expect((await prisma.lot.findUniqueOrThrow({ where: { id: stored.body.data.id } })).ratePlanId).toBe(old.id);
+
+    // New arrivals take the new plan; the old one is refused.
+    expect((await arrive(client, r.body.data.id)).status).toBe(201);
+    expect((await arrive(client, old.id)).status).toBe(400);
+    // The same price again, or a plan already closed, is refused.
+    expect((await fx.call('POST', `/v1/rate-plans/${old.id}/new-rate`, fx.tokens.owner, { rate_amount_pkr: 99 })).status).toBe(400);
+    expect((await fx.call('POST', `/v1/rate-plans/${r.body.data.id}/new-rate`, fx.tokens.owner, { rate_amount_pkr: 95 })).status).toBe(400);
+  });
+});

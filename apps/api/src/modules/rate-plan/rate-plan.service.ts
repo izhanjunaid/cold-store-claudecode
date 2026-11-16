@@ -107,6 +107,33 @@ export class RatePlanService {
     return toResponse(plan as RatePlanRecord);
   }
 
+  /**
+   * A new rate from today (docs/32 2.5). Lots already stored keep the plan, and so the
+   * price, they arrived under; the plan is closed to new arrivals and a copy with the new
+   * price takes them from now on.
+   */
+  async newRate(facilityId: string, id: string, input: { rateAmountPkr: number; name?: string }) {
+    const plan = (await this.repo.findById(facilityId, id)) as (RatePlanRecord & { partyId?: string | null }) | null;
+    if (!plan) throw Errors.VALIDATION_ERROR('Rate plan not found');
+    if (!plan.isActive) throw Errors.VALIDATION_ERROR('This rate plan is already closed to new arrivals', 'rate_amount_pkr');
+    if (input.rateAmountPkr === Number(plan.rateAmountPkr)) {
+      throw Errors.VALIDATION_ERROR('The new rate is the same as the present one', 'rate_amount_pkr');
+    }
+    const created = await this.repo.replaceWithNewRate(plan, {
+      facilityId,
+      name: input.name?.trim() || `${plan.name} (Rs ${input.rateAmountPkr})`,
+      commodityId: plan.commodityId,
+      partyId: plan.partyId ?? null,
+      rateType: plan.rateType as never,
+      rateAmountPkr: input.rateAmountPkr,
+      seasonStartDate: plan.seasonStartDate,
+      seasonEndDate: plan.seasonEndDate,
+      minBillingDays: plan.minBillingDays,
+      tariff: (plan.tariff ?? undefined) as never,
+    });
+    return toResponse(created as RatePlanRecord);
+  }
+
   async update(facilityId: string, id: string, input: UpdateInput) {
     const plan = await this.repo.findById(facilityId, id);
     if (!plan) throw Errors.VALIDATION_ERROR('Rate plan not found');
