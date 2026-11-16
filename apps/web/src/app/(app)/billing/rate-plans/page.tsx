@@ -17,7 +17,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { PageHeader } from '@/components/layout/page-header';
 import { useConfirm } from '@/components/form';
 import { DataTable, type DataTableColumn } from '@/components/data-table';
-import { DEFAULT_TARIFF, TariffFields, tariffIssue } from './tariff-fields';
+import { DEFAULT_TARIFF, TARIFF_PRESETS, TariffFields, tariffIssue } from './tariff-fields';
+import { computeTariffCharge } from '@coldchain/shared';
+import { useUnits } from '@/lib/units';
 import { PartyPicker } from '@/components/party/party-picker';
 
 import { formatDate, formatMoney } from '@/lib/format';
@@ -37,11 +39,42 @@ interface RatePlan {
   is_active: boolean;
 }
 
+/**
+ * "How do you charge?" (docs/32 section 2.5). Each card is one way stores charge rent and
+ * asks only for prices. Under the cards the stored plan is one of the four rate types;
+ * "Half a month, then months" is the adhi-month rule as a ready-made tariff, and the full
+ * rule builder sits behind "Custom rule".
+ */
+const CHARGE_CARDS = [
+  { id: 'season', rate_type: 'SEASONAL_PER_BAG', title: 'Per season', hint: 'One price for the whole season, however long the goods stay.' },
+  { id: 'month', rate_type: 'MONTHLY_PER_BAG', title: 'Per month', hint: 'A price for each month. A started month counts as a whole month.' },
+  { id: 'half', rate_type: 'TARIFF_PER_BAG', title: 'Half a month, then months', hint: 'Half a month for the first 15 days, then whole months, then the days left over.' },
+  { id: 'day', rate_type: 'DAILY_PER_BAG', title: 'Per day', hint: 'A price for each day in the room.' },
+  { id: 'custom', rate_type: 'TARIFF_PER_BAG', title: 'Custom rule', hint: 'Build your own rule: free days, calendar months, a season fee plus extra time.' },
+] as const;
+type ChargeCard = (typeof CHARGE_CARDS)[number]['id'];
+const HALF_MONTH_TARIFF = TARIFF_PRESETS.find((t) => t.id === 'apple')!.tariff;
+
+/** What a stay costs for 100 units under the form's present choices: the card's worked example. */
+function exampleBill(card: ChargeCard, rate: number, tariff: Tariff, days: number): number | null {
+  if (!(rate > 0)) return null;
+  if (card === 'season') return 100 * rate;
+  if (card === 'month') return 100 * Math.ceil(days / 30) * rate;
+  if (card === 'day') return 100 * days * rate;
+  try {
+    const start = new Date(Date.UTC(2026, 0, 1));
+    const end = new Date(start.getTime() + days * 86_400_000);
+    return computeTariffCharge({ monthRatePkr: rate, minBillingDays: 1, tariff }, 100, start, end).amountPkr;
+  } catch {
+    return null;
+  }
+}
+
 const RATE_TYPE_LABELS: Record<string, string> = {
-  SEASONAL_PER_BAG: 'Seasonal / Bag',
-  MONTHLY_PER_BAG: 'Monthly / Bag',
-  DAILY_PER_BAG: 'Daily / Bag',
-  TARIFF_PER_BAG: 'Custom tariff',
+  SEASONAL_PER_BAG: 'Per season',
+  MONTHLY_PER_BAG: 'Per month',
+  DAILY_PER_BAG: 'Per day',
+  TARIFF_PER_BAG: 'Custom rule',
 };
 const SELECT_CLASS =
   'flex h-8 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
@@ -86,6 +119,8 @@ export default function RatePlanListPage() {
   const [form, setForm] = useState<FormData>(EMPTY);
   const [original, setOriginal] = useState<FormData>(EMPTY);
   const [submitting, setSubmitting] = useState(false);
+  const [card, setCard] = useState<ChargeCard>('season');
+  const units = useUnits();
 
   const fetchPlans = async () => {
     setLoading(true);
@@ -106,9 +141,23 @@ export default function RatePlanListPage() {
   const isTariff = form.rate_type === 'TARIFF_PER_BAG';
   const needsSeason = isSeasonal || (isTariff && form.tariff.opening.type === 'SEASON');
   const tariffProblem = isTariff ? tariffIssue(form.tariff, form.season_end_date) : null;
+  const unit = units.of(form.commodity_id || null);
+  const chooseCard = (id: ChargeCard) => {
+    const c = CHARGE_CARDS.find((x) => x.id === id)!;
+    setCard(id);
+    setForm((f) => ({ ...f, rate_type: c.rate_type, tariff: id === 'half' ? HALF_MONTH_TARIFF : id === 'custom' ? f.tariff : DEFAULT_TARIFF }));
+  };
+  const priceLabel =
+    card === 'season' ? `Price per ${unit.one} for the season (PKR)`
+    : card === 'day' ? `Price per ${unit.one} per day (PKR)`
+    : `Price per ${unit.one} per month (PKR)`;
+  const examples = [20, 45, 100]
+    .map((days) => ({ days, pkr: exampleBill(card, parseFloat(form.rate_amount_pkr), form.tariff, days) }))
+    .filter((e): e is { days: number; pkr: number } => e.pkr !== null);
 
   const openCreate = () => {
     setForm(EMPTY);
+    setCard('season');
     setEditingId(null);
     setShowModal(true);
   };
@@ -126,6 +175,8 @@ export default function RatePlanListPage() {
       is_active: plan.is_active,
     };
     setForm(next);
+    // An existing plan keeps its rule on screen: a tariff opens in the builder.
+    setCard(plan.rate_type === 'SEASONAL_PER_BAG' ? 'season' : plan.rate_type === 'MONTHLY_PER_BAG' ? 'month' : plan.rate_type === 'DAILY_PER_BAG' ? 'day' : 'custom');
     setOriginal(next);
     setEditingId(plan.id);
     setShowModal(true);
@@ -299,6 +350,26 @@ export default function RatePlanListPage() {
                 Pick a client when this rate was agreed with him alone. His arrivals then use it without the munshi choosing.
               </p>
             </div>
+            {!editingId && (
+              <fieldset className="space-y-1.5">
+                <legend className="text-sm font-medium">How do you charge?</legend>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="How do you charge?">
+                  {CHARGE_CARDS.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={card === c.id}
+                      onClick={() => chooseCard(c.id)}
+                      className={`rounded-md border p-2.5 text-left text-sm ${card === c.id ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-input hover:bg-muted/50'}`}
+                    >
+                      <span className="block font-medium">{c.title}</span>
+                      <span className="block text-xs text-muted-foreground">{c.hint}</span>
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>Commodity</Label>
@@ -311,22 +382,15 @@ export default function RatePlanListPage() {
                   ))}
                 </select>
               </div>
-              <div className="space-y-1">
-                <Label>Rate Type</Label>
-                {editingId ? (
+              {editingId && (
+                <div className="space-y-1">
+                  <Label>Rate Type</Label>
                   <Input value={RATE_TYPE_LABELS[form.rate_type] ?? form.rate_type} disabled className="bg-muted text-muted-foreground" />
-                ) : (
-                  <select value={form.rate_type} onChange={(e) => set('rate_type', e.target.value)} className={SELECT_CLASS}>
-                    <option value="SEASONAL_PER_BAG">Seasonal / Bag</option>
-                    <option value="MONTHLY_PER_BAG">Monthly / Bag</option>
-                    <option value="DAILY_PER_BAG">Daily / Bag</option>
-                    <option value="TARIFF_PER_BAG">Custom tariff (½ month, months, days…)</option>
-                  </select>
-                )}
-              </div>
+                </div>
+              )}
               <div className="space-y-1">
                 <Label>
-                  {isTariff ? 'Monthly rate per bag (PKR)' : 'Rate Amount (PKR)'} <span className="text-destructive">*</span>
+                  {priceLabel} <span className="text-destructive">*</span>
                 </Label>
                 <Input
                   type="number"
@@ -377,7 +441,18 @@ export default function RatePlanListPage() {
                 </>
               )}
             </div>
-            {isTariff && (
+            {examples.length > 0 && (
+              <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground" data-testid="example-bills">
+                Example for 100 {unit.many}:{' '}
+                {examples.map((e, i) => (
+                  <span key={e.days}>
+                    {i > 0 ? ' · ' : ''}
+                    {e.days} days = <strong className="text-foreground">{formatMoney(e.pkr)}</strong>
+                  </span>
+                ))}
+              </p>
+            )}
+            {isTariff && card === 'custom' && (
               <TariffFields
                 tariff={form.tariff}
                 onChange={(t) => set('tariff', t)}
