@@ -121,7 +121,7 @@ Clients will notice:
 
 Measured on the same generated season (median, this 8 GB machine): lot search 315 ms → 37 ms; dashboard: server error → about 2 s; receivables aging: server error → about 3 s. The database statement behind both takes 1.3 s; the rest is the report code around it.
 
-Checked on 2026-11-16: API integration tests (1,031 passed, 4 skipped, run in four parts because the machine ran short of memory on a single run), API unit tests 306, web tests 524, `pnpm build` green.
+Checked on 2026-11-16: API integration tests (1,067 passed, 4 skipped, run in parts because the machine ran short of memory on a single run), API unit tests 306, web tests 524, `pnpm build` green.
 
 Left for later, with the reason:
 - **Paging the general ledger.** The screen exports its rows to a spreadsheet file, so paging needs the export reworked too. One month of the farmers' account is 1.5 s; a full year is 8 s and 16 MB. Moved to Stage 10's speed work.
