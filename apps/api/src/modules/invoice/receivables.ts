@@ -59,17 +59,6 @@ export async function creditExposure(db: Db, facilityId: string, partyId: string
   return sumMoney(parts);
 }
 
-/**
- * PostgreSQL takes at most 32,767 bind variables in one statement, and a store
- * passes that many bills in a season or two (docs/31 F-0). Any id list that grows
- * with the store's history is fetched in slices.
- */
-async function byIds<T>(ids: string[], fetch: (slice: string[]) => Promise<T[]>): Promise<T[]> {
-  const out: T[] = [];
-  for (let i = 0; i < ids.length; i += 10_000) out.push(...(await fetch(ids.slice(i, i + 10_000))));
-  return out;
-}
-
 export type OpenItem = {
   partyId: string;
   /** The invoice, or null for a line that is no document's (opening balance, manual). */
@@ -98,77 +87,68 @@ export async function openItems(
   db: Db,
   args: { facilityId: string; book: BookType; asOf: Date; partyId?: string },
 ): Promise<OpenItem[]> {
-  const lines = await db.journalEntryLine.findMany({
-    where: {
-      ...postedLinesWhere({ facilityId: args.facilityId, book: args.book, to: args.asOf }),
-      accountCode: { in: [...AR_CONTROL_ACCOUNTS] },
-      partyId: args.partyId ?? { not: null },
-    },
-    select: {
-      partyId: true,
-      debitAmount: true,
-      creditAmount: true,
-      journalEntry: { select: { sourceTable: true, sourceId: true, entryDate: true, entryNumber: true } },
-    },
-  });
-
-  const creditNoteIds = [...new Set(lines.filter((l) => l.journalEntry.sourceTable === 'credit_notes').map((l) => l.journalEntry.sourceId))];
-  const creditNotes = await byIds(creditNoteIds, (ids) =>
-    db.creditNote.findMany({ where: { id: { in: ids } }, select: { id: true, originalInvoiceId: true } }),
-  );
-  const invoiceOfCreditNote = new Map(creditNotes.map((c) => [c.id, c.originalInvoiceId]));
-
-  const invoiceNet = new Map<string, number>();
-  const other = new Map<string, OpenItem>();
-  for (const l of lines) {
-    const je = l.journalEntry;
-    const amount = Number(l.debitAmount) - Number(l.creditAmount);
-    const invoiceId =
-      je.sourceTable === 'invoices' ? je.sourceId : je.sourceTable === 'credit_notes' ? invoiceOfCreditNote.get(je.sourceId) : undefined;
-    if (invoiceId) {
-      invoiceNet.set(invoiceId, (invoiceNet.get(invoiceId) ?? 0) + amount);
-    } else if (je.sourceTable !== 'payments') {
-      const key = `${l.partyId}:${je.sourceTable}:${je.sourceId}`;
-      const item = other.get(key) ?? { partyId: l.partyId!, invoiceId: null, reference: je.entryNumber, date: je.entryDate, amountPkr: 0 };
-      item.amountPkr += amount;
-      if (je.entryDate < item.date) item.date = je.entryDate;
-      other.set(key, item);
-    }
-  }
-
-  // Receipts applied per invoice in one grouped read, then only the invoices
-  // still open are fetched — a season of paid bills never crosses the wire.
-  const applied = await db.paymentAllocation.groupBy({
-    by: ['invoiceId'],
-    where: {
-      invoiceId: { not: null },
-      voidedAt: null,
-      payment: { facilityId: args.facilityId, paymentDate: { lte: args.asOf } },
-      ...(args.partyId ? { invoice: { billingPartyId: args.partyId } } : {}),
-    },
-    _sum: { allocatedAmountPkr: true },
-  });
-  const open = new Map<string, number>();
-  for (const [id, net] of invoiceNet) open.set(id, net);
-  for (const a of applied) {
-    if (open.has(a.invoiceId!)) open.set(a.invoiceId!, open.get(a.invoiceId!)! - Number(a._sum.allocatedAmountPkr ?? 0));
-  }
-  const openIds = [...open].filter(([, amount]) => Math.abs(round2(amount)) > 0.005).map(([id]) => id);
-  const invoices = await byIds(openIds, (ids) =>
-    db.invoice.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, billingPartyId: true, invoiceNumber: true, invoiceDate: true },
-    }),
-  );
-  const items: OpenItem[] = invoices.map((inv) => ({
-    partyId: inv.billingPartyId,
-    invoiceId: inv.id,
-    reference: inv.invoiceNumber,
-    date: inv.invoiceDate,
-    amountPkr: round2(open.get(inv.id)!),
-  }));
-  for (const item of other.values()) items.push({ ...item, amountPkr: round2(item.amountPkr) });
-  return items.filter((i) => Math.abs(i.amountPkr) > 0.005);
+  // One statement, summed in the database. It used to load every receivable line the
+  // store ever posted and add them up here, then name every invoice in one IN list:
+  // seconds on a season of data, and a server error past 32,767 bills, the most bind
+  // variables PostgreSQL takes (docs/31 F-0). Only what is still open comes back.
+  //
+  // The line filter is postedLinesWhere's: POSTED, in the book, up to the date. Raw
+  // SQL is safe here: none of these tables is row-level secured. The day is passed as
+  // text: a date column holds the UTC date part of what Prisma is given, and a Date
+  // bound to raw SQL would be cast in the session's time zone instead.
+  const asOf = toIsoDate(args.asOf);
+  const partyId = args.partyId ?? null;
+  const rows = await db.$queryRaw<
+    { party_id: string; invoice_id: string | null; reference: string | null; date: Date; amount: unknown }[]
+  >`
+    WITH src AS (
+      SELECT l.party_id, je.source_table, je.source_id,
+             SUM(l.debit_amount - l.credit_amount) AS net,
+             MIN(je.entry_date) AS date,
+             MIN(je.entry_number) AS entry_number
+      FROM journal_entry_lines l
+      JOIN journal_entries je ON je.id = l.journal_entry_id
+      WHERE l.facility_id = ${args.facilityId}::uuid
+        AND je.posting_status = 'POSTED'
+        AND je.book_type = ${args.book}::"BookType"
+        AND je.entry_date <= ${asOf}::date
+        AND l.account_code = ANY(${[...AR_CONTROL_ACCOUNTS]}::varchar[])
+        AND l.party_id IS NOT NULL
+        AND (${partyId}::uuid IS NULL OR l.party_id = ${partyId}::uuid)
+        AND je.source_table <> 'payments'
+      GROUP BY l.party_id, je.source_table, je.source_id
+    ), doc AS (
+      SELECT s.party_id, s.net, s.date, s.entry_number,
+             CASE WHEN s.source_table = 'invoices' THEN s.source_id
+                  WHEN s.source_table = 'credit_notes' THEN cn.original_invoice_id END AS invoice_id
+      FROM src s
+      LEFT JOIN credit_notes cn ON s.source_table = 'credit_notes' AND cn.id = s.source_id
+    ), inv AS (
+      SELECT d.invoice_id, SUM(d.net) AS net
+      FROM doc d JOIN invoices i ON i.id = d.invoice_id
+      GROUP BY d.invoice_id
+    ), applied AS (
+      SELECT a.invoice_id, SUM(a.allocated_amount_pkr) AS amount
+      FROM payment_allocations a
+      JOIN payments p ON p.id = a.payment_id
+      WHERE a.voided_at IS NULL AND p.payment_date <= ${asOf}::date
+        AND a.invoice_id IN (SELECT invoice_id FROM inv)
+      GROUP BY a.invoice_id
+    )
+    SELECT i.billing_party_id AS party_id, i.id AS invoice_id, i.invoice_number AS reference, i.invoice_date AS date,
+           inv.net - COALESCE(applied.amount, 0) AS amount
+    FROM inv
+    JOIN invoices i ON i.id = inv.invoice_id
+    LEFT JOIN applied ON applied.invoice_id = inv.invoice_id
+    WHERE ABS(inv.net - COALESCE(applied.amount, 0)) > 0.005
+    UNION ALL
+    SELECT d.party_id, NULL, d.entry_number, d.date, d.net
+    FROM doc d
+    WHERE d.invoice_id IS NULL AND ABS(d.net) > 0.005
+  `;
+  return rows
+    .map((r) => ({ partyId: r.party_id, invoiceId: r.invoice_id, reference: r.reference, date: r.date, amountPkr: round2(Number(r.amount)) }))
+    .filter((i) => Math.abs(i.amountPkr) > 0.005);
 }
 
 export type StatementEntryType =

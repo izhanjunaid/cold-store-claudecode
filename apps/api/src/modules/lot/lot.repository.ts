@@ -48,11 +48,25 @@ export class LotRepository {
     // Free-text search spans lot number, marka, owner party name, and vehicle number —
     // the fields a munshi actually has in hand ("where is Haji Sahib's stock?").
     if (filters.search) {
+      const contains = { contains: filters.search, mode: 'insensitive' as const };
+      // Owners are matched first and passed as ids. With the name test inside the
+      // lot query (a join), PostgreSQL cannot use the trigram indexes of 0048 and
+      // reads every lot; with ids it combines the four indexes.
+      // ponytail: a search matching more than 5,000 parties falls back to the join.
+      const owners = await this.prisma.party.findMany({
+        where: { facilityId: filters.facilityId, name: contains },
+        select: { id: true },
+        take: 5001,
+      });
       where.OR = [
-        { lotNumber: { contains: filters.search, mode: 'insensitive' } },
-        { marka: { contains: filters.search, mode: 'insensitive' } },
-        { ownerParty: { name: { contains: filters.search, mode: 'insensitive' } } },
-        { vehicleNumber: { contains: filters.search, mode: 'insensitive' } },
+        { lotNumber: contains },
+        { marka: contains },
+        { vehicleNumber: contains },
+        ...(owners.length > 5000
+          ? [{ ownerParty: { name: contains } }]
+          : owners.length > 0
+            ? [{ ownerPartyId: { in: owners.map((o) => o.id) } }]
+            : []),
       ];
     }
 
