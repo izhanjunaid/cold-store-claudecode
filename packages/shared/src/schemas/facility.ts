@@ -103,6 +103,10 @@ export const FacilitySettings = z.object({
   // for a truck the gate has logged in, so a typed plate can no longer hide a load from the gate. Off by
   // default: the owner switches it on once the gate logs every truck on arrival. A manager may still book ahead.
   book_only_trucks_inside: z.boolean(),
+  // Rent when goods change owner inside the store (docs/32 2.6). SELLER_BILLED: the seller gets a
+  // bill for the rent up to that day and the buyer's rent starts then. BUYER_TAKES_OVER: no bill
+  // is made; the buyer pays all the rent not yet billed when the goods leave.
+  transfer_rent_rule: z.enum(['SELLER_BILLED', 'BUYER_TAKES_OVER']),
 });
 export type FacilitySettingsType = z.infer<typeof FacilitySettings>;
 
@@ -139,6 +143,7 @@ export const DEFAULT_FACILITY_SETTINGS: FacilitySettingsType = {
   dispatch_solo_mode: false,
   hide_weights: false,
   book_only_trucks_inside: false,
+  transfer_rent_rule: 'SELLER_BILLED',
 };
 
 /** One saved change of one business setting and the day it takes effect (docs/32 section 2.2). */

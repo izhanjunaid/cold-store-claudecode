@@ -800,6 +800,10 @@ model Lot {
   parentLotId         String?   @map("parent_lot_id") @db.Uuid
   /// The season rent on these bags is already billed (to a previous owner); a withdrawal bills none.
   seasonFeeBilled     Boolean   @default(false) @map("season_fee_billed")
+  /// Where the present owner's rent starts when it is not the latest change of owner (0051).
+  rentStartDate       DateTime? @map("rent_start_date") @db.Date
+  /// Rent per unit already billed on these units under another lot number (0051).
+  rentBilledCarriedPkr Decimal  @default(0) @map("rent_billed_carried_pkr") @db.Decimal(12, 2)
   vehicleNumber       String?   @map("vehicle_number") @db.VarChar(30)
   marka               String?   @map("marka") @db.VarChar(100)
   status              LotStatus @default(ACTIVE)
@@ -952,6 +956,8 @@ model Invoice {
   voidReason        String?       @map("void_reason") @db.Text
   /// Set on a late-payment surcharge invoice: the overdue invoice it charges on.
   surchargeOfInvoiceId String?    @map("surcharge_of_invoice_id") @db.Uuid
+  /// Rent charged up to period_end with the goods still in the room (0051).
+  rentPeriodBill       Boolean    @default(false) @map("rent_period_bill")
 
   facility        Facility            @relation(fields: [facilityId], references: [id])
   surchargeOf     Invoice?            @relation("InvoiceSurcharge", fields: [surchargeOfInvoiceId], references: [id])
