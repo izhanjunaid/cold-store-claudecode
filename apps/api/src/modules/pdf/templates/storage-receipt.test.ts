@@ -98,3 +98,15 @@ describe('storage-receipt template', () => {
     expect(html).toContain('500'); // the bags still print
   });
 });
+
+describe('storage-receipt template — the unit of the goods (docs/32 2.4)', () => {
+  it('says "Crates" for goods counted in crates', () => {
+    const html = renderStorageReceiptHtml({ ...SAMPLE, commodityName: 'APPLE', unitLabel: 'Crates' });
+    expect(html).toContain('Crates (Accepted)');
+    expect(html).not.toContain('Bags (Accepted)');
+  });
+
+  it('keeps "Bags" when no unit is given', () => {
+    expect(renderStorageReceiptHtml(SAMPLE)).toContain('Bags (Accepted)');
+  });
+});

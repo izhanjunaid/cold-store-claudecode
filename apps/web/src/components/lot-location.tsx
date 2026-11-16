@@ -23,6 +23,7 @@ import {
 } from '@/components/rack-allocation-editor';
 import { formatDateTime, formatCount } from '@/lib/format';
 import { openPdf } from '@/lib/open-pdf';
+import { Units } from '@/lib/units';
 
 export interface LotPlacements {
   lot_id: string;
@@ -141,7 +142,7 @@ export function LotLocationCard({ lotId, canOperate }: { lotId: string; canOpera
             />
           )}
           {loc.placements.length === 0 && loc.unplaced_bags === 0 && (
-            <span className="text-sm text-muted-foreground">No bags in storage.</span>
+            <span className="text-sm text-muted-foreground">Nothing in storage.</span>
           )}
         </div>
       </CardContent>
@@ -336,7 +337,7 @@ function MoveLotDialog({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Bags to move{fromPlacement ? ` (max ${formatCount(fromPlacement.bags)})` : ''}
+                    Quantity to move{fromPlacement ? ` (max ${formatCount(fromPlacement.bags)})` : ''}
                   </label>
                   <Input
                     type="number"
@@ -460,7 +461,7 @@ export function LotMovementsTimeline({ lotId }: { lotId: string }) {
           <span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" aria-hidden />
           <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
             <span className="font-medium">{MOVEMENT_LABELS[m.movement_type]}</span>
-            <span className="tabular-nums">{formatCount(m.bags)} bags</span>
+            <span className="tabular-nums">{formatCount(m.bags)} <Units /></span>
             <span className="text-muted-foreground">{movementRoute(m)}</span>
           </div>
           <p className="text-xs text-muted-foreground">

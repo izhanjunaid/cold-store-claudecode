@@ -1,3 +1,4 @@
+import { lotUnit } from '../../common/lot-unit';
 import { roomLoads, spaceTaken } from '../../common/room-load';
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { businessDate } from '@coldchain/shared';
@@ -619,6 +620,7 @@ export class PlacementService {
       lotNumber: lot.lotNumber,
       ownerName: lot.ownerParty?.name ?? '',
       commodityName: lot.commodity?.name ?? '',
+      ...(await lotUnit(this.prisma, lotId).then(({ unitLabel, unitLabelUrdu }) => ({ unitLabel, unitLabelUrdu }))),
       varietyName: lot.variety?.name ?? null,
       marka: lot.marka ?? null,
       roomName: lot.chamber?.name ?? '',

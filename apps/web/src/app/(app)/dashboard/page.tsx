@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/layout/page-header';
 import { OpeningBalanceNotice } from '@/components/opening-balance-notice';
 import { StatTile } from '@/components/stat-tile';
+import { useUnits } from '@/lib/units';
 
 const fmt = formatCount;
 
@@ -39,6 +40,7 @@ function TileSkeletons({ count }: { count: number }) {
 }
 
 export default function DashboardPage() {
+  const units = useUnits();
   const user = useAuthStore((s) => s.user);
   const router = useRouter();
   const canView = can(user, 'reports.operational');
@@ -80,10 +82,10 @@ export default function DashboardPage() {
         ) : (
           <>
             <StatTile label="Active Lots" value={fmt(data?.active_lots ?? 0)} caption="in storage now" />
-            <StatTile label="Total Bags" value={fmt(data?.total_bags ?? 0)} caption="across active lots" />
+            <StatTile label={`Total ${units.any.many}`} value={fmt(data?.total_bags ?? 0)} caption="across active lots" />
             <StatTile label="Occupancy" value={`${data?.occupancy_pct?.toFixed(1) ?? '0.0'}%`} caption="of total capacity" />
-            <StatTile label="Today's Inbound" value={fmt(data?.today_inbound_bags ?? 0)} caption="bags accepted today" />
-            <StatTile label="Today's Outbound" value={fmt(data?.today_outbound_bags ?? 0)} caption="bags dispatched today" />
+            <StatTile label="Today's Inbound" value={fmt(data?.today_inbound_bags ?? 0)} caption={`${units.any.many} accepted today`} />
+            <StatTile label="Today's Outbound" value={fmt(data?.today_outbound_bags ?? 0)} caption={`${units.any.many} dispatched today`} />
           </>
         )}
       </div>
@@ -154,7 +156,7 @@ export default function DashboardPage() {
                     <Tooltip
                       contentStyle={{ borderRadius: 8, border: '1px solid hsl(var(--border))', fontSize: 12 }}
                       formatter={(value: number, _name, p) => [
-                        `${fmt(p.payload.bags)}/${fmt(p.payload.capacity)} bags (${value}%)`,
+                        `${fmt(p.payload.bags)}/${fmt(p.payload.capacity)} ${units.any.many} (${value}%)`,
                         'Occupancy',
                       ]}
                     />

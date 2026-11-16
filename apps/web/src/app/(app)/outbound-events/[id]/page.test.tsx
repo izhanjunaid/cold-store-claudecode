@@ -130,7 +130,7 @@ describe('OutboundEventDetailPage — the gate guard counts blind', () => {
     });
     renderPage();
     await loaded();
-    const bags = screen.getByText('Bags Withdrawn').nextElementSibling as HTMLElement;
+    const bags = screen.getByText('Quantity Withdrawn').nextElementSibling as HTMLElement;
     expect(bags).toHaveTextContent('—');
     expect(await screen.findByText(/R-1/)).toBeInTheDocument();
     expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
@@ -320,7 +320,7 @@ describe('OutboundEventDetailPage — cancel withdrawal', () => {
       }),
     );
     expect(await screen.findByRole('status')).toHaveTextContent(/cancelled.*truck did not come/i);
-    expect(toast.success).toHaveBeenCalledWith('Withdrawal cancelled — its bags are free again.');
+    expect(toast.success).toHaveBeenCalledWith('Withdrawal cancelled — its stock is free again.');
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /print dispatch note/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /cancel withdrawal/i })).not.toBeInTheDocument();

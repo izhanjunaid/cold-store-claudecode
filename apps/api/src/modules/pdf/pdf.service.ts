@@ -30,6 +30,9 @@ Handlebars.registerHelper('money', function (value: unknown, options: Handlebars
 });
 
 export interface StorageReceiptData {
+  /** The unit the goods are counted in ("Bags", "Crates") and its Urdu name; "Bags" when absent. */
+  unitLabel?: string;
+  unitLabelUrdu?: string | null;
   // Facility
   facilityName: string;
   facilityCity: string;
@@ -67,6 +70,9 @@ export interface StorageReceiptData {
 }
 
 export interface TransferAcknowledgmentData {
+  /** The unit the goods are counted in ("Bags", "Crates") and its Urdu name; "Bags" when absent. */
+  unitLabel?: string;
+  unitLabelUrdu?: string | null;
   facilityName: string;
   facilityCity: string;
   parentLotNumber: string;
@@ -86,6 +92,9 @@ export interface TransferAcknowledgmentData {
 }
 
 export interface DispatchNoteData {
+  /** The unit the goods are counted in ("Bags", "Crates") and its Urdu name; "Bags" when absent. */
+  unitLabel?: string;
+  unitLabelUrdu?: string | null;
   facilityName: string;
   facilityCity: string;
   dispatchNoteNumber: string;
@@ -577,6 +586,9 @@ export async function renderLoadSlip(data: LoadSlipData, numberLocale: PdfNumber
 // ============================================================================
 
 export interface PlacementSlipData {
+  /** The unit the goods are counted in ("Bags", "Crates") and its Urdu name; "Bags" when absent. */
+  unitLabel?: string;
+  unitLabelUrdu?: string | null;
   facilityName: string;
   facilityCity: string;
   lotNumber: string;

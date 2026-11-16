@@ -21,6 +21,7 @@ import { PageSkeleton } from '@/components/page-skeleton';
 import { WithdrawSheet } from '@/components/outbound/withdraw-sheet';
 import { useWeightsShown } from '@/hooks/use-reference-data';
 import { openPdf } from '@/lib/open-pdf';
+import { useUnits } from '@/lib/units';
 
 interface Lot {
   id: string;
@@ -101,6 +102,7 @@ export default function LotDetailPage() {
   const recentTransferId = searchParams?.get('transfer');
 
   const [lot, setLot] = useState<Lot | null>(null);
+  const unit = useUnits().of(lot?.commodity_name);
   const [ownershipHistory, setOwnershipHistory] = useState<OwnershipEvent[]>([]);
   const [outboundEvents, setOutboundEvents] = useState<OutboundSummary[]>([]);
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
@@ -253,7 +255,7 @@ export default function LotDetailPage() {
             <Field label="Room" value={lot.chamber_name ?? '—'} />
             <Field label="Rate Plan" value={lot.rate_plan_name ?? '—'} />
             <Field
-              label="Bags (Balance / Original)"
+              label={`${unit.many.charAt(0).toUpperCase() + unit.many.slice(1)} (Balance / Original)`}
               value={
                 <>
                   {formatCount(lot.current_balance_bags)}
@@ -331,7 +333,7 @@ export default function LotDetailPage() {
             <TabsContent value="ownership" className="mt-0">
               {lot.marka && (
                 <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
-                  <span className="text-muted-foreground">Physical marka on the bags: </span>
+                  <span className="text-muted-foreground">Physical marka on the goods: </span>
                   <UrduText className="font-semibold text-foreground">{lot.marka}</UrduText>
                   <span className="text-muted-foreground"> — stays constant across transfers; cross-check it against the current owner at dispatch.</span>
                 </div>
@@ -345,7 +347,7 @@ export default function LotDetailPage() {
                       <TableHead>Event</TableHead>
                       <TableHead>From</TableHead>
                       <TableHead>To</TableHead>
-                      <TableHead className="text-right">Bags</TableHead>
+                      <TableHead className="text-right">Quantity</TableHead>
                       <TableHead className="text-right">Price</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Operator</TableHead>
@@ -399,7 +401,7 @@ export default function LotDetailPage() {
                     <TableRow>
                       <TableHead>Dispatch #</TableHead>
                       <TableHead>Type</TableHead>
-                      <TableHead className="text-right">Bags</TableHead>
+                      <TableHead className="text-right">Quantity</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead />

@@ -66,8 +66,8 @@ export default function SeasonalSummaryPage() {
       ) : data ? (
         <>
           <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatTile size="compact" label="Inbound (bags)" value={formatCount(data.total_inbound_bags)} />
-            <StatTile size="compact" label="Outbound (bags)" value={formatCount(data.total_outbound_bags)} />
+            <StatTile size="compact" label="Inbound (quantity)" value={formatCount(data.total_inbound_bags)} />
+            <StatTile size="compact" label="Outbound (quantity)" value={formatCount(data.total_outbound_bags)} />
             <StatTile
               size="compact"
               label="Revenue"
@@ -89,8 +89,8 @@ export default function SeasonalSummaryPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Commodity</TableHead>
-                  <TableHead className="text-right">Inbound (bags)</TableHead>
-                  <TableHead className="text-right">Outbound (bags)</TableHead>
+                  <TableHead className="text-right">Inbound (quantity)</TableHead>
+                  <TableHead className="text-right">Outbound (quantity)</TableHead>
                   <TableHead className="text-right">Revenue (PKR)</TableHead>
                 </TableRow>
               </TableHeader>

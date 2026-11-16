@@ -240,8 +240,8 @@ describe('CheckoutSheet', () => {
 
     it('sends the racks the bags came off, and only those', async () => {
       renderSheet(vi.fn(), vi.fn(), 'lot-1');
-      fireEvent.change(await screen.findByLabelText('Bags picked from Rack A'), { target: { value: '60' } });
-      fireEvent.change(screen.getByLabelText('Bags picked from Rack B'), { target: { value: '40' } });
+      fireEvent.change(await screen.findByLabelText('Quantity picked from Rack A'), { target: { value: '60' } });
+      fireEvent.change(screen.getByLabelText('Quantity picked from Rack B'), { target: { value: '40' } });
       fireEvent.click(screen.getByRole('button', { name: /Dispatch & Collect/ }));
       await waitFor(() => expect(posts()).toHaveLength(1));
       expect(posts()[0]![1].body.picked_from).toEqual([
@@ -252,7 +252,7 @@ describe('CheckoutSheet', () => {
 
     it('left blank, sends no picks at all (the server trims the fullest racks)', async () => {
       renderSheet(vi.fn(), vi.fn(), 'lot-1');
-      await screen.findByLabelText('Bags picked from Rack A');
+      await screen.findByLabelText('Quantity picked from Rack A');
       fireEvent.click(await screen.findByRole('button', { name: /Dispatch & Collect/ }));
       await waitFor(() => expect(posts()).toHaveLength(1));
       expect(posts()[0]![1].body).not.toHaveProperty('picked_from');
@@ -260,7 +260,7 @@ describe('CheckoutSheet', () => {
 
     it('more bags picked than withdrawn is refused before anything is sent', async () => {
       renderSheet(vi.fn(), vi.fn(), 'lot-1');
-      fireEvent.change(await screen.findByLabelText('Bags picked from Rack A'), { target: { value: '101' } });
+      fireEvent.change(await screen.findByLabelText('Quantity picked from Rack A'), { target: { value: '101' } });
       expect(await screen.findByRole('alert')).toHaveTextContent(/exceed the withdrawn quantity \(100\)/);
       expect(screen.getByRole('button', { name: /Dispatch & Collect/ })).toBeDisabled();
     });

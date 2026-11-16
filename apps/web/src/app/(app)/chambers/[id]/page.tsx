@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import { formatDateTime, formatCount } from '@/lib/format';
 import { PageSkeleton } from '@/components/page-skeleton';
 import { openPdf } from '@/lib/open-pdf';
+import { Units } from '@/lib/units';
 
 interface TemperatureLog {
   id: string;
@@ -146,7 +147,7 @@ export default function RoomDetailPage() {
           <CardContent>
             <dl className="divide-y text-sm">
               <div className="flex justify-between py-1.5"><dt className="text-muted-foreground">Commodity</dt><dd className="font-medium">{chamber.commodity_restriction_name || 'Multi-commodity'}</dd></div>
-              <div className="flex justify-between py-1.5"><dt className="text-muted-foreground">Capacity</dt><dd className="font-medium tabular-nums">{chamber.max_capacity_bags.toLocaleString()} bags</dd></div>
+              <div className="flex justify-between py-1.5"><dt className="text-muted-foreground">Capacity</dt><dd className="font-medium tabular-nums">{chamber.max_capacity_bags.toLocaleString()} <Units /></dd></div>
               <div className="flex justify-between py-1.5"><dt className="text-muted-foreground">Racks</dt><dd className="font-medium tabular-nums">{chamber.racks.length}</dd></div>
               <div className="flex justify-between py-1.5"><dt className="text-muted-foreground">Temp Range</dt><dd className="font-medium">{chamber.temperature_min_c ?? '?'}°C – {chamber.temperature_max_c ?? '?'}°C</dd></div>
               <div className="flex justify-between py-1.5"><dt className="text-muted-foreground">Status</dt><dd><StatusBadge status={chamber.is_active ? 'ACTIVE' : 'INACTIVE'} /></dd></div>
@@ -356,7 +357,7 @@ function RackLotsDialog({
                       {l.marka}
                     </UrduText>
                   )}
-                  <span className="ml-auto shrink-0 font-medium tabular-nums">{formatCount(l.bags)} bags</span>
+                  <span className="ml-auto shrink-0 font-medium tabular-nums">{formatCount(l.bags)} <Units of={l.commodity_name} /></span>
                 </li>
               ))}
             </ul>
@@ -423,7 +424,7 @@ function RackEditDialog({
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. R-1" maxLength={50} />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Capacity (bags)</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Capacity</label>
             <Input type="number" min={1} value={capacity} onChange={(e) => setCapacity(e.target.value)} className="tabular-nums" />
           </div>
           {rack && (

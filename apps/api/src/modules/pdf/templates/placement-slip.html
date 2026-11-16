@@ -190,7 +190,7 @@
   <table class="racks">
     <tr>
       <th>Rack / ریک</th>
-      <th style="text-align:right">Bags / بوری</th>
+      <th style="text-align:right">{{#if unitLabel}}{{unitLabel}}{{else}}Bags{{/if}}{{#if unitLabelUrdu}} / {{unitLabelUrdu}}{{else}}{{#unless unitLabel}} / بوری{{/unless}}{{/if}}</th>
     </tr>
     {{#each placements}}
     <tr>

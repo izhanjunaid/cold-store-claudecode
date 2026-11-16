@@ -191,7 +191,7 @@ export default function RoomCreatePage() {
                     min={1}
                     value={rack.capacity}
                     onChange={(e) => setRack(idx, { capacity: e.target.value })}
-                    placeholder="Capacity (bags)"
+                    placeholder="Capacity"
                     className="w-40 tabular-nums"
                   />
                   <Button

@@ -135,7 +135,7 @@ export default function OutboundEventDetailPage() {
   const pickedTotal = pickedFrom.reduce((s, p) => s + p.bags, 0);
   const pickError =
     event != null && pickedTotal > event.quantity_withdrawn_bags
-      ? `Picked bags (${pickedTotal}) exceed the withdrawn quantity (${event.quantity_withdrawn_bags})`
+      ? `Picked quantity (${pickedTotal}) exceeds the withdrawn quantity (${event.quantity_withdrawn_bags})`
       : null;
 
   const handleFinalize = async () => {
@@ -221,7 +221,7 @@ export default function OutboundEventDetailPage() {
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
           <Field label="Withdrawal Type" value={event.withdrawal_type} />
-          <Field label="Bags Withdrawn" value={formatCount(event.quantity_withdrawn_bags)} />
+          <Field label="Quantity Withdrawn" value={formatCount(event.quantity_withdrawn_bags)} />
           <Field label="Outbound Date" value={formatDate(event.outbound_date)} />
           <Field label="Operator" value={event.created_by_name} />
           {event.receiving_party_name && <Field label="Receiving Party" value={event.receiving_party_name} />}
@@ -305,13 +305,13 @@ export default function OutboundEventDetailPage() {
             ) : (
               <>
                 <p className="mb-3 text-xs text-muted-foreground">
-                  Where the stock sits{canPick ? ' — optionally record which racks the bags were pulled from; left blank, the fullest racks are reduced automatically' : ''}.
+                  Where the stock sits{canPick ? ' — optionally record which racks the stock was pulled from; left blank, the fullest racks are reduced automatically' : ''}.
                 </p>
                 <div className="space-y-2">
                   {location.placements.map((p) => (
                     <div key={p.rack_id} className="flex items-center gap-3 text-sm">
                       <span className="w-24 font-medium">{p.rack_name}</span>
-                      <span className="w-28 text-muted-foreground tabular-nums">{formatCount(p.bags)} bags here</span>
+                      <span className="w-28 text-muted-foreground tabular-nums">{formatCount(p.bags)} here</span>
                       {canPick && (
                         <Input
                           type="number"
@@ -378,7 +378,7 @@ export default function OutboundEventDetailPage() {
         onCancelled={(updated) => {
           setEvent(updated);
           setError(null);
-          toast.success('Withdrawal cancelled — its bags are free again.');
+          toast.success('Withdrawal cancelled — its stock is free again.');
         }}
       />
     </div>

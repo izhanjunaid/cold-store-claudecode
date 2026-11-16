@@ -15,7 +15,70 @@ interface Commodity {
   id: string;
   name: string;
   unit_label: string;
+  unit_name: string;
+  unit_name_urdu: string | null;
+  unit_weight_kg: number | null;
+  space_factor: number;
   default_storage_days_alert: number | null;
+}
+
+/** The unit fields of one kind of goods, as typed on the form. */
+interface UnitForm {
+  unit_label: string;
+  unit_name: string;
+  unit_name_urdu: string;
+  unit_weight_kg: string;
+  space_factor: string;
+}
+
+const NEW_UNIT: UnitForm = { unit_label: 'Bags', unit_name: 'Bag', unit_name_urdu: 'بوری', unit_weight_kg: '', space_factor: '1' };
+
+function unitPayload(f: UnitForm) {
+  return {
+    unit_label: f.unit_label.trim(),
+    unit_name: f.unit_name.trim() || f.unit_label.trim(),
+    unit_name_urdu: f.unit_name_urdu.trim() || null,
+    unit_weight_kg: f.unit_weight_kg === '' ? null : Number(f.unit_weight_kg),
+    space_factor: Number(f.space_factor) > 0 ? Number(f.space_factor) : 1,
+  };
+}
+
+function UnitFields({ value, onChange }: { value: UnitForm; onChange: (v: UnitForm) => void }) {
+  const set = (k: keyof UnitForm) => (e: React.ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value });
+  return (
+    <>
+      <div className="space-y-1.5">
+        <Label>
+          Counted in <span className="text-destructive">*</span>
+        </Label>
+        <Input value={value.unit_label} onChange={set('unit_label')} required maxLength={20} placeholder="Bags" />
+      </div>
+      <div className="space-y-1.5">
+        <Label>One of them</Label>
+        <Input value={value.unit_name} onChange={set('unit_name')} maxLength={20} placeholder="Bag" />
+      </div>
+      <div className="space-y-1.5">
+        <Label>In Urdu</Label>
+        <Input value={value.unit_name_urdu} onChange={set('unit_name_urdu')} maxLength={40} dir="rtl" placeholder="بوری" />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Weight of one (kg)</Label>
+        <Input type="number" min={0} step="0.01" value={value.unit_weight_kg} onChange={set('unit_weight_kg')} className="tabular-nums" placeholder="optional" />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Room one takes</Label>
+        <Input
+          type="number"
+          min={0.001}
+          step="0.001"
+          value={value.space_factor}
+          onChange={set('space_factor')}
+          className="tabular-nums"
+          title="1 for the goods your room capacity is counted in. A crate that takes half the room of a bag is 0.5."
+        />
+      </div>
+    </>
+  );
 }
 interface Variety {
   id: string;
@@ -29,7 +92,9 @@ export default function CommoditiesPage() {
 
   // add-commodity form
   const [name, setName] = useState('');
-  const [unit, setUnit] = useState('bags');
+  const [unit, setUnit] = useState<UnitForm>(NEW_UNIT);
+  // The goods whose unit is being edited, and the values typed.
+  const [editing, setEditing] = useState<{ id: string; form: UnitForm } | null>(null);
   const [alertDays, setAlertDays] = useState('');
   const [savingCommodity, setSavingCommodity] = useState(false);
 
@@ -67,18 +132,30 @@ export default function CommoditiesPage() {
     e.preventDefault();
     setSavingCommodity(true);
     try {
-      const payload: Record<string, unknown> = { name: name.trim(), unit_label: unit.trim() };
+      const payload: Record<string, unknown> = { name: name.trim(), ...unitPayload(unit) };
       if (alertDays !== '') payload['default_storage_days_alert'] = parseInt(alertDays, 10);
       await apiClient('/v1/commodities', { method: 'POST', body: payload });
       toast.success('Commodity added');
       setName('');
-      setUnit('bags');
+      setUnit(NEW_UNIT);
       setAlertDays('');
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to add commodity');
     } finally {
       setSavingCommodity(false);
+    }
+  };
+
+  const saveUnit = async () => {
+    if (!editing) return;
+    try {
+      await apiClient(`/v1/commodities/${editing.id}`, { method: 'PATCH', body: unitPayload(editing.form) });
+      toast.success('Unit saved');
+      setEditing(null);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save the unit');
     }
   };
 
@@ -114,12 +191,7 @@ export default function CommoditiesPage() {
               </Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} required maxLength={100} placeholder="e.g. Potato" />
             </div>
-            <div className="space-y-1.5">
-              <Label>
-                Unit <span className="text-destructive">*</span>
-              </Label>
-              <Input value={unit} onChange={(e) => setUnit(e.target.value)} required maxLength={20} placeholder="bags" />
-            </div>
+            <UnitFields value={unit} onChange={setUnit} />
             <div className="space-y-1.5">
               <Label>Storage alert (days)</Label>
               <Input
@@ -163,10 +235,42 @@ export default function CommoditiesPage() {
                 <div className="mb-3 flex items-baseline justify-between gap-2">
                   <h3 className="font-semibold text-foreground">{c.name}</h3>
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    unit: {c.unit_label}
+                    counted in {c.unit_label}
+                    {c.unit_name_urdu ? ` (${c.unit_name_urdu})` : ''}
+                    {c.unit_weight_kg ? ` · ${c.unit_weight_kg} kg each` : ''}
+                    {c.space_factor !== 1 ? ` · room ${c.space_factor}` : ''}
                     {c.default_storage_days_alert ? ` · alert ${c.default_storage_days_alert}d` : ''}
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="ml-1 h-auto p-0 text-xs"
+                      onClick={() =>
+                        setEditing({
+                          id: c.id,
+                          form: {
+                            unit_label: c.unit_label,
+                            unit_name: c.unit_name ?? '',
+                            unit_name_urdu: c.unit_name_urdu ?? '',
+                            unit_weight_kg: c.unit_weight_kg == null ? '' : String(c.unit_weight_kg),
+                            space_factor: String(c.space_factor ?? 1),
+                          },
+                        })
+                      }
+                    >
+                      Edit unit
+                    </Button>
                   </span>
                 </div>
+                {editing?.id === c.id && (
+                  <div className="mb-3 grid grid-cols-1 gap-3 rounded-md border p-3 sm:grid-cols-5 sm:items-end">
+                    <UnitFields value={editing.form} onChange={(form) => setEditing({ id: c.id, form })} />
+                    <div className="flex gap-2 sm:col-span-5">
+                      <Button type="button" size="sm" onClick={saveUnit}>Save unit</Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
                 <div className="mb-3 flex flex-wrap gap-1.5">
                   {(varieties[c.id] ?? []).length === 0 ? (
                     <span className="text-sm text-muted-foreground">No varieties yet</span>

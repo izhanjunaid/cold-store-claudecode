@@ -70,7 +70,7 @@ export const lotColumns: DataTableColumn<LotRow>[] = [
   },
   {
     id: 'bags',
-    header: 'Bags',
+    header: 'Quantity',
     numeric: true,
     cell: (lot) => formatCount(lot.quantity_bags),
     csv: (lot) => lot.quantity_bags,

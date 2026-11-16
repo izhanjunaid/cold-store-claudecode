@@ -1,3 +1,4 @@
+import { lotUnit } from '../../common/lot-unit';
 import { roomLoads, spaceTaken } from '../../common/room-load';
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { RATE_UNIT_LABEL, addDays, businessDate, fromIsoDate, type RateType } from '@coldchain/shared';
@@ -437,6 +438,7 @@ export class LotService {
       ownerName: typedLot.ownerParty?.name ?? '',
       ownerNameUrdu: null,
       commodityName: typedLot.commodity?.name ?? '',
+      ...(await lotUnit(this.prisma, id).then(({ unitLabel, unitLabelUrdu }) => ({ unitLabel, unitLabelUrdu }))),
       varietyName: typedLot.variety?.name ?? null,
       quantityBags: typedLot.quantityBags,
       acceptedWeightKg: showWeights ? recordedKg(typedLot.acceptedWeightKg) : null,

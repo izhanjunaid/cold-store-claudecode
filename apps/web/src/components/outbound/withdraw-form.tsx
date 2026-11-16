@@ -19,6 +19,7 @@ import { useFacility } from '@/hooks/use-reference-data';
 import { TrucksInsideChips, useTrucksInside } from '@/components/gate/trucks-inside-chips';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageSkeleton } from '@/components/page-skeleton';
+import { Units } from '@/lib/units';
 
 interface Lot {
   id: string;
@@ -132,7 +133,7 @@ export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, pla
     if (!lot) return;
     if (form.withdrawal_type === 'PARTIAL') {
       const qty = Number(form.quantity_withdrawn_bags);
-      if (!qty || qty <= 0) return setError('Enter number of bags to withdraw');
+      if (!qty || qty <= 0) return setError('Enter the quantity to withdraw');
       if (qty >= lot.current_balance_bags)
         return setError(
           `Partial quantity must be less than current balance (${lot.current_balance_bags}). Use FULL to withdraw the whole lot.`,
@@ -202,7 +203,7 @@ export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, pla
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Current Balance</div>
-            <div className="font-medium text-primary-700">{lot.current_balance_bags.toLocaleString()} bags</div>
+            <div className="font-medium text-primary-700">{lot.current_balance_bags.toLocaleString()} <Units of={lot.commodity_name} /></div>
           </div>
           {location && (
             <div className="col-span-full border-t pt-3">
@@ -253,14 +254,14 @@ export function WithdrawForm({ lotId, variant = 'page', onCreated, onCancel, pla
                   variant={form.withdrawal_type === t ? 'default' : 'outline'}
                   onClick={() => setForm({ ...form, withdrawal_type: t })}
                 >
-                  {t === 'FULL' ? `Full (${lot.current_balance_bags} bags)` : 'Partial'}
+                  {t === 'FULL' ? <>Full ({lot.current_balance_bags} <Units of={lot.commodity_name} />)</> : 'Partial'}
                 </Button>
               ))}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {form.withdrawal_type === 'FULL'
-                ? 'All remaining bags dispatched; lot will close after finalization.'
-                : 'Specify how many bags to withdraw; remaining stay in storage.'}
+                ? 'Everything left is dispatched; the lot closes after finalization.'
+                : 'Enter how much to withdraw; the rest stays in storage.'}
             </p>
           </div>
 

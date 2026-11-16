@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
+import { Units } from '@/lib/units';
 
 export default function CommodityInventoryPage() {
   const user = useAuthStore((s) => s.user);
@@ -45,7 +46,7 @@ export default function CommodityInventoryPage() {
 
   return (
     <div>
-      <PageHeader title="Commodity Inventory" description="Bags in storage by commodity, with per-room breakdown" />
+      <PageHeader title="Commodity Inventory" description="Stock in storage by commodity, with per-room breakdown" />
 
       <div className="mb-5 grid grid-cols-2 gap-3 sm:max-w-md">
         <Card>
@@ -56,7 +57,7 @@ export default function CommodityInventoryPage() {
         </Card>
         <Card>
           <CardContent className="pt-5">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Total Bags</div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Total <Units title /></div>
             <div className="mt-1 text-xl font-semibold tabular-nums">{totalBags.toLocaleString()}</div>
           </CardContent>
         </Card>
@@ -88,7 +89,7 @@ export default function CommodityInventoryPage() {
                         ({row.per_chamber.length} room{row.per_chamber.length === 1 ? '' : 's'})
                       </span>
                     </div>
-                    <span className="text-sm font-medium tabular-nums">{row.total_bags.toLocaleString()} bags</span>
+                    <span className="text-sm font-medium tabular-nums">{row.total_bags.toLocaleString()} <Units of={row.commodity_name} /></span>
                   </button>
                   {isOpen && (
                     <div className="bg-muted/30 px-4 py-2">
@@ -96,7 +97,7 @@ export default function CommodityInventoryPage() {
                         <TableHeader>
                           <TableRow>
                             <TableHead>Room</TableHead>
-                            <TableHead className="text-right">Bags</TableHead>
+                            <TableHead className="text-right">Quantity</TableHead>
                             <TableHead className="text-right">Occupancy</TableHead>
                           </TableRow>
                         </TableHeader>

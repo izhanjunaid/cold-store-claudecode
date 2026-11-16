@@ -220,7 +220,7 @@ export default function RevenueAccrualPage() {
               <TableHead className="h-8">Lot</TableHead>
               <TableHead className="h-8">Party</TableHead>
               <TableHead className="h-8">Commodity</TableHead>
-              <TableHead className="h-8 text-right">Bags</TableHead>
+              <TableHead className="h-8 text-right">Quantity</TableHead>
               <TableHead className="h-8 text-right">Days</TableHead>
               <TableHead className="h-8">Revenue account</TableHead>
               <TableHead className="h-8 text-right">Earned to date</TableHead>
