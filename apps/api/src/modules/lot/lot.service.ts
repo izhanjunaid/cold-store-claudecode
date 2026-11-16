@@ -1,3 +1,4 @@
+import { roomLoads, spaceTaken } from '../../common/room-load';
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { RATE_UNIT_LABEL, addDays, businessDate, fromIsoDate, type RateType } from '@coldchain/shared';
 import { LotRepository, LOT_INCLUDE_SHAPE } from './lot.repository';
@@ -245,13 +246,15 @@ export class LotService {
     const settings = await settingsOn(this.prisma, input.facilityId);
 
     // 3a. Capacity check (aggregate over ACTIVE lots)
-    const agg = await this.repo.sumActiveBalanceByChamber(input.facilityId, input.chamberId);
-    const currentOccupancy = agg._sum.currentBalanceBags ?? 0;
-    if (currentOccupancy + input.quantityBags > chamber.maxCapacityBags) {
+    // The room these units take, in the room's capacity units (docs/32 2.4).
+    const currentOccupancy = (await roomLoads(this.prisma, [input.chamberId])).get(input.chamberId) ?? 0;
+    const goods = await this.prisma.commodity.findUnique({ where: { id: input.commodityId }, select: { spaceFactor: true } });
+    const incoming = spaceTaken(input.quantityBags, goods?.spaceFactor ?? 1);
+    if (currentOccupancy + incoming > chamber.maxCapacityBags) {
       throw Errors.CHAMBER_CAPACITY_EXCEEDED();
     }
     const warningPct = settings.chamber_capacity_warning_pct;
-    if (currentOccupancy + input.quantityBags > chamber.maxCapacityBags * (warningPct / 100)) {
+    if (currentOccupancy + incoming > chamber.maxCapacityBags * (warningPct / 100)) {
       warnings.push(
         `Chamber ${chamber.name} will be >${warningPct}% full after this inbound`,
       );

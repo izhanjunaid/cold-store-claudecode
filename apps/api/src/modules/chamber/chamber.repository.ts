@@ -1,3 +1,4 @@
+import { roomLoads } from '../../common/room-load';
 import type { PrismaClient, Prisma } from '@coldchain/db';
 
 export class ChamberRepository {
@@ -60,19 +61,9 @@ export class ChamberRepository {
     });
   }
 
+  /** Each room's load in its capacity units (units x space factor; see common/room-load.ts). */
   async getOccupancyByChamberIds(chamberIds: string[]): Promise<Map<string, number>> {
-    if (chamberIds.length === 0) return new Map();
-    const rows = await this.prisma.lot.groupBy({
-      by: ['chamberId'],
-      where: { chamberId: { in: chamberIds }, status: 'ACTIVE' },
-      _sum: { currentBalanceBags: true },
-    });
-    const map = new Map<string, number>();
-    for (const id of chamberIds) map.set(id, 0);
-    for (const row of rows) {
-      if (row.chamberId) map.set(row.chamberId, Number(row._sum.currentBalanceBags ?? 0));
-    }
-    return map;
+    return roomLoads(this.prisma, chamberIds);
   }
 
   async logTemperature(data: Prisma.TemperatureLogUncheckedCreateInput) {

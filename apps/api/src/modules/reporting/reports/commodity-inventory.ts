@@ -29,7 +29,7 @@ export async function getCommodityInventory(
   const [commodities, chambers] = await Promise.all([
     prisma.commodity.findMany({
       where: { id: { in: commodityIds } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, unitLabel: true, spaceFactor: true },
     }),
     prisma.chamber.findMany({
       where: { id: { in: chamberIds } },
@@ -43,6 +43,8 @@ export async function getCommodityInventory(
   type Row = {
     commodity_id: string;
     commodity_name: string;
+    /** The unit these goods are counted in ("Bags", "Crates"). */
+    unit_label: string;
     total_bags: number;
     per_chamber: Array<{
       chamber_id: string;
@@ -65,6 +67,7 @@ export async function getCommodityInventory(
       row = {
         commodity_id: commodity.id,
         commodity_name: commodity.name,
+        unit_label: commodity.unitLabel,
         total_bags: 0,
         per_chamber: [],
       };
@@ -72,7 +75,7 @@ export async function getCommodityInventory(
     }
     row.total_bags += bags;
     const occupancy_pct =
-      chamber.maxCapacityBags > 0 ? round2((bags / chamber.maxCapacityBags) * 100) : 0;
+      chamber.maxCapacityBags > 0 ? round2(((bags * Number(commodity.spaceFactor)) / chamber.maxCapacityBags) * 100) : 0;
     row.per_chamber.push({
       chamber_id: chamber.id,
       chamber_name: chamber.name,

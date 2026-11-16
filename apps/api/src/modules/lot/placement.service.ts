@@ -1,3 +1,4 @@
+import { roomLoads, spaceTaken } from '../../common/room-load';
 import type { PrismaClient, Prisma } from '@coldchain/db';
 import { businessDate } from '@coldchain/shared';
 import { Errors } from '../../common/errors';
@@ -543,12 +544,9 @@ export class PlacementService {
     }
 
     // Hard capacity at the destination room — same rule as inbound.
-    const agg = await tx.lot.aggregate({
-      where: { facilityId: lot.facilityId, chamberId: toChamber.id, status: 'ACTIVE' },
-      _sum: { currentBalanceBags: true },
-    });
-    const occupancy = agg._sum.currentBalanceBags ?? 0;
-    if (occupancy + lot.currentBalanceBags > toChamber.maxCapacityBags) {
+    const occupancy = (await roomLoads(tx, [toChamber.id])).get(toChamber.id) ?? 0;
+    const goods = await tx.commodity.findUnique({ where: { id: lot.commodityId }, select: { spaceFactor: true } });
+    if (occupancy + spaceTaken(lot.currentBalanceBags, goods?.spaceFactor ?? 1) > toChamber.maxCapacityBags) {
       throw Errors.CHAMBER_CAPACITY_EXCEEDED();
     }
 

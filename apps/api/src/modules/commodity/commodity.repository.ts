@@ -32,6 +32,14 @@ export class CommodityRepository {
     });
   }
 
+  async isRevenueAccount(facilityId: string, accountCode: string): Promise<boolean> {
+    const account = await this.prisma.chartOfAccounts.findUnique({
+      where: { facilityId_accountCode: { facilityId, accountCode } },
+      select: { accountClass: true, isActive: true },
+    });
+    return account !== null && account.accountClass === 'REVENUE' && account.isActive;
+  }
+
   async findVarietiesByCommodity(commodityId: string) {
     return this.prisma.variety.findMany({
       where: { commodityId },

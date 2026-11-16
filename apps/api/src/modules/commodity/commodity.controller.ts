@@ -7,6 +7,19 @@ import { z } from 'zod';
 
 const IdParam = z.object({ id: z.string().uuid() });
 
+function commodityInput(body: z.infer<typeof UpdateCommodityRequest>) {
+  return {
+    name: body.name,
+    unitLabel: body.unit_label,
+    unitName: body.unit_name,
+    unitNameUrdu: body.unit_name_urdu,
+    unitWeightKg: body.unit_weight_kg,
+    spaceFactor: body.space_factor,
+    revenueAccountCode: body.revenue_account_code,
+    defaultStorageDaysAlert: body.default_storage_days_alert,
+  };
+}
+
 export async function commodityRoutes(app: FastifyInstance) {
   const service = new CommodityService(new CommodityRepository(app.prisma));
 
@@ -41,10 +54,10 @@ export async function commodityRoutes(app: FastifyInstance) {
     schema: { body: CreateCommodityRequest },
     handler: async (request, reply) => {
       const body = request.body as z.infer<typeof CreateCommodityRequest>;
-      const result = await service.create({
+      const result = await service.create(request.user!.facilityId, {
+        ...commodityInput(body),
         name: body.name,
         unitLabel: body.unit_label,
-        defaultStorageDaysAlert: body.default_storage_days_alert,
       });
       return sendSuccess(reply.status(201), result);
     },
@@ -59,11 +72,7 @@ export async function commodityRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const { id } = request.params as z.infer<typeof IdParam>;
       const body = request.body as z.infer<typeof UpdateCommodityRequest>;
-      const result = await service.update(id, {
-        name: body.name,
-        unitLabel: body.unit_label,
-        defaultStorageDaysAlert: body.default_storage_days_alert,
-      });
+      const result = await service.update(request.user!.facilityId, id, commodityInput(body));
       return sendSuccess(reply, result);
     },
   });

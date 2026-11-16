@@ -103,13 +103,6 @@ export class LotRepository {
     });
   }
 
-  sumActiveBalanceByChamber(facilityId: string, chamberId: string) {
-    return this.prisma.lot.aggregate({
-      where: { facilityId, chamberId, status: 'ACTIVE' },
-      _sum: { currentBalanceBags: true },
-    });
-  }
-
   update(id: string, data: Prisma.LotUncheckedUpdateInput): Promise<unknown> {
     return this.prisma.lot.update({
       where: { id },
