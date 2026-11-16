@@ -1,9 +1,9 @@
 # ColdChain — Build Progress
 
 ## Current Status
-- **Redesign program (correct for the trade, configurable by settings): research, audit and plan written 2026-11-16 on `redesign/domain-and-audit`; the plan awaits the owner's approval and nothing is built.**
+- **Redesign program (correct for the trade, configurable by settings): plan approved 2026-11-16; Stage 0 (the money and failure fixes) is built on `redesign/stage-0-stop-losses`, local, not pushed, not merged. Merging needs the owner's word.**
   - `docs/29_domain_brief.md` (how the trade works, where stores differ, glossary), `docs/30_questionnaire.md` (Urdu and English, for owners and munshis), `docs/31_module_audit.md` (findings and measured timings), `docs/32_redesign_plan.md` (the plan and **the progress file to continue from**).
-  - Two Critical rent errors on change of owner (T-1, T-2) and one Critical failure of the dashboard and receivables aging above 32,767 bills (F-0) are open on `main`; they are Stage 0 of the plan.
+  - Stage 0 fixes the two Critical rent errors on change of owner (T-1, T-2), the dashboard and aging failure above 32,767 bills (F-0), peshgi left out of what a client owes (A-1, P-2) and the lot search speed. Migrations 0047 (`lots.season_fee_billed`) and 0048 (text-search indexes). All three are still open on `main` until the branch is merged. Detail: `docs/32` "Stage 0 as built". Next: Stage 1 (dated settings).
   - Owner decisions (2026-11-15): the store's own trading stock stays out of the software; migration is tested on generated data only; merging to `main` needs the owner's word.
   - Local tools: `scripts/perf-seed.sql` (season data into a throwaway `coldchain_perf` database), `scripts/perf-time.mjs` (timings).
 - **v0.9.0 tagged on 2026-11-13 (`main` at `cd4f1a1`). NOT promoted: `:stable` is still v0.6.2, and promoting is the owner's call.**

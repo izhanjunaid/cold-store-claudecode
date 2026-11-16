@@ -108,6 +108,26 @@ Clients will notice:
 - A client's statement and "amount owed" now include his peshgi. A truck of a client with unpaid peshgi may need a manager at the gate where it did not before.
 - The dashboard keeps working as the store grows.
 
+**Stage 0 as built (2026-11-16, branch `redesign/stage-0-stop-losses`).** The owner said "go ahead" without answering section 5, so the recommended defaults were used: the seller is billed at a change of owner.
+
+| Fix | What was done | Test |
+|---|---|---|
+| F-0 dashboard and aging fail on a big store | The aging read is one database statement that returns only what is still open. | `receivables-scale.integration.test.ts` (33,000 bills) |
+| T-1 partial change of owner loses rent | The seller gets a draft bill for the rent on the bags sold, from the start of his billing period to the transfer date. | `ownership-transfer.integration.test.ts` |
+| T-2 season rent charged twice | New lot field `season_fee_billed` (migration 0047). It is set when the seller is billed a season fee at a transfer. A withdrawal and the monthly revenue accrual charge no season rent on such a lot. The migration marks lots already transferred in full on a seasonal plan. | same file, full and partial |
+| A-1, P-2 peshgi left out | A client's credit exposure adds his unpaid peshgi. The statement keeps its rows and closing balance (they still tie to the ledger) and adds "Peshgi unpaid" and "Total owed". | `receivables-read-model.integration.test.ts` |
+| Lot search speed | Text-search indexes (migration 0048) and owners resolved to ids first. | existing lot search tests |
+| F-1 false benchmark | `scripts/perf-baseline.ts` removed. `pnpm perf:time` runs `scripts/perf-time.mjs`. | |
+
+Measured on the same generated season (median): lot search 315 ms → about 35 ms; dashboard and receivables aging: server error → about 1 s.
+
+Left for later, with the reason:
+- **Paging the general ledger.** The screen exports its rows to a spreadsheet file, so paging needs the export reworked too. One month of the farmers' account is 1.5 s; a full year is 8 s and 16 MB. Moved to Stage 10's speed work.
+- **The dashboard at about 1 s.** It still adds up the whole season to find the overdue amount. Stage 3 (rent tracked per lot, bills that know what is still open) removes the cause.
+- **Monthly rent at a change of owner.** Seller and buyer are each billed their own period rounded up to whole months, so a lot sold mid-month pays one month more in total than a lot that was not sold. This is how a full transfer already worked. Stage 3 settles it with the "billed up to" date.
+- **T-3** (the seller's bill stays a draft until someone finalises it) is unchanged. It now applies to partial transfers too. The dashboard lists these drafts.
+- If a seller's draft season bill is later deleted, the lot stays marked as season-billed. Stage 3 replaces the mark with the bill itself.
+
 ### Stage 1 — Dated settings (2.2, 2.3)
 Build the settings store and the dated read. Move each existing business setting into it as a first version dated before any data. The Settings screen gains "from date" and history.
 
@@ -207,8 +227,8 @@ The three stores, taken from the research:
 |---|---|---|---|
 | Research: domain brief, glossary, questionnaire | Done 2026-11-16 | `redesign/domain-and-audit` | `docs/29`, `docs/30` |
 | Audit | Done 2026-11-16 | same | `docs/31`; timings on generated data |
-| Redesign plan | Written 2026-11-16, **awaiting approval** | same | this file |
-| 0 Stop the losses | Not started | | |
+| Redesign plan | Approved 2026-11-16 ("go ahead"); section 5 not answered, recommended defaults in use | same | this file |
+| 0 Stop the losses | Built 2026-11-16, **not merged** | `redesign/stage-0-stop-losses` | see "Stage 0 as built"; general-ledger paging moved to Stage 10 |
 | 1 Dated settings | Not started | | |
 | 2 Goods and units | Not started | | |
 | 3 Rent | Not started | | |
