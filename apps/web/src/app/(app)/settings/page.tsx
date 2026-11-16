@@ -14,6 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 import { SoftwareVersion } from '@/components/settings/software-version';
+import { SettingChanges } from '@/components/settings/setting-changes';
 
 import { PageSkeleton } from '@/components/page-skeleton';
 interface Commodity {
@@ -60,6 +61,9 @@ export default function SettingsPage() {
   const [weighsProduce, setWeighsProduce] = useState(true);
   // "Book only trucks inside the gate" (docs/28 D2).
   const [bookOnlyTrucksInside, setBookOnlyTrucksInside] = useState(false);
+  // The day the changed rules start: empty = today.
+  const [effectiveFrom, setEffectiveFrom] = useState('');
+  const [changeNote, setChangeNote] = useState('');
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -109,6 +113,8 @@ export default function SettingsPage() {
           city,
           phone: phone.trim() || null,
           gst_number: gstNumber.trim() || null,
+          ...(effectiveFrom && effectiveFrom > localIsoDate() ? { effective_from: effectiveFrom } : {}),
+          ...(changeNote.trim() ? { note: changeNote.trim() } : {}),
           settings: {
             weight_dispute_threshold_kg: Number(weightThreshold) || 0,
             storage_alert_thresholds: cleanedThresholds,
@@ -132,7 +138,11 @@ export default function SettingsPage() {
       setFacility(updated);
       // The desk reads the switch from this cache (five minutes of staleness otherwise).
       queryClient.invalidateQueries({ queryKey: qk.facility.me });
-      toast.success('Settings saved');
+      toast.success(
+        effectiveFrom && effectiveFrom > localIsoDate() ? `Saved. Changed rules start on ${effectiveFrom}` : 'Settings saved',
+      );
+      setEffectiveFrom('');
+      setChangeNote('');
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Save failed');
     } finally {
@@ -331,7 +341,21 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader><CardTitle className="text-sm">When do the changes start?</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="Takes effect from" hint="Leave empty to start today. Bills and papers dated before this day are not changed.">
+              <Input type="date" min={localIsoDate()} value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+            </Field>
+            <Field label="Note (optional)" hint="Why the change was made. Kept in the history.">
+              <Input value={changeNote} maxLength={500} onChange={(e) => setChangeNote(e.target.value)} />
+            </Field>
+          </CardContent>
+        </Card>
+
         <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save Settings'}</Button>
+
+        <SettingChanges pending={facility.pending_settings ?? []} />
 
         <SoftwareVersion />
       </div>
