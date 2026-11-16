@@ -163,6 +163,23 @@ Migration: every existing kind of goods gets unit "Bag" or its present label and
 
 Clients will notice: "Crates" where goods are in crates. Nothing else.
 
+**Stage 2 as built (2026-11-18, branch `redesign/stage-2-goods-units`, on top of Stage 1).**
+
+- Each kind of goods has: the unit it is counted in ("Bags", "Crates"), the name of one unit, its Urdu name, the weight of one unit (information only), and the room one unit takes (migration 0050). Existing goods keep their unit and get "room one takes" = 1, so every count and capacity reads as before.
+- A room's fullness is now units multiplied by "room one takes", added up in one place. A room of 100 holds 150 crates that each take half the room of a bag, and then 25 bags.
+- Screens: a count beside one kind of goods shows its unit. A total shows the shared unit, or "units" when the store's goods differ. Column headings and messages that said "Bags" now say "Quantity" or "stock".
+- Papers: the storage receipt, dispatch note, change-of-owner paper and placement slip print the goods' unit. The dispatch note now also prints the name of the goods, which it left blank before.
+- The goods screen has the new fields and an "Edit unit" form.
+- The revenue account of a kind of goods can be chosen when it is created or changed, and must be one of the store's revenue accounts.
+
+Not done in this stage, with the reason:
+- The goods list is not made "per store" in the database. One installation serves one store (2.13), so the list already belongs to that store.
+- The words "per bag" on the rent screens and on service charges are left for Stage 3, which rebuilds those screens.
+- The revenue account can be chosen through the API only. The goods screen has no picker for it yet.
+- Database columns named `..._bags` keep their names (2.4).
+
+Tests: `goods-units.integration.test.ts` (unit fields, revenue account must be a revenue account, a mixed room), `units.test.tsx` (the unit word on screens), a receipt test for "Crates". Checked: API integration 1,076 passed (4 skipped), API unit 308, web 533, `pnpm build` green.
+
 ### Stage 3 — Rent (2.5, 2.6)
 One engine; the "How do you charge?" cards; a client's own rate; dated plan versions; rent tracked per lot; the change-of-owner choice; bills at season end and by period.
 
@@ -247,9 +264,9 @@ The three stores, taken from the research:
 | Research: domain brief, glossary, questionnaire | Done 2026-11-16 | `redesign/domain-and-audit` | `docs/29`, `docs/30` |
 | Audit | Done 2026-11-16 | same | `docs/31`; timings on generated data |
 | Redesign plan | Approved 2026-11-16 ("go ahead"); section 5 not answered, recommended defaults in use | same | this file |
-| 0 Stop the losses | Built 2026-11-16, PR #53 open, CI green, **not merged** | `redesign/stage-0-stop-losses` | see "Stage 0 as built"; general-ledger paging moved to Stage 10 |
-| 1 Dated settings | Built 2026-11-17, **not merged** | `redesign/stage-1-dated-settings` (on top of Stage 0) | see "Stage 1 as built" |
-| 2 Goods and units | Not started | | |
+| 0 Stop the losses | Done, merged 2026-11-17 (PR #53) | `redesign/stage-0-stop-losses` | see "Stage 0 as built"; general-ledger paging moved to Stage 10 |
+| 1 Dated settings | Built 2026-11-17, PR #54 open, CI green, **not merged** | `redesign/stage-1-dated-settings` (on top of Stage 0) | see "Stage 1 as built" |
+| 2 Goods and units | Built 2026-11-18, **not merged** | `redesign/stage-2-goods-units` (on top of Stage 1) | see "Stage 2 as built" |
 | 3 Rent | Not started | | |
 | 4 Client terms, arhti, peshgi | Not started | | |
 | 5 Tax | Not started | | |
